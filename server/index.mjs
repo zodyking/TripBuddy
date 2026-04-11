@@ -751,7 +751,6 @@ if (distExists) {
   await app.register(fastifyStatic, {
     root: DIST_DIR,
     prefix: '/',
-    decorateReply: false,
   })
   app.setNotFoundHandler(async (req, reply) => {
     if (req.method === 'GET' && !req.url.startsWith('/api')) {

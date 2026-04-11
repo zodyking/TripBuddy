@@ -429,7 +429,7 @@ export async function openSession({
     } else {
       emitLog(
         'info',
-        'Sign in manually if prompted (or enable Okta auto-login in settings)',
+        'Automatic sign-in is off for this session — sign in manually in the browser window if one opens.',
       )
     }
     return { ok: true }

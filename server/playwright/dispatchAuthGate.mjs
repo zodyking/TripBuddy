@@ -5,7 +5,7 @@ import { DISPATCH_STABLE_MS } from '../config.mjs'
 const OKTA_HOST_RE = /purpleid\.okta\.com|\.okta\.com|oktapreview\.com/i
 
 export const PURPLEID_SIGNIN_MESSAGE =
-  'FedEx opened PurpleID sign-in. Save username and password in Settings (Sign-in) and enable Okta auto-login for headless Check in, or complete sign-in in a headed browser session, then run Check in again.'
+  'FedEx opened PurpleID sign-in. Save your FedEx username and password in Settings (Sign-in), then run Linehaul bearer capture or Check in again. The server signs in automatically using those credentials.'
 
 /**
  * @param {string} url
