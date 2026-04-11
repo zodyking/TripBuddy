@@ -3,7 +3,7 @@ FROM node:20-bookworm-slim AS ui
 
 WORKDIR /app
 COPY package.json package-lock.json ./
-RUN npm ci --ignore-scripts
+RUN npm install --ignore-scripts
 
 COPY vite.config.js vite-plugin-fedextool-api.mjs ./
 COPY src ./src
@@ -21,7 +21,7 @@ WORKDIR /app
 
 # Server dependencies
 COPY server/package.json server/package-lock.json ./server/
-RUN cd server && npm ci --ignore-scripts
+RUN cd server && npm install --ignore-scripts
 
 # Playwright chromium (browsers already present in base image, but ensure correct version)
 RUN cd server && npx playwright install chromium
