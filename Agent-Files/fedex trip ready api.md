@@ -1,0 +1,82 @@
+$session = New-Object Microsoft.PowerShell.Commands.WebRequestSession
+$session.UserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36"
+Invoke-WebRequest -UseBasicParsing -Uri "https://fxg-prod-prod.apigee.net/linehaul/trip/v1/trip-preparation/trip/tripStatus/referenceId/65449002924463117" `
+-WebSession $session `
+-Headers @{
+"Accept"="application/json, text/plain, */*"
+  "Accept-Encoding"="gzip, deflate, br, zstd"
+  "Accept-Language"="en-US,en;q=0.9"
+  "Access-Control-Allow-Origin"="*"
+  "Authorization"="Bearer eyJraWQiOiJ4a0J2UThOYnJyR0ttbWFFd3Y2LUo3SUFSOHVaSTUzUzd3aXJhWko4ZmRVIiwiYWxnIjoiUlMyNTYifQ.eyJ2ZXIiOjEsImp0aSI6IkFULjNRUlVZWFU4VkJ6MTZfNm1TUlRsYmNsX0hMd1pOaFRoeWtMeDIzQ1lSaUEiLCJpc3MiOiJodHRwczovL3B1cnBsZWlkLm9rdGEuY29tL29hdXRoMi9hdXM1bzZkNXd0TnBjRXNVSDM1NyIsImF1ZCI6IkFQUDM1MzY4NTkiLCJpYXQiOjE3NzU4NjIwMDMsImV4cCI6MTc3NTg2NTYwMywiY2lkIjoiMG9hNzNmc3NkbHBjbHJmVHkzNTciLCJ1aWQiOiIwMHUxcjYydmg2NWQ4MTdlODM1OCIsInNjcCI6WyJvcGVuaWQiLCJncm91cHMiLCJwcm9maWxlIiwiZW1haWwiXSwiYXV0aF90aW1lIjoxNzc1ODYyMDAyLCJzdWIiOiI2NTQ0OTAwQHZlbmRvci5sZGFwLmZlZGV4LmNvbSIsImdyb3VwcyI6WyJmeGdfbGhsX2V4ZWN1dGVfdHJpcF9kcml2ZXJfZGZfMzUzNjg1OSJdLCJlbXBsb3llZU51bWJlciI6IjY1NDQ5MDAiLCJmZHhfZWFpIjoiTi9BIn0.TDQ7q5bRCOl4eVFXSy40lDB6UEsGJX8FQCkiuB2mQEMwxS19R5NhTLD3FjOrSvOQ4jpB93xdednE3g4ZtwWGEu9e0cC_elxvJoPSBumzI9HoH7DHs_OUNTeAAdnSh2HaEcpFwvgySuYRM18yijttl7JvEt5tMP-2PZWLXr8at_31FTIjGXA1wzMUdpYLQWOBB3VzMZwsACpWoPdgcLC-V0vpAXJn9MSMV2CNg5490gm7Mhoh7nSi_NulBmwIPMRYjAmjWgT6q-FpGazvoEaCA2JA6sA0-U3484QPAtUbiczxT8zI7-BMBnBdEYGhy0kYjfZY4jdpoGuTh-d_WHmLqQ"
+  "CorrelationId"="MTA_6544900_2026041019115"
+  "Origin"="https://fdxtools.fedex.com"
+  "Referer"="https://fdxtools.fedex.com/"
+  "Sec-Fetch-Dest"="empty"
+  "Sec-Fetch-Mode"="cors"
+  "Sec-Fetch-Site"="cross-site"
+  "Timeout"="7500"
+  "clientDeviceModel"=""
+  "clientDeviceType"=""
+  "clientDeviceVendor"=""
+  "clientOS"="Windows"
+  "clientOSVersion"="10"
+  "originId"="3117"
+  "sec-ch-ua"="`"Chromium`";v=`"146`", `"Not-A.Brand`";v=`"24`", `"Google Chrome`";v=`"146`""
+  "sec-ch-ua-mobile"="?0"
+  "sec-ch-ua-platform"="`"Windows`""
+}
+
+//Request Headers
+GET /linehaul/trip/v1/trip-preparation/trip/tripStatus/referenceId/65449002924463117 HTTP/1.1
+Accept: application/json, text/plain, */*
+Accept-Encoding: gzip, deflate, br, zstd
+Accept-Language: en-US,en;q=0.9
+Access-Control-Allow-Origin: *
+Authorization: Bearer eyJraWQiOiJ4a0J2UThOYnJyR0ttbWFFd3Y2LUo3SUFSOHVaSTUzUzd3aXJhWko4ZmRVIiwiYWxnIjoiUlMyNTYifQ.eyJ2ZXIiOjEsImp0aSI6IkFULjNRUlVZWFU4VkJ6MTZfNm1TUlRsYmNsX0hMd1pOaFRoeWtMeDIzQ1lSaUEiLCJpc3MiOiJodHRwczovL3B1cnBsZWlkLm9rdGEuY29tL29hdXRoMi9hdXM1bzZkNXd0TnBjRXNVSDM1NyIsImF1ZCI6IkFQUDM1MzY4NTkiLCJpYXQiOjE3NzU4NjIwMDMsImV4cCI6MTc3NTg2NTYwMywiY2lkIjoiMG9hNzNmc3NkbHBjbHJmVHkzNTciLCJ1aWQiOiIwMHUxcjYydmg2NWQ4MTdlODM1OCIsInNjcCI6WyJvcGVuaWQiLCJncm91cHMiLCJwcm9maWxlIiwiZW1haWwiXSwiYXV0aF90aW1lIjoxNzc1ODYyMDAyLCJzdWIiOiI2NTQ0OTAwQHZlbmRvci5sZGFwLmZlZGV4LmNvbSIsImdyb3VwcyI6WyJmeGdfbGhsX2V4ZWN1dGVfdHJpcF9kcml2ZXJfZGZfMzUzNjg1OSJdLCJlbXBsb3llZU51bWJlciI6IjY1NDQ5MDAiLCJmZHhfZWFpIjoiTi9BIn0.TDQ7q5bRCOl4eVFXSy40lDB6UEsGJX8FQCkiuB2mQEMwxS19R5NhTLD3FjOrSvOQ4jpB93xdednE3g4ZtwWGEu9e0cC_elxvJoPSBumzI9HoH7DHs_OUNTeAAdnSh2HaEcpFwvgySuYRM18yijttl7JvEt5tMP-2PZWLXr8at_31FTIjGXA1wzMUdpYLQWOBB3VzMZwsACpWoPdgcLC-V0vpAXJn9MSMV2CNg5490gm7Mhoh7nSi_NulBmwIPMRYjAmjWgT6q-FpGazvoEaCA2JA6sA0-U3484QPAtUbiczxT8zI7-BMBnBdEYGhy0kYjfZY4jdpoGuTh-d_WHmLqQ
+Connection: keep-alive
+CorrelationId: MTA_6544900_2026041019115
+Host: fxg-prod-prod.apigee.net
+Origin: https://fdxtools.fedex.com
+Referer: https://fdxtools.fedex.com/
+Sec-Fetch-Dest: empty
+Sec-Fetch-Mode: cors
+Sec-Fetch-Site: cross-site
+Timeout: 7500
+User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36
+clientDeviceModel: 
+clientDeviceType: 
+clientDeviceVendor: 
+clientOS: Windows
+clientOSVersion: 10
+originId: 3117
+sec-ch-ua: "Chromium";v="146", "Not-A.Brand";v="24", "Google Chrome";v="146"
+sec-ch-ua-mobile: ?0
+sec-ch-ua-platform: "Windows"
+
+
+//Response headers
+HTTP/1.1 200 OK
+Date: Fri, 10 Apr 2026 23:20:20 GMT
+Content-Type: application/json
+Transfer-Encoding: chunked
+Connection: keep-alive
+Server: nginx/1.19.0
+Access-Control-Allow-Origin: *
+Cache-Control: no-cache, no-store, max-age=0, must-revalidate
+Expires: 0
+Pragma: no-cache
+Set-Cookie: ADRUM_BTa=R:27|g:530c1771-0c91-4811-9f4b-e5524f2e5051; Max-Age=30; Expires=Fri, 10-Apr-2026 23:20:50 GMT; Path=/; Secure
+Set-Cookie: ADRUM_BTa=R:27|g:530c1771-0c91-4811-9f4b-e5524f2e5051|n:fedex1_b2302943-9419-49fb-b06e-405cc744a61c; Max-Age=30; Expires=Fri, 10-Apr-2026 23:20:50 GMT; Path=/; Secure
+Set-Cookie: ADRUM_BT1=R:27|i:17213920; Max-Age=30; Expires=Fri, 10-Apr-2026 23:20:50 GMT; Path=/; Secure
+Set-Cookie: ADRUM_BT1=R:27|i:17213920|e:6; Max-Age=30; Expires=Fri, 10-Apr-2026 23:20:50 GMT; Path=/; Secure
+Set-Cookie: ADRUM_BT1=R:27|i:17213920|e:6|t:1775863220581; Max-Age=30; Expires=Fri, 10-Apr-2026 23:20:50 GMT; Path=/; Secure
+Strict-Transport-Security: max-age=31536000 ; includeSubDomains
+Vary: Origin
+Vary: Access-Control-Request-Method
+Vary: Access-Control-Request-Headers
+X-Content-Type-Options: nosniff
+X-Frame-Options: DENY
+X-Vcap-Request-Id: f20ab6b3-dd35-4843-70d4-f0c26a546818
+X-Xss-Protection: 1; mode=block
+messageid: rrt-2284762775925565485-b-gea1-1998429-70208662-41
+

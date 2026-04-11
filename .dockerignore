@@ -1,0 +1,39 @@
+# Build artifacts
+node_modules
+dist
+dist-ssr
+server/node_modules
+
+# Local dev data (mounted as volume in production)
+server/.local
+server/.pw-user-data
+server/.uploads-tmp
+
+# Git
+.git
+.gitignore
+
+# Editor / IDE
+.vscode
+.idea
+*.sw?
+*.code-workspace
+
+# Logs
+*.log
+npm-debug.log*
+
+# CI / testing
+coverage
+__screenshots__
+cypress
+.eslintcache
+*.tsbuildinfo
+
+# Secrets (never bake into image)
+.env
+.env.*
+
+# Documentation / notes
+Agent-Files
+*.md
