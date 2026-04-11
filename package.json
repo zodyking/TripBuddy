@@ -20,6 +20,17 @@
     "vite": "^8.0.3",
     "vite-plugin-vue-devtools": "^8.1.1"
   },
+  "overrides": {
+    "vite-plugin-inspect": {
+      "vite": "$vite"
+    },
+    "vite-dev-rpc": {
+      "vite": "$vite"
+    },
+    "vite-hot-client": {
+      "vite": "$vite"
+    }
+  },
   "engines": {
     "node": "^20.19.0 || >=22.12.0"
   }

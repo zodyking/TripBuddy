@@ -1,0 +1,18 @@
+# Force Dokploy/Nixpacks to skip auto-detection and use the repo Dockerfile instead.
+# See https://nixpacks.com/docs/configuration/file
+
+[phases.setup]
+# Empty: we don't want Nixpacks to install anything
+nixPkgs = []
+aptPkgs = []
+
+[phases.install]
+cmds = []
+
+[phases.build]
+cmds = []
+
+[start]
+# This won't actually be used if Dokploy is set to "Dockerfile" build type,
+# but if Nixpacks runs anyway, at least point to the right command.
+cmd = "node server/index.mjs"

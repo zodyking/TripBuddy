@@ -1,8 +1,17 @@
 # Deploying FedExTool on Dokploy
 
-## Build command (uses repo Dockerfile)
+## Build Type (IMPORTANT)
 
-Dokploy should detect the [`Dockerfile`](../Dockerfile) automatically; no custom build command needed.
+Dokploy defaults to **Nixpacks** auto-detection, which will **not** work for this app (it builds a static-only Caddy site and skips the Node API server).
+
+**You must set the build type to "Dockerfile":**
+
+1. In Dokploy, go to your application settings
+2. Find **Build Type** or **Builder** setting
+3. Change from "Nixpacks" / "Auto" to **"Dockerfile"**
+4. Ensure **Dockerfile Path** is set to `Dockerfile` (the repo root)
+
+The repo includes a [`nixpacks.toml`](../nixpacks.toml) that disables Nixpacks phases as a fallback, but explicitly selecting "Dockerfile" build type is the reliable fix.
 
 ## Port mapping
 
