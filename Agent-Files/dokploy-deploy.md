@@ -21,6 +21,15 @@ The repo includes a [`nixpacks.toml`](../nixpacks.toml) that disables Nixpacks p
 
 Set Dokploy to map host port → `3847` (or change via `FEDEX_TOOL_API_PORT`).
 
+### Bad Gateway (502) from Traefik
+
+If the site loads **Bad Gateway** but the container is running, the reverse proxy is almost always pointing at the **wrong internal port**.
+
+- In **Domains** (or routing) for this app, the **container / internal port** must be **`3847`** — the port Fastify listens on inside the image (`EXPOSE 3847` in the Dockerfile).
+- Do **not** use `5173` (Vite dev), `3000`, or a random value like `5137`. Those will return **502 Bad Gateway** because nothing is listening there.
+
+If you intentionally change the listen port, set `FEDEX_TOOL_API_PORT` in the container env **and** set the same value as the internal port on the domain route.
+
 ## Health check
 
 ```
