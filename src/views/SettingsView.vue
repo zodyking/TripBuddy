@@ -39,6 +39,8 @@ import {
   setTripStatusChangeEnabled,
   isTrailerStatusChangeEnabled,
   setTrailerStatusChangeEnabled,
+  isArrivalAlertsEnabled,
+  setArrivalAlertsEnabled,
 } from '../utils/tripVoiceAnnouncement.js'
 import {
   getAlertPrefs,
@@ -60,6 +62,7 @@ const tripAlertMode = ref(getTripAlertMode())
 
 const tripStatusChangeOn = ref(isTripStatusChangeEnabled())
 const trailerStatusChangeOn = ref(isTrailerStatusChangeEnabled())
+const arrivalAlertsOn = ref(isArrivalAlertsEnabled())
 
 const alertPrefs = ref(getAlertPrefs())
 
@@ -78,6 +81,11 @@ function setTripAlertModeUi(
 function toggleTripStatusChange(enabled) {
   tripStatusChangeOn.value = enabled
   setTripStatusChangeEnabled(enabled)
+}
+
+function toggleArrivalAlerts(enabled) {
+  arrivalAlertsOn.value = enabled
+  setArrivalAlertsEnabled(enabled)
 }
 
 function toggleTrailerStatusChange(enabled) {
@@ -503,6 +511,7 @@ watch(settingsTab, (tab) => {
     tripAlertMode.value = getTripAlertMode()
     tripStatusChangeOn.value = isTripStatusChangeEnabled()
     trailerStatusChangeOn.value = isTrailerStatusChangeEnabled()
+    arrivalAlertsOn.value = isArrivalAlertsEnabled()
     alertPrefs.value = getAlertPrefs()
   }
 })
@@ -809,6 +818,16 @@ onUnmounted(() => {
               @change="toggleTrailerStatusChange($event.target.checked)"
             />
             <span class="alert-toggle-label">Trailer loading finished (loading → closed)</span>
+          </label>
+        </div>
+        <div class="alert-toggle-row">
+          <label class="alert-toggle">
+            <input
+              type="checkbox"
+              :checked="arrivalAlertsOn"
+              @change="toggleArrivalAlerts($event.target.checked)"
+            />
+            <span class="alert-toggle-label">Arrival alerts (arrived successfully, geofence arrival)</span>
           </label>
         </div>
       </SettingsSection>

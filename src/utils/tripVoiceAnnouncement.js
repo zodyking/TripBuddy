@@ -8,6 +8,7 @@ const OLD_TTS_KEY = 'fedexTripTtsEnabled'
 const MODE_KEY = 'fedexTripAlertMode'
 const TRIP_STATUS_CHANGE_KEY = 'fedexTripStatusChangeEnabled'
 const TRAILER_STATUS_CHANGE_KEY = 'fedexTrailerStatusChangeEnabled'
+const ARRIVAL_ALERTS_KEY = 'fedexArrivalAlertsEnabled'
 
 /** @typedef {'off' | 'tts' | 'bell' | 'both'} TripAlertMode */
 
@@ -74,6 +75,19 @@ export function isTrailerStatusChangeEnabled() {
 export function setTrailerStatusChangeEnabled(enabled) {
   if (typeof window === 'undefined' || !window.localStorage) return
   window.localStorage.setItem(TRAILER_STATUS_CHANGE_KEY, enabled ? 'true' : 'false')
+}
+
+/** @returns {boolean} Arrival alerts enabled (arrived successfully, geofence arrival). */
+export function isArrivalAlertsEnabled() {
+  if (typeof window === 'undefined' || !window.localStorage) return true
+  const raw = window.localStorage.getItem(ARRIVAL_ALERTS_KEY)
+  return raw !== 'false'
+}
+
+/** @param {boolean} enabled */
+export function setArrivalAlertsEnabled(enabled) {
+  if (typeof window === 'undefined' || !window.localStorage) return
+  window.localStorage.setItem(ARRIVAL_ALERTS_KEY, enabled ? 'true' : 'false')
 }
 
 export function getTripBellSoundUrl() {
@@ -401,4 +415,26 @@ function announceText(text, mode) {
   if (wantBell) {
     playBellSound()
   }
+}
+
+/**
+ * Announce successful arrival at destination.
+ */
+export function announceArrivalSuccess() {
+  if (typeof window === 'undefined') return
+  const mode = getTripAlertMode()
+  if (mode === 'off') return
+  if (!isArrivalAlertsEnabled()) return
+  announceText('Arrived at destination successfully.', mode)
+}
+
+/**
+ * Announce that tractor was already arrived by geofence.
+ */
+export function announceGeofenceArrival() {
+  if (typeof window === 'undefined') return
+  const mode = getTripAlertMode()
+  if (mode === 'off') return
+  if (!isArrivalAlertsEnabled()) return
+  announceText('Tractor already arrived by geofence.', mode)
 }

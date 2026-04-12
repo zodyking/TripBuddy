@@ -14,6 +14,22 @@ export const ARRIVE_LOC_AFTER_NAV_MS = 15_000
 const LOC_VISIBLE_MS = ARRIVE_LOC_VISIBLE_MS
 const LOC_VISIBLE_SHORT_MS = ARRIVE_LOC_VISIBLE_SHORT_MS
 
+const GEOFENCE_BANNER_SNIPPET = 'tractor may have been arrived by geofence'
+
+/**
+ * Check if page contains geofence auto-arrival banner.
+ * @param {import('playwright').Page} page
+ * @returns {Promise<boolean>}
+ */
+async function detectGeofenceBanner(page) {
+  try {
+    const body = await page.locator('body').innerText({ timeout: 2000 })
+    return body.toLowerCase().includes(GEOFENCE_BANNER_SNIPPET)
+  } catch {
+    return false
+  }
+}
+
 function xp(path) {
   return `xpath=${path}`
 }
@@ -100,8 +116,15 @@ export async function runFullArrive({ page, tractorNumber, log, signal }) {
   log('info', 'Clicked Continue')
 
   await page.waitForLoadState('domcontentloaded', { timeout: 10_000 }).catch(() => {})
+  await sleep(1000, signal)
 
   if (signal?.aborted) throw new Error('Aborted')
+
+  const geofenceDetected = await detectGeofenceBanner(page)
+  if (geofenceDetected) {
+    log('info', 'Tractor already arrived by geofence — skipping manual arrive')
+    return { success: true, alreadyArrivedByGeofence: true }
+  }
 
   const arriveSubmitLoc = page.locator(xp(AX.arriveSubmit))
   try {
@@ -111,11 +134,11 @@ export async function runFullArrive({ page, tractorNumber, log, signal }) {
     await byRole.first().waitFor({ state: 'visible', timeout: 5_000 })
     await byRole.first().click()
     log('info', 'Clicked Arrive (role fallback)')
-    return { success: true }
+    return { success: true, alreadyArrivedByGeofence: false }
   }
 
   await arriveSubmitLoc.click()
   log('info', 'Clicked Arrive to confirm arrival')
 
-  return { success: true }
+  return { success: true, alreadyArrivedByGeofence: false }
 }

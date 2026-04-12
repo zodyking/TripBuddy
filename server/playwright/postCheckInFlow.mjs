@@ -173,3 +173,24 @@ export async function runPhoneModalAndSignOut(page, { phone, log, signal }) {
   await clickSignOutModalConfirm(page, CX, signal)
   log('info', 'Signed out', { checkInComplete: true })
 }
+
+/**
+ * Sign out only (no phone modal) — used when geofence already arrived.
+ * @param {import('playwright').Page} page
+ * @param {{ log: (type: string, message: string, extra?: object) => void, signal?: AbortSignal }} opts
+ */
+export async function clickSignOutOnly(page, { log, signal }) {
+  assertNotStuckOnPurpleId(page)
+  const CX = await getResolvedCheckInXpaths()
+
+  if (signal?.aborted) throw new Error('Aborted')
+
+  const signOutToolbar = page.locator(xp(CX.toolbarSignOut))
+  await signOutToolbar.click({ force: true, timeout: TOOLBAR_MS })
+  log('info', 'Opened sign out')
+
+  if (signal?.aborted) throw new Error('Aborted')
+
+  await clickSignOutModalConfirm(page, CX, signal)
+  log('info', 'Signed out (geofence arrival)')
+}
