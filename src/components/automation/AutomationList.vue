@@ -39,15 +39,22 @@ async function load() {
 const installingPresetId = ref(null)
 
 async function installPreset(presetId, name) {
-  if (installingPresetId.value) return
+  console.log('[AutomationList] installPreset called:', presetId, name)
+  if (installingPresetId.value) {
+    console.log('[AutomationList] blocked: already installing', installingPresetId.value)
+    return
+  }
   installingPresetId.value = presetId
   try {
+    console.log('[AutomationList] calling installAutomationPreset...')
     const auto = await installAutomationPreset(presetId)
+    console.log('[AutomationList] install success:', auto)
     pushLiveLog({ type: 'info', message: `Installed preset: ${name}`, ts: Date.now() })
     showPresets.value = false
     await load()
     emit('edit', auto.id)
   } catch (e) {
+    console.error('[AutomationList] install error:', e)
     pushLiveLog({ type: 'error', message: e.message || String(e), ts: Date.now() })
   } finally {
     installingPresetId.value = null

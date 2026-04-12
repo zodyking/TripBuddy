@@ -711,13 +711,20 @@ app.post('/api/automations/:id/run', async (req, reply) => {
 app.get('/api/automations/presets', async () => listPresets())
 
 app.post('/api/automations/presets/:presetId/install', async (req, reply) => {
+  console.log(`[presets/install] presetId=${req.params.presetId}`)
   const preset = getPreset(req.params.presetId)
-  if (!preset) return reply.code(404).send({ error: 'Preset not found' })
+  if (!preset) {
+    console.log(`[presets/install] preset not found: ${req.params.presetId}`)
+    return reply.code(404).send({ error: 'Preset not found' })
+  }
   try {
+    console.log(`[presets/install] creating automation from preset:`, preset.name)
     const auto = await createAutomation(preset)
+    console.log(`[presets/install] created automation id=${auto.id}`)
     return auto
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e)
+    console.error(`[presets/install] error:`, msg)
     return reply.code(400).send({ error: msg })
   }
 })
