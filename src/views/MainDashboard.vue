@@ -109,7 +109,6 @@ const trailerGpsModalOpen = ref(false)
 const trailerGpsData = ref(null)
 
 const instructions = ref('')
-const tractorLocation = ref('')
 
 const automationPreview = ref(null)
 const automationPreviewHidden = ref(false)
@@ -343,7 +342,6 @@ async function saveLocationAndRetry() {
     const rid = inBrowserRetryRunId.value
     if (rid) {
       await postRetryLocation(rid, v)
-      tractorLocation.value = v
       locationRetryOpen.value = false
       locationRetryFedexMessage.value = ''
       locationRetryInput.value = ''
@@ -513,7 +511,6 @@ async function loadAssignment() {
   try {
     const a = await getAssignment()
     instructions.value = a.instructions ?? ''
-    tractorLocation.value = a.tractorLocation ?? ''
   } catch (e) {
     loadError.value = e instanceof Error ? e.message : String(e)
   }
@@ -736,7 +733,7 @@ onUnmounted(() => {
           @click.stop
         >
           <div class="loc-retry-header">
-            <h3 id="loc-retry-title" class="loc-retry-title">Wrong dispatch location</h3>
+            <h3 id="loc-retry-title" class="loc-retry-title">Location Mismatch Detected</h3>
             <button
               type="button"
               class="loc-retry-close tap"
@@ -746,37 +743,28 @@ onUnmounted(() => {
               ×
             </button>
           </div>
-          <p class="loc-retry-desc">
-            Your saved <strong>Current location</strong> does not match FedEx. Enter the correct code below; it
-            is saved to your assignment and the open browser session retries immediately.
-          </p>
-          <div class="portal-fedex-quote-box" role="note">
-            <span class="portal-fedex-quote-label">FedEx message</span>
-            <p class="portal-fedex-quote">{{ locationRetryFedexMessage }}</p>
-          </div>
-          <label class="modal-lbl" for="loc-retry-inp">New location code</label>
+          <label class="modal-lbl" for="loc-retry-inp">Enter correct location code</label>
           <input
             id="loc-retry-inp"
             v-model="locationRetryInput"
             class="modal-inp loc-retry-inp"
             type="text"
             autocomplete="off"
+            placeholder="Location code"
             :disabled="locationRetrySubmitting"
             @keyup.enter="saveLocationAndRetry"
           />
           <div class="modal-actions loc-retry-actions">
-            <button type="button" class="btn secondary tap loc-retry-btn-secondary" @click="cancelLocationRetry">
-              Cancel
+            <button type="button" class="btn secondary tap" @click="cancelLocationRetry">
+              Close
             </button>
             <button
               type="button"
-              class="btn primary tap loc-retry-btn-primary"
+              class="btn primary tap"
               :disabled="locationRetrySubmitting || !locationRetryInput.trim()"
-              title="Save location to assignment and retry"
-              aria-label="Save location and retry"
               @click="saveLocationAndRetry"
             >
-              {{ locationRetrySubmitting ? 'Saving…' : 'Save & retry' }}
+              {{ locationRetrySubmitting ? 'Submitting…' : 'Submit' }}
             </button>
           </div>
         </div>
@@ -1072,7 +1060,7 @@ onUnmounted(() => {
         role="status"
       >
         <button type="button" class="tap trip-voice-unlock-btn" @click="onUnlockTripVoiceTap">
-          Tap to enable trip alerts
+          Tap to activate audio alerts
         </button>
         <span class="trip-voice-unlock-sub">Some phones and tablets require a tap before alerts can play.</span>
       </div>
@@ -1585,42 +1573,6 @@ onUnmounted(() => {
   line-height: 1;
   cursor: pointer;
 }
-.loc-retry-desc {
-  margin: 0;
-  font-size: 0.84rem;
-  line-height: 1.45;
-  color: var(--muted, #9898a8);
-}
-.loc-retry-desc strong {
-  color: var(--text, #e8e8ee);
-  font-weight: 600;
-}
-.portal-fedex-quote-box {
-  margin: 0;
-  padding: 0.5rem 0.65rem 0.55rem;
-  background: #12121a;
-  border-radius: 8px;
-  border: 1px solid #3d2727;
-  border-left: 3px solid #e57373;
-}
-.portal-fedex-quote-label {
-  display: block;
-  margin: 0 0 0.3rem;
-  font-size: 0.68rem;
-  font-weight: 700;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  color: #e57373;
-}
-.portal-fedex-quote {
-  margin: 0;
-  padding: 0;
-  font-size: 0.8125rem;
-  line-height: 1.4;
-  color: var(--text, #e0e0e8);
-  white-space: pre-wrap;
-  word-break: break-word;
-}
 .modal-lbl {
   display: block;
   font-size: 0.85rem;
@@ -1651,29 +1603,11 @@ onUnmounted(() => {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 0.5rem;
-  margin-top: 0.15rem;
-}
-.loc-retry-btn-primary,
-.loc-retry-btn-secondary {
-  min-height: 48px;
-  padding: 0.55rem 0.65rem;
-  font-size: 0.9rem;
-}
-.loc-retry-btn-primary {
-  font-weight: 700;
-}
-.loc-retry-btn-primary:disabled {
-  opacity: 0.85;
+  margin-top: 0.75rem;
 }
 @media (max-width: 380px) {
   .loc-retry-actions {
     grid-template-columns: 1fr;
-  }
-  .loc-retry-btn-secondary {
-    order: 2;
-  }
-  .loc-retry-btn-primary {
-    order: 1;
   }
 }
 .run-error-banner {

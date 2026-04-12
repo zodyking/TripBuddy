@@ -43,7 +43,6 @@ export const PRESETS = {
 
 const DEFAULT_ASSIGNMENT = {
   instructions: '',
-  tractorLocation: '',
   driverPhone: '',
   preset: 'sealed_dual',
   photoSlots: [...PRESETS.sealed_dual.photoSlots],
@@ -93,8 +92,6 @@ export async function readAssignment() {
     if (err) return cloneDefault()
     return {
       instructions: typeof data.instructions === 'string' ? data.instructions : '',
-      tractorLocation:
-        typeof data.tractorLocation === 'string' ? data.tractorLocation : '',
       driverPhone: typeof data.driverPhone === 'string' ? data.driverPhone : '',
       preset: typeof data.preset === 'string' ? data.preset : 'custom',
       photoSlots: data.photoSlots,
@@ -139,10 +136,6 @@ export async function writeAssignment(body) {
       typeof body.instructions === 'string'
         ? body.instructions
         : prev.instructions,
-    tractorLocation:
-      typeof body.tractorLocation === 'string'
-        ? body.tractorLocation
-        : prev.tractorLocation,
     driverPhone:
       typeof body.driverPhone === 'string' ? body.driverPhone : prev.driverPhone,
     preset,

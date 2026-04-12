@@ -695,8 +695,6 @@ async function executeAction(action, page, ctx) {
           } else if (action.onMismatch === 'retry') {
             log('info', 'Waiting for location retry from UI...')
             const newLoc = await waitForBlockRetryLocation(ctx.runId, signal)
-            await writeAssignment({ tractorLocation: newLoc })
-            ctx.assignment.tractorLocation = newLoc
             const locationEl = page.locator(`xpath=${CX.locationInput}`)
             await locationEl.waitFor({
               state: 'visible',

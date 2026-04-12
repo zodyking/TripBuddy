@@ -3,6 +3,8 @@
  * Uses direct speechSynthesis.speak() (fire and forget) like the working trip-ready approach.
  */
 
+import { pushLiveLog } from '../stores/liveLogStore.js'
+
 const PREFS_KEY = 'fedexAlertPrefs'
 
 const PRIORITY = {
@@ -78,6 +80,7 @@ export const ALERT_SOUNDS = {
  */
 function playAudioAsync(url) {
   if (typeof window === 'undefined') return
+  pushLiveLog({ type: 'info', message: `[Audio] triggered: ${url}`, ts: Date.now() })
   try {
     if (currentAudio) {
       currentAudio.pause()
@@ -85,14 +88,22 @@ function playAudioAsync(url) {
     }
     const audio = new Audio(url)
     currentAudio = audio
-    audio.play().catch((e) => {
-      console.error('[Audio] play error:', e)
-    })
     audio.addEventListener('ended', () => {
       if (currentAudio === audio) currentAudio = null
+      pushLiveLog({ type: 'info', message: `[Audio] success: ${url}`, ts: Date.now() })
     }, { once: true })
+    audio.addEventListener('error', () => {
+      pushLiveLog({ type: 'error', message: `[Audio] failed: ${url}`, ts: Date.now() })
+    }, { once: true })
+    audio.play()
+      .then(() => {
+        pushLiveLog({ type: 'info', message: `[Audio] started: ${url}`, ts: Date.now() })
+      })
+      .catch((e) => {
+        pushLiveLog({ type: 'error', message: `[Audio] play rejected: ${e.message || e}`, ts: Date.now() })
+      })
   } catch (e) {
-    console.error('[Audio] error:', e)
+    pushLiveLog({ type: 'error', message: `[Audio] exception: ${e.message || e}`, ts: Date.now() })
   }
 }
 
@@ -102,17 +113,31 @@ function playAudioAsync(url) {
  * @param {string} text
  */
 function speakTts(text) {
-  if (typeof window === 'undefined' || !window.speechSynthesis) return
+  if (typeof window === 'undefined' || !window.speechSynthesis) {
+    pushLiveLog({ type: 'warn', message: `[TTS] skipped: no speechSynthesis available`, ts: Date.now() })
+    return
+  }
   try {
     window.speechSynthesis.cancel()
     const utterance = new SpeechSynthesisUtterance(text)
     utterance.rate = 1.05
     utterance.pitch = 1
     utterance.volume = 1
+
+    utterance.onstart = () => {
+      pushLiveLog({ type: 'info', message: `[TTS] started: ${text}`, ts: Date.now() })
+    }
+    utterance.onend = () => {
+      pushLiveLog({ type: 'info', message: `[TTS] success: ${text}`, ts: Date.now() })
+    }
+    utterance.onerror = (e) => {
+      pushLiveLog({ type: 'error', message: `[TTS] failed: ${text} - ${e.error || 'unknown'}`, ts: Date.now() })
+    }
+
     window.speechSynthesis.speak(utterance)
-    console.log('[TTS] speaking:', text)
+    pushLiveLog({ type: 'info', message: `[TTS] triggered: ${text}`, ts: Date.now() })
   } catch (e) {
-    console.error('[TTS] speak error:', e)
+    pushLiveLog({ type: 'error', message: `[TTS] exception: ${e.message || e}`, ts: Date.now() })
   }
 }
 
@@ -124,7 +149,7 @@ function processQueue() {
   if (!alert) return
 
   isPlaying = true
-  console.log('[AlertQueue] playing:', alert.type, { text: alert.text, soundUrl: alert.soundUrl })
+  pushLiveLog({ type: 'info', message: `[AlertQueue] playing: ${alert.type} - ${alert.text || '(no text)'}`, ts: Date.now() })
 
   if (alert.soundUrl) {
     playAudioAsync(alert.soundUrl)
@@ -146,24 +171,23 @@ function processQueue() {
  */
 export function enqueueAlert(type, options = {}) {
   if (typeof window === 'undefined') return
-  console.log('[AlertQueue] enqueueAlert called:', type, options)
 
   const prefs = getAlertPrefs()
   
   if (type === 'tractorChange' && !prefs.tractorChange) {
-    console.log('[AlertQueue] blocked by prefs: tractorChange disabled')
+    pushLiveLog({ type: 'warn', message: `[AlertQueue] blocked: tractorChange disabled in prefs`, ts: Date.now() })
     return
   }
   if (type === 'driverChange' && !prefs.driverChange) {
-    console.log('[AlertQueue] blocked by prefs: driverChange disabled')
+    pushLiveLog({ type: 'warn', message: `[AlertQueue] blocked: driverChange disabled in prefs`, ts: Date.now() })
     return
   }
   if ((type === 'checkInSuccess' || type === 'checkInFail') && !prefs.checkIn) {
-    console.log('[AlertQueue] blocked by prefs: checkIn disabled')
+    pushLiveLog({ type: 'warn', message: `[AlertQueue] blocked: checkIn disabled in prefs`, ts: Date.now() })
     return
   }
   if (type === 'apiReconnect' && !prefs.apiReconnect) {
-    console.log('[AlertQueue] blocked by prefs: apiReconnect disabled')
+    pushLiveLog({ type: 'warn', message: `[AlertQueue] blocked: apiReconnect disabled in prefs`, ts: Date.now() })
     return
   }
 
@@ -172,7 +196,6 @@ export function enqueueAlert(type, options = {}) {
     (a) => a.type === type && now - a.ts < DEDUP_WINDOW_MS
   )
   if (existingIndex !== -1) {
-    console.log('[AlertQueue] dedup: updating existing alert at index', existingIndex)
     alertQueue[existingIndex] = {
       type,
       priority: options.priority ?? PRIORITY.change,
@@ -180,8 +203,8 @@ export function enqueueAlert(type, options = {}) {
       soundUrl: options.soundUrl,
       ts: now,
     }
+    pushLiveLog({ type: 'info', message: `[AlertQueue] dedup updated: ${type}`, ts: Date.now() })
   } else {
-    console.log('[AlertQueue] adding new alert to queue, current length:', alertQueue.length)
     alertQueue.push({
       type,
       priority: options.priority ?? PRIORITY.change,
@@ -189,12 +212,14 @@ export function enqueueAlert(type, options = {}) {
       soundUrl: options.soundUrl,
       ts: now,
     })
+    pushLiveLog({ type: 'info', message: `[AlertQueue] enqueued: ${type} - ${options.text || '(no text)'}`, ts: Date.now() })
   }
 
   processQueue()
 }
 
 export function announceTractorChange() {
+  pushLiveLog({ type: 'info', message: `[Alert] announceTractorChange called`, ts: Date.now() })
   enqueueAlert('tractorChange', {
     text: 'Tractor details updated.',
     priority: PRIORITY.change,
@@ -202,6 +227,7 @@ export function announceTractorChange() {
 }
 
 export function announceDriverChange() {
+  pushLiveLog({ type: 'info', message: `[Alert] announceDriverChange called`, ts: Date.now() })
   enqueueAlert('driverChange', {
     text: 'Driver details updated.',
     priority: PRIORITY.change,
@@ -209,7 +235,7 @@ export function announceDriverChange() {
 }
 
 export function announceCheckInSuccess() {
-  console.log('[AlertQueue] announceCheckInSuccess called')
+  pushLiveLog({ type: 'info', message: `[Alert] announceCheckInSuccess called`, ts: Date.now() })
   enqueueAlert('checkInSuccess', {
     text: 'Check-in successful.',
     priority: PRIORITY.info,
@@ -217,7 +243,7 @@ export function announceCheckInSuccess() {
 }
 
 export function announceCheckInFail() {
-  console.log('[AlertQueue] announceCheckInFail called')
+  pushLiveLog({ type: 'info', message: `[Alert] announceCheckInFail called`, ts: Date.now() })
   enqueueAlert('checkInFail', {
     text: 'Check-in failed.',
     priority: PRIORITY.error,
@@ -225,7 +251,7 @@ export function announceCheckInFail() {
 }
 
 export function announceCheckInTripReady() {
-  console.log('[AlertQueue] announceCheckInTripReady called')
+  pushLiveLog({ type: 'info', message: `[Alert] announceCheckInTripReady called`, ts: Date.now() })
   enqueueAlert('checkInSuccess', {
     text: 'Check in successful. Trip ready and acknowledged.',
     priority: PRIORITY.tripReady,
@@ -233,6 +259,7 @@ export function announceCheckInTripReady() {
 }
 
 export function announceApiReconnect() {
+  pushLiveLog({ type: 'info', message: `[Alert] announceApiReconnect called`, ts: Date.now() })
   enqueueAlert('apiReconnect', {
     text: 'API reconnected.',
     priority: PRIORITY.info,
@@ -259,30 +286,26 @@ export function cancelAllAlerts() {
   }
 }
 
+/**
+ * Test functions call speechSynthesis directly (not through queue) to work on iOS.
+ * The queue doesn't work on iOS because it's not triggered by a user gesture.
+ */
 export function testTractorChangeAlert() {
-  enqueueAlert('tractorChange', {
-    text: 'Test: Tractor details updated.',
-    priority: PRIORITY.change,
-  })
+  pushLiveLog({ type: 'info', message: `[Test] testTractorChangeAlert called`, ts: Date.now() })
+  speakTts('Tractor details updated.')
 }
 
 export function testDriverChangeAlert() {
-  enqueueAlert('driverChange', {
-    text: 'Test: Driver details updated.',
-    priority: PRIORITY.change,
-  })
+  pushLiveLog({ type: 'info', message: `[Test] testDriverChangeAlert called`, ts: Date.now() })
+  speakTts('Driver details updated.')
 }
 
 export function testSuccessAlert() {
-  enqueueAlert('checkInSuccess', {
-    text: 'Test: Check-in successful.',
-    priority: PRIORITY.info,
-  })
+  pushLiveLog({ type: 'info', message: `[Test] testSuccessAlert called`, ts: Date.now() })
+  speakTts('Check-in successful.')
 }
 
 export function testErrorAlert() {
-  enqueueAlert('checkInFail', {
-    text: 'Test: Check-in failed.',
-    priority: PRIORITY.error,
-  })
+  pushLiveLog({ type: 'info', message: `[Test] testErrorAlert called`, ts: Date.now() })
+  speakTts('Check-in failed.')
 }

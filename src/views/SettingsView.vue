@@ -57,7 +57,7 @@ const SECRET_SAVED_MASK = '••••••••••••••••'
 /** @type {import('vue').Ref<'general' | 'automation' | 'audio'>} */
 const settingsTab = ref('general')
 
-/** @type {import('vue').Ref<'off' | 'tts' | 'bell' | 'both'>} */
+/** @type {import('vue').Ref<'off' | 'tts' | 'both'>} */
 const tripAlertMode = ref(getTripAlertMode())
 
 const tripStatusChangeOn = ref(isTripStatusChangeEnabled())
@@ -72,10 +72,21 @@ function updateAlertPref(key, value) {
 }
 
 function setTripAlertModeUi(
-  /** @type {'off' | 'tts' | 'bell' | 'both'} */ mode,
+  /** @type {'off' | 'tts' | 'both'} */ mode,
 ) {
   tripAlertMode.value = mode
   setTripAlertMode(mode)
+}
+
+const ttsEnabled = computed(() => tripAlertMode.value !== 'off')
+const bellChimeEnabled = computed(() => tripAlertMode.value === 'both')
+
+function toggleTts(enabled) {
+  setTripAlertModeUi(enabled ? 'tts' : 'off')
+}
+
+function toggleBellChime(enabled) {
+  setTripAlertModeUi(enabled ? 'both' : 'tts')
 }
 
 function toggleTripStatusChange(enabled) {
@@ -142,7 +153,6 @@ const linehaulPollAriaNow = computed(() =>
   ),
 )
 
-const tractorLocationEd = ref('')
 /** US phone: digits only (max 10); shown in the field as (XXX) XXX XXXX */
 const phoneDigits = ref('')
 const credMsg = ref(null)
@@ -192,7 +202,6 @@ function onCredTractorInput(e) {
 async function loadAssignmentState() {
   try {
     const a = await getAssignment()
-    tractorLocationEd.value = a.tractorLocation ?? ''
     phoneDigits.value = String(a.driverPhone ?? '')
       .replace(/\D/g, '')
       .slice(0, 10)
@@ -249,7 +258,6 @@ async function saveCredentials() {
     await putCredentials(body)
     await putAssignment({
       driverPhone: phoneDigits.value,
-      tractorLocation: tractorLocationEd.value,
     })
     credPass.value = ''
     credLinehaulToken.value = ''
@@ -586,14 +594,6 @@ onUnmounted(() => {
           maxlength="6"
           @input="onCredTractorInput"
         />
-        <label class="lbl">Tractor location</label>
-        <input
-          v-model="tractorLocationEd"
-          class="inp tap"
-          type="text"
-          autocomplete="off"
-          placeholder="Current location for check-in"
-        />
         <label class="lbl">Phone number</label>
         <input
           :value="phoneDisplay"
@@ -753,140 +753,114 @@ onUnmounted(() => {
     </div>
 
     <main v-show="settingsTab === 'audio'" class="stack audio-panel">
-      <SettingsSection title="Trip ready alerts">
-        <p class="hint tight">
-          Alerts play on <strong>this device</strong> (phone, tablet, or PC) — not on the server. Turn volume up. On
-          some phones you may need to tap “enable” on Home before the first alert after opening the app.
-        </p>
-        <p class="lbl audio-mode-label">When a new trip appears (origin + destination)</p>
-        <div class="audio-mode-grid" role="group" aria-label="Trip alert type">
-          <button
-            type="button"
-            class="audio-mode-btn tap"
-            :class="{ active: tripAlertMode === 'off' }"
-            @click="setTripAlertModeUi('off')"
-          >
-            Off
-          </button>
-          <button
-            type="button"
-            class="audio-mode-btn tap"
-            :class="{ active: tripAlertMode === 'tts' }"
-            @click="setTripAlertModeUi('tts')"
-          >
-            Speech
-          </button>
-          <button
-            type="button"
-            class="audio-mode-btn tap"
-            :class="{ active: tripAlertMode === 'bell' }"
-            @click="setTripAlertModeUi('bell')"
-          >
-            Bell
-          </button>
-          <button
-            type="button"
-            class="audio-mode-btn tap"
-            :class="{ active: tripAlertMode === 'both' }"
-            @click="setTripAlertModeUi('both')"
-          >
-            Speech + bell
-          </button>
-        </div>
-        <p class="lbl audio-test-label">Test on this device</p>
-        <div class="audio-test-row">
-          <button type="button" class="btn tap" @click="speakTripTtsTest">Test speech</button>
-          <button type="button" class="btn tap" @click="playTripBellTest">Test bell</button>
+      <SettingsSection title="Audio Alerts">
+        
+        <div class="audio-master-row">
+          <label class="audio-master-toggle">
+            <input
+              type="checkbox"
+              :checked="ttsEnabled"
+              @change="toggleTts($event.target.checked)"
+            />
+            <span class="audio-master-label">Text-to-speech alerts</span>
+          </label>
+          <button type="button" class="btn tap" :disabled="!ttsEnabled" @click="speakTripTtsTest">Test</button>
         </div>
 
-        <div class="alert-toggle-row">
+        <div v-if="ttsEnabled" class="audio-bell-row">
           <label class="alert-toggle">
             <input
               type="checkbox"
-              :checked="tripStatusChangeOn"
-              @change="toggleTripStatusChange($event.target.checked)"
+              :checked="bellChimeEnabled"
+              @change="toggleBellChime($event.target.checked)"
             />
-            <span class="alert-toggle-label">Trip status change (assigned / dispatched / completed)</span>
+            <span class="alert-toggle-label">Play bell chime before alerts</span>
           </label>
+          <button type="button" class="btn-sm tap" @click="playTripBellTest">Test</button>
         </div>
 
-        <div class="alert-toggle-row">
-          <label class="alert-toggle">
-            <input
-              type="checkbox"
-              :checked="trailerStatusChangeOn"
-              @change="toggleTrailerStatusChange($event.target.checked)"
-            />
-            <span class="alert-toggle-label">Trailer loading finished (loading → closed)</span>
-          </label>
-        </div>
-        <div class="alert-toggle-row">
-          <label class="alert-toggle">
-            <input
-              type="checkbox"
-              :checked="arrivalAlertsOn"
-              @change="toggleArrivalAlerts($event.target.checked)"
-            />
-            <span class="alert-toggle-label">Arrival alerts (arrived successfully, geofence arrival)</span>
-          </label>
-        </div>
-      </SettingsSection>
+        <div v-if="ttsEnabled" class="alert-types-section">
+          <p class="alert-types-heading">Alert types</p>
 
-      <SettingsSection title="Status Change Alerts">
-        <p class="hint tight">
-          Announce when tractor or driver details change during Linehaul polling. Alerts play sequentially (never overlap).
-        </p>
+          <div class="alert-toggle-row">
+            <label class="alert-toggle">
+              <input
+                type="checkbox"
+                :checked="alertPrefs.tripReady"
+                @change="updateAlertPref('tripReady', $event.target.checked)"
+              />
+              <span class="alert-toggle-label">New trip ready</span>
+            </label>
+          </div>
 
         <div class="alert-toggle-row">
-          <label class="alert-toggle">
-            <input
-              type="checkbox"
-              :checked="alertPrefs.tractorChange"
-              @change="updateAlertPref('tractorChange', $event.target.checked)"
-            />
-            <span class="alert-toggle-label">Tractor details change</span>
-          </label>
-          <button type="button" class="btn-sm tap" @click="testTractorChangeAlert">Test</button>
-        </div>
+            <label class="alert-toggle">
+              <input
+                type="checkbox"
+                :checked="tripStatusChangeOn"
+                @change="toggleTripStatusChange($event.target.checked)"
+              />
+              <span class="alert-toggle-label">Trip status change</span>
+            </label>
+          </div>
 
-        <div class="alert-toggle-row">
-          <label class="alert-toggle">
-            <input
-              type="checkbox"
-              :checked="alertPrefs.driverChange"
-              @change="updateAlertPref('driverChange', $event.target.checked)"
-            />
-            <span class="alert-toggle-label">Driver details change</span>
-          </label>
-          <button type="button" class="btn-sm tap" @click="testDriverChangeAlert">Test</button>
-        </div>
+          <div class="alert-toggle-row">
+            <label class="alert-toggle">
+              <input
+                type="checkbox"
+                :checked="trailerStatusChangeOn"
+                @change="toggleTrailerStatusChange($event.target.checked)"
+              />
+              <span class="alert-toggle-label">Trailer loading finished</span>
+            </label>
+          </div>
 
-        <div class="alert-toggle-row">
-          <label class="alert-toggle">
-            <input
-              type="checkbox"
-              :checked="alertPrefs.checkIn"
-              @change="updateAlertPref('checkIn', $event.target.checked)"
-            />
-            <span class="alert-toggle-label">Check-in success / failure</span>
-          </label>
-          <div class="btn-group-sm">
-            <button type="button" class="btn-sm tap" @click="testSuccessAlert">Success</button>
-            <button type="button" class="btn-sm tap" @click="testErrorAlert">Error</button>
+          <div class="alert-toggle-row">
+            <label class="alert-toggle">
+              <input
+                type="checkbox"
+                :checked="arrivalAlertsOn"
+                @change="toggleArrivalAlerts($event.target.checked)"
+              />
+              <span class="alert-toggle-label">Arrival alerts</span>
+            </label>
+          </div>
+
+          <div class="alert-toggle-row">
+            <label class="alert-toggle">
+              <input
+                type="checkbox"
+                :checked="alertPrefs.tractorChange"
+                @change="updateAlertPref('tractorChange', $event.target.checked)"
+              />
+              <span class="alert-toggle-label">Tractor details change</span>
+            </label>
+          </div>
+
+          <div class="alert-toggle-row">
+            <label class="alert-toggle">
+              <input
+                type="checkbox"
+                :checked="alertPrefs.driverChange"
+                @change="updateAlertPref('driverChange', $event.target.checked)"
+              />
+              <span class="alert-toggle-label">Driver details change</span>
+            </label>
+          </div>
+
+          <div class="alert-toggle-row">
+            <label class="alert-toggle">
+              <input
+                type="checkbox"
+                :checked="alertPrefs.checkIn"
+                @change="updateAlertPref('checkIn', $event.target.checked)"
+              />
+              <span class="alert-toggle-label">Check-in results</span>
+            </label>
           </div>
         </div>
-
-        <div class="alert-toggle-row">
-          <label class="alert-toggle">
-            <input
-              type="checkbox"
-              :checked="alertPrefs.apiReconnect"
-              @change="updateAlertPref('apiReconnect', $event.target.checked)"
-            />
-            <span class="alert-toggle-label">API reconnection</span>
-          </label>
-        </div>
       </SettingsSection>
+
     </main>
   </div>
 </template>
@@ -944,52 +918,52 @@ onUnmounted(() => {
 .audio-panel {
   padding-top: 0.15rem;
 }
-.audio-mode-label {
-  margin-top: 0.25rem;
-}
-.audio-mode-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 0.45rem;
-  margin-bottom: 0.75rem;
-}
-@media (min-width: 420px) {
-  .audio-mode-grid {
-    grid-template-columns: repeat(4, 1fr);
-  }
-}
-.audio-mode-btn {
-  cursor: pointer;
-  border-radius: var(--radius-md, 0.5rem);
-  border: 1px solid var(--color-border, rgba(255, 255, 255, 0.08));
-  background: var(--color-bg-surface, #16161d);
-  color: var(--color-text-tertiary, #6e6e7e);
-  padding: var(--space-2, 0.5rem) var(--space-2, 0.5rem);
-  font-size: var(--text-sm, 0.8125rem);
-  font-weight: var(--weight-semibold, 600);
-  min-height: var(--touch-target, 2.75rem);
-  line-height: var(--leading-tight, 1.2);
-  transition: var(--transition-all);
-}
-.audio-mode-btn:hover:not(.active) {
-  background: var(--color-hover, rgba(255, 255, 255, 0.04));
-  color: var(--color-text-secondary, #a8a8b8);
-}
-.audio-mode-btn.active {
-  background: var(--color-accent-purple-dark, #5c2d91);
-  color: white;
-  border-color: var(--color-accent-purple, #7b4db5);
-  box-shadow: 0 0 0 1px rgba(123, 77, 181, 0.3),
-              var(--shadow-glow-purple, 0 0 12px rgba(123, 77, 181, 0.2));
-}
-.audio-test-label {
-  margin-top: 0.5rem;
-}
-.audio-test-row {
+.audio-master-row {
   display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem;
-  margin-bottom: 0.25rem;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.5rem 0;
+  margin-bottom: 0.5rem;
+}
+.audio-master-toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  cursor: pointer;
+  flex: 1;
+}
+.audio-master-toggle input[type="checkbox"] {
+  width: 1.5rem;
+  height: 1.5rem;
+  accent-color: var(--color-accent-purple, #7b4db5);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.audio-master-label {
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--color-text-primary, #f4f4f8);
+}
+.audio-bell-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.5rem 0;
+  margin-bottom: 0.5rem;
+  border-bottom: 1px solid var(--color-border, rgba(255, 255, 255, 0.08));
+}
+.alert-types-section {
+  padding-top: 0.5rem;
+}
+.alert-types-heading {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--color-text-secondary, #a8a8b8);
+  margin: 0 0 0.5rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
 }
 .alert-toggle-row {
   display: flex;

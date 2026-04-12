@@ -3,6 +3,7 @@
  * Bell: `public/sounds/trip-ready-bell.mp3` (Mixkit preview SFX, royalty-free — mixkit.co).
  */
 import { extractOriginDest, hasTripOriginAndDestination } from './tripDetailsDisplay.js'
+import { pushLiveLog } from '../stores/liveLogStore.js'
 
 const OLD_TTS_KEY = 'fedexTripTtsEnabled'
 const MODE_KEY = 'fedexTripAlertMode'
@@ -10,13 +11,19 @@ const TRIP_STATUS_CHANGE_KEY = 'fedexTripStatusChangeEnabled'
 const TRAILER_STATUS_CHANGE_KEY = 'fedexTrailerStatusChangeEnabled'
 const ARRIVAL_ALERTS_KEY = 'fedexArrivalAlertsEnabled'
 
-/** @typedef {'off' | 'tts' | 'bell' | 'both'} TripAlertMode */
+/** 
+ * Audio mode: off = no alerts, tts = speech only, both = bell chime before speech
+ * Note: 'bell' (standalone) is deprecated - bell is now only a chime prefix for TTS
+ * @typedef {'off' | 'tts' | 'both'} TripAlertMode 
+ */
 
 /** @returns {TripAlertMode} */
 export function getTripAlertMode() {
   if (typeof window === 'undefined' || !window.localStorage) return 'tts'
   const raw = window.localStorage.getItem(MODE_KEY)
-  if (raw === 'off' || raw === 'tts' || raw === 'bell' || raw === 'both') return raw
+  // Migrate old 'bell' mode to 'tts' (bell-only no longer supported)
+  if (raw === 'bell') return 'tts'
+  if (raw === 'off' || raw === 'tts' || raw === 'both') return raw
   const legacy = window.localStorage.getItem(OLD_TTS_KEY)
   if (legacy === 'false') return 'off'
   return 'tts'
@@ -25,7 +32,7 @@ export function getTripAlertMode() {
 /** @param {TripAlertMode} mode */
 export function setTripAlertMode(mode) {
   if (typeof window === 'undefined' || !window.localStorage) return
-  if (mode !== 'off' && mode !== 'tts' && mode !== 'bell' && mode !== 'both') return
+  if (mode !== 'off' && mode !== 'tts' && mode !== 'both') return
   window.localStorage.setItem(MODE_KEY, mode)
   try {
     window.localStorage.removeItem(OLD_TTS_KEY)
@@ -34,16 +41,15 @@ export function setTripAlertMode(mode) {
   }
 }
 
-/** @returns {boolean} Legacy name: true when TTS should run (tts or both). */
+/** @returns {boolean} True when TTS should run (tts or both). */
 export function isTripTtsEnabled() {
   const m = getTripAlertMode()
   return m === 'tts' || m === 'both'
 }
 
-/** @returns {boolean} Bell should play for trip-ready (bell or both). */
+/** @returns {boolean} Bell chime should play before TTS (only when mode is 'both'). */
 export function isTripBellEnabled() {
-  const m = getTripAlertMode()
-  return m === 'bell' || m === 'both'
+  return getTripAlertMode() === 'both'
 }
 
 /** Any non-off alert (for hints / unlock UI). */
@@ -128,23 +134,31 @@ function evaluateGestureGate() {
 
 function playBellSound() {
   if (typeof window === 'undefined') return
+  const url = getTripBellSoundUrl()
+  pushLiveLog({ type: 'info', message: `[Bell] triggered: ${url}`, ts: Date.now() })
   try {
     if (currentBellAudio) {
       currentBellAudio.pause()
       currentBellAudio = null
     }
-    const a = new Audio(getTripBellSoundUrl())
+    const a = new Audio(url)
     currentBellAudio = a
-    void a.play().catch(() => {})
-    a.addEventListener(
-      'ended',
-      () => {
-        if (currentBellAudio === a) currentBellAudio = null
-      },
-      { once: true },
-    )
-  } catch {
-    /* ignore */
+    a.addEventListener('ended', () => {
+      if (currentBellAudio === a) currentBellAudio = null
+      pushLiveLog({ type: 'info', message: `[Bell] success: ${url}`, ts: Date.now() })
+    }, { once: true })
+    a.addEventListener('error', () => {
+      pushLiveLog({ type: 'error', message: `[Bell] failed: ${url}`, ts: Date.now() })
+    }, { once: true })
+    a.play()
+      .then(() => {
+        pushLiveLog({ type: 'info', message: `[Bell] started: ${url}`, ts: Date.now() })
+      })
+      .catch((e) => {
+        pushLiveLog({ type: 'error', message: `[Bell] play rejected: ${e.message || e}`, ts: Date.now() })
+      })
+  } catch (e) {
+    pushLiveLog({ type: 'error', message: `[Bell] exception: ${e.message || e}`, ts: Date.now() })
   }
 }
 
@@ -153,34 +167,73 @@ function flushPendingTripAlert() {
   const { fp, text, wantTts, wantBell } = pendingAnnouncement
   pendingAnnouncement = null
   lastFingerprint = fp
-  if (wantTts && window.speechSynthesis) {
-    try {
-      window.speechSynthesis.cancel()
-      const u = new SpeechSynthesisUtterance(text)
-      u.rate = 1.08
-      u.pitch = 1
-      u.volume = 1
-      window.speechSynthesis.speak(u)
-    } catch {
-      /* ignore */
-    }
-  }
+  pushLiveLog({ type: 'info', message: `[TripVoice] flushing pending: ${text}`, ts: Date.now() })
+  
+  // Bell chime plays BEFORE TTS
   if (wantBell) {
     playBellSound()
+  }
+  if (wantTts && window.speechSynthesis) {
+    speakUtterance(text)
   }
 }
 
 /**
- * Call from a click / pointer handler so the first announcement can play on iOS / Android
- * (browsers may block speech / audio until there is a user gesture).
+ * Shared utterance speaker with logging.
+ * @param {string} text
+ */
+function speakUtterance(text) {
+  if (typeof window === 'undefined' || !window.speechSynthesis) {
+    pushLiveLog({ type: 'warn', message: `[TripVoice] skipped: no speechSynthesis`, ts: Date.now() })
+    return
+  }
+  try {
+    window.speechSynthesis.cancel()
+    const u = new SpeechSynthesisUtterance(text)
+    u.rate = 1.08
+    u.pitch = 1
+    u.volume = 1
+
+    u.onstart = () => {
+      pushLiveLog({ type: 'info', message: `[TripVoice] started: ${text}`, ts: Date.now() })
+    }
+    u.onend = () => {
+      pushLiveLog({ type: 'info', message: `[TripVoice] success: ${text}`, ts: Date.now() })
+    }
+    u.onerror = (e) => {
+      pushLiveLog({ type: 'error', message: `[TripVoice] failed: ${text} - ${e.error || 'unknown'}`, ts: Date.now() })
+    }
+
+    window.speechSynthesis.speak(u)
+    pushLiveLog({ type: 'info', message: `[TripVoice] triggered: ${text}`, ts: Date.now() })
+  } catch (e) {
+    pushLiveLog({ type: 'error', message: `[TripVoice] exception: ${e.message || e}`, ts: Date.now() })
+  }
+}
+
+/**
+ * Call from a click / pointer handler so the first announcement can play on iOS / Android.
+ * This MUST call speechSynthesis.speak() directly to prime the browser - just setting a flag doesn't work on iOS.
  */
 export function unlockTripVoiceFromUserGesture() {
   if (typeof window === 'undefined') return
   gestureUnlocked = true
+  
+  // Prime iOS by actually speaking - this is what makes subsequent TTS work
+  if (window.speechSynthesis) {
+    speakUtterance('Text to speech alerts active.')
+  }
+  
+  // Play bell chime if user has bell+tts mode enabled
+  const mode = getTripAlertMode()
+  if (mode === 'both') {
+    playBellSound()
+  }
+  
   flushPendingTripAlert()
 }
 
-/** Whether to show “tap to enable” UI (touch-primary and not yet unlocked). */
+/** Whether to show "tap to enable" UI (touch-primary and not yet unlocked). */
 export function tripVoiceShowUnlockHint() {
   if (typeof window === 'undefined') return false
   if (!isTripAlertEnabled()) return false
@@ -211,11 +264,7 @@ export function maybeAnnounceNewTrip(tripsBody, noActiveTrip) {
   const mode = getTripAlertMode()
   if (mode === 'off') return
 
-  const wantTts = mode === 'tts' || mode === 'both'
-  const wantBell = mode === 'bell' || mode === 'both'
-  if (!wantTts && !wantBell) return
-
-  if (wantTts && !window.speechSynthesis) return
+  if (!window.speechSynthesis) return
 
   evaluateGestureGate()
 
@@ -234,29 +283,23 @@ export function maybeAnnounceNewTrip(tripsBody, noActiveTrip) {
   const o = toSpeechPhrase(origin)
   const d = toSpeechPhrase(destination)
   const text = `New trip ready from ${o} to ${d}.`
+  const wantBell = mode === 'both'
 
   if (!gestureUnlocked) {
     if (pendingAnnouncement?.fp === fp) return
-    pendingAnnouncement = { fp, text, wantTts, wantBell }
+    pendingAnnouncement = { fp, text, wantTts: true, wantBell }
+    pushLiveLog({ type: 'warn', message: `[TripVoice] queued pending (gesture locked): ${text}`, ts: Date.now() })
     return
   }
 
   lastFingerprint = fp
-  if (wantTts && window.speechSynthesis) {
-    try {
-      window.speechSynthesis.cancel()
-      const u = new SpeechSynthesisUtterance(text)
-      u.rate = 1.08
-      u.pitch = 1
-      u.volume = 1
-      window.speechSynthesis.speak(u)
-    } catch {
-      /* ignore */
-    }
-  }
+  pushLiveLog({ type: 'info', message: `[TripVoice] announcing new trip: ${text}`, ts: Date.now() })
+  
+  // Bell chime plays BEFORE TTS
   if (wantBell) {
     playBellSound()
   }
+  speakUtterance(text)
 }
 
 /** Stop any in-flight announcement (e.g. on unmount). */
@@ -280,22 +323,14 @@ export function cancelTripVoiceAnnouncement() {
 /** Settings: test speech (same voice as trip alert). */
 export function speakTripTtsTest() {
   if (typeof window === 'undefined' || !window.speechSynthesis) return
-  try {
-    window.speechSynthesis.cancel()
-    const u = new SpeechSynthesisUtterance(
-      'Trip status changed to assigned. Trailer 1 has finished loading and is now closed.',
-    )
-    u.rate = 1.08
-    u.pitch = 1
-    u.volume = 1
-    window.speechSynthesis.speak(u)
-  } catch {
-    /* ignore */
-  }
+  const text = 'Text to speech alerts active.'
+  pushLiveLog({ type: 'info', message: `[TripVoice] test triggered: ${text}`, ts: Date.now() })
+  speakUtterance(text)
 }
 
 /** Settings: test bell sound. */
 export function playTripBellTest() {
+  pushLiveLog({ type: 'info', message: `[TripVoice] bell test triggered`, ts: Date.now() })
   playBellSound()
 }
 
@@ -312,22 +347,22 @@ let lastTripPhase = ''
  */
 export function maybeAnnounceStatusChange(phase) {
   if (typeof window === 'undefined') return
-  console.log('[TTS] maybeAnnounceStatusChange:', phase, '(last:', lastTripPhase + ')')
+  pushLiveLog({ type: 'info', message: `[TripVoice] maybeAnnounceStatusChange: ${lastTripPhase} -> ${phase}`, ts: Date.now() })
   if (phase === lastTripPhase) return
   const prev = lastTripPhase
   lastTripPhase = phase
   if (!prev) {
-    console.log('[TTS] skipping: no previous phase')
+    pushLiveLog({ type: 'info', message: `[TripVoice] skipping: no previous phase`, ts: Date.now() })
     return
   }
 
   const mode = getTripAlertMode()
   if (mode === 'off') {
-    console.log('[TTS] skipping: mode is off')
+    pushLiveLog({ type: 'warn', message: `[TripVoice] skipping status change: mode is off`, ts: Date.now() })
     return
   }
   if (!isTripStatusChangeEnabled()) {
-    console.log('[TTS] skipping: trip status change disabled')
+    pushLiveLog({ type: 'warn', message: `[TripVoice] skipping status change: disabled in prefs`, ts: Date.now() })
     return
   }
 
@@ -341,7 +376,7 @@ export function maybeAnnounceStatusChange(phase) {
   }
 
   if (text) {
-    console.log('[TTS] announcing status change:', text)
+    pushLiveLog({ type: 'info', message: `[TripVoice] announcing status change: ${text}`, ts: Date.now() })
     announceText(text, mode)
   }
 }
@@ -356,18 +391,18 @@ const prevTrailerStatuses = new Map()
 export function maybeAnnounceTrailerStatusChange(trailers) {
   if (typeof window === 'undefined') return
   if (!Array.isArray(trailers)) {
-    console.log('[TTS] maybeAnnounceTrailerStatusChange: not an array')
+    pushLiveLog({ type: 'warn', message: `[TripVoice] maybeAnnounceTrailerStatusChange: not an array`, ts: Date.now() })
     return
   }
-  console.log('[TTS] maybeAnnounceTrailerStatusChange: checking', trailers.length, 'trailers')
+  pushLiveLog({ type: 'info', message: `[TripVoice] checking ${trailers.length} trailer(s) for status change`, ts: Date.now() })
 
   const mode = getTripAlertMode()
   if (mode === 'off') {
-    console.log('[TTS] skipping trailer status: mode is off')
+    pushLiveLog({ type: 'warn', message: `[TripVoice] skipping trailer status: mode is off`, ts: Date.now() })
     return
   }
   if (!isTrailerStatusChangeEnabled()) {
-    console.log('[TTS] skipping trailer status: disabled in prefs')
+    pushLiveLog({ type: 'warn', message: `[TripVoice] skipping trailer status: disabled in prefs`, ts: Date.now() })
     return
   }
 
@@ -379,11 +414,10 @@ export function maybeAnnounceTrailerStatusChange(trailers) {
 
     const status = String(tr.detlCodeLoadStatus ?? '').toUpperCase()
     const prev = prevTrailerStatuses.get(order)
-    console.log('[TTS] trailer', order, 'status:', prev, '->', status)
 
     if (prev === 'LDNG' && status === 'CLSD') {
       const text = `Trailer ${order} has finished loading and is now closed.`
-      console.log('[TTS] announcing trailer status change:', text)
+      pushLiveLog({ type: 'info', message: `[TripVoice] trailer status change: ${text}`, ts: Date.now() })
       announceText(text, mode)
     }
 
@@ -406,41 +440,35 @@ export function clearTripPhaseTracking() {
 }
 
 /**
- * Shared announcement logic for TTS and/or bell.
+ * Shared announcement logic for TTS with optional bell chime prefix.
+ * Bell plays BEFORE TTS as a chime prefix (not standalone).
  * @param {string} text
  * @param {TripAlertMode} mode
  * @param {{ force?: boolean }} [opts] - If force is true, bypass gesture gate (use for user-initiated actions)
  */
 function announceText(text, mode, opts = {}) {
   if (typeof window === 'undefined') return
+  if (mode === 'off') return
 
   evaluateGestureGate()
 
-  const wantTts = mode === 'tts' || mode === 'both'
-  const wantBell = mode === 'bell' || mode === 'both'
+  const wantBell = mode === 'both'
 
   if (!gestureUnlocked && !opts.force) {
-    console.log('[TTS] blocked by gesture gate:', text)
+    pushLiveLog({ type: 'warn', message: `[TripVoice] blocked by gesture gate: ${text}`, ts: Date.now() })
     return
   }
 
-  console.log('[TTS] announcing:', text, { mode, wantTts, wantBell })
+  pushLiveLog({ type: 'info', message: `[TripVoice] announceText: ${text} (bell=${wantBell})`, ts: Date.now() })
 
-  if (wantTts && window.speechSynthesis) {
-    try {
-      window.speechSynthesis.cancel()
-      const u = new SpeechSynthesisUtterance(text)
-      u.rate = 1.08
-      u.pitch = 1
-      u.volume = 1
-      window.speechSynthesis.speak(u)
-    } catch (e) {
-      console.error('[TTS] speechSynthesis error:', e)
-    }
-  }
-
+  // Bell chime plays BEFORE TTS (as a prefix)
   if (wantBell) {
     playBellSound()
+  }
+
+  // Always speak TTS when mode is not 'off'
+  if (window.speechSynthesis) {
+    speakUtterance(text)
   }
 }
 
@@ -449,15 +477,15 @@ function announceText(text, mode, opts = {}) {
  * Uses force mode since this is triggered by user-initiated automation.
  */
 export function announceArrivalSuccess() {
-  console.log('[TTS] announceArrivalSuccess called')
+  pushLiveLog({ type: 'info', message: `[TripVoice] announceArrivalSuccess called`, ts: Date.now() })
   if (typeof window === 'undefined') return
   const mode = getTripAlertMode()
   if (mode === 'off') {
-    console.log('[TTS] skipping arrival success: mode is off')
+    pushLiveLog({ type: 'warn', message: `[TripVoice] skipping arrival success: mode is off`, ts: Date.now() })
     return
   }
   if (!isArrivalAlertsEnabled()) {
-    console.log('[TTS] skipping arrival success: arrival alerts disabled')
+    pushLiveLog({ type: 'warn', message: `[TripVoice] skipping arrival success: disabled in prefs`, ts: Date.now() })
     return
   }
   announceText('Arrived at destination successfully.', mode, { force: true })
@@ -468,15 +496,15 @@ export function announceArrivalSuccess() {
  * Uses force mode since this is triggered by user-initiated automation.
  */
 export function announceGeofenceArrival() {
-  console.log('[TTS] announceGeofenceArrival called')
+  pushLiveLog({ type: 'info', message: `[TripVoice] announceGeofenceArrival called`, ts: Date.now() })
   if (typeof window === 'undefined') return
   const mode = getTripAlertMode()
   if (mode === 'off') {
-    console.log('[TTS] skipping geofence arrival: mode is off')
+    pushLiveLog({ type: 'warn', message: `[TripVoice] skipping geofence arrival: mode is off`, ts: Date.now() })
     return
   }
   if (!isArrivalAlertsEnabled()) {
-    console.log('[TTS] skipping geofence arrival: arrival alerts disabled')
+    pushLiveLog({ type: 'warn', message: `[TripVoice] skipping geofence arrival: disabled in prefs`, ts: Date.now() })
     return
   }
   announceText('Tractor already arrived by geofence.', mode, { force: true })

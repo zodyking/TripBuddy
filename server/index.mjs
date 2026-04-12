@@ -539,12 +539,6 @@ app.post('/api/run', async (req, reply) => {
         .send({ error: 'Set tractor number in Settings' })
     }
     const a = await readAssignment()
-    if (!(a.tractorLocation || '').trim()) {
-      return reply.code(400).send({
-        error:
-          'Set current location (Tractor location) before Check in',
-      })
-    }
     if (!(a.driverPhone || '').trim()) {
       return reply.code(400).send({
         error: 'Set driver phone (Driver Credentials in Settings) before Check in',
