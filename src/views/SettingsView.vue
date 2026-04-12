@@ -40,6 +40,7 @@ import {
   setTrailerStatusChangeEnabled,
   isArrivalAlertsEnabled,
   setArrivalAlertsEnabled,
+  previewTripAlertSample,
 } from '../utils/tripVoiceAnnouncement.js'
 import {
   getAlertPrefs,
@@ -47,7 +48,6 @@ import {
   testTractorChangeAlert,
   testDriverChangeAlert,
   testSuccessAlert,
-  testErrorAlert,
 } from '../utils/alertAudioQueue.js'
 
 /** Shown when a secret is on file but the user has not typed a new value (password inputs stay masked). */
@@ -689,7 +689,7 @@ onUnmounted(() => {
         </div>
       </SettingsSection>
 
-      <SettingsSection title="Live log">
+      <SettingsSection title="App Logs">
         <div class="log-actions">
           <button type="button" class="btn tap" @click="clearLiveLog">Clear log</button>
         </div>
@@ -748,87 +748,113 @@ onUnmounted(() => {
     </div>
 
     <main v-show="settingsTab === 'audio'" class="stack audio-panel">
-      <SettingsSection title="Audio Alerts">
-        
+      <SettingsSection title="Audio Alerts" :collapsible="false">
         <div class="audio-row">
+          <label class="toggle-switch">
+            <input type="checkbox" :checked="ttsEnabled" @change="toggleTts($event.target.checked)" />
+            <span class="toggle-slider"></span>
+          </label>
           <span class="audio-row-label">Text-to-speech alerts</span>
-          <div class="audio-row-controls">
-            <label class="toggle-switch">
-              <input type="checkbox" :checked="ttsEnabled" @change="toggleTts($event.target.checked)" />
-              <span class="toggle-slider"></span>
-            </label>
-            <button type="button" class="audio-test-btn tap" :disabled="!ttsEnabled" @click="speakTripTtsTest">Test</button>
-          </div>
+          <button type="button" class="audio-test-btn tap" :disabled="!ttsEnabled" @click="speakTripTtsTest">Test</button>
         </div>
 
         <div v-if="ttsEnabled" class="audio-row">
+          <label class="toggle-switch">
+            <input type="checkbox" :checked="bellChimeEnabled" @change="toggleBellChime($event.target.checked)" />
+            <span class="toggle-slider"></span>
+          </label>
           <span class="audio-row-label">Play bell chime before alerts</span>
-          <div class="audio-row-controls">
-            <label class="toggle-switch">
-              <input type="checkbox" :checked="bellChimeEnabled" @change="toggleBellChime($event.target.checked)" />
-              <span class="toggle-slider"></span>
-            </label>
-            <button type="button" class="audio-test-btn tap" @click="playTripBellTest">Test</button>
-          </div>
+          <button type="button" class="audio-test-btn tap" @click="playTripBellTest">Test</button>
         </div>
 
         <div v-if="ttsEnabled" class="alert-types-section">
           <p class="alert-types-heading">Alert Types</p>
 
           <div class="audio-row">
-            <span class="audio-row-label">New trip ready</span>
             <label class="toggle-switch">
               <input type="checkbox" :checked="alertPrefs.tripReady" @change="updateAlertPref('tripReady', $event.target.checked)" />
               <span class="toggle-slider"></span>
             </label>
+            <span class="audio-row-label">New trip ready</span>
+            <button
+              type="button"
+              class="audio-test-btn tap"
+              @click="previewTripAlertSample('New trip ready from Example Origin to Example Destination.')"
+            >
+              Test
+            </button>
           </div>
 
           <div class="audio-row">
-            <span class="audio-row-label">Trip status change</span>
             <label class="toggle-switch">
               <input type="checkbox" :checked="tripStatusChangeOn" @change="toggleTripStatusChange($event.target.checked)" />
               <span class="toggle-slider"></span>
             </label>
+            <span class="audio-row-label">Trip status change</span>
+            <button
+              type="button"
+              class="audio-test-btn tap"
+              @click="previewTripAlertSample('Trip status changed to dispatched.')"
+            >
+              Test
+            </button>
           </div>
 
           <div class="audio-row">
-            <span class="audio-row-label">Trailer loading finished</span>
             <label class="toggle-switch">
               <input type="checkbox" :checked="trailerStatusChangeOn" @change="toggleTrailerStatusChange($event.target.checked)" />
               <span class="toggle-slider"></span>
             </label>
+            <span class="audio-row-label">Trailer loading finished</span>
+            <button
+              type="button"
+              class="audio-test-btn tap"
+              @click="previewTripAlertSample('Trailer 1 has finished loading and is now closed.')"
+            >
+              Test
+            </button>
           </div>
 
           <div class="audio-row">
-            <span class="audio-row-label">Arrival alerts</span>
             <label class="toggle-switch">
               <input type="checkbox" :checked="arrivalAlertsOn" @change="toggleArrivalAlerts($event.target.checked)" />
               <span class="toggle-slider"></span>
             </label>
+            <span class="audio-row-label">Arrival alerts</span>
+            <button
+              type="button"
+              class="audio-test-btn tap"
+              @click="previewTripAlertSample('Arrived at destination successfully.')"
+            >
+              Test
+            </button>
           </div>
 
           <div class="audio-row">
-            <span class="audio-row-label">Tractor details change</span>
             <label class="toggle-switch">
               <input type="checkbox" :checked="alertPrefs.tractorChange" @change="updateAlertPref('tractorChange', $event.target.checked)" />
               <span class="toggle-slider"></span>
             </label>
+            <span class="audio-row-label">Tractor details change</span>
+            <button type="button" class="audio-test-btn tap" @click="testTractorChangeAlert">Test</button>
           </div>
 
           <div class="audio-row">
-            <span class="audio-row-label">Driver details change</span>
             <label class="toggle-switch">
               <input type="checkbox" :checked="alertPrefs.driverChange" @change="updateAlertPref('driverChange', $event.target.checked)" />
               <span class="toggle-slider"></span>
             </label>
+            <span class="audio-row-label">Driver details change</span>
+            <button type="button" class="audio-test-btn tap" @click="testDriverChangeAlert">Test</button>
           </div>
 
           <div class="audio-row">
-            <span class="audio-row-label">Check-in results</span>
             <label class="toggle-switch">
               <input type="checkbox" :checked="alertPrefs.checkIn" @change="updateAlertPref('checkIn', $event.target.checked)" />
               <span class="toggle-slider"></span>
             </label>
+            <span class="audio-row-label">Check-in results</span>
+            <button type="button" class="audio-test-btn tap" @click="testSuccessAlert">Test</button>
           </div>
         </div>
       </SettingsSection>
@@ -893,8 +919,7 @@ onUnmounted(() => {
 .audio-row {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 1rem;
+  gap: 0.75rem;
   padding: 0.75rem 0;
   border-bottom: 1px solid var(--color-border, rgba(255, 255, 255, 0.08));
   min-height: 48px;
@@ -907,12 +932,6 @@ onUnmounted(() => {
   color: var(--color-text-primary, #f4f4f8);
   flex: 1;
   min-width: 0;
-}
-.audio-row-controls {
-  display: flex;
-  align-items: center;
-  gap: 0.75rem;
-  flex-shrink: 0;
 }
 .toggle-switch {
   position: relative;
