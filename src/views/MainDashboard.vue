@@ -74,6 +74,7 @@ import {
   announceDriverChange,
   announceCheckInSuccess,
   announceCheckInFail,
+  announceCheckInTripReady,
   cancelAllAlerts,
 } from '../utils/alertAudioQueue.js'
 
@@ -222,6 +223,7 @@ async function loadQuickActions() {
 
 async function runQuickAction(auto) {
   if (runningAutomationId.value) return
+  unlockTripVoiceFromUserGesture()
   runningAutomationId.value = auto.id
   runStartTs.value = Date.now()
   streamBannerHandledKey.value = null
@@ -244,6 +246,16 @@ async function runQuickAction(auto) {
           announceGeofenceArrival()
         } else {
           announceArrivalSuccess()
+        }
+      }
+      const checkInPayload = result.variables?._checkInPayload
+      if (checkInPayload && typeof checkInPayload === 'object') {
+        if (checkInPayload.tripReadyAcknowledged === true) {
+          announceCheckInTripReady()
+        } else if (checkInPayload.signedOut === true) {
+          announceCheckInSuccess()
+        } else if (checkInPayload.success === false) {
+          announceCheckInFail()
         }
       }
       if (result.variables?._bannerDetected === false) {

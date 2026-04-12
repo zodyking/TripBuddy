@@ -2,7 +2,8 @@
 import { ref, onMounted } from 'vue'
 import { listAutomations, createAutomation, deleteAutomation, duplicateAutomation, runAutomation, listAutomationPresets, installAutomationPreset } from '../../api.js'
 import { pushLiveLog } from '../../stores/liveLogStore.js'
-import { announceGeofenceArrival, announceArrivalSuccess } from '../../utils/tripVoiceAnnouncement.js'
+import { announceGeofenceArrival, announceArrivalSuccess, unlockTripVoiceFromUserGesture } from '../../utils/tripVoiceAnnouncement.js'
+import { announceCheckInSuccess, announceCheckInFail, announceCheckInTripReady } from '../../utils/alertAudioQueue.js'
 
 function generateId() {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
@@ -99,6 +100,7 @@ async function duplicate(id) {
 }
 
 async function run(id, name) {
+  unlockTripVoiceFromUserGesture()
   runningId.value = id
   try {
     const result = await runAutomation(id, { headless: true })
@@ -109,6 +111,16 @@ async function run(id, name) {
           announceGeofenceArrival()
         } else {
           announceArrivalSuccess()
+        }
+      }
+      const checkInPayload = result.variables?._checkInPayload
+      if (checkInPayload && typeof checkInPayload === 'object') {
+        if (checkInPayload.tripReadyAcknowledged === true) {
+          announceCheckInTripReady()
+        } else if (checkInPayload.signedOut === true) {
+          announceCheckInSuccess()
+        } else if (checkInPayload.success === false) {
+          announceCheckInFail()
         }
       }
       pushLiveLog({ type: 'info', message: `Ran: ${name}`, ts: Date.now() })

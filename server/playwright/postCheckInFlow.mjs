@@ -22,6 +22,22 @@ function xp(path) {
 }
 
 /**
+ * Detect if the page shows "Check In Successful!" with "Trip Summary" —
+ * indicates a trip was assigned during check-in and phone modal won't appear.
+ * @param {import('playwright').Page} page
+ * @returns {Promise<boolean>}
+ */
+async function detectTripReadyPage(page) {
+  try {
+    const body = await page.locator('body').innerText({ timeout: 2000 })
+    const lower = body.toLowerCase()
+    return lower.includes('check in successful') && lower.includes('trip summary')
+  } catch {
+    return false
+  }
+}
+
+/**
  * After SEND, FedEx shows "Contact Linehaul" with orange CONFIRM.
  * @param {import('playwright').Page} page
  * @param {(type: string, message: string, extra?: object) => void} log
@@ -95,8 +111,10 @@ export async function clickSignOutModalConfirm(page, CX, signal) {
 
 /**
  * After check-in submit succeeds: phone modal, assistance confirm, toolbar sign out, confirm.
+ * If trip ready page is detected (Check In Successful + Trip Summary), skips phone modal.
  * @param {import('playwright').Page} page
  * @param {{ phone: string, log: (type: string, message: string, extra?: object) => void, signal?: AbortSignal }} opts
+ * @returns {Promise<{ tripReadyAcknowledged: boolean }>}
  */
 export async function runPhoneModalAndSignOut(page, { phone, log, signal }) {
   assertNotStuckOnPurpleId(page)
@@ -106,6 +124,20 @@ export async function runPhoneModalAndSignOut(page, { phone, log, signal }) {
   const CX = await getResolvedCheckInXpaths()
 
   if (signal?.aborted) throw new Error('Aborted')
+
+  const tripReady = await detectTripReadyPage(page)
+  if (tripReady) {
+    log('info', 'Trip ready page detected — skipping phone modal')
+    const signOutToolbar = page.locator(xp(CX.toolbarSignOut))
+    await signOutToolbar.click({ force: true, timeout: TOOLBAR_MS })
+    log('info', 'Opened sign out')
+
+    if (signal?.aborted) throw new Error('Aborted')
+
+    await clickSignOutModalConfirm(page, CX, signal)
+    log('info', 'Signed out (trip ready)', { checkInComplete: true })
+    return { tripReadyAcknowledged: true }
+  }
 
   log('info', 'Phone modal')
   const modal = page.locator('app-not-scheduled-phone-number-modal')
@@ -174,6 +206,7 @@ export async function runPhoneModalAndSignOut(page, { phone, log, signal }) {
 
   await clickSignOutModalConfirm(page, CX, signal)
   log('info', 'Signed out', { checkInComplete: true })
+  return { tripReadyAcknowledged: false }
 }
 
 /**

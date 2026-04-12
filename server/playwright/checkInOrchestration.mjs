@@ -15,7 +15,7 @@ import { runPhoneModalAndSignOut } from './postCheckInFlow.mjs'
  * @param {boolean} opts.tryOktaLogin
  * @param {string} opts.runId
  * @param {(runId: string, signal: AbortSignal) => Promise<string>} opts.waitForLocationRetry
- * @returns {Promise<{ success: boolean, bannerText?: string, locationMismatch?: boolean, signedOut?: boolean } | undefined>}
+ * @returns {Promise<{ success: boolean, bannerText?: string, locationMismatch?: boolean, signedOut?: boolean, tripReadyAcknowledged?: boolean } | undefined>}
  */
 export async function runCheckInEndToEnd(page, opts) {
   const { log, signal, tryOktaLogin, runId, waitForLocationRetry } = opts
@@ -68,8 +68,12 @@ export async function runCheckInEndToEnd(page, opts) {
         'Set driver phone (Driver Credentials in Settings) before Check in',
       )
     }
-    await runPhoneModalAndSignOut(page, { phone, log, signal })
-    checkInPayload = { ...checkInPayload, signedOut: true }
+    const postResult = await runPhoneModalAndSignOut(page, { phone, log, signal })
+    checkInPayload = {
+      ...checkInPayload,
+      signedOut: true,
+      tripReadyAcknowledged: postResult.tripReadyAcknowledged,
+    }
   }
 
   return checkInPayload

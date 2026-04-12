@@ -148,23 +148,32 @@ function speakTtsAsync(text) {
 }
 
 async function processQueue() {
-  if (isPlaying || alertQueue.length === 0) return
+  if (isPlaying || alertQueue.length === 0) {
+    console.log('[AlertQueue] processQueue: skip', { isPlaying, queueLen: alertQueue.length })
+    return
+  }
 
   alertQueue.sort((a, b) => b.priority - a.priority)
   const alert = alertQueue.shift()
   if (!alert) return
 
   isPlaying = true
+  console.log('[AlertQueue] playing:', alert.type, { text: alert.text, soundUrl: alert.soundUrl })
 
   try {
     if (alert.soundUrl) {
+      console.log('[AlertQueue] playAudioAsync start:', alert.soundUrl)
       await playAudioAsync(alert.soundUrl)
+      console.log('[AlertQueue] playAudioAsync done')
     }
     if (alert.text) {
+      console.log('[AlertQueue] speakTtsAsync start:', alert.text)
       await speakTtsAsync(alert.text)
+      console.log('[AlertQueue] speakTtsAsync done')
     }
   } finally {
     isPlaying = false
+    console.log('[AlertQueue] processQueue: finished alert, checking next')
     processQueue()
   }
 }
@@ -176,19 +185,33 @@ async function processQueue() {
  */
 export function enqueueAlert(type, options = {}) {
   if (typeof window === 'undefined') return
+  console.log('[AlertQueue] enqueueAlert called:', type, options)
 
   const prefs = getAlertPrefs()
   
-  if (type === 'tractorChange' && !prefs.tractorChange) return
-  if (type === 'driverChange' && !prefs.driverChange) return
-  if ((type === 'checkInSuccess' || type === 'checkInFail') && !prefs.checkIn) return
-  if (type === 'apiReconnect' && !prefs.apiReconnect) return
+  if (type === 'tractorChange' && !prefs.tractorChange) {
+    console.log('[AlertQueue] blocked by prefs: tractorChange disabled')
+    return
+  }
+  if (type === 'driverChange' && !prefs.driverChange) {
+    console.log('[AlertQueue] blocked by prefs: driverChange disabled')
+    return
+  }
+  if ((type === 'checkInSuccess' || type === 'checkInFail') && !prefs.checkIn) {
+    console.log('[AlertQueue] blocked by prefs: checkIn disabled')
+    return
+  }
+  if (type === 'apiReconnect' && !prefs.apiReconnect) {
+    console.log('[AlertQueue] blocked by prefs: apiReconnect disabled')
+    return
+  }
 
   const now = Date.now()
   const existingIndex = alertQueue.findIndex(
     (a) => a.type === type && now - a.ts < DEDUP_WINDOW_MS
   )
   if (existingIndex !== -1) {
+    console.log('[AlertQueue] dedup: updating existing alert at index', existingIndex)
     alertQueue[existingIndex] = {
       type,
       priority: options.priority ?? PRIORITY.change,
@@ -197,6 +220,7 @@ export function enqueueAlert(type, options = {}) {
       ts: now,
     }
   } else {
+    console.log('[AlertQueue] adding new alert to queue, current length:', alertQueue.length)
     alertQueue.push({
       type,
       priority: options.priority ?? PRIORITY.change,
@@ -226,6 +250,7 @@ export function announceDriverChange() {
 }
 
 export function announceCheckInSuccess() {
+  console.log('[AlertQueue] announceCheckInSuccess called')
   enqueueAlert('checkInSuccess', {
     soundUrl: ALERT_SOUNDS.success,
     text: 'Check-in successful.',
@@ -234,10 +259,20 @@ export function announceCheckInSuccess() {
 }
 
 export function announceCheckInFail() {
+  console.log('[AlertQueue] announceCheckInFail called')
   enqueueAlert('checkInFail', {
     soundUrl: ALERT_SOUNDS.error,
     text: 'Check-in failed.',
     priority: PRIORITY.error,
+  })
+}
+
+export function announceCheckInTripReady() {
+  console.log('[AlertQueue] announceCheckInTripReady called')
+  enqueueAlert('checkInSuccess', {
+    soundUrl: ALERT_SOUNDS.success,
+    text: 'Check in successful. Trip ready and acknowledged.',
+    priority: PRIORITY.tripReady,
   })
 }
 

@@ -312,14 +312,24 @@ let lastTripPhase = ''
  */
 export function maybeAnnounceStatusChange(phase) {
   if (typeof window === 'undefined') return
+  console.log('[TTS] maybeAnnounceStatusChange:', phase, '(last:', lastTripPhase + ')')
   if (phase === lastTripPhase) return
   const prev = lastTripPhase
   lastTripPhase = phase
-  if (!prev) return
+  if (!prev) {
+    console.log('[TTS] skipping: no previous phase')
+    return
+  }
 
   const mode = getTripAlertMode()
-  if (mode === 'off') return
-  if (!isTripStatusChangeEnabled()) return
+  if (mode === 'off') {
+    console.log('[TTS] skipping: mode is off')
+    return
+  }
+  if (!isTripStatusChangeEnabled()) {
+    console.log('[TTS] skipping: trip status change disabled')
+    return
+  }
 
   let text = ''
   if (phase === 'assigned' && prev !== 'assigned') {
@@ -331,6 +341,7 @@ export function maybeAnnounceStatusChange(phase) {
   }
 
   if (text) {
+    console.log('[TTS] announcing status change:', text)
     announceText(text, mode)
   }
 }
@@ -344,11 +355,21 @@ const prevTrailerStatuses = new Map()
  */
 export function maybeAnnounceTrailerStatusChange(trailers) {
   if (typeof window === 'undefined') return
-  if (!Array.isArray(trailers)) return
+  if (!Array.isArray(trailers)) {
+    console.log('[TTS] maybeAnnounceTrailerStatusChange: not an array')
+    return
+  }
+  console.log('[TTS] maybeAnnounceTrailerStatusChange: checking', trailers.length, 'trailers')
 
   const mode = getTripAlertMode()
-  if (mode === 'off') return
-  if (!isTrailerStatusChangeEnabled()) return
+  if (mode === 'off') {
+    console.log('[TTS] skipping trailer status: mode is off')
+    return
+  }
+  if (!isTrailerStatusChangeEnabled()) {
+    console.log('[TTS] skipping trailer status: disabled in prefs')
+    return
+  }
 
   for (const t of trailers) {
     if (!t || typeof t !== 'object') continue
@@ -358,9 +379,11 @@ export function maybeAnnounceTrailerStatusChange(trailers) {
 
     const status = String(tr.detlCodeLoadStatus ?? '').toUpperCase()
     const prev = prevTrailerStatuses.get(order)
+    console.log('[TTS] trailer', order, 'status:', prev, '->', status)
 
     if (prev === 'LDNG' && status === 'CLSD') {
       const text = `Trailer ${order} has finished loading and is now closed.`
+      console.log('[TTS] announcing trailer status change:', text)
       announceText(text, mode)
     }
 
@@ -386,8 +409,9 @@ export function clearTripPhaseTracking() {
  * Shared announcement logic for TTS and/or bell.
  * @param {string} text
  * @param {TripAlertMode} mode
+ * @param {{ force?: boolean }} [opts] - If force is true, bypass gesture gate (use for user-initiated actions)
  */
-function announceText(text, mode) {
+function announceText(text, mode, opts = {}) {
   if (typeof window === 'undefined') return
 
   evaluateGestureGate()
@@ -395,9 +419,12 @@ function announceText(text, mode) {
   const wantTts = mode === 'tts' || mode === 'both'
   const wantBell = mode === 'bell' || mode === 'both'
 
-  if (!gestureUnlocked) {
+  if (!gestureUnlocked && !opts.force) {
+    console.log('[TTS] blocked by gesture gate:', text)
     return
   }
+
+  console.log('[TTS] announcing:', text, { mode, wantTts, wantBell })
 
   if (wantTts && window.speechSynthesis) {
     try {
@@ -407,8 +434,8 @@ function announceText(text, mode) {
       u.pitch = 1
       u.volume = 1
       window.speechSynthesis.speak(u)
-    } catch {
-      /* ignore */
+    } catch (e) {
+      console.error('[TTS] speechSynthesis error:', e)
     }
   }
 
@@ -419,22 +446,38 @@ function announceText(text, mode) {
 
 /**
  * Announce successful arrival at destination.
+ * Uses force mode since this is triggered by user-initiated automation.
  */
 export function announceArrivalSuccess() {
+  console.log('[TTS] announceArrivalSuccess called')
   if (typeof window === 'undefined') return
   const mode = getTripAlertMode()
-  if (mode === 'off') return
-  if (!isArrivalAlertsEnabled()) return
-  announceText('Arrived at destination successfully.', mode)
+  if (mode === 'off') {
+    console.log('[TTS] skipping arrival success: mode is off')
+    return
+  }
+  if (!isArrivalAlertsEnabled()) {
+    console.log('[TTS] skipping arrival success: arrival alerts disabled')
+    return
+  }
+  announceText('Arrived at destination successfully.', mode, { force: true })
 }
 
 /**
  * Announce that tractor was already arrived by geofence.
+ * Uses force mode since this is triggered by user-initiated automation.
  */
 export function announceGeofenceArrival() {
+  console.log('[TTS] announceGeofenceArrival called')
   if (typeof window === 'undefined') return
   const mode = getTripAlertMode()
-  if (mode === 'off') return
-  if (!isArrivalAlertsEnabled()) return
-  announceText('Tractor already arrived by geofence.', mode)
+  if (mode === 'off') {
+    console.log('[TTS] skipping geofence arrival: mode is off')
+    return
+  }
+  if (!isArrivalAlertsEnabled()) {
+    console.log('[TTS] skipping geofence arrival: arrival alerts disabled')
+    return
+  }
+  announceText('Tractor already arrived by geofence.', mode, { force: true })
 }
