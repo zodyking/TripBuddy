@@ -1,5 +1,6 @@
 <script setup>
 import { onMounted, onUnmounted } from 'vue'
+import { useRoute } from 'vue-router'
 import { useApiHealth } from '../composables/useApiHealth.js'
 import {
   connectLiveLogStream,
@@ -7,6 +8,7 @@ import {
   reconnectLiveLogStream,
 } from '../stores/liveLogStore.js'
 
+const route = useRoute()
 const { apiOk, refreshHealth } = useApiHealth()
 
 const headerAriaLabel = 'FedExTool — Linehaul'
