@@ -222,7 +222,6 @@ async function loadQuickActions() {
 
 async function runQuickAction(auto) {
   if (runningAutomationId.value) return
-  unlockTripVoiceFromUserGesture()
   runningAutomationId.value = auto.id
   runStartTs.value = Date.now()
   streamBannerHandledKey.value = null

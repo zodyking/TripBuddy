@@ -2,7 +2,7 @@
 import { ref, onMounted } from 'vue'
 import { listAutomations, createAutomation, deleteAutomation, duplicateAutomation, runAutomation, listAutomationPresets, installAutomationPreset } from '../../api.js'
 import { pushLiveLog } from '../../stores/liveLogStore.js'
-import { announceGeofenceArrival, announceArrivalSuccess, unlockTripVoiceFromUserGesture } from '../../utils/tripVoiceAnnouncement.js'
+import { announceGeofenceArrival, announceArrivalSuccess } from '../../utils/tripVoiceAnnouncement.js'
 import { announceCheckInSuccess, announceCheckInFail, announceCheckInTripReady } from '../../utils/alertAudioQueue.js'
 
 function generateId() {
@@ -100,7 +100,6 @@ async function duplicate(id) {
 }
 
 async function run(id, name) {
-  unlockTripVoiceFromUserGesture()
   runningId.value = id
   try {
     const result = await runAutomation(id, { headless: true })
