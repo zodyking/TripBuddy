@@ -120,8 +120,6 @@ let unregisterAssignment = () => {}
 const credUser = ref('')
 const credTractor = ref('')
 const credLinehaulToken = ref('')
-/** Okta access token for userinfo (optional; also captured with Linehaul browser capture). */
-const credOktaToken = ref('')
 const credPollMinutes = ref(0)
 /** Linehaul home refresh slider: 0 = manual only, max 60 min (1 min steps). */
 const LINEHAUL_POLL_MAX = 60
@@ -213,10 +211,7 @@ async function loadAssignmentState() {
 
 async function loadCredentials() {
   try {
-    credMeta.value = await getCredentials({
-      includeLinehaulBearer: true,
-      includeOktaToken: true,
-    })
+    credMeta.value = await getCredentials({ includeLinehaulBearer: true })
     credUser.value = credMeta.value.username || ''
     credTractor.value = String(credMeta.value.tractorNumber ?? '')
       .replace(/\D/g, '')
@@ -235,14 +230,9 @@ async function loadCredentials() {
       typeof credMeta.value.fedexLinehaulBearer === 'string'
         ? credMeta.value.fedexLinehaulBearer
         : ''
-    credOktaToken.value =
-      typeof credMeta.value.fedexOktaAccessToken === 'string'
-        ? credMeta.value.fedexOktaAccessToken
-        : ''
   } catch {
     credMeta.value = null
     credLinehaulToken.value = ''
-    credOktaToken.value = ''
   }
 }
 
@@ -252,7 +242,6 @@ async function saveCredentials() {
   credMsg.value = null
   try {
     const hasBearerInput = credLinehaulToken.value.trim().length > 0
-    const hasOktaInput = credOktaToken.value.trim().length > 0
     const body = {
       username: credUser.value,
       password: credPass.value || undefined,
@@ -265,16 +254,12 @@ async function saveCredentials() {
     if (hasBearerInput) {
       body.fedexLinehaulBearer = credLinehaulToken.value.trim()
     }
-    if (hasOktaInput) {
-      body.fedexOktaAccessToken = credOktaToken.value.trim()
-    }
     await putCredentials(body)
     await putAssignment({
       driverPhone: phoneDigits.value,
     })
     credPass.value = ''
     credLinehaulToken.value = ''
-    credOktaToken.value = ''
     await loadCredentials()
     await loadAssignmentState()
     credMsg.value = 'Saved'
@@ -294,7 +279,6 @@ async function clearCredentials() {
     credUser.value = ''
     credTractor.value = ''
     credLinehaulToken.value = ''
-    credOktaToken.value = ''
     credPass.value = ''
     await loadCredentials()
     pushLiveLog({ type: 'info', message: 'Credentials cleared', ts: Date.now() })
@@ -637,15 +621,6 @@ onUnmounted(() => {
             {{ captureBearerBusy ? 'Capturing…' : 'Capture from browser' }}
           </button>
         </div>
-        <label class="lbl">Okta access token (userinfo)</label>
-        <input
-          v-model="credOktaToken"
-          class="inp tap token-field"
-          type="text"
-          autocomplete="off"
-          spellcheck="false"
-          placeholder="Optional — paste JWT or use Linehaul capture (sniffs userinfo)"
-        />
         <div class="linehaul-poll-card">
           <div class="linehaul-poll-head">
             <label class="linehaul-poll-title" for="linehaul-poll-range">Linehaul refresh rate</label>

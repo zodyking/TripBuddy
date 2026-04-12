@@ -33,7 +33,6 @@ import {
   linehaulLastFetchAt,
   linehaulFetching,
   linehaulLocationMatch,
-  linehaulOktaUserInfo,
   refreshLinehaulApis,
   tripPhase,
   linehaulDriverIdFromCredMeta,
@@ -578,13 +577,10 @@ const linehaulDriverIdDisplay = computed(() =>
   linehaulDriverIdFromCredMeta(linehaulCredMeta.value ?? {}),
 )
 
-/** First + last from Okta userinfo only (not Linehaul driver API). */
+/** Driver name scraped from Okta userinfo during Linehaul capture. */
 const driverDisplayName = computed(() => {
-  const u = linehaulOktaUserInfo.value
-  if (!u || typeof u !== 'object') return ''
-  const g = String(u.given_name ?? '').trim()
-  const f = String(u.family_name ?? '').trim()
-  return [g, f].filter(Boolean).join(' ')
+  const name = linehaulCredMeta.value?.driverName
+  return typeof name === 'string' ? name : ''
 })
 
 async function refreshLinehaulCredMeta() {

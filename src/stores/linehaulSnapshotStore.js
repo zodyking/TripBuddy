@@ -2,7 +2,6 @@ import { ref, computed } from 'vue'
 import {
   fetchFedexLinehaulTractor,
   fetchFedexLinehaulDriver,
-  fetchFedexOktaUserinfo,
   fetchFedexLinehaulTripStatus,
   fetchFedexLinehaulTrips,
   getCredentials,
@@ -24,8 +23,6 @@ export const linehaulTripsNoActive = ref(false)
 export const lastDailyTripLegSequence = ref(null)
 export const linehaulLastFetchAt = ref(null)
 export const linehaulFetching = ref(false)
-/** Okta userinfo subset for dashboard NAME (not Linehaul driver fields). */
-export const linehaulOktaUserInfo = ref(null)
 
 /** Cached full trip snapshot (from APRVD) with trailer details for persistence after dispatch. */
 export const cachedTripSnapshot = ref(null)
@@ -206,11 +203,9 @@ async function refreshLinehaulApisImpl(attempt) {
   linehaulTripReadyError.value = null
   linehaulTripsError.value = null
   linehaulTripsNoActive.value = false
-  const hadOktaProfile = linehaulOktaUserInfo.value != null
-  const [tr, dr, oi] = await Promise.all([
+  const [tr, dr] = await Promise.all([
     fetchFedexLinehaulTractor(),
     fetchFedexLinehaulDriver(),
-    fetchFedexOktaUserinfo(),
   ])
   let cred = {}
   try {
@@ -231,24 +226,6 @@ async function refreshLinehaulApisImpl(attempt) {
   } else {
     linehaulDriverBody.value = null
     linehaulDriverError.value = dr.error || 'Driver request failed'
-  }
-
-  if (oi.ok && oi.body !== undefined && typeof oi.body === 'object' && !Array.isArray(oi.body)) {
-    const b = /** @type {Record<string, unknown>} */ (oi.body)
-    linehaulOktaUserInfo.value = {
-      given_name: typeof b.given_name === 'string' ? b.given_name : undefined,
-      family_name: typeof b.family_name === 'string' ? b.family_name : undefined,
-    }
-  } else if (oi.status === 401) {
-    linehaulOktaUserInfo.value = null
-    if (hadOktaProfile) {
-      pushLiveLog({
-        type: 'info',
-        message:
-          'Okta name unavailable (sign in or save Okta token in Settings / capture Linehaul).',
-        ts: Date.now(),
-      })
-    }
   }
 
   const driverId = linehaulDriverIdFromCredMeta(cred)

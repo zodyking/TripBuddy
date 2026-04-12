@@ -55,9 +55,7 @@ import {
   getTractorNumber,
   getLinehaulDriverId,
   getDecryptedLinehaulBearer,
-  getDecryptedOktaAccessToken,
 } from './credentials-store.mjs'
-import { oktaUserinfoGet } from './fedex-okta-api.mjs'
 import {
   captureAndSaveLinehaulBearer,
   isLinehaulCaptureBusy,
@@ -142,19 +140,13 @@ app.put('/api/assignment', async (req, reply) => {
 app.get('/api/settings/credentials', async (req) => {
   const meta = await getCredentialsMeta()
   const includeBearer = req.query?.includeLinehaulBearer === '1'
-  const includeOkta = req.query?.includeOktaToken === '1'
   let fedexLinehaulBearer = null
   if (includeBearer) {
     fedexLinehaulBearer = await getDecryptedLinehaulBearer()
   }
-  let fedexOktaAccessToken = null
-  if (includeOkta) {
-    fedexOktaAccessToken = await getDecryptedOktaAccessToken()
-  }
   return {
     ...meta,
     ...(includeBearer ? { fedexLinehaulBearer } : {}),
-    ...(includeOkta ? { fedexOktaAccessToken } : {}),
     secretHint: process.env.FEDEX_TOOL_SECRET ? null : TOOL_SECRET_HINT,
   }
 })
@@ -221,22 +213,6 @@ app.get('/api/fedex/linehaul/driver', async (req, reply) => {
     })
   }
   const result = await linehaulGet('driver', driverId, bearer)
-  return reply.code(result.status).send({
-    ok: result.ok,
-    status: result.status,
-    body: result.body,
-  })
-})
-
-app.get('/api/fedex/okta/userinfo', async (req, reply) => {
-  const token = await getDecryptedOktaAccessToken()
-  if (!token) {
-    return reply.code(401).send({
-      error:
-        'No Okta access token on file. Run Linehaul capture after sign-in (captures userinfo token when present), or paste Okta token in Settings.',
-    })
-  }
-  const result = await oktaUserinfoGet(token)
   return reply.code(result.status).send({
     ok: result.ok,
     status: result.status,

@@ -33,16 +33,12 @@ export async function putAssignment(body) {
 }
 
 /**
- * @param {{ includeLinehaulBearer?: boolean, includeOktaToken?: boolean }} [opts]
+ * @param {{ includeLinehaulBearer?: boolean }} [opts]
  * When includeLinehaulBearer, response includes decrypted Linehaul JWT for Settings only.
- * When includeOktaToken, response includes decrypted Okta access token for Settings only.
  */
 export async function getCredentials(opts = {}) {
-  const params = new URLSearchParams()
-  if (opts.includeLinehaulBearer) params.set('includeLinehaulBearer', '1')
-  if (opts.includeOktaToken) params.set('includeOktaToken', '1')
-  const q = params.toString()
-  const r = await fetch(`/api/settings/credentials${q ? `?${q}` : ''}`)
+  const q = opts.includeLinehaulBearer ? '?includeLinehaulBearer=1' : ''
+  const r = await fetch(`/api/settings/credentials${q}`)
   return handleJson(r)
 }
 
@@ -122,39 +118,6 @@ export async function fetchFedexLinehaulDriver(opts = {}) {
   if (opts.driver) q.set('driver', String(opts.driver))
   const qs = q.toString()
   const r = await fetch(`/api/fedex/linehaul/driver${qs ? `?${qs}` : ''}`)
-  const text = await r.text()
-  let parsed = {}
-  try {
-    parsed = text ? JSON.parse(text) : {}
-  } catch {
-    parsed = { raw: text }
-  }
-  if (!r.ok) {
-    return {
-      ok: false,
-      status: r.status,
-      body: parsed.body,
-      error:
-        typeof parsed.error === 'string'
-          ? parsed.error
-          : `HTTP ${r.status}`,
-    }
-  }
-  return {
-    ok: parsed.ok !== false,
-    status: parsed.status ?? r.status,
-    body: parsed.body,
-    error:
-      typeof parsed.error === 'string' ? parsed.error : undefined,
-  }
-}
-
-/**
- * Okta OpenID userinfo (given_name / family_name) — never throws.
- * @returns {{ ok: boolean, status: number, body?: unknown, error?: string }}
- */
-export async function fetchFedexOktaUserinfo() {
-  const r = await fetch('/api/fedex/okta/userinfo')
   const text = await r.text()
   let parsed = {}
   try {

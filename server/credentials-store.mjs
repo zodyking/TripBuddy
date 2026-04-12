@@ -47,7 +47,7 @@ function decryptPassword(blob) {
  *   tractorNumber: string | null,
  *   employeeNumber: string | null,
  *   linehaulBearerEnc: object | null,
- *   oktaAccessTokenEnc: object | null,
+ *   driverName: string | null,
  *   linehaulPollMinutes: number | null,
  * }}
  */
@@ -67,7 +67,8 @@ async function readFileRaw() {
       employeeNumber:
         typeof data.employeeNumber === 'string' ? data.employeeNumber : null,
       linehaulBearerEnc: data.linehaulBearerEnc ?? null,
-      oktaAccessTokenEnc: data.oktaAccessTokenEnc ?? null,
+      driverName:
+        typeof data.driverName === 'string' ? data.driverName : null,
       linehaulPollMinutes: pollM,
     }
   } catch {
@@ -77,7 +78,7 @@ async function readFileRaw() {
       tractorNumber: null,
       employeeNumber: null,
       linehaulBearerEnc: null,
-      oktaAccessTokenEnc: null,
+      driverName: null,
       linehaulPollMinutes: null,
     }
   }
@@ -90,7 +91,7 @@ export async function getCredentialsMeta() {
     tractorNumber,
     employeeNumber,
     linehaulBearerEnc,
-    oktaAccessTokenEnc,
+    driverName,
     linehaulPollMinutes,
   } = await readFileRaw()
   const tn = tractorNumber?.trim() || null
@@ -107,11 +108,7 @@ export async function getCredentialsMeta() {
     hasLinehaulBearer: Boolean(
       linehaulBearerEnc?.data && linehaulBearerEnc?.iv && linehaulBearerEnc?.tag,
     ),
-    hasOktaAccessToken: Boolean(
-      oktaAccessTokenEnc?.data &&
-        oktaAccessTokenEnc?.iv &&
-        oktaAccessTokenEnc?.tag,
-    ),
+    driverName: driverName || null,
     linehaulPollMinutes: poll,
   }
 }
@@ -169,15 +166,10 @@ export async function getDecryptedLinehaulBearer() {
   }
 }
 
-/** Decrypted Okta access token for PurpleID userinfo (or null). Not the Linehaul Apigee JWT. */
-export async function getDecryptedOktaAccessToken() {
-  const { oktaAccessTokenEnc } = await readFileRaw()
-  if (!oktaAccessTokenEnc?.data) return null
-  try {
-    return decryptPassword(oktaAccessTokenEnc)
-  } catch {
-    return null
-  }
+/** Scraped driver name from Okta userinfo (or null). */
+export async function getDriverName() {
+  const { driverName } = await readFileRaw()
+  return driverName || null
 }
 
 /**
@@ -187,8 +179,8 @@ export async function getDecryptedOktaAccessToken() {
  *   tractorNumber?: string,
  *   fedexLinehaulBearer?: string,
  *   clearFedexLinehaulBearer?: boolean,
- *   fedexOktaAccessToken?: string,
- *   clearFedexOktaAccessToken?: boolean,
+ *   driverName?: string,
+ *   clearDriverName?: boolean,
  *   linehaulPollMinutes?: number,
  * }} body password optional = keep; linehaulPollMinutes 0–1440 (0 = no auto refresh)
  */
@@ -226,18 +218,14 @@ export async function saveCredentials(body) {
     linehaulBearerEnc = encryptPassword(tok)
   }
 
-  let oktaAccessTokenEnc = prev.oktaAccessTokenEnc
-  if (body.clearFedexOktaAccessToken === true) {
-    oktaAccessTokenEnc = null
+  let driverName = prev.driverName
+  if (body.clearDriverName === true) {
+    driverName = null
   } else if (
-    typeof body.fedexOktaAccessToken === 'string' &&
-    body.fedexOktaAccessToken.trim().length > 0
+    typeof body.driverName === 'string' &&
+    body.driverName.trim().length > 0
   ) {
-    let otok = body.fedexOktaAccessToken.trim()
-    if (/^bearer\s+/i.test(otok)) {
-      otok = otok.replace(/^bearer\s+/i, '').trim()
-    }
-    oktaAccessTokenEnc = encryptPassword(otok)
+    driverName = body.driverName.trim()
   }
 
   let linehaulPollMinutes = prev.linehaulPollMinutes
@@ -251,7 +239,7 @@ export async function saveCredentials(body) {
     tractorNumber,
     employeeNumber,
     linehaulBearerEnc,
-    oktaAccessTokenEnc,
+    driverName,
     linehaulPollMinutes,
   }
   await fs.writeFile(CRED_FILE, JSON.stringify(next, null, 2), 'utf8')
@@ -269,7 +257,7 @@ export async function clearCredentials() {
         tractorNumber: null,
         employeeNumber: null,
         linehaulBearerEnc: null,
-        oktaAccessTokenEnc: null,
+        driverName: null,
         linehaulPollMinutes: null,
       },
       null,

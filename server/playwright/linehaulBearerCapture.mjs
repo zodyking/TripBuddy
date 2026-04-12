@@ -172,25 +172,16 @@ export async function captureAndSaveLinehaulBearer(opts = {}) {
     /** @type {string | null} */
     let capturedLinehaul = null
     /** @type {string | null} */
-    let capturedOkta = null
+    let capturedDriverName = null
     /** Throttle noisy Linehaul request logs */
     let lastLinehaulReqLog = 0
 
     /**
-     * @param {import('playwright').Request} request
-     * @returns {string | null}
+     * Check if response is Okta userinfo endpoint.
+     * @param {string} url
      */
-    function oktaTokenFromRequest(request) {
-      try {
-        const url = request.url()
-        if (!/purpleid\.okta\.com/i.test(url)) return null
-        if (!url.includes('/v1/userinfo')) return null
-        const h = request.headers()
-        const raw = h.authorization ?? h.Authorization
-        return parseBearerFromAuthHeader(raw)
-      } catch {
-        return null
-      }
+    function isOktaUserinfoUrl(url) {
+      return /purpleid\.okta\.com/i.test(url) && url.includes('/v1/userinfo')
     }
 
     const onRequest = (/** @type {import('playwright').Request} */ request) => {
@@ -218,16 +209,6 @@ export async function captureAndSaveLinehaulBearer(opts = {}) {
           )
         }
       }
-      if (!capturedOkta) {
-        const ot = oktaTokenFromRequest(request)
-        if (ot) {
-          capturedOkta = ot
-          log(
-            'info',
-            `[Linehaul capture] Captured Okta access token for userinfo (${ot.length} chars).`,
-          )
-        }
-      }
     }
 
     const onFrameNav = (/** @type {import('playwright').Frame} */ frame) => {
@@ -243,7 +224,30 @@ export async function captureAndSaveLinehaulBearer(opts = {}) {
       }
     }
 
+    const onResponse = async (/** @type {import('playwright').Response} */ response) => {
+      if (capturedDriverName) return
+      try {
+        const url = response.url()
+        if (!isOktaUserinfoUrl(url)) return
+        if (response.status() !== 200) return
+        const body = await response.json()
+        const g = typeof body.given_name === 'string' ? body.given_name.trim() : ''
+        const f = typeof body.family_name === 'string' ? body.family_name.trim() : ''
+        let name = [g, f].filter(Boolean).join(' ')
+        if (!name && typeof body.name === 'string') {
+          name = body.name.trim()
+        }
+        if (name) {
+          capturedDriverName = name
+          log('info', `[Linehaul capture] Captured driver name from userinfo: ${name}`)
+        }
+      } catch {
+        /* ignore parse errors */
+      }
+    }
+
     page.on('request', onRequest)
+    page.on('response', onResponse)
     page.on('framenavigated', onFrameNav)
     page.on('console', onConsole)
 
@@ -294,15 +298,16 @@ export async function captureAndSaveLinehaulBearer(opts = {}) {
 
       await saveCredentials({
         fedexLinehaulBearer: capturedLinehaul,
-        ...(capturedOkta ? { fedexOktaAccessToken: capturedOkta } : {}),
+        ...(capturedDriverName ? { driverName: capturedDriverName } : {}),
       })
       log('info', '[Linehaul capture] Linehaul bearer token saved to encrypted credentials.')
-      if (capturedOkta) {
-        log('info', '[Linehaul capture] Okta access token (userinfo) saved to encrypted credentials.')
+      if (capturedDriverName) {
+        log('info', `[Linehaul capture] Driver name saved: ${capturedDriverName}`)
       }
       return { ok: true, saved: true, reason: 'captured' }
     } finally {
       page.off('request', onRequest)
+      page.off('response', onResponse)
       page.off('framenavigated', onFrameNav)
       page.off('console', onConsole)
     }
