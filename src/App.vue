@@ -59,8 +59,8 @@
   --color-hover: rgba(255, 255, 255, 0.04);
   --color-active: rgba(255, 255, 255, 0.08);
 
-  /* Gradients */
-  --gradient-accent: linear-gradient(135deg, var(--color-accent-purple) 0%, var(--color-accent-orange) 100%);
+  /* Accent background (solid purple — no gradient rainbow) */
+  --gradient-accent: var(--color-accent-purple);
   --gradient-surface: linear-gradient(180deg, rgba(255,255,255,0.03) 0%, transparent 100%);
   --gradient-glow-purple: radial-gradient(ellipse at center, rgba(123, 77, 181, 0.15) 0%, transparent 70%);
   --gradient-glow-orange: radial-gradient(ellipse at center, rgba(255, 107, 26, 0.1) 0%, transparent 70%);
@@ -366,19 +366,12 @@ body {
   color: white;
 }
 
-/* Scrollbar styling */
-::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
+/* Invisible scrollbars app-wide */
+* {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
 }
-::-webkit-scrollbar-track {
-  background: transparent;
-}
-::-webkit-scrollbar-thumb {
-  background: var(--color-text-tertiary);
-  border-radius: var(--radius-full);
-}
-::-webkit-scrollbar-thumb:hover {
-  background: var(--color-text-secondary);
+*::-webkit-scrollbar {
+  display: none;
 }
 </style>

@@ -6,6 +6,8 @@ import { extractOriginDest, hasTripOriginAndDestination } from './tripDetailsDis
 
 const OLD_TTS_KEY = 'fedexTripTtsEnabled'
 const MODE_KEY = 'fedexTripAlertMode'
+const TRIP_STATUS_CHANGE_KEY = 'fedexTripStatusChangeEnabled'
+const TRAILER_STATUS_CHANGE_KEY = 'fedexTrailerStatusChangeEnabled'
 
 /** @typedef {'off' | 'tts' | 'bell' | 'both'} TripAlertMode */
 
@@ -46,6 +48,32 @@ export function isTripBellEnabled() {
 /** Any non-off alert (for hints / unlock UI). */
 export function isTripAlertEnabled() {
   return getTripAlertMode() !== 'off'
+}
+
+/** @returns {boolean} Trip status change alerts enabled (assigned/dispatched/completed). */
+export function isTripStatusChangeEnabled() {
+  if (typeof window === 'undefined' || !window.localStorage) return true
+  const raw = window.localStorage.getItem(TRIP_STATUS_CHANGE_KEY)
+  return raw !== 'false'
+}
+
+/** @param {boolean} enabled */
+export function setTripStatusChangeEnabled(enabled) {
+  if (typeof window === 'undefined' || !window.localStorage) return
+  window.localStorage.setItem(TRIP_STATUS_CHANGE_KEY, enabled ? 'true' : 'false')
+}
+
+/** @returns {boolean} Trailer load status change alerts enabled (LDNG to CLSD). */
+export function isTrailerStatusChangeEnabled() {
+  if (typeof window === 'undefined' || !window.localStorage) return true
+  const raw = window.localStorage.getItem(TRAILER_STATUS_CHANGE_KEY)
+  return raw !== 'false'
+}
+
+/** @param {boolean} enabled */
+export function setTrailerStatusChangeEnabled(enabled) {
+  if (typeof window === 'undefined' || !window.localStorage) return
+  window.localStorage.setItem(TRAILER_STATUS_CHANGE_KEY, enabled ? 'true' : 'false')
 }
 
 export function getTripBellSoundUrl() {
@@ -277,6 +305,7 @@ export function maybeAnnounceStatusChange(phase) {
 
   const mode = getTripAlertMode()
   if (mode === 'off') return
+  if (!isTripStatusChangeEnabled()) return
 
   let text = ''
   if (phase === 'assigned' && prev !== 'assigned') {
@@ -305,6 +334,7 @@ export function maybeAnnounceTrailerStatusChange(trailers) {
 
   const mode = getTripAlertMode()
   if (mode === 'off') return
+  if (!isTrailerStatusChangeEnabled()) return
 
   for (const t of trailers) {
     if (!t || typeof t !== 'object') continue

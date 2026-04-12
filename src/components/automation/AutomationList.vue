@@ -36,14 +36,21 @@ async function load() {
   }
 }
 
+const installingPresetId = ref(null)
+
 async function installPreset(presetId, name) {
+  if (installingPresetId.value) return
+  installingPresetId.value = presetId
   try {
     const auto = await installAutomationPreset(presetId)
     pushLiveLog({ type: 'info', message: `Installed preset: ${name}`, ts: Date.now() })
     showPresets.value = false
+    await load()
     emit('edit', auto.id)
   } catch (e) {
-    pushLiveLog({ type: 'error', message: e.message, ts: Date.now() })
+    pushLiveLog({ type: 'error', message: e.message || String(e), ts: Date.now() })
+  } finally {
+    installingPresetId.value = null
   }
 }
 
@@ -128,8 +135,13 @@ onMounted(load)
             <span class="preset-desc">{{ preset.description }}</span>
             <span class="preset-meta">{{ preset.actionCount }} actions</span>
           </div>
-          <button type="button" class="btn tap" @click="installPreset(preset.id, preset.name)">
-            Install
+          <button
+            type="button"
+            class="btn tap"
+            :disabled="installingPresetId === preset.id"
+            @click="installPreset(preset.id, preset.name)"
+          >
+            {{ installingPresetId === preset.id ? 'Installing…' : 'Install' }}
           </button>
         </div>
       </div>

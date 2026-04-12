@@ -35,6 +35,7 @@ import {
   linehaulLocationMatch,
   refreshLinehaulApis,
   tripPhase,
+  linehaulDriverIdFromCredMeta,
 } from '../stores/linehaulSnapshotStore.js'
 import {
   registerApiRecover,
@@ -453,12 +454,6 @@ function getDriverFingerprint(body) {
   })
 }
 
-/** Green vs red dot: value `act` (case-insensitive) = active OK. */
-function linehaulStatIsAct(value) {
-  if (value == null || value === '') return false
-  return String(value).trim().toLowerCase() === 'act'
-}
-
 watch(
   linehaulTractorBody,
   (newVal, oldVal) => {
@@ -557,6 +552,21 @@ const trailerGpsEmbedUrl = computed(() => {
   return `https://www.openstreetmap.org/export/embed.html?bbox=${lng - 0.005},${lat - 0.003},${lng + 0.005},${lat + 0.003}&layer=mapnik&marker=${lat},${lng}`
 })
 
+/** Credentials snapshot for Driver ID row (same rule as header badges used). */
+const linehaulCredMeta = ref(null)
+
+const linehaulDriverIdDisplay = computed(() =>
+  linehaulDriverIdFromCredMeta(linehaulCredMeta.value ?? {}),
+)
+
+async function refreshLinehaulCredMeta() {
+  try {
+    linehaulCredMeta.value = await getCredentials()
+  } catch {
+    linehaulCredMeta.value = null
+  }
+}
+
 async function setupLinehaulPolling() {
   if (linehaulPollTimer) {
     clearInterval(linehaulPollTimer)
@@ -618,6 +628,7 @@ onMounted(async () => {
   })
   unregisterRecover = registerApiRecover(reconnectLiveLogStream)
   await loadAssignment()
+  void refreshLinehaulCredMeta()
   void loadQuickActions()
   void pollAutomationPreview()
   previewPollTimer = setInterval(pollAutomationPreview, 1600)
@@ -626,6 +637,7 @@ onMounted(async () => {
 
 onActivated(() => {
   loadAssignment()
+  void refreshLinehaulCredMeta()
   void loadQuickActions()
   void setupLinehaulPolling()
 })
@@ -920,39 +932,40 @@ onUnmounted(() => {
     </section>
 
     <section class="panel driver-status-panel">
-      <h2>Driver Status</h2>
+      <div class="driver-status-card-head">
+        <h2 class="driver-status-heading">Driver Status</h2>
+        <span
+          v-if="linehaulLocationMatch !== null && (linehaulTractorBody || linehaulDriverBody)"
+          class="driver-status-loc-pill"
+          :class="linehaulLocationMatch ? 'is-aligned' : 'is-mismatch'"
+          role="status"
+          :aria-label="
+            linehaulLocationMatch
+              ? 'Tractor and driver locations match'
+              : 'Tractor and driver locations do not match'
+          "
+        >
+          {{ linehaulLocationMatch ? 'Aligned' : 'Mismatch' }}
+        </span>
+      </div>
       <p class="hint driver-status-hint">
         FedEx Linehaul tractor and driver snapshot. Refresh: Settings → Driver Credentials (interval or manual).
       </p>
       <div class="driver-status-surface">
-        <div class="driver-status-toolbar">
-          <span class="driver-status-toolbar-label">Linehaul</span>
-          <div class="driver-status-toolbar-meta">
-            <span v-if="linehaulFetching" class="linehaul-loading" aria-live="polite">Loading…</span>
-            <time
-              v-else-if="linehaulLastFetchAt != null"
-              class="linehaul-meta"
-              :datetime="new Date(linehaulLastFetchAt).toISOString()"
-            >
-              {{ new Date(linehaulLastFetchAt).toLocaleString() }}
-            </time>
-          </div>
-        </div>
+        <p v-if="linehaulFetching" class="driver-status-fetching" aria-live="polite">Updating…</p>
+        <p
+          v-else-if="linehaulLastFetchAt != null"
+          class="driver-status-fetched-at"
+        >
+          <time :datetime="new Date(linehaulLastFetchAt).toISOString()">{{
+            new Date(linehaulLastFetchAt).toLocaleString()
+          }}</time>
+        </p>
 
         <div v-if="linehaulTractorError || linehaulDriverError" class="linehaul-errors">
           <p v-if="linehaulTractorError" class="err">Tractor Details: {{ linehaulTractorError }}</p>
           <p v-if="linehaulDriverError" class="err">Driver Details: {{ linehaulDriverError }}</p>
         </div>
-        <div
-          v-if="linehaulLocationMatch !== null && (linehaulTractorBody || linehaulDriverBody)"
-          class="match-row match-row--tight"
-        >
-          <span class="match-label">Tractor vs driver location</span>
-          <span :class="linehaulLocationMatch ? 'badge match-yes' : 'badge match-no'">
-            {{ linehaulLocationMatch ? 'Aligned' : 'Mismatch' }}
-          </span>
-        </div>
-
         <div class="driver-status-cards">
           <div v-if="linehaulTractorBody" class="linehaul-block">
             <h4 class="linehaul-h3">Tractor</h4>
@@ -969,34 +982,12 @@ onUnmounted(() => {
                 <dt>Domicile</dt>
                 <dd>{{ linehaulTractorBody.tractorDomicileAbbrv }}</dd>
               </div>
-              <div v-if="linehaulTractorBody.detlCodeActvStat" class="linehaul-dl-row linehaul-dl-row--stat">
-                <dt>
-                  <span
-                    class="linehaul-stat-dot"
-                    :class="
-                      linehaulStatIsAct(linehaulTractorBody.detlCodeActvStat)
-                        ? 'linehaul-stat-dot--ok'
-                        : 'linehaul-stat-dot--bad'
-                    "
-                    aria-hidden="true"
-                  />
-                  Active
-                </dt>
+              <div v-if="linehaulTractorBody.detlCodeActvStat" class="linehaul-dl-row">
+                <dt>Active</dt>
                 <dd>{{ linehaulTractorBody.detlCodeActvStat }}</dd>
               </div>
-              <div v-if="linehaulTractorBody.detlCodeAvailStat" class="linehaul-dl-row linehaul-dl-row--stat">
-                <dt>
-                  <span
-                    class="linehaul-stat-dot"
-                    :class="
-                      linehaulStatIsAct(linehaulTractorBody.detlCodeAvailStat)
-                        ? 'linehaul-stat-dot--ok'
-                        : 'linehaul-stat-dot--bad'
-                    "
-                    aria-hidden="true"
-                  />
-                  Status
-                </dt>
+              <div v-if="linehaulTractorBody.detlCodeAvailStat" class="linehaul-dl-row">
+                <dt>Status</dt>
                 <dd>{{ linehaulTractorBody.detlCodeAvailStat }}</dd>
               </div>
             </dl>
@@ -1012,34 +1003,16 @@ onUnmounted(() => {
                 <dt>Location</dt>
                 <dd>{{ linehaulDriverBody.driverLocation }}</dd>
               </div>
-              <div v-if="linehaulDriverBody.driverActvStat" class="linehaul-dl-row linehaul-dl-row--stat">
-                <dt>
-                  <span
-                    class="linehaul-stat-dot"
-                    :class="
-                      linehaulStatIsAct(linehaulDriverBody.driverActvStat)
-                        ? 'linehaul-stat-dot--ok'
-                        : 'linehaul-stat-dot--bad'
-                    "
-                    aria-hidden="true"
-                  />
-                  Active
-                </dt>
+              <div v-if="linehaulDriverIdDisplay" class="linehaul-dl-row">
+                <dt>Driver ID</dt>
+                <dd>{{ linehaulDriverIdDisplay }}</dd>
+              </div>
+              <div v-if="linehaulDriverBody.driverActvStat" class="linehaul-dl-row">
+                <dt>Active</dt>
                 <dd>{{ linehaulDriverBody.driverActvStat }}</dd>
               </div>
-              <div v-if="linehaulDriverBody.driverAvlStat" class="linehaul-dl-row linehaul-dl-row--stat">
-                <dt>
-                  <span
-                    class="linehaul-stat-dot"
-                    :class="
-                      linehaulStatIsAct(linehaulDriverBody.driverAvlStat)
-                        ? 'linehaul-stat-dot--ok'
-                        : 'linehaul-stat-dot--bad'
-                    "
-                    aria-hidden="true"
-                  />
-                  Status
-                </dt>
+              <div v-if="linehaulDriverBody.driverAvlStat" class="linehaul-dl-row">
+                <dt>Status</dt>
                 <dd>{{ linehaulDriverBody.driverAvlStat }}</dd>
               </div>
             </dl>
@@ -1457,6 +1430,48 @@ onUnmounted(() => {
 .driver-status-hint {
   margin-bottom: 0.45rem;
 }
+.driver-status-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin: 0 0 var(--space-3, 0.75rem);
+  min-width: 0;
+}
+.driver-status-heading {
+  margin: 0;
+  font-size: var(--text-md, 1rem);
+  font-weight: var(--weight-semibold, 600);
+  color: var(--color-text-primary, #f4f4f8);
+  letter-spacing: var(--tracking-tight, -0.02em);
+  flex: 1;
+  min-width: 0;
+}
+.panel.driver-status-panel h2.driver-status-heading {
+  margin-bottom: 0;
+}
+.driver-status-loc-pill {
+  flex-shrink: 0;
+  box-sizing: border-box;
+  font-size: 0.5625rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  line-height: 1.15;
+  padding: 0.22rem 0.45rem;
+  border-radius: 9999px;
+  white-space: nowrap;
+}
+.driver-status-loc-pill.is-aligned {
+  background: var(--color-success-muted, rgba(34, 197, 94, 0.15));
+  color: var(--color-success, #22c55e);
+  border: 1px solid var(--color-success-border, rgba(34, 197, 94, 0.35));
+}
+.driver-status-loc-pill.is-mismatch {
+  background: var(--color-error-muted, rgba(239, 68, 68, 0.15));
+  color: var(--color-error, #ef4444);
+  border: 1px solid var(--color-error-border, rgba(239, 68, 68, 0.3));
+}
 .driver-status-surface {
   margin-top: 0.15rem;
   border: 1px solid #34343e;
@@ -1464,37 +1479,18 @@ onUnmounted(() => {
   background: #18181f;
   padding: 0.5rem 0.6rem 0.6rem;
 }
-.driver-status-toolbar {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.35rem 0.75rem;
-  margin-bottom: 0.45rem;
-  padding-bottom: 0.4rem;
-  border-bottom: 1px solid #2a2a34;
-}
-.driver-status-toolbar-label {
-  font-size: 0.68rem;
-  font-weight: 700;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: var(--muted, #9898a8);
-}
-.driver-status-toolbar-meta {
-  min-height: 1.25rem;
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-}
-.driver-status-toolbar .linehaul-loading {
-  margin: 0;
+.driver-status-fetching {
+  margin: 0 0 0.35rem;
   font-size: 0.78rem;
+  color: #90caf9;
 }
-.driver-status-toolbar .linehaul-meta {
-  margin: 0;
-  font-size: 0.75rem;
+.driver-status-fetched-at {
+  margin: 0 0 0.4rem;
+  font-size: 0.72rem;
   color: var(--muted, #9898a8);
+}
+.driver-status-fetched-at time {
+  font-variant-numeric: tabular-nums;
 }
 .driver-status-cards {
   display: grid;
@@ -1509,23 +1505,6 @@ onUnmounted(() => {
 .driver-status-idle {
   margin: 0.35rem 0 0;
   font-size: 0.82rem;
-}
-.linehaul-stat-dot {
-  display: inline-block;
-  width: 0.45rem;
-  height: 0.45rem;
-  border-radius: 50%;
-  margin-right: 0.35rem;
-  vertical-align: 0.08em;
-  flex-shrink: 0;
-}
-.linehaul-stat-dot--ok {
-  background: var(--color-success, #22c55e);
-  box-shadow: 0 0 0 1px rgba(34, 197, 94, 0.35);
-}
-.linehaul-stat-dot--bad {
-  background: var(--color-error, #ef4444);
-  box-shadow: 0 0 0 1px rgba(239, 68, 68, 0.35);
 }
 .linehaul-dl {
   margin: 0;
@@ -1556,12 +1535,6 @@ onUnmounted(() => {
   color: var(--text, #e8e8ee);
   font-weight: 500;
   word-break: break-word;
-}
-.linehaul-dl-row--stat dt {
-  text-transform: none;
-  letter-spacing: 0.02em;
-  font-size: 0.72rem;
-  color: var(--text, #e0e0e8);
 }
 .loc-retry-modal {
   display: flex;
@@ -1821,58 +1794,12 @@ onUnmounted(() => {
   color: var(--muted, #9898a8);
   margin: 0.85rem 0 0.35rem;
 }
-.linehaul-meta {
-  font-size: 0.8rem;
-  color: var(--muted, #9898a8);
-  margin: 0 0 0.5rem;
-}
-.linehaul-loading {
-  font-size: 0.9rem;
-  color: #90caf9;
-  margin: 0.25rem 0 0.5rem;
-}
 .driver-status-surface .linehaul-errors {
   margin-bottom: 0.4rem;
 }
 .linehaul-errors .err {
   margin: 0.25rem 0;
   font-size: 0.85rem;
-}
-.driver-status-surface .match-row--tight {
-  margin-top: 0;
-  margin-bottom: 0.45rem;
-  padding: 0.4rem 0.55rem;
-}
-.match-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.75rem;
-  margin: 0.5rem 0 0.75rem;
-  padding: 0.5rem 0.65rem;
-  border-radius: 8px;
-  background: #22222c;
-}
-.match-label {
-  font-size: 0.85rem;
-}
-.badge {
-  font-size: var(--text-xs, 0.6875rem);
-  font-weight: var(--weight-bold, 700);
-  padding: var(--space-1, 0.25rem) var(--space-2-5, 0.625rem);
-  border-radius: var(--radius-md, 0.5rem);
-  text-transform: uppercase;
-  letter-spacing: var(--tracking-wider, 0.05em);
-}
-.match-yes {
-  background: var(--color-success-muted, rgba(34, 197, 94, 0.15));
-  color: var(--color-success, #22c55e);
-  border: 1px solid var(--color-success-border, rgba(34, 197, 94, 0.3));
-}
-.match-no {
-  background: var(--color-error-muted, rgba(239, 68, 68, 0.15));
-  color: var(--color-error, #ef4444);
-  border: 1px solid var(--color-error-border, rgba(239, 68, 68, 0.3));
 }
 .driver-status-cards .linehaul-block {
   margin-top: 0;
@@ -2151,7 +2078,7 @@ onUnmounted(() => {
   overflow: hidden;
 }
 .btn.primary {
-  background: var(--gradient-accent, linear-gradient(135deg, #7b4db5 0%, #ff6b1a 100%));
+  background: var(--color-accent-purple, #7b4db5);
   color: white;
   border: none;
   box-shadow: var(--shadow-sm, 0 2px 4px rgba(0, 0, 0, 0.25));

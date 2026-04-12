@@ -35,6 +35,10 @@ import {
   setTripAlertMode,
   speakTripTtsTest,
   playTripBellTest,
+  isTripStatusChangeEnabled,
+  setTripStatusChangeEnabled,
+  isTrailerStatusChangeEnabled,
+  setTrailerStatusChangeEnabled,
 } from '../utils/tripVoiceAnnouncement.js'
 import {
   getAlertPrefs,
@@ -54,6 +58,9 @@ const settingsTab = ref('general')
 /** @type {import('vue').Ref<'off' | 'tts' | 'bell' | 'both'>} */
 const tripAlertMode = ref(getTripAlertMode())
 
+const tripStatusChangeOn = ref(isTripStatusChangeEnabled())
+const trailerStatusChangeOn = ref(isTrailerStatusChangeEnabled())
+
 const alertPrefs = ref(getAlertPrefs())
 
 function updateAlertPref(key, value) {
@@ -66,6 +73,16 @@ function setTripAlertModeUi(
 ) {
   tripAlertMode.value = mode
   setTripAlertMode(mode)
+}
+
+function toggleTripStatusChange(enabled) {
+  tripStatusChangeOn.value = enabled
+  setTripStatusChangeEnabled(enabled)
+}
+
+function toggleTrailerStatusChange(enabled) {
+  trailerStatusChangeOn.value = enabled
+  setTrailerStatusChangeEnabled(enabled)
 }
 
 const editingAutomationId = ref(null)
@@ -484,6 +501,8 @@ onMounted(() => {
 watch(settingsTab, (tab) => {
   if (tab === 'audio') {
     tripAlertMode.value = getTripAlertMode()
+    tripStatusChangeOn.value = isTripStatusChangeEnabled()
+    trailerStatusChangeOn.value = isTrailerStatusChangeEnabled()
     alertPrefs.value = getAlertPrefs()
   }
 })
@@ -770,6 +789,28 @@ onUnmounted(() => {
           <button type="button" class="btn tap" @click="speakTripTtsTest">Test speech</button>
           <button type="button" class="btn tap" @click="playTripBellTest">Test bell</button>
         </div>
+
+        <div class="alert-toggle-row">
+          <label class="alert-toggle">
+            <input
+              type="checkbox"
+              :checked="tripStatusChangeOn"
+              @change="toggleTripStatusChange($event.target.checked)"
+            />
+            <span class="alert-toggle-label">Trip status change (assigned / dispatched / completed)</span>
+          </label>
+        </div>
+
+        <div class="alert-toggle-row">
+          <label class="alert-toggle">
+            <input
+              type="checkbox"
+              :checked="trailerStatusChangeOn"
+              @change="toggleTrailerStatusChange($event.target.checked)"
+            />
+            <span class="alert-toggle-label">Trailer loading finished (loading → closed)</span>
+          </label>
+        </div>
       </SettingsSection>
 
       <SettingsSection title="Status Change Alerts">
@@ -874,7 +915,7 @@ onUnmounted(() => {
 }
 
 .tab-btn.active {
-  background: var(--gradient-accent, linear-gradient(135deg, #7b4db5 0%, #ff6b1a 100%));
+  background: var(--color-accent-purple, #7b4db5);
   color: white;
   box-shadow: var(--shadow-sm, 0 2px 4px rgba(0, 0, 0, 0.25));
 }
@@ -1181,7 +1222,7 @@ onUnmounted(() => {
   border-color: var(--color-accent-purple, #7b4db5);
 }
 .btn.primary {
-  background: var(--gradient-accent, linear-gradient(135deg, #7b4db5 0%, #ff6b1a 100%));
+  background: var(--color-accent-purple, #7b4db5);
   border: none;
   color: white;
   font-weight: var(--weight-semibold, 600);

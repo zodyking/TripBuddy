@@ -1,52 +1,18 @@
 <script setup>
-import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
-import { useRoute } from 'vue-router'
+import { onMounted, onUnmounted } from 'vue'
 import { useApiHealth } from '../composables/useApiHealth.js'
 import {
   connectLiveLogStream,
   disconnectLiveLogStream,
   reconnectLiveLogStream,
 } from '../stores/liveLogStore.js'
-import { getCredentials } from '../api.js'
-import { linehaulDriverIdFromCredMeta } from '../stores/linehaulSnapshotStore.js'
 
-const route = useRoute()
 const { apiOk, refreshHealth } = useApiHealth()
-
-/** @type {import('vue').Ref<Record<string, unknown> | null>} */
-const credMeta = ref(null)
-
-async function refreshHeaderCreds() {
-  try {
-    credMeta.value = await getCredentials()
-  } catch {
-    credMeta.value = null
-  }
-}
-
-const headerDriverId = computed(() =>
-  linehaulDriverIdFromCredMeta(credMeta.value ?? {}),
-)
-
-const headerTractor = computed(() => {
-  const t = credMeta.value?.tractorNumber
-  return typeof t === 'string' && t.trim() ? t.trim() : ''
-})
-
-const showHeaderCenter = computed(
-  () => Boolean(headerDriverId.value || headerTractor.value),
-)
 
 const headerAriaLabel = 'FedExTool — Linehaul'
 
-function onVisibility() {
-  if (document.visibilityState === 'visible') void refreshHeaderCreds()
-}
-
 onMounted(() => {
   connectLiveLogStream()
-  void refreshHeaderCreds()
-  document.addEventListener('visibilitychange', onVisibility)
   for (const ms of [500, 1500, 3500]) {
     setTimeout(() => {
       void refreshHealth().then(() => {
@@ -56,15 +22,7 @@ onMounted(() => {
   }
 })
 
-watch(
-  () => route.path,
-  () => {
-    void refreshHeaderCreds()
-  },
-)
-
 onUnmounted(() => {
-  document.removeEventListener('visibilitychange', onVisibility)
   disconnectLiveLogStream()
 })
 </script>
@@ -77,25 +35,11 @@ onUnmounted(() => {
           <span class="brand" aria-label="FedEx">
             <span class="brand-fed">Fed</span><span class="brand-ex">Ex</span>
           </span>
-          <span class="header-divider" aria-hidden="true"></span>
-          <span class="header-title">Linehaul</span>
         </div>
 
-        <div
-          v-if="showHeaderCenter"
-          class="header-center"
-          aria-label="Driver and tractor from saved credentials"
-        >
-          <div v-if="headerDriverId" class="header-badge">
-            <span class="badge-icon">D</span>
-            <span class="badge-text">{{ headerDriverId }}</span>
-          </div>
-          <div v-if="headerTractor" class="header-badge">
-            <span class="badge-icon">T</span>
-            <span class="badge-text">{{ headerTractor }}</span>
-          </div>
+        <div class="header-center">
+          <span class="header-title header-title--center">Linehaul</span>
         </div>
-        <div v-else class="header-center header-center--empty" aria-hidden="true" />
 
         <div class="header-right">
           <div class="api-status" :class="{ 'is-ok': apiOk === true, 'is-offline': apiOk === false }">
@@ -217,48 +161,20 @@ onUnmounted(() => {
   text-transform: uppercase;
 }
 
-/* Header Center — Badges */
+.header-title--center {
+  display: block;
+  text-align: center;
+  width: 100%;
+  min-width: 0;
+}
+
+/* Header Center — title only */
 .header-center {
-  justify-self: center;
+  justify-self: stretch;
+  min-width: 0;
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: var(--space-2, 0.5rem);
-}
-
-.header-center--empty {
-  min-height: 1.5rem;
-}
-
-.header-badge {
-  display: flex;
-  align-items: center;
-  gap: var(--space-1-5, 0.375rem);
-  padding: var(--space-1, 0.25rem) var(--space-2-5, 0.625rem);
-  border-radius: var(--radius-full, 9999px);
-  background: rgba(123, 77, 181, 0.12);
-  border: 1px solid rgba(123, 77, 181, 0.25);
-}
-
-.badge-icon {
-  width: 1.125rem;
-  height: 1.125rem;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: var(--radius-full, 9999px);
-  background: var(--color-accent-purple, #7b4db5);
-  font-size: var(--text-xs, 0.6875rem);
-  font-weight: var(--weight-bold, 700);
-  color: white;
-  line-height: 1;
-}
-
-.badge-text {
-  font-size: var(--text-sm, 0.8125rem);
-  font-weight: var(--weight-medium, 500);
-  color: var(--color-text-secondary, #a8a8b8);
-  font-variant-numeric: tabular-nums;
 }
 
 /* Header Right — API Status */
@@ -366,7 +282,7 @@ onUnmounted(() => {
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
-   BOTTOM NAVIGATION — Glass with gradient active state
+   BOTTOM NAVIGATION — Opaque bar (content must not show through)
    ═══════════════════════════════════════════════════════════════════════════ */
 .bottom-nav {
   position: fixed;
@@ -376,11 +292,9 @@ onUnmounted(() => {
   z-index: var(--z-sticky, 20);
   display: flex;
   height: var(--nav-height, 4rem);
-  background: var(--color-glass, rgba(22, 22, 29, 0.85));
-  backdrop-filter: blur(var(--blur-xl, 32px));
-  -webkit-backdrop-filter: blur(var(--blur-xl, 32px));
-  border-top: 1px solid var(--color-glass-border, rgba(255, 255, 255, 0.06));
-  box-shadow: 0 -4px 24px rgba(0, 0, 0, 0.3);
+  background: var(--color-bg-base, #08080a);
+  border-top: 1px solid var(--color-border, rgba(255, 255, 255, 0.08));
+  box-shadow: 0 -4px 24px rgba(0, 0, 0, 0.35);
   padding-bottom: env(safe-area-inset-bottom, 0);
 }
 
@@ -457,16 +371,8 @@ onUnmounted(() => {
     font-size: var(--text-base, 0.9375rem);
   }
 
-  .header-divider {
-    display: none;
-  }
-
-  .header-title {
-    display: none;
-  }
-
-  .header-center {
-    display: none;
+  .header-title--center {
+    font-size: var(--text-xs, 0.6875rem);
   }
 
   .api-status {
@@ -482,35 +388,10 @@ onUnmounted(() => {
   }
 }
 
-/* Standard mobile (375px+) */
-@media (min-width: 375px) and (max-width: 419px) {
-  .header-badge {
-    padding: var(--space-0-5, 0.125rem) var(--space-2, 0.5rem);
-  }
-
-  .badge-icon {
-    width: 1rem;
-    height: 1rem;
-    font-size: 0.6rem;
-  }
-
-  .badge-text {
-    font-size: var(--text-xs, 0.6875rem);
-  }
-}
-
 /* Large mobile / small tablet (420px+) */
 @media (min-width: 420px) {
   .header-inner {
     gap: var(--space-4, 1rem);
-  }
-  
-  .header-badge {
-    padding: var(--space-1-5, 0.375rem) var(--space-3, 0.75rem);
-  }
-  
-  .badge-text {
-    font-size: var(--text-base, 0.9375rem);
   }
 }
 
@@ -541,8 +422,7 @@ onUnmounted(() => {
   }
 
   .api-dot,
-  .nav-item,
-  .header-badge {
+  .nav-item {
     transition: none;
   }
 }
