@@ -1,6 +1,6 @@
 /**
  * Sequential audio alert queue system.
- * Ensures alerts play one at a time (no overlapping) with priority ordering.
+ * Uses direct speechSynthesis.speak() (fire and forget) like the working trip-ready approach.
  */
 
 const PREFS_KEY = 'fedexAlertPrefs'
@@ -51,14 +51,13 @@ export function setAlertPrefs(prefs) {
  * @property {AlertType} type
  * @property {number} priority
  * @property {string} [text] - TTS text
- * @property {string} [soundUrl] - Sound file URL
+ * @property {string} [soundUrl] - Sound file URL (only for trip-ready bell)
  * @property {number} ts - Enqueue timestamp for dedup
  */
 
 /** @type {QueuedAlert[]} */
 let alertQueue = []
 let isPlaying = false
-let currentTtsUtterance = null
 let currentAudio = null
 
 const DEDUP_WINDOW_MS = 2000
@@ -71,87 +70,54 @@ function getSoundUrl(filename) {
 
 export const ALERT_SOUNDS = {
   tripReady: getSoundUrl('trip-ready-bell.mp3'),
-  tractorChange: getSoundUrl('tractor-change.mp3'),
-  driverChange: getSoundUrl('driver-change.mp3'),
-  success: getSoundUrl('success.mp3'),
-  error: getSoundUrl('error.mp3'),
-  reconnect: getSoundUrl('reconnect.mp3'),
 }
 
 /**
- * Play audio and return a promise that resolves when finished.
+ * Play audio (fire and forget - don't wait for completion).
  * @param {string} url
- * @returns {Promise<void>}
  */
 function playAudioAsync(url) {
-  return new Promise((resolve) => {
-    if (typeof window === 'undefined') {
-      resolve()
-      return
+  if (typeof window === 'undefined') return
+  try {
+    if (currentAudio) {
+      currentAudio.pause()
+      currentAudio = null
     }
-    try {
-      if (currentAudio) {
-        currentAudio.pause()
-        currentAudio = null
-      }
-      const audio = new Audio(url)
-      currentAudio = audio
-      audio.addEventListener('ended', () => {
-        if (currentAudio === audio) currentAudio = null
-        resolve()
-      }, { once: true })
-      audio.addEventListener('error', () => {
-        if (currentAudio === audio) currentAudio = null
-        resolve()
-      }, { once: true })
-      audio.play().catch(() => {
-        if (currentAudio === audio) currentAudio = null
-        resolve()
-      })
-    } catch {
-      resolve()
-    }
-  })
+    const audio = new Audio(url)
+    currentAudio = audio
+    audio.play().catch((e) => {
+      console.error('[Audio] play error:', e)
+    })
+    audio.addEventListener('ended', () => {
+      if (currentAudio === audio) currentAudio = null
+    }, { once: true })
+  } catch (e) {
+    console.error('[Audio] error:', e)
+  }
 }
 
 /**
- * Speak TTS and return a promise that resolves when finished.
+ * Speak TTS (fire and forget - don't wait for completion).
+ * This matches the working trip-ready approach.
  * @param {string} text
- * @returns {Promise<void>}
  */
-function speakTtsAsync(text) {
-  return new Promise((resolve) => {
-    if (typeof window === 'undefined' || !window.speechSynthesis) {
-      resolve()
-      return
-    }
-    try {
-      window.speechSynthesis.cancel()
-      const utterance = new SpeechSynthesisUtterance(text)
-      utterance.rate = 1.05
-      utterance.pitch = 1
-      utterance.volume = 1
-      currentTtsUtterance = utterance
-      utterance.onend = () => {
-        if (currentTtsUtterance === utterance) currentTtsUtterance = null
-        resolve()
-      }
-      utterance.onerror = () => {
-        if (currentTtsUtterance === utterance) currentTtsUtterance = null
-        resolve()
-      }
-      window.speechSynthesis.speak(utterance)
-    } catch {
-      resolve()
-    }
-  })
+function speakTts(text) {
+  if (typeof window === 'undefined' || !window.speechSynthesis) return
+  try {
+    window.speechSynthesis.cancel()
+    const utterance = new SpeechSynthesisUtterance(text)
+    utterance.rate = 1.05
+    utterance.pitch = 1
+    utterance.volume = 1
+    window.speechSynthesis.speak(utterance)
+    console.log('[TTS] speaking:', text)
+  } catch (e) {
+    console.error('[TTS] speak error:', e)
+  }
 }
 
-async function processQueue() {
-  if (isPlaying || alertQueue.length === 0) {
-    console.log('[AlertQueue] processQueue: skip', { isPlaying, queueLen: alertQueue.length })
-    return
-  }
+function processQueue() {
+  if (isPlaying || alertQueue.length === 0) return
 
   alertQueue.sort((a, b) => b.priority - a.priority)
   const alert = alertQueue.shift()
@@ -160,22 +126,17 @@ async function processQueue() {
   isPlaying = true
   console.log('[AlertQueue] playing:', alert.type, { text: alert.text, soundUrl: alert.soundUrl })
 
-  try {
-    if (alert.soundUrl) {
-      console.log('[AlertQueue] playAudioAsync start:', alert.soundUrl)
-      await playAudioAsync(alert.soundUrl)
-      console.log('[AlertQueue] playAudioAsync done')
-    }
-    if (alert.text) {
-      console.log('[AlertQueue] speakTtsAsync start:', alert.text)
-      await speakTtsAsync(alert.text)
-      console.log('[AlertQueue] speakTtsAsync done')
-    }
-  } finally {
-    isPlaying = false
-    console.log('[AlertQueue] processQueue: finished alert, checking next')
-    processQueue()
+  if (alert.soundUrl) {
+    playAudioAsync(alert.soundUrl)
   }
+  if (alert.text) {
+    speakTts(alert.text)
+  }
+
+  setTimeout(() => {
+    isPlaying = false
+    processQueue()
+  }, 100)
 }
 
 /**
@@ -235,7 +196,6 @@ export function enqueueAlert(type, options = {}) {
 
 export function announceTractorChange() {
   enqueueAlert('tractorChange', {
-    soundUrl: ALERT_SOUNDS.tractorChange,
     text: 'Tractor details updated.',
     priority: PRIORITY.change,
   })
@@ -243,7 +203,6 @@ export function announceTractorChange() {
 
 export function announceDriverChange() {
   enqueueAlert('driverChange', {
-    soundUrl: ALERT_SOUNDS.driverChange,
     text: 'Driver details updated.',
     priority: PRIORITY.change,
   })
@@ -252,7 +211,6 @@ export function announceDriverChange() {
 export function announceCheckInSuccess() {
   console.log('[AlertQueue] announceCheckInSuccess called')
   enqueueAlert('checkInSuccess', {
-    soundUrl: ALERT_SOUNDS.success,
     text: 'Check-in successful.',
     priority: PRIORITY.info,
   })
@@ -261,7 +219,6 @@ export function announceCheckInSuccess() {
 export function announceCheckInFail() {
   console.log('[AlertQueue] announceCheckInFail called')
   enqueueAlert('checkInFail', {
-    soundUrl: ALERT_SOUNDS.error,
     text: 'Check-in failed.',
     priority: PRIORITY.error,
   })
@@ -270,7 +227,6 @@ export function announceCheckInFail() {
 export function announceCheckInTripReady() {
   console.log('[AlertQueue] announceCheckInTripReady called')
   enqueueAlert('checkInSuccess', {
-    soundUrl: ALERT_SOUNDS.success,
     text: 'Check in successful. Trip ready and acknowledged.',
     priority: PRIORITY.tripReady,
   })
@@ -278,7 +234,7 @@ export function announceCheckInTripReady() {
 
 export function announceApiReconnect() {
   enqueueAlert('apiReconnect', {
-    soundUrl: ALERT_SOUNDS.reconnect,
+    text: 'API reconnected.',
     priority: PRIORITY.info,
   })
 }
@@ -301,12 +257,10 @@ export function cancelAllAlerts() {
       currentAudio = null
     }
   }
-  currentTtsUtterance = null
 }
 
 export function testTractorChangeAlert() {
   enqueueAlert('tractorChange', {
-    soundUrl: ALERT_SOUNDS.tractorChange,
     text: 'Test: Tractor details updated.',
     priority: PRIORITY.change,
   })
@@ -314,7 +268,6 @@ export function testTractorChangeAlert() {
 
 export function testDriverChangeAlert() {
   enqueueAlert('driverChange', {
-    soundUrl: ALERT_SOUNDS.driverChange,
     text: 'Test: Driver details updated.',
     priority: PRIORITY.change,
   })
@@ -322,7 +275,6 @@ export function testDriverChangeAlert() {
 
 export function testSuccessAlert() {
   enqueueAlert('checkInSuccess', {
-    soundUrl: ALERT_SOUNDS.success,
     text: 'Test: Check-in successful.',
     priority: PRIORITY.info,
   })
@@ -330,7 +282,6 @@ export function testSuccessAlert() {
 
 export function testErrorAlert() {
   enqueueAlert('checkInFail', {
-    soundUrl: ALERT_SOUNDS.error,
     text: 'Test: Check-in failed.',
     priority: PRIORITY.error,
   })
