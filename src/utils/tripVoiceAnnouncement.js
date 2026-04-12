@@ -132,46 +132,79 @@ function evaluateGestureGate() {
   if (tripVoiceLikelyNeedsUserGesture()) gestureUnlocked = false
 }
 
+/**
+ * Play bell sound and return a Promise that resolves when audio ends.
+ * @returns {Promise<void>}
+ */
 function playBellSound() {
-  if (typeof window === 'undefined') return
-  const url = getTripBellSoundUrl()
-  pushLiveLog({ type: 'info', message: `[Bell] triggered: ${url}`, ts: Date.now() })
-  try {
-    if (currentBellAudio) {
-      currentBellAudio.pause()
-      currentBellAudio = null
+  return new Promise((resolve) => {
+    if (typeof window === 'undefined') {
+      resolve()
+      return
     }
-    const a = new Audio(url)
-    currentBellAudio = a
-    a.addEventListener('ended', () => {
+    const url = getTripBellSoundUrl()
+    pushLiveLog({ type: 'info', message: `[Bell] triggered: ${url}`, ts: Date.now() })
+    
+    let resolved = false
+    const done = () => {
+      if (resolved) return
+      resolved = true
       if (currentBellAudio === a) currentBellAudio = null
-      pushLiveLog({ type: 'info', message: `[Bell] success: ${url}`, ts: Date.now() })
-    }, { once: true })
-    a.addEventListener('error', () => {
-      pushLiveLog({ type: 'error', message: `[Bell] failed: ${url}`, ts: Date.now() })
-    }, { once: true })
-    a.play()
-      .then(() => {
-        pushLiveLog({ type: 'info', message: `[Bell] started: ${url}`, ts: Date.now() })
-      })
-      .catch((e) => {
-        pushLiveLog({ type: 'error', message: `[Bell] play rejected: ${e.message || e}`, ts: Date.now() })
-      })
-  } catch (e) {
-    pushLiveLog({ type: 'error', message: `[Bell] exception: ${e.message || e}`, ts: Date.now() })
-  }
+      resolve()
+    }
+    
+    let a
+    try {
+      if (currentBellAudio) {
+        currentBellAudio.pause()
+        currentBellAudio = null
+      }
+      a = new Audio(url)
+      currentBellAudio = a
+      
+      // Resolve when ended or error
+      a.addEventListener('ended', () => {
+        pushLiveLog({ type: 'info', message: `[Bell] success: ${url}`, ts: Date.now() })
+        done()
+      }, { once: true })
+      a.addEventListener('error', () => {
+        pushLiveLog({ type: 'error', message: `[Bell] failed: ${url}`, ts: Date.now() })
+        done()
+      }, { once: true })
+      
+      // Fallback timeout (2 seconds max wait)
+      setTimeout(() => {
+        if (!resolved) {
+          pushLiveLog({ type: 'warn', message: `[Bell] timeout, continuing`, ts: Date.now() })
+          done()
+        }
+      }, 2000)
+      
+      a.play()
+        .then(() => {
+          pushLiveLog({ type: 'info', message: `[Bell] started: ${url}`, ts: Date.now() })
+        })
+        .catch((e) => {
+          pushLiveLog({ type: 'error', message: `[Bell] play rejected: ${e.message || e}`, ts: Date.now() })
+          done()
+        })
+    } catch (e) {
+      pushLiveLog({ type: 'error', message: `[Bell] exception: ${e.message || e}`, ts: Date.now() })
+      resolve()
+    }
+  })
 }
 
-function flushPendingTripAlert() {
+async function flushPendingTripAlert() {
   if (typeof window === 'undefined' || !pendingAnnouncement) return
   const { fp, text, wantTts, wantBell } = pendingAnnouncement
   pendingAnnouncement = null
   lastFingerprint = fp
   pushLiveLog({ type: 'info', message: `[TripVoice] flushing pending: ${text}`, ts: Date.now() })
   
-  // Bell chime plays BEFORE TTS
+  // Bell chime plays BEFORE TTS - await completion
   if (wantBell) {
-    playBellSound()
+    await playBellSound()
   }
   if (wantTts && window.speechSynthesis) {
     speakUtterance(text)
@@ -215,19 +248,20 @@ function speakUtterance(text) {
  * Call from a click / pointer handler so the first announcement can play on iOS / Android.
  * This MUST call speechSynthesis.speak() directly to prime the browser - just setting a flag doesn't work on iOS.
  */
-export function unlockTripVoiceFromUserGesture() {
+export async function unlockTripVoiceFromUserGesture() {
   if (typeof window === 'undefined') return
   gestureUnlocked = true
   
-  // Prime iOS by actually speaking - this is what makes subsequent TTS work
-  if (window.speechSynthesis) {
-    speakUtterance('Text to speech alerts active.')
+  const mode = getTripAlertMode()
+  
+  // Play bell chime FIRST if user has bell+tts mode enabled
+  if (mode === 'both') {
+    await playBellSound()
   }
   
-  // Play bell chime if user has bell+tts mode enabled
-  const mode = getTripAlertMode()
-  if (mode === 'both') {
-    playBellSound()
+  // THEN prime iOS by speaking - this is what makes subsequent TTS work
+  if (window.speechSynthesis) {
+    speakUtterance('Text to speech alerts active.')
   }
   
   flushPendingTripAlert()
@@ -259,7 +293,7 @@ function toSpeechPhrase(s) {
  * @param {unknown} tripsBody
  * @param {boolean} noActiveTrip
  */
-export function maybeAnnounceNewTrip(tripsBody, noActiveTrip) {
+export async function maybeAnnounceNewTrip(tripsBody, noActiveTrip) {
   if (typeof window === 'undefined') return
   const mode = getTripAlertMode()
   if (mode === 'off') return
@@ -295,9 +329,9 @@ export function maybeAnnounceNewTrip(tripsBody, noActiveTrip) {
   lastFingerprint = fp
   pushLiveLog({ type: 'info', message: `[TripVoice] announcing new trip: ${text}`, ts: Date.now() })
   
-  // Bell chime plays BEFORE TTS
+  // Bell chime plays BEFORE TTS - await completion
   if (wantBell) {
-    playBellSound()
+    await playBellSound()
   }
   speakUtterance(text)
 }
@@ -446,7 +480,7 @@ export function clearTripPhaseTracking() {
  * @param {TripAlertMode} mode
  * @param {{ force?: boolean }} [opts] - If force is true, bypass gesture gate (use for user-initiated actions)
  */
-function announceText(text, mode, opts = {}) {
+async function announceText(text, mode, opts = {}) {
   if (typeof window === 'undefined') return
   if (mode === 'off') return
 
@@ -461,9 +495,9 @@ function announceText(text, mode, opts = {}) {
 
   pushLiveLog({ type: 'info', message: `[TripVoice] announceText: ${text} (bell=${wantBell})`, ts: Date.now() })
 
-  // Bell chime plays BEFORE TTS (as a prefix)
+  // Bell chime plays BEFORE TTS - await completion
   if (wantBell) {
-    playBellSound()
+    await playBellSound()
   }
 
   // Always speak TTS when mode is not 'off'
