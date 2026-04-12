@@ -71,56 +71,74 @@ onUnmounted(() => {
 
 <template>
   <div class="app-shell">
-    <header class="app-top app-top-grid" role="banner" :aria-label="headerAriaLabel">
-      <div class="app-top-left">
-        <span class="brand-fedex" aria-label="FedEx">
-          <span class="brand-fed">Fed</span><span class="brand-ex">Ex</span>
-        </span>
-        <span class="page-heading">Linehaul</span>
-      </div>
-      <div
-        v-if="showHeaderCenter"
-        class="app-top-center"
-        aria-label="Driver and tractor from saved credentials"
-      >
-        <span v-if="headerDriverId" class="app-top-center-item"
-          >Driver {{ headerDriverId }}</span
+    <header class="app-header" role="banner" :aria-label="headerAriaLabel">
+      <div class="header-inner">
+        <div class="header-left">
+          <span class="brand" aria-label="FedEx">
+            <span class="brand-fed">Fed</span><span class="brand-ex">Ex</span>
+          </span>
+          <span class="header-divider" aria-hidden="true"></span>
+          <span class="header-title">Linehaul</span>
+        </div>
+
+        <div
+          v-if="showHeaderCenter"
+          class="header-center"
+          aria-label="Driver and tractor from saved credentials"
         >
-        <span v-if="headerDriverId && headerTractor" class="app-top-center-sep" aria-hidden="true"
-          >·</span
-        >
-        <span v-if="headerTractor" class="app-top-center-item"
-          >Tractor {{ headerTractor }}</span
-        >
-      </div>
-      <div v-else class="app-top-center app-top-center--empty" aria-hidden="true" />
-      <div class="pill" :data-ok="apiOk === true">
-        API: {{ apiOk === null ? '…' : apiOk ? 'ok' : 'offline' }}
+          <div v-if="headerDriverId" class="header-badge">
+            <span class="badge-icon">D</span>
+            <span class="badge-text">{{ headerDriverId }}</span>
+          </div>
+          <div v-if="headerTractor" class="header-badge">
+            <span class="badge-icon">T</span>
+            <span class="badge-text">{{ headerTractor }}</span>
+          </div>
+        </div>
+        <div v-else class="header-center header-center--empty" aria-hidden="true" />
+
+        <div class="header-right">
+          <div class="api-status" :class="{ 'is-ok': apiOk === true, 'is-offline': apiOk === false }">
+            <span class="api-dot" :class="{ 'animate-pulse-glow': apiOk === null }"></span>
+            <span class="api-label">{{ apiOk === null ? 'Connecting' : apiOk ? 'Online' : 'Offline' }}</span>
+          </div>
+        </div>
       </div>
     </header>
 
-    <p v-if="apiOk === false" class="offline-hint">
-      The API on port 3847 is offline. Running <code>vite</code> alone usually starts it automatically; otherwise use <code>npm run dev</code>. Live log uses a direct connection to the API in dev.
-    </p>
-
-    <div class="app-content">
-      <RouterView />
+    <div v-if="apiOk === false" class="offline-banner">
+      <div class="offline-banner-inner">
+        <span class="offline-icon">!</span>
+        <span class="offline-text">API offline — run <code>npm run dev</code> from project root</span>
+      </div>
     </div>
 
-    <nav class="bottom-nav" aria-label="Main">
+    <main class="app-main">
+      <RouterView />
+    </main>
+
+    <nav class="bottom-nav" aria-label="Main navigation">
       <RouterLink
-        class="nav-item tap"
-        :class="{ 'nav-item-active': route.name === 'home' }"
+        class="nav-item"
+        :class="{ 'is-active': route.name === 'home' }"
         to="/"
       >
-        Home
+        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>
+          <polyline points="9 22 9 12 15 12 15 22"/>
+        </svg>
+        <span class="nav-label">Home</span>
       </RouterLink>
       <RouterLink
-        class="nav-item tap"
-        :class="{ 'nav-item-active': route.name === 'settings' }"
+        class="nav-item"
+        :class="{ 'is-active': route.name === 'settings' }"
         to="/settings"
       >
-        Settings
+        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="3"/>
+          <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+        </svg>
+        <span class="nav-label">Settings</span>
       </RouterLink>
     </nav>
   </div>
@@ -129,136 +147,384 @@ onUnmounted(() => {
 <style scoped>
 .app-shell {
   min-height: 100vh;
-  padding-bottom: calc(3.5rem + env(safe-area-inset-bottom, 0));
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  padding-bottom: calc(var(--nav-height, 4rem) + env(safe-area-inset-bottom, 0));
 }
-.app-top-grid {
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   HEADER — Glass morphism with gradient accent
+   ═══════════════════════════════════════════════════════════════════════════ */
+.app-header {
   position: sticky;
   top: 0;
-  z-index: 30;
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 2.2fr) minmax(0, 1fr);
-  align-items: center;
-  gap: 0.5rem;
-  padding: 0.65rem 1rem;
-  border-bottom: 1px solid var(--border, #2e2e38);
-  background: var(--bg, #0f0f12);
-  box-shadow: 0 1px 0 rgba(0, 0, 0, 0.25);
+  z-index: var(--z-header, 30);
+  background: var(--color-glass, rgba(22, 22, 29, 0.72));
+  backdrop-filter: blur(var(--blur-lg, 20px));
+  -webkit-backdrop-filter: blur(var(--blur-lg, 20px));
+  border-bottom: 1px solid var(--color-glass-border, rgba(255, 255, 255, 0.06));
+  box-shadow: var(--shadow-md, 0 4px 8px rgba(0, 0, 0, 0.3)),
+              inset 0 -1px 0 var(--color-glass-highlight, rgba(255, 255, 255, 0.03));
 }
-.app-top-left {
+
+.header-inner {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.5fr) minmax(0, 1fr);
+  align-items: center;
+  gap: var(--space-3, 0.75rem);
+  max-width: var(--app-content-max, 40rem);
+  margin-inline: auto;
+  padding: var(--space-3, 0.75rem) var(--space-4, 1rem);
+  padding-top: max(var(--space-3, 0.75rem), env(safe-area-inset-top));
+}
+
+.header-left {
   display: flex;
   align-items: center;
-  gap: 0.65rem;
-  min-width: 0;
+  gap: var(--space-2-5, 0.625rem);
   justify-self: start;
 }
-.brand-fedex {
-  flex-shrink: 0;
-  font-size: 1.15rem;
-  font-weight: 800;
-  letter-spacing: -0.02em;
-  line-height: 1;
+
+.brand {
+  font-size: var(--text-lg, 1.125rem);
+  font-weight: var(--weight-bold, 700);
+  letter-spacing: var(--tracking-tight, -0.02em);
+  line-height: var(--leading-none, 1);
   user-select: none;
 }
+
 .brand-fed {
-  color: #4d148c;
+  color: var(--color-accent-purple, #7b4db5);
 }
+
 .brand-ex {
-  color: #ff6600;
+  color: var(--color-accent-orange, #ff6b1a);
 }
-.page-heading {
-  font-size: 1.05rem;
-  font-weight: 600;
-  color: var(--text, #e8e8ee);
-  line-height: 1.2;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
-  text-rendering: optimizeLegibility;
+
+.header-divider {
+  width: 1px;
+  height: 1.25rem;
+  background: var(--color-border, rgba(255, 255, 255, 0.08));
+  opacity: 0.5;
 }
-.app-top-center {
+
+.header-title {
+  font-size: var(--text-base, 0.9375rem);
+  font-weight: var(--weight-semibold, 600);
+  color: var(--color-text-primary, #f4f4f8);
+  letter-spacing: var(--tracking-wide, 0.025em);
+  text-transform: uppercase;
+}
+
+/* Header Center — Badges */
+.header-center {
   justify-self: center;
-  min-width: 0;
-  max-width: 100%;
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 0.35rem;
-  font-size: 0.78rem;
-  line-height: 1.25;
-  color: var(--muted, #9898a8);
+  gap: var(--space-2, 0.5rem);
 }
-.app-top-center--empty {
-  min-height: 1em;
-  pointer-events: none;
+
+.header-center--empty {
+  min-height: 1.5rem;
 }
-.app-top-center-item {
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  max-width: 42vw;
+
+.header-badge {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1-5, 0.375rem);
+  padding: var(--space-1, 0.25rem) var(--space-2-5, 0.625rem);
+  border-radius: var(--radius-full, 9999px);
+  background: rgba(123, 77, 181, 0.12);
+  border: 1px solid rgba(123, 77, 181, 0.25);
 }
-.app-top-center-sep {
-  flex-shrink: 0;
-  opacity: 0.7;
+
+.badge-icon {
+  width: 1.125rem;
+  height: 1.125rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-full, 9999px);
+  background: var(--gradient-accent, linear-gradient(135deg, #7b4db5 0%, #ff6b1a 100%));
+  font-size: var(--text-xs, 0.6875rem);
+  font-weight: var(--weight-bold, 700);
+  color: white;
+  line-height: 1;
 }
-.pill {
+
+.badge-text {
+  font-size: var(--text-sm, 0.8125rem);
+  font-weight: var(--weight-medium, 500);
+  color: var(--color-text-secondary, #a8a8b8);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Header Right — API Status */
+.header-right {
   justify-self: end;
+}
+
+.api-status {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1-5, 0.375rem);
+  padding: var(--space-1, 0.25rem) var(--space-2-5, 0.625rem);
+  border-radius: var(--radius-full, 9999px);
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--color-border, rgba(255, 255, 255, 0.08));
+}
+
+.api-dot {
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: var(--radius-full, 9999px);
+  background: var(--color-text-tertiary, #6e6e7e);
   flex-shrink: 0;
-  font-size: 0.75rem;
-  padding: 0.35rem 0.6rem;
-  border-radius: 999px;
-  border: 1px solid var(--border, #2e2e38);
-  color: var(--muted, #9898a8);
 }
-.pill[data-ok='true'] {
-  border-color: #2e7d32;
-  color: #a5d6a7;
+
+.api-status.is-ok .api-dot {
+  background: var(--color-success, #22c55e);
+  box-shadow: 0 0 8px rgba(34, 197, 94, 0.5);
 }
-.offline-hint {
-  font-size: 0.85rem;
-  color: #ffcc80;
-  margin: 0;
-  padding: 0.5rem 1rem 0.75rem;
-  max-width: var(--app-content-max, 36rem);
+
+.api-status.is-offline .api-dot {
+  background: var(--color-error, #ef4444);
+  box-shadow: 0 0 8px rgba(239, 68, 68, 0.5);
+}
+
+.api-label {
+  font-size: var(--text-xs, 0.6875rem);
+  font-weight: var(--weight-medium, 500);
+  color: var(--color-text-tertiary, #6e6e7e);
+  text-transform: uppercase;
+  letter-spacing: var(--tracking-wider, 0.05em);
+}
+
+.api-status.is-ok .api-label {
+  color: var(--color-success, #22c55e);
+}
+
+.api-status.is-offline .api-label {
+  color: var(--color-error, #ef4444);
+}
+
+/* Offline Banner */
+.offline-banner {
+  background: var(--color-error-muted, rgba(239, 68, 68, 0.15));
+  border-bottom: 1px solid var(--color-error-border, rgba(239, 68, 68, 0.3));
+}
+
+.offline-banner-inner {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2, 0.5rem);
+  max-width: var(--app-content-max, 40rem);
   margin-inline: auto;
+  padding: var(--space-2, 0.5rem) var(--space-4, 1rem);
 }
-.app-content {
-  max-width: var(--app-content-max, 36rem);
+
+.offline-icon {
+  width: 1.25rem;
+  height: 1.25rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-full, 9999px);
+  background: var(--color-error, #ef4444);
+  font-size: var(--text-xs, 0.6875rem);
+  font-weight: var(--weight-bold, 700);
+  color: white;
+  flex-shrink: 0;
+}
+
+.offline-text {
+  font-size: var(--text-sm, 0.8125rem);
+  color: var(--color-text-primary, #f4f4f8);
+}
+
+.offline-text code {
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 0.9em;
+  padding: 0.1em 0.35em;
+  border-radius: var(--radius-sm, 0.375rem);
+  background: rgba(0, 0, 0, 0.3);
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   MAIN CONTENT
+   ═══════════════════════════════════════════════════════════════════════════ */
+.app-main {
+  flex: 1;
+  max-width: var(--app-content-max, 40rem);
+  width: 100%;
   margin-inline: auto;
-  padding-inline: 1rem;
+  padding-inline: var(--space-4, 1rem);
 }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   BOTTOM NAVIGATION — Glass with gradient active state
+   ═══════════════════════════════════════════════════════════════════════════ */
 .bottom-nav {
   position: fixed;
   left: 0;
   right: 0;
   bottom: 0;
+  z-index: var(--z-sticky, 20);
   display: flex;
-  border-top: 1px solid var(--border, #2e2e38);
-  background: #12121a;
+  height: var(--nav-height, 4rem);
+  background: var(--color-glass, rgba(22, 22, 29, 0.85));
+  backdrop-filter: blur(var(--blur-xl, 32px));
+  -webkit-backdrop-filter: blur(var(--blur-xl, 32px));
+  border-top: 1px solid var(--color-glass-border, rgba(255, 255, 255, 0.06));
+  box-shadow: 0 -4px 24px rgba(0, 0, 0, 0.3);
   padding-bottom: env(safe-area-inset-bottom, 0);
-  z-index: 20;
 }
+
 .nav-item {
   flex: 1;
-  text-align: center;
-  padding: 1rem;
-  font-weight: 600;
-  color: var(--text, #e8e8ee);
-  text-decoration: none;
-  min-height: 52px;
   display: flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
+  gap: var(--space-1, 0.25rem);
+  padding: var(--space-2, 0.5rem);
+  text-decoration: none;
+  color: var(--color-text-tertiary, #6e6e7e);
+  transition: var(--transition-colors);
+  position: relative;
+  -webkit-tap-highlight-color: transparent;
 }
-.nav-item-active {
-  color: #ffb74d;
+
+.nav-item:active {
+  transform: scale(0.96);
 }
-.tap:active {
-  opacity: 0.88;
+
+.nav-icon {
+  width: 1.375rem;
+  height: 1.375rem;
+  stroke-width: 1.75;
+  transition: var(--transition-colors);
 }
-code {
-  font-size: 0.9em;
+
+.nav-label {
+  font-size: var(--text-xs, 0.6875rem);
+  font-weight: var(--weight-semibold, 600);
+  letter-spacing: var(--tracking-wide, 0.025em);
+  text-transform: uppercase;
+}
+
+.nav-item.is-active {
+  color: var(--color-text-primary, #f4f4f8);
+}
+
+.nav-item.is-active::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 2.5rem;
+  height: 2px;
+  background: var(--gradient-accent, linear-gradient(135deg, #7b4db5 0%, #ff6b1a 100%));
+  border-radius: 0 0 var(--radius-full, 9999px) var(--radius-full, 9999px);
+}
+
+.nav-item.is-active .nav-icon {
+  color: var(--color-accent-purple-light, #9d6fd7);
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   RESPONSIVE — Mobile-first breakpoints
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* Small mobile (up to 374px) */
+@media (max-width: 374px) {
+  .header-inner {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: var(--space-2, 0.5rem);
+  }
+
+  .header-center {
+    display: none;
+  }
+
+  .header-title {
+    font-size: var(--text-sm, 0.8125rem);
+  }
+
+  .api-label {
+    display: none;
+  }
+
+  .nav-label {
+    font-size: 0.625rem;
+  }
+}
+
+/* Standard mobile (375px+) */
+@media (min-width: 375px) and (max-width: 419px) {
+  .header-badge {
+    padding: var(--space-0-5, 0.125rem) var(--space-2, 0.5rem);
+  }
+
+  .badge-icon {
+    width: 1rem;
+    height: 1rem;
+    font-size: 0.6rem;
+  }
+
+  .badge-text {
+    font-size: var(--text-xs, 0.6875rem);
+  }
+}
+
+/* Large mobile / small tablet (420px+) */
+@media (min-width: 420px) {
+  .header-inner {
+    gap: var(--space-4, 1rem);
+  }
+  
+  .header-badge {
+    padding: var(--space-1-5, 0.375rem) var(--space-3, 0.75rem);
+  }
+  
+  .badge-text {
+    font-size: var(--text-base, 0.9375rem);
+  }
+}
+
+/* Tablet and up (640px+) */
+@media (min-width: 640px) {
+  .header-inner {
+    padding: var(--space-4, 1rem) var(--space-6, 1.5rem);
+  }
+
+  .header-title {
+    font-size: var(--text-md, 1rem);
+  }
+
+  .nav-icon {
+    width: 1.5rem;
+    height: 1.5rem;
+  }
+
+  .nav-label {
+    font-size: var(--text-xs, 0.6875rem);
+  }
+}
+
+/* Reduced motion */
+@media (prefers-reduced-motion: reduce) {
+  .nav-item:active {
+    transform: none;
+  }
+
+  .api-dot,
+  .nav-item,
+  .header-badge {
+    transition: none;
+  }
 }
 </style>

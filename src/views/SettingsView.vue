@@ -1,13 +1,11 @@
 <script setup>
-import { ref, reactive, computed, onMounted, onUnmounted, watch } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import {
   getAssignment,
-  postRun,
   getCredentials,
   putCredentials,
   deleteCredentials,
   putAssignment,
-  postOcr,
   getHealth,
   postLinehaulCaptureBearer,
   fetchFedexLinehaulTractor,
@@ -38,6 +36,14 @@ import {
   speakTripTtsTest,
   playTripBellTest,
 } from '../utils/tripVoiceAnnouncement.js'
+import {
+  getAlertPrefs,
+  setAlertPrefs,
+  testTractorChangeAlert,
+  testDriverChangeAlert,
+  testSuccessAlert,
+  testErrorAlert,
+} from '../utils/alertAudioQueue.js'
 
 /** Shown when a secret is on file but the user has not typed a new value (password inputs stay masked). */
 const SECRET_SAVED_MASK = '••••••••••••••••'
@@ -47,6 +53,13 @@ const settingsTab = ref('general')
 
 /** @type {import('vue').Ref<'off' | 'tts' | 'bell' | 'both'>} */
 const tripAlertMode = ref(getTripAlertMode())
+
+const alertPrefs = ref(getAlertPrefs())
+
+function updateAlertPref(key, value) {
+  alertPrefs.value = { ...alertPrefs.value, [key]: value }
+  setAlertPrefs({ [key]: value })
+}
 
 function setTripAlertModeUi(
   /** @type {'off' | 'tts' | 'bell' | 'both'} */ mode,
@@ -102,27 +115,10 @@ const linehaulPollAriaNow = computed(() =>
   ),
 )
 
-const instructionsEd = ref('')
-const tractorEd = ref('')
+const tractorLocationEd = ref('')
 /** US phone: digits only (max 10); shown in the field as (XXX) XXX XXXX */
 const phoneDigits = ref('')
-const dispatchSaving = ref(false)
-const dispatchMsg = ref(null)
-
-const presetSelect = ref('sealed_dual')
-const PRESET_OPTIONS = [
-  { value: 'sealed_dual', label: 'Dolly + 2 seals' },
-  { value: 'empty_dual', label: 'Empty move (3 fields)' },
-  { value: 'trailer_only', label: 'Trailer 1 only' },
-  { value: 'dolly_t1', label: 'Dolly + T1' },
-]
-
-const photoSlots = ref([])
-const fieldValues = reactive({})
-const filesBySlot = ref({})
-const ocrBusy = ref(false)
-const inspectBusy = ref(false)
-const inspectMsg = ref(null)
+const credMsg = ref(null)
 
 const screenshotModal = ref(null)
 
@@ -166,61 +162,15 @@ function onCredTractorInput(e) {
   credTractor.value = String(e.target?.value ?? '').replace(/\D/g, '').slice(0, 6)
 }
 
-function syncFieldValuesFromSlots(slots, fv) {
-  const keep = new Set(slots.map((s) => s.id))
-  for (const k of Object.keys(fieldValues)) {
-    if (!keep.has(k)) delete fieldValues[k]
-  }
-  for (const s of slots) {
-    fieldValues[s.id] = fv[s.id] ?? fieldValues[s.id] ?? ''
-  }
-}
-
 async function loadAssignmentState() {
   try {
     const a = await getAssignment()
-    instructionsEd.value = a.instructions ?? ''
-    tractorEd.value = a.tractorLocation ?? ''
+    tractorLocationEd.value = a.tractorLocation ?? ''
     phoneDigits.value = String(a.driverPhone ?? '')
       .replace(/\D/g, '')
       .slice(0, 10)
-    presetSelect.value = a.preset ?? 'sealed_dual'
-    photoSlots.value = Array.isArray(a.photoSlots) ? [...a.photoSlots] : []
-    syncFieldValuesFromSlots(photoSlots.value, a.fieldValues || {})
   } catch (e) {
     pushLiveLog({ type: 'error', message: e instanceof Error ? e.message : String(e), ts: Date.now() })
-  }
-}
-
-async function saveDispatchInfo() {
-  if (!(await requireApi())) return
-  dispatchSaving.value = true
-  dispatchMsg.value = null
-  try {
-    await putAssignment({
-      instructions: instructionsEd.value,
-      tractorLocation: tractorEd.value,
-      driverPhone: phoneDigits.value,
-      fieldValues: { ...fieldValues },
-    })
-    dispatchMsg.value = 'Saved'
-    pushLiveLog({ type: 'info', message: 'Dispatch info saved', ts: Date.now() })
-  } catch (e) {
-    dispatchMsg.value = e instanceof Error ? e.message : String(e)
-  } finally {
-    dispatchSaving.value = false
-  }
-}
-
-async function applyLayoutPreset() {
-  if (!(await requireApi())) return
-  dispatchMsg.value = null
-  try {
-    await putAssignment({ applyPreset: presetSelect.value })
-    await loadAssignmentState()
-    pushLiveLog({ type: 'info', message: `Layout preset: ${presetSelect.value}`, ts: Date.now() })
-  } catch (e) {
-    dispatchMsg.value = e instanceof Error ? e.message : String(e)
   }
 }
 
@@ -254,6 +204,7 @@ async function loadCredentials() {
 async function saveCredentials() {
   if (!(await requireApi())) return
   credSaving.value = true
+  credMsg.value = null
   try {
     const hasBearerInput = credLinehaulToken.value.trim().length > 0
     const body = {
@@ -269,13 +220,18 @@ async function saveCredentials() {
       body.fedexLinehaulBearer = credLinehaulToken.value.trim()
     }
     await putCredentials(body)
-    await putAssignment({ driverPhone: phoneDigits.value })
+    await putAssignment({
+      driverPhone: phoneDigits.value,
+      tractorLocation: tractorLocationEd.value,
+    })
     credPass.value = ''
     credLinehaulToken.value = ''
     await loadCredentials()
     await loadAssignmentState()
-    pushLiveLog({ type: 'info', message: 'Credentials saved (password encrypted on disk)', ts: Date.now() })
+    credMsg.value = 'Saved'
+    pushLiveLog({ type: 'info', message: 'Credentials saved', ts: Date.now() })
   } catch (e) {
+    credMsg.value = e instanceof Error ? e.message : String(e)
     pushLiveLog({ type: 'error', message: e instanceof Error ? e.message : String(e), ts: Date.now() })
   } finally {
     credSaving.value = false
@@ -496,69 +452,6 @@ async function runLinehaulTest() {
   }
 }
 
-function onSlotFile(slotId, ev) {
-  const f = ev.target.files?.[0]
-  if (f) filesBySlot.value = { ...filesBySlot.value, [slotId]: f }
-  else {
-    const copy = { ...filesBySlot.value }
-    delete copy[slotId]
-    filesBySlot.value = copy
-  }
-}
-
-async function runOcr() {
-  if (!(await requireApi())) return
-  ocrBusy.value = true
-  dispatchMsg.value = null
-  try {
-    const fd = new FormData()
-    for (const s of photoSlots.value) {
-      const f = filesBySlot.value[s.id]
-      if (f) fd.append(s.id, f)
-    }
-    if ([...fd.keys()].length === 0) {
-      dispatchMsg.value = 'Choose at least one photo'
-      return
-    }
-    const { results } = await postOcr(fd)
-    for (const r of results || []) {
-      if (r.field in fieldValues) fieldValues[r.field] = r.text || ''
-    }
-    await putAssignment({ fieldValues: { ...fieldValues } })
-    dispatchMsg.value = 'OCR done — verify values'
-    pushLiveLog({ type: 'info', message: 'OCR complete', ts: Date.now() })
-  } catch (e) {
-    dispatchMsg.value = e instanceof Error ? e.message : String(e)
-  } finally {
-    ocrBusy.value = false
-  }
-}
-
-const valueOrder = computed(() => photoSlots.value.map((s) => s.id))
-
-async function runInspectCheckout() {
-  if (!(await requireApi())) return
-  inspectBusy.value = true
-  inspectMsg.value = null
-  try {
-    await putAssignment({ fieldValues: { ...fieldValues } })
-    const result = await postRun({
-      scenario: 'inspect_checkout',
-      headless: true,
-      slowMo: 0,
-      values: { ...fieldValues },
-      valueOrder: valueOrder.value,
-      tryOktaLogin: false,
-    })
-    inspectMsg.value = result.ok ? 'Inspect/checkout finished' : result.error || 'Failed'
-    pushLiveLog({ type: 'info', message: inspectMsg.value, ts: Date.now() })
-  } catch (e) {
-    inspectMsg.value = e instanceof Error ? e.message : String(e)
-  } finally {
-    inspectBusy.value = false
-  }
-}
-
 function clearAssignmentAlert() {
   assignmentAlert.value = null
 }
@@ -578,7 +471,10 @@ onMounted(() => {
 })
 
 watch(settingsTab, (tab) => {
-  if (tab === 'audio') tripAlertMode.value = getTripAlertMode()
+  if (tab === 'audio') {
+    tripAlertMode.value = getTripAlertMode()
+    alertPrefs.value = getAlertPrefs()
+  }
 })
 
 onUnmounted(() => {
@@ -630,6 +526,7 @@ onUnmounted(() => {
 
     <main v-show="settingsTab === 'general'" class="stack">
       <SettingsSection title="Driver Credentials">
+        <p v-if="credMsg" class="cred-msg" :class="{ 'cred-msg--error': credMsg !== 'Saved' }">{{ credMsg }}</p>
         <label class="lbl">Username / Driver ID</label>
         <input v-model="credUser" class="inp tap" type="text" autocomplete="username" />
         <label class="lbl">Password</label>
@@ -649,6 +546,14 @@ onUnmounted(() => {
           autocomplete="off"
           maxlength="6"
           @input="onCredTractorInput"
+        />
+        <label class="lbl">Tractor location</label>
+        <input
+          v-model="tractorLocationEd"
+          class="inp tap"
+          type="text"
+          autocomplete="off"
+          placeholder="Current location for check-in"
         />
         <label class="lbl">Phone number</label>
         <input
@@ -729,58 +634,10 @@ onUnmounted(() => {
         </div>
         <div class="btn-row">
           <button type="button" class="btn primary tap" :disabled="credSaving" @click="saveCredentials">
-            Save credentials
+            {{ credSaving ? 'Saving…' : 'Save' }}
           </button>
           <button type="button" class="btn tap" @click="clearCredentials">Clear</button>
         </div>
-      </SettingsSection>
-
-      <SettingsSection title="Dispatch & seals">
-        <p v-if="dispatchMsg" class="dispatch-msg">{{ dispatchMsg }}</p>
-        <p class="hint tight">
-          Instructions and tractor location are shown read-only on Home — save after edits. Driver phone is set under
-          Driver Credentials only.
-        </p>
-        <label class="lbl">Instructions (for drivers / Home display)</label>
-        <textarea v-model="instructionsEd" class="area-tap" rows="4" autocomplete="off" />
-        <label class="lbl">Tractor location (current location for Check in)</label>
-        <input v-model="tractorEd" class="inp tap" type="text" autocomplete="off" />
-        <button type="button" class="btn primary tap" :disabled="dispatchSaving" @click="saveDispatchInfo">
-          Save dispatch info
-        </button>
-
-        <label class="lbl block-gap">Layout preset</label>
-        <select v-model="presetSelect" class="inp tap">
-          <option v-for="o in PRESET_OPTIONS" :key="o.value" :value="o.value">
-            {{ o.label }}
-          </option>
-        </select>
-        <button type="button" class="btn tap" @click="applyLayoutPreset">Apply layout preset</button>
-
-        <template v-if="photoSlots.length">
-          <p class="hint tight block-gap">Inspect order: {{ valueOrder.join(', ') }}</p>
-          <div v-for="s in photoSlots" :key="s.id" class="slot">
-            <label class="slot-label">{{ s.label }}</label>
-            <input type="file" accept="image/*" class="file tap" @change="onSlotFile(s.id, $event)" />
-            <input v-model="fieldValues[s.id]" class="inp tap" type="text" autocomplete="off" />
-          </div>
-          <div class="btn-row">
-            <button type="button" class="btn tap" :disabled="ocrBusy" @click="runOcr">
-              {{ ocrBusy ? 'OCR…' : 'Run OCR' }}
-            </button>
-          </div>
-        </template>
-
-        <p v-if="inspectMsg" class="dispatch-msg block-gap">{{ inspectMsg }}</p>
-        <p class="hint tight">Uses field values above (saved to server).</p>
-        <button
-          type="button"
-          class="btn primary tap"
-          :disabled="inspectBusy || !photoSlots.length"
-          @click="runInspectCheckout"
-        >
-          {{ inspectBusy ? 'Running…' : 'Run inspect & checkout (headless)' }}
-        </button>
       </SettingsSection>
 
       <SettingsSection title="XPath Tools">
@@ -892,6 +749,62 @@ onUnmounted(() => {
           <button type="button" class="btn tap" @click="playTripBellTest">Test bell</button>
         </div>
       </SettingsSection>
+
+      <SettingsSection title="Status Change Alerts">
+        <p class="hint tight">
+          Announce when tractor or driver details change during Linehaul polling. Alerts play sequentially (never overlap).
+        </p>
+
+        <div class="alert-toggle-row">
+          <label class="alert-toggle">
+            <input
+              type="checkbox"
+              :checked="alertPrefs.tractorChange"
+              @change="updateAlertPref('tractorChange', $event.target.checked)"
+            />
+            <span class="alert-toggle-label">Tractor details change</span>
+          </label>
+          <button type="button" class="btn-sm tap" @click="testTractorChangeAlert">Test</button>
+        </div>
+
+        <div class="alert-toggle-row">
+          <label class="alert-toggle">
+            <input
+              type="checkbox"
+              :checked="alertPrefs.driverChange"
+              @change="updateAlertPref('driverChange', $event.target.checked)"
+            />
+            <span class="alert-toggle-label">Driver details change</span>
+          </label>
+          <button type="button" class="btn-sm tap" @click="testDriverChangeAlert">Test</button>
+        </div>
+
+        <div class="alert-toggle-row">
+          <label class="alert-toggle">
+            <input
+              type="checkbox"
+              :checked="alertPrefs.checkIn"
+              @change="updateAlertPref('checkIn', $event.target.checked)"
+            />
+            <span class="alert-toggle-label">Check-in success / failure</span>
+          </label>
+          <div class="btn-group-sm">
+            <button type="button" class="btn-sm tap" @click="testSuccessAlert">Success</button>
+            <button type="button" class="btn-sm tap" @click="testErrorAlert">Error</button>
+          </div>
+        </div>
+
+        <div class="alert-toggle-row">
+          <label class="alert-toggle">
+            <input
+              type="checkbox"
+              :checked="alertPrefs.apiReconnect"
+              @change="updateAlertPref('apiReconnect', $event.target.checked)"
+            />
+            <span class="alert-toggle-label">API reconnection</span>
+          </label>
+        </div>
+      </SettingsSection>
     </main>
   </div>
 </template>
@@ -899,31 +812,49 @@ onUnmounted(() => {
 <style scoped>
 .shell {
   min-height: 100vh;
-  padding: 0.75rem 0 1rem;
+  min-height: 100dvh;
+  padding: var(--space-4, 1rem) 0 var(--space-6, 1.5rem);
 }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   TABS — Premium segmented control
+   ═══════════════════════════════════════════════════════════════════════════ */
 .settings-tabs {
   display: flex;
-  gap: 0.35rem;
-  margin-bottom: 0.75rem;
-  flex-wrap: wrap;
+  gap: var(--space-1, 0.25rem);
+  padding: var(--space-1, 0.25rem);
+  margin-bottom: var(--space-4, 1rem);
+  background: var(--color-glass, rgba(22, 22, 29, 0.72));
+  backdrop-filter: blur(var(--blur-md, 12px));
+  -webkit-backdrop-filter: blur(var(--blur-md, 12px));
+  border: 1px solid var(--color-glass-border, rgba(255, 255, 255, 0.06));
+  border-radius: var(--radius-xl, 1rem);
 }
+
 .tab-btn {
+  flex: 1;
   cursor: pointer;
-  border-radius: 8px;
-  border: 1px solid var(--border, #2e2e38);
-  background: #1e1e26;
-  color: var(--muted, #9898a8);
-  padding: 0.55rem 1rem;
-  font-size: 0.95rem;
-  font-weight: 600;
-  min-height: 44px;
-  min-width: 7rem;
+  border-radius: var(--radius-lg, 0.75rem);
+  border: none;
+  background: transparent;
+  color: var(--color-text-tertiary, #6e6e7e);
+  padding: var(--space-2-5, 0.625rem) var(--space-4, 1rem);
+  font-size: var(--text-sm, 0.8125rem);
+  font-weight: var(--weight-semibold, 600);
+  min-height: var(--touch-target, 2.75rem);
+  transition: var(--transition-all);
+  position: relative;
 }
+
+.tab-btn:hover:not(.active) {
+  color: var(--color-text-secondary, #a8a8b8);
+  background: var(--color-hover, rgba(255, 255, 255, 0.04));
+}
+
 .tab-btn.active {
-  background: #2a2a34;
-  color: var(--text, #e8e8ee);
-  border-color: #5c2d91;
-  box-shadow: 0 0 0 1px rgba(92, 45, 145, 0.35);
+  background: var(--gradient-accent, linear-gradient(135deg, #7b4db5 0%, #ff6b1a 100%));
+  color: white;
+  box-shadow: var(--shadow-sm, 0 2px 4px rgba(0, 0, 0, 0.25));
 }
 .automation-wrap {
   margin-top: 0;
@@ -947,21 +878,27 @@ onUnmounted(() => {
 }
 .audio-mode-btn {
   cursor: pointer;
-  border-radius: 8px;
-  border: 1px solid var(--border, #2e2e38);
-  background: #1e1e26;
-  color: var(--muted, #9898a8);
-  padding: 0.5rem 0.45rem;
-  font-size: 0.82rem;
-  font-weight: 600;
-  min-height: 44px;
-  line-height: 1.2;
+  border-radius: var(--radius-md, 0.5rem);
+  border: 1px solid var(--color-border, rgba(255, 255, 255, 0.08));
+  background: var(--color-bg-surface, #16161d);
+  color: var(--color-text-tertiary, #6e6e7e);
+  padding: var(--space-2, 0.5rem) var(--space-2, 0.5rem);
+  font-size: var(--text-sm, 0.8125rem);
+  font-weight: var(--weight-semibold, 600);
+  min-height: var(--touch-target, 2.75rem);
+  line-height: var(--leading-tight, 1.2);
+  transition: var(--transition-all);
+}
+.audio-mode-btn:hover:not(.active) {
+  background: var(--color-hover, rgba(255, 255, 255, 0.04));
+  color: var(--color-text-secondary, #a8a8b8);
 }
 .audio-mode-btn.active {
-  background: #2a2a34;
-  color: var(--text, #e8e8ee);
-  border-color: #5c2d91;
-  box-shadow: 0 0 0 1px rgba(92, 45, 145, 0.35);
+  background: var(--color-accent-purple-dark, #5c2d91);
+  color: white;
+  border-color: var(--color-accent-purple, #7b4db5);
+  box-shadow: 0 0 0 1px rgba(123, 77, 181, 0.3),
+              var(--shadow-glow-purple, 0 0 12px rgba(123, 77, 181, 0.2));
 }
 .audio-test-label {
   margin-top: 0.5rem;
@@ -972,65 +909,135 @@ onUnmounted(() => {
   gap: 0.5rem;
   margin-bottom: 0.25rem;
 }
-.dispatch-msg {
+.alert-toggle-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.75rem 0;
+  border-bottom: 1px solid var(--color-border, rgba(255, 255, 255, 0.08));
+}
+.alert-toggle-row:last-child {
+  border-bottom: none;
+}
+.alert-toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  cursor: pointer;
+  flex: 1;
+  min-width: 0;
+}
+.alert-toggle input[type="checkbox"] {
+  width: 1.25rem;
+  height: 1.25rem;
+  accent-color: var(--color-accent-purple, #7b4db5);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.alert-toggle-label {
   font-size: 0.9rem;
-  color: #90caf9;
+  color: var(--color-text-primary, #f4f4f8);
+}
+.btn-sm {
+  cursor: pointer;
+  border-radius: 6px;
+  border: 1px solid var(--color-border, rgba(255, 255, 255, 0.08));
+  background: var(--color-bg-surface, #16161d);
+  color: var(--color-text-secondary, #a8a8b8);
+  padding: 0.4rem 0.65rem;
+  font-size: 0.75rem;
+  font-weight: 500;
+  min-height: 32px;
+  transition: var(--transition-colors);
+}
+.btn-sm:hover {
+  background: var(--color-hover, rgba(255, 255, 255, 0.04));
+  color: var(--color-text-primary, #f4f4f8);
+}
+.btn-group-sm {
+  display: flex;
+  gap: 0.35rem;
+}
+.cred-msg {
+  font-size: 0.9rem;
+  color: var(--color-success, #22c55e);
   margin: 0 0 0.75rem;
 }
+.cred-msg--error {
+  color: var(--color-error, #ef4444);
+}
 .alert {
-  background: #2a1f08;
-  border: 1px solid #d97706;
-  padding: 1rem;
-  border-radius: 8px;
-  margin-bottom: 1rem;
+  background: var(--color-warning-muted, rgba(245, 158, 11, 0.15));
+  border: 1px solid var(--color-warning-border, rgba(245, 158, 11, 0.3));
+  padding: var(--space-4, 1rem);
+  border-radius: var(--radius-lg, 0.75rem);
+  margin-bottom: var(--space-4, 1rem);
+  animation: slide-up var(--duration-normal, 200ms) var(--ease-out);
 }
 .stack {
   display: flex;
   flex-direction: column;
-  gap: 0.65rem;
+  gap: var(--space-4, 1rem);
 }
 .hint {
-  font-size: 0.8rem;
-  color: var(--muted, #9898a8);
-  margin: 0 0 0.75rem;
-  line-height: 1.4;
+  font-size: var(--text-sm, 0.8125rem);
+  color: var(--color-text-tertiary, #6e6e7e);
+  margin: 0 0 var(--space-3, 0.75rem);
+  line-height: var(--leading-relaxed, 1.65);
 }
 .hint.tight {
-  margin-bottom: 0.5rem;
+  margin-bottom: var(--space-2, 0.5rem);
+}
+.hint strong {
+  color: var(--color-text-secondary, #a8a8b8);
 }
 .block-gap {
-  margin-top: 1rem;
+  margin-top: var(--space-4, 1rem);
 }
 .lbl {
   display: block;
-  font-size: 0.85rem;
-  margin-bottom: 0.25rem;
-  color: var(--muted, #9898a8);
+  font-size: var(--text-sm, 0.8125rem);
+  font-weight: var(--weight-medium, 500);
+  margin-bottom: var(--space-1-5, 0.375rem);
+  color: var(--color-text-secondary, #a8a8b8);
 }
 .row {
   display: flex;
   align-items: center;
-  gap: 0.5rem;
-  margin-bottom: 0.5rem;
-  font-size: 0.9rem;
-  min-height: 44px;
+  gap: var(--space-2, 0.5rem);
+  margin-bottom: var(--space-2, 0.5rem);
+  font-size: var(--text-base, 0.9375rem);
+  min-height: var(--touch-target, 2.75rem);
 }
 .inp {
   width: 100%;
-  padding: 0.55rem 0.65rem;
-  border-radius: 8px;
-  border: 1px solid var(--border, #2e2e38);
-  background: #12121a;
-  color: var(--text, #e8e8ee);
-  margin-bottom: 0.65rem;
-  min-height: 44px;
+  padding: var(--space-2-5, 0.625rem) var(--space-3, 0.75rem);
+  border-radius: var(--radius-md, 0.5rem);
+  border: 1px solid var(--color-border, rgba(255, 255, 255, 0.08));
+  background: var(--color-bg-elevated, #0f0f14);
+  color: var(--color-text-primary, #f4f4f8);
+  margin-bottom: var(--space-3, 0.75rem);
+  min-height: var(--touch-target, 2.75rem);
+  font-size: var(--text-base, 0.9375rem);
+  transition: var(--transition-colors);
+}
+.inp:focus {
+  outline: none;
+  border-color: var(--color-accent-purple, #7b4db5);
+  box-shadow: 0 0 0 3px rgba(123, 77, 181, 0.15);
+}
+.inp::placeholder {
+  color: var(--color-text-tertiary, #6e6e7e);
 }
 .linehaul-poll-card {
-  margin-bottom: 0.65rem;
-  padding: 0.75rem 1rem;
-  border-radius: 10px;
-  border: 1px solid var(--border, #2e2e38);
-  background: rgba(18, 18, 26, 0.65);
+  margin-bottom: var(--space-3, 0.75rem);
+  padding: var(--space-4, 1rem);
+  border-radius: var(--radius-lg, 0.75rem);
+  border: 1px solid var(--color-border, rgba(255, 255, 255, 0.08));
+  background: var(--color-glass, rgba(22, 22, 29, 0.72));
+  backdrop-filter: blur(var(--blur-sm, 8px));
+  -webkit-backdrop-filter: blur(var(--blur-sm, 8px));
 }
 .linehaul-poll-head {
   display: flex;
@@ -1100,49 +1107,25 @@ onUnmounted(() => {
   align-self: center;
   white-space: nowrap;
 }
-.area-tap {
-  width: 100%;
-  min-height: 5rem;
-  padding: 0.55rem 0.65rem;
-  border-radius: 8px;
-  border: 1px solid var(--border, #2e2e38);
-  background: #12121a;
-  color: var(--text, #e8e8ee);
-  margin-bottom: 0.65rem;
-  resize: vertical;
-}
-.slot {
-  margin-bottom: 1rem;
-}
-.slot-label {
-  display: block;
-  font-size: 0.85rem;
-  color: var(--muted, #9898a8);
-  margin-bottom: 0.35rem;
-}
-.file {
-  margin-bottom: 0.5rem;
-  font-size: 0.85rem;
-}
 .btn-row {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.5rem;
-  margin-top: 0.5rem;
+  gap: var(--space-2, 0.5rem);
+  margin-top: var(--space-3, 0.75rem);
 }
 .linehaul-test-row {
-  margin: 0.85rem 0 0.75rem;
-  padding-top: 0.5rem;
-  border-top: 1px solid var(--border, #2e2e38);
+  margin: var(--space-4, 1rem) 0 var(--space-3, 0.75rem);
+  padding-top: var(--space-3, 0.75rem);
+  border-top: 1px solid var(--color-border, rgba(255, 255, 255, 0.08));
 }
 .linehaul-test-lbl {
-  margin-bottom: 0.35rem;
+  margin-bottom: var(--space-2, 0.5rem);
 }
 .linehaul-test-controls {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 0.5rem;
+  gap: var(--space-2, 0.5rem);
 }
 .linehaul-test-select {
   flex: 1 1 14rem;
@@ -1155,20 +1138,39 @@ onUnmounted(() => {
 }
 .btn {
   cursor: pointer;
-  border-radius: 8px;
-  border: 1px solid var(--border, #2e2e38);
-  background: #2a2a34;
-  color: var(--text, #e8e8ee);
-  padding: 0.5rem 0.85rem;
-  font-size: 0.9rem;
-  min-height: 44px;
+  border-radius: var(--radius-md, 0.5rem);
+  border: 1px solid var(--color-border, rgba(255, 255, 255, 0.08));
+  background: var(--color-bg-surface, #16161d);
+  color: var(--color-text-primary, #f4f4f8);
+  padding: var(--space-2, 0.5rem) var(--space-4, 1rem);
+  font-size: var(--text-sm, 0.8125rem);
+  font-weight: var(--weight-medium, 500);
+  min-height: var(--touch-target, 2.75rem);
+  transition: var(--transition-all);
+}
+.btn:hover {
+  background: var(--color-hover, rgba(255, 255, 255, 0.04));
+  border-color: var(--color-accent-purple, #7b4db5);
 }
 .btn.primary {
-  background: #5c2d91;
-  border-color: #7b4db5;
+  background: var(--gradient-accent, linear-gradient(135deg, #7b4db5 0%, #ff6b1a 100%));
+  border: none;
+  color: white;
+  font-weight: var(--weight-semibold, 600);
+}
+.btn.primary:hover {
+  box-shadow: var(--shadow-glow-purple, 0 0 20px rgba(123, 77, 181, 0.25));
+  transform: translateY(-1px);
+}
+.btn.primary:active {
+  transform: translateY(0);
 }
 .btn.ghost {
   background: transparent;
+  border-color: transparent;
+}
+.btn.ghost:hover {
+  background: var(--color-hover, rgba(255, 255, 255, 0.04));
 }
 .log-actions {
   margin-bottom: 0.5rem;
@@ -1292,5 +1294,62 @@ code {
   max-height: 80vh;
   border-radius: 6px;
   object-fit: contain;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   RESPONSIVE — Mobile-first breakpoints
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+@media (max-width: 374px) {
+  .shell {
+    padding: var(--space-3, 0.75rem) 0;
+  }
+
+  .settings-tabs {
+    gap: var(--space-0-5, 0.125rem);
+    padding: var(--space-0-5, 0.125rem);
+    border-radius: var(--radius-lg, 0.75rem);
+  }
+
+  .tab-btn {
+    padding: var(--space-2, 0.5rem) var(--space-2, 0.5rem);
+    font-size: var(--text-xs, 0.6875rem);
+  }
+
+  .stack {
+    gap: var(--space-3, 0.75rem);
+  }
+}
+
+@media (min-width: 420px) {
+  .shell {
+    padding: var(--space-5, 1.25rem) 0 var(--space-6, 1.5rem);
+  }
+
+  .settings-tabs {
+    border-radius: var(--radius-2xl, 1.25rem);
+  }
+
+  .tab-btn {
+    font-size: var(--text-sm, 0.8125rem);
+  }
+}
+
+@media (min-width: 640px) {
+  .shell {
+    padding: var(--space-6, 1.5rem) 0 var(--space-8, 2rem);
+  }
+
+  .stack {
+    gap: var(--space-5, 1.25rem);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .alert,
+  .btn.primary:hover {
+    animation: none;
+    transform: none;
+  }
 }
 </style>

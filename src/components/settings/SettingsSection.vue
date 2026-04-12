@@ -17,41 +17,71 @@ defineProps({
 
 <style scoped>
 .settings-details {
-  background: var(--card, #1a1a21);
-  border: 1px solid var(--border, #2e2e38);
-  border-radius: 10px;
+  position: relative;
+  background: var(--color-glass, rgba(22, 22, 29, 0.72));
+  backdrop-filter: blur(var(--blur-lg, 20px));
+  -webkit-backdrop-filter: blur(var(--blur-lg, 20px));
+  border: 1px solid var(--color-glass-border, rgba(255, 255, 255, 0.06));
+  border-radius: var(--radius-xl, 1rem);
   padding: 0;
   overflow: hidden;
+  box-shadow: var(--shadow-md, 0 4px 8px rgba(0, 0, 0, 0.3)),
+              inset 0 1px 0 var(--color-glass-highlight, rgba(255, 255, 255, 0.03));
 }
+
+.settings-details::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: var(--space-4, 1rem);
+  right: var(--space-4, 1rem);
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--color-accent-purple, #7b4db5), var(--color-accent-orange, #ff6b1a), transparent);
+  opacity: 0.4;
+  border-radius: var(--radius-full, 9999px);
+}
+
 .settings-summary {
   list-style: none;
   cursor: pointer;
-  font-weight: 600;
-  font-size: 1rem;
-  padding: 0.85rem 1rem;
+  font-weight: var(--weight-semibold, 600);
+  font-size: var(--text-md, 1rem);
+  padding: var(--space-4, 1rem);
   user-select: none;
-  min-height: 44px;
+  min-height: var(--touch-target, 2.75rem);
   display: flex;
   align-items: center;
+  color: var(--color-text-primary, #f4f4f8);
+  transition: var(--transition-colors);
+  -webkit-tap-highlight-color: transparent;
 }
+
+.settings-summary:hover {
+  background: var(--color-hover, rgba(255, 255, 255, 0.04));
+}
+
 .settings-summary::-webkit-details-marker {
   display: none;
 }
+
 .settings-summary::after {
   content: '';
   width: 0.5rem;
   height: 0.5rem;
   margin-left: auto;
-  border-right: 2px solid var(--muted, #9898a8);
-  border-bottom: 2px solid var(--muted, #9898a8);
+  border-right: 2px solid var(--color-text-tertiary, #6e6e7e);
+  border-bottom: 2px solid var(--color-text-tertiary, #6e6e7e);
   transform: rotate(45deg);
-  transition: transform 0.15s ease;
+  transition: transform var(--duration-normal, 200ms) var(--ease-out);
 }
+
 .settings-details[open] .settings-summary::after {
   transform: rotate(-135deg);
 }
+
 .settings-body {
-  padding: 0 1rem 1rem;
-  border-top: 1px solid var(--border, #2e2e38);
+  padding: 0 var(--space-4, 1rem) var(--space-4, 1rem);
+  border-top: 1px solid var(--color-border, rgba(255, 255, 255, 0.08));
+  animation: slide-up var(--duration-normal, 200ms) var(--ease-out);
 }
 </style>
