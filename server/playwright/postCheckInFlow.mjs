@@ -6,6 +6,8 @@ import { getResolvedCheckInXpaths } from './checkInFlow.mjs'
  * Slightly higher for toolbar clicks than in-dialog actions.
  */
 const DIALOG_MS = 2_000
+/** Sign-out confirmation modal can render slowly after toolbar click (Angular / network). */
+const SIGN_OUT_MODAL_MS = 15_000
 const ACTION_MS = 2_000
 const TOOLBAR_MS = 5_000
 
@@ -64,7 +66,7 @@ export async function clickSignOutModalConfirm(page, CX, signal) {
   if (signal?.aborted) throw new Error('Aborted')
 
   const modalRoot = page.locator('app-sign-out-modal')
-  await modalRoot.waitFor({ state: 'visible', timeout: DIALOG_MS })
+  await modalRoot.waitFor({ state: 'visible', timeout: SIGN_OUT_MODAL_MS })
 
   const byContinue = modalRoot.getByRole('button', { name: /continue/i })
   const bySignOut = modalRoot.getByRole('button', { name: /sign out/i })

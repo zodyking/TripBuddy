@@ -2,6 +2,7 @@
 import { ref, onMounted } from 'vue'
 import { listAutomations, createAutomation, deleteAutomation, duplicateAutomation, runAutomation, listAutomationPresets, installAutomationPreset } from '../../api.js'
 import { pushLiveLog } from '../../stores/liveLogStore.js'
+import { announceGeofenceArrival, announceArrivalSuccess } from '../../utils/tripVoiceAnnouncement.js'
 
 function generateId() {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
@@ -102,6 +103,14 @@ async function run(id, name) {
   try {
     const result = await runAutomation(id, { headless: true })
     if (result.ok) {
+      const arrivePayload = result.variables?._arrivePayload
+      if (arrivePayload && typeof arrivePayload === 'object') {
+        if (arrivePayload.alreadyArrivedByGeofence === true) {
+          announceGeofenceArrival()
+        } else {
+          announceArrivalSuccess()
+        }
+      }
       pushLiveLog({ type: 'info', message: `Ran: ${name}`, ts: Date.now() })
     } else {
       pushLiveLog({ type: 'error', message: result.error || 'Failed', ts: Date.now() })

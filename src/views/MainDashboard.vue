@@ -66,6 +66,8 @@ import {
   maybeAnnounceTrailerStatusChange,
   clearTrailerStatusTracking,
   clearTripPhaseTracking,
+  announceGeofenceArrival,
+  announceArrivalSuccess,
 } from '../utils/tripVoiceAnnouncement.js'
 import {
   announceTractorChange,
@@ -236,6 +238,14 @@ async function runQuickAction(auto) {
     }
     const result = await runAutomation(auto.id, { headless: true })
     if (result.ok) {
+      const arrivePayload = result.variables?._arrivePayload
+      if (arrivePayload && typeof arrivePayload === 'object') {
+        if (arrivePayload.alreadyArrivedByGeofence === true) {
+          announceGeofenceArrival()
+        } else {
+          announceArrivalSuccess()
+        }
+      }
       if (result.variables?._bannerDetected === false) {
         checkInSuccessBanner.value = `${auto.manualButtonLabel || auto.name} completed`
       } else {
