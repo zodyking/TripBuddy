@@ -176,6 +176,22 @@ function playBellThenSpeak(text) {
   }, 2000)
 }
 
+/**
+ * Preview sample text using current trip alert mode (Settings Test buttons).
+ * `tts` = immediate speech; `both` = bell then speech after delay; `off` = no-op.
+ * @param {string} text
+ */
+export function previewTripAlertSample(text) {
+  if (typeof window === 'undefined') return
+  const mode = getTripAlertMode()
+  if (mode === 'off') return
+  if (mode === 'both') {
+    playBellThenSpeak(text)
+  } else if (window.speechSynthesis) {
+    speakUtterance(text)
+  }
+}
+
 function flushPendingTripAlert() {
   if (typeof window === 'undefined' || !pendingAnnouncement) return
   const { fp, text, wantTts, wantBell } = pendingAnnouncement

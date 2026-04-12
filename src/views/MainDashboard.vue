@@ -33,6 +33,7 @@ import {
   linehaulLastFetchAt,
   linehaulFetching,
   linehaulLocationMatch,
+  linehaulOktaUserInfo,
   refreshLinehaulApis,
   tripPhase,
   linehaulDriverIdFromCredMeta,
@@ -577,6 +578,15 @@ const linehaulDriverIdDisplay = computed(() =>
   linehaulDriverIdFromCredMeta(linehaulCredMeta.value ?? {}),
 )
 
+/** First + last from Okta userinfo only (not Linehaul driver API). */
+const driverDisplayName = computed(() => {
+  const u = linehaulOktaUserInfo.value
+  if (!u || typeof u !== 'object') return ''
+  const g = String(u.given_name ?? '').trim()
+  const f = String(u.family_name ?? '').trim()
+  return [g, f].filter(Boolean).join(' ')
+})
+
 async function refreshLinehaulCredMeta() {
   try {
     linehaulCredMeta.value = await getCredentials()
@@ -1012,6 +1022,10 @@ onUnmounted(() => {
               <div v-if="linehaulDriverIdDisplay" class="linehaul-dl-row">
                 <dt>Driver ID</dt>
                 <dd>{{ linehaulDriverIdDisplay }}</dd>
+              </div>
+              <div v-if="driverDisplayName" class="linehaul-dl-row">
+                <dt>NAME</dt>
+                <dd>{{ driverDisplayName }}</dd>
               </div>
               <div v-if="linehaulDriverBody.driverActvStat" class="linehaul-dl-row">
                 <dt>Active</dt>

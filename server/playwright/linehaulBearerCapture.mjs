@@ -170,9 +170,28 @@ export async function captureAndSaveLinehaulBearer(opts = {}) {
     }
 
     /** @type {string | null} */
-    let captured = null
+    let capturedLinehaul = null
+    /** @type {string | null} */
+    let capturedOkta = null
     /** Throttle noisy Linehaul request logs */
     let lastLinehaulReqLog = 0
+
+    /**
+     * @param {import('playwright').Request} request
+     * @returns {string | null}
+     */
+    function oktaTokenFromRequest(request) {
+      try {
+        const url = request.url()
+        if (!/purpleid\.okta\.com/i.test(url)) return null
+        if (!url.includes('/v1/userinfo')) return null
+        const h = request.headers()
+        const raw = h.authorization ?? h.Authorization
+        return parseBearerFromAuthHeader(raw)
+      } catch {
+        return null
+      }
+    }
 
     const onRequest = (/** @type {import('playwright').Request} */ request) => {
       const url = request.url()
@@ -189,14 +208,25 @@ export async function captureAndSaveLinehaulBearer(opts = {}) {
           )
         }
       }
-      if (captured) return
-      const t = tokenFromRequest(request)
-      if (t) {
-        captured = t
-        log(
-          'info',
-          `[Linehaul capture] Captured JWT from browser (${t.length} chars). Saving…`,
-        )
+      if (!capturedLinehaul) {
+        const t = tokenFromRequest(request)
+        if (t) {
+          capturedLinehaul = t
+          log(
+            'info',
+            `[Linehaul capture] Captured JWT from browser (${t.length} chars). Saving…`,
+          )
+        }
+      }
+      if (!capturedOkta) {
+        const ot = oktaTokenFromRequest(request)
+        if (ot) {
+          capturedOkta = ot
+          log(
+            'info',
+            `[Linehaul capture] Captured Okta access token for userinfo (${ot.length} chars).`,
+          )
+        }
       }
     }
 
@@ -242,7 +272,7 @@ export async function captureAndSaveLinehaulBearer(opts = {}) {
       const waitStarted = Date.now()
       const deadline = waitStarted + waitMs
       let lastHeartbeat = Date.now()
-      while (!captured && Date.now() < deadline) {
+      while (!capturedLinehaul && Date.now() < deadline) {
         if (signal?.aborted) throw new Error('Aborted')
         const now = Date.now()
         if (now - lastHeartbeat >= 10_000) {
@@ -256,14 +286,20 @@ export async function captureAndSaveLinehaulBearer(opts = {}) {
         await sleep(250, signal)
       }
 
-      if (!captured) {
+      if (!capturedLinehaul) {
         throw new Error(
           'Timed out waiting for a Linehaul Apigee request with Authorization. Stay on dispatch home until the app loads Linehaul data, or try headed mode / complete sign-in.',
         )
       }
 
-      await saveCredentials({ fedexLinehaulBearer: captured })
+      await saveCredentials({
+        fedexLinehaulBearer: capturedLinehaul,
+        ...(capturedOkta ? { fedexOktaAccessToken: capturedOkta } : {}),
+      })
       log('info', '[Linehaul capture] Linehaul bearer token saved to encrypted credentials.')
+      if (capturedOkta) {
+        log('info', '[Linehaul capture] Okta access token (userinfo) saved to encrypted credentials.')
+      }
       return { ok: true, saved: true, reason: 'captured' }
     } finally {
       page.off('request', onRequest)

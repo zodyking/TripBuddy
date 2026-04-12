@@ -4,6 +4,7 @@
  */
 
 import { pushLiveLog } from '../stores/liveLogStore.js'
+import { previewTripAlertSample } from './tripVoiceAnnouncement.js'
 
 const PREFS_KEY = 'fedexAlertPrefs'
 
@@ -292,20 +293,20 @@ export function cancelAllAlerts() {
  */
 export function testTractorChangeAlert() {
   pushLiveLog({ type: 'info', message: `[Test] testTractorChangeAlert called`, ts: Date.now() })
-  speakTts('Tractor details updated.')
+  previewTripAlertSample('Tractor details updated.')
 }
 
 export function testDriverChangeAlert() {
   pushLiveLog({ type: 'info', message: `[Test] testDriverChangeAlert called`, ts: Date.now() })
-  speakTts('Driver details updated.')
+  previewTripAlertSample('Driver details updated.')
 }
 
 export function testSuccessAlert() {
   pushLiveLog({ type: 'info', message: `[Test] testSuccessAlert called`, ts: Date.now() })
-  speakTts('Check-in successful.')
+  previewTripAlertSample('Check-in successful.')
 }
 
 export function testErrorAlert() {
   pushLiveLog({ type: 'info', message: `[Test] testErrorAlert called`, ts: Date.now() })
-  speakTts('Check-in failed.')
+  previewTripAlertSample('Check-in failed.')
 }

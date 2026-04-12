@@ -3,16 +3,24 @@ defineProps({
   title: { type: String, required: true },
   /** When true, section starts expanded */
   open: { type: Boolean, default: false },
+  /** When false, title is static (no collapse / chevron) */
+  collapsible: { type: Boolean, default: true },
 })
 </script>
 
 <template>
-  <details class="settings-details" :open="open">
+  <details v-if="collapsible" class="settings-details" :open="open">
     <summary class="settings-summary">{{ title }}</summary>
     <div class="settings-body">
       <slot />
     </div>
   </details>
+  <div v-else class="settings-details settings-details-static">
+    <div class="settings-summary-static">{{ title }}</div>
+    <div class="settings-body">
+      <slot />
+    </div>
+  </div>
 </template>
 
 <style scoped>
@@ -77,6 +85,17 @@ defineProps({
 
 .settings-details[open] .settings-summary::after {
   transform: rotate(-135deg);
+}
+
+.settings-summary-static {
+  font-weight: var(--weight-semibold, 600);
+  font-size: var(--text-md, 1rem);
+  padding: var(--space-4, 1rem);
+  user-select: none;
+  min-height: var(--touch-target, 2.75rem);
+  display: flex;
+  align-items: center;
+  color: var(--color-text-primary, #f4f4f8);
 }
 
 .settings-body {

@@ -1,0 +1,50 @@
+$session = New-Object Microsoft.PowerShell.Commands.WebRequestSession
+$session.UserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36"
+Invoke-WebRequest -UseBasicParsing -Uri "https://purpleid.okta.com/oauth2/aus5o6d5wtNpcEsUH357/v1/userinfo" `
+-WebSession $session `
+-Headers @{
+"authority"="purpleid.okta.com"
+  "method"="GET"
+  "path"="/oauth2/aus5o6d5wtNpcEsUH357/v1/userinfo"
+  "scheme"="https"
+  "accept"="application/json"
+  "accept-encoding"="gzip, deflate, br, zstd"
+  "accept-language"="en-US,en;q=0.9"
+  "authorization"="Bearer eyJraWQiOiJ4a0J2UThOYnJyR0ttbWFFd3Y2LUo3SUFSOHVaSTUzUzd3aXJhWko4ZmRVIiwiYWxnIjoiUlMyNTYifQ.eyJ2ZXIiOjEsImp0aSI6IkFULmxCd0p5cTE0T0FPRXBSZzlrN1cxZ2lmTEIyUk51UlVmNVNRbnFTbjhmMUUiLCJpc3MiOiJodHRwczovL3B1cnBsZWlkLm9rdGEuY29tL29hdXRoMi9hdXM1bzZkNXd0TnBjRXNVSDM1NyIsImF1ZCI6IkFQUDM1MzY4NTkiLCJpYXQiOjE3NzYwMzYxNDUsImV4cCI6MTc3NjAzOTc0NSwiY2lkIjoiMG9hNzNmc3NkbHBjbHJmVHkzNTciLCJ1aWQiOiIwMHUxcjYydmg2NWQ4MTdlODM1OCIsInNjcCI6WyJncm91cHMiLCJwcm9maWxlIiwib3BlbmlkIiwiZW1haWwiXSwiYXV0aF90aW1lIjoxNzc2MDM2MTQ0LCJzdWIiOiI2NTQ0OTAwQHZlbmRvci5sZGFwLmZlZGV4LmNvbSIsImdyb3VwcyI6WyJmeGdfbGhsX2V4ZWN1dGVfdHJpcF9kcml2ZXJfZGZfMzUzNjg1OSJdLCJlbXBsb3llZU51bWJlciI6IjY1NDQ5MDAiLCJmZHhfZWFpIjoiTi9BIn0.rS80RlLGexOePqeKViBDl_ON6Ot1suvwdbi3fIltwEAZSlsrCSI1PDXbcIwRuNKjswSajgkEpr-zZuG9SSOz0RtkCseXuF_VQG2gt3jTxibMd8sFWhwxz24ngZhgaQpuqbygHj8xefKtjw1oNIVeJ0TnQOOqLboMnAnTysJLncybKZ_PUbluSsmCIQzapj1oMCrFpc2gJXoFagsN66JsQPV9FMWYyx1AMsQoZRhhFcZ6w6riQdDJOtCKvuco1s8-w5i4_Y2JTScEXiUuEibw5Sk3zN5_AVdSljGExN1lv4KjeHUKpGdBOhmupCf3Ibm_RxbptsRR9NlpeYiY0U8ing"
+  "origin"="https://fdxtools.fedex.com"
+  "priority"="u=1, i"
+  "referer"="https://fdxtools.fedex.com/"
+  "sec-ch-ua"="`"Chromium`";v=`"146`", `"Not-A.Brand`";v=`"24`", `"Google Chrome`";v=`"146`""
+  "sec-ch-ua-mobile"="?0"
+  "sec-ch-ua-platform"="`"Windows`""
+  "sec-fetch-dest"="empty"
+  "sec-fetch-mode"="cors"
+  "sec-fetch-site"="cross-site"
+  "x-okta-user-agent-extended"="okta-auth-js/7.14.1 @okta/okta-angular/6.5.1 Angular/19.2.17"
+} `
+-ContentType "application/json"
+
+//Request Headers
+
+//Request Response
+{"sub":"00u1r62vh65d817e8358","name":"BRANDON KING","locale":"en-US","email":"6544900@vendor.ldap.fedex.com","preferred_username":"6544900@vendor.ldap.fedex.com","given_name":"BRANDON","family_name":"KING","zoneinfo":"America/Los_Angeles","updated_at":1765125455,"email_verified":true,"groups":["fxg_lhl_execute_trip_driver_df_3536859"],"employeeNumber":"6544900"}
+
+---
+
+## Local test (Node script)
+
+This endpoint expects an **Okta access token** (issuer `purpleid.okta.com`), not the FedEx Linehaul **Apigee** JWT used for `linehaul/trip` APIs.
+
+From repo root:
+
+```
+OKTA_ACCESS_TOKEN="<paste token from DevTools Network → userinfo request>" node scripts/test-okta-userinfo.mjs
+```
+
+Append a successful JSON snapshot to this file:
+
+```
+OKTA_ACCESS_TOKEN="..." node scripts/test-okta-userinfo.mjs --append
+```
+
+Optional: `node scripts/test-okta-userinfo.mjs <token>` (first arg = token).
