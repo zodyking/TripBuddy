@@ -293,7 +293,8 @@ onUnmounted(() => {
   bottom: 0;
   z-index: var(--z-sticky, 20);
   display: flex;
-  height: var(--nav-height, 4rem);
+  height: calc(var(--nav-height, 4rem) + env(safe-area-inset-bottom, 0px));
+  max-height: calc(var(--nav-height, 4rem) + env(safe-area-inset-bottom, 0px));
   background: var(--color-bg-base, #08080a);
   border-top: 1px solid var(--color-border, rgba(255, 255, 255, 0.08));
   box-shadow: 0 -4px 24px rgba(0, 0, 0, 0.35);

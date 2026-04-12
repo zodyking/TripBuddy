@@ -2143,8 +2143,8 @@ onUnmounted(() => {
   object-position: top center;
 }
 .quick-actions-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  display: flex;
+  flex-direction: column;
   gap: var(--space-3, 0.75rem);
 }
 .quick-action-btn {
@@ -2173,9 +2173,6 @@ onUnmounted(() => {
     font-size: var(--text-base, 0.9375rem);
   }
 
-  .quick-actions-grid {
-    grid-template-columns: 1fr;
-  }
 }
 
 @media (min-width: 420px) {
