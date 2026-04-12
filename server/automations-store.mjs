@@ -351,6 +351,15 @@ export const BLOCK_DEFINITIONS = {
       { key: 'tryOktaLogin', label: 'Auto Okta login if needed', type: 'boolean', default: true },
     ],
   },
+  arriveEndToEnd: {
+    type: 'arriveEndToEnd',
+    label: 'Arrive (full pipeline)',
+    category: 'fedex',
+    icon: 'map-pin',
+    fields: [
+      { key: 'tryOktaLogin', label: 'Auto Okta login if needed', type: 'boolean', default: true },
+    ],
+  },
   fillCheckInForm: {
     type: 'fillCheckInForm',
     label: 'Fill Check-In Form',
