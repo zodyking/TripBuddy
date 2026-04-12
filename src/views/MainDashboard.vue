@@ -948,9 +948,6 @@ onUnmounted(() => {
           {{ linehaulLocationMatch ? 'Aligned' : 'Mismatch' }}
         </span>
       </div>
-      <p class="hint driver-status-hint">
-        FedEx Linehaul tractor and driver snapshot. Refresh: Settings → Driver Credentials (interval or manual).
-      </p>
       <div class="driver-status-surface">
         <p v-if="linehaulFetching" class="driver-status-fetching" aria-live="polite">Updating…</p>
         <p
@@ -1035,7 +1032,7 @@ onUnmounted(() => {
 
     <section class="panel dispatch-instructions-panel">
       <div class="dispatch-card-toolbar">
-        <h2 class="dispatch-instructions-title">Dispatch instructions</h2>
+        <h2 class="dispatch-instructions-title">Dispatch Instructions</h2>
         <div
           class="trip-status-inline"
           role="status"
@@ -1047,10 +1044,6 @@ onUnmounted(() => {
           <span class="trip-status-state">{{ tripStatusUi.text }}</span>
         </div>
       </div>
-      <p class="hint trip-voice-hint" role="note">
-        Trip alerts (speech and/or bell) play on this device’s speaker or headset (not the server). Turn the volume up.
-        Change mode under Settings → Audio.
-      </p>
       <div
         v-if="tripVoiceUnlockHint && tripAlertOn"
         class="trip-voice-unlock-banner"
@@ -1086,13 +1079,12 @@ onUnmounted(() => {
           <span class="dispatch-od-val">{{ tripOriginDest.destination }}</span>
         </button>
       </div>
-      <p v-if="!instructions.trim()" class="empty">No instructions yet — edit in Settings.</p>
+      <p v-if="!instructions.trim()" class="empty">No instructions yet.</p>
       <p v-else class="read dispatch-instructions-body">{{ instructions }}</p>
     </section>
 
     <section v-if="showSealOrTripPanel" class="panel trip-details-panel">
-      <h2>Trip details</h2>
-      <p class="hint">FedEx trip payload when Linehaul loads (trailers and dolly when present).</p>
+      <h2>Trip Details</h2>
       <p
         v-if="
           linehaulTripsBody &&
@@ -1426,9 +1418,6 @@ onUnmounted(() => {
 }
 .dest-loc-actions {
   margin-top: 0.25rem;
-}
-.driver-status-hint {
-  margin-bottom: 0.45rem;
 }
 .driver-status-card-head {
   display: flex;
@@ -1882,11 +1871,6 @@ onUnmounted(() => {
 }
 .dispatch-instructions-body {
   margin-top: 0;
-}
-.trip-voice-hint {
-  margin: 0 0 0.65rem;
-  font-size: 0.78rem;
-  line-height: 1.35;
 }
 .trip-voice-unlock-banner {
   display: flex;
