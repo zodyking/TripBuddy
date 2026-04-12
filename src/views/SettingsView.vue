@@ -29,7 +29,6 @@ import {
 import SettingsSection from '../components/settings/SettingsSection.vue'
 import AutomationList from '../components/automation/AutomationList.vue'
 import AutomationEditor from '../components/automation/AutomationEditor.vue'
-import XPathExtractor from '../components/settings/XPathExtractor.vue'
 import {
   getTripAlertMode,
   setTripAlertMode,
@@ -688,10 +687,6 @@ onUnmounted(() => {
           </button>
           <button type="button" class="btn tap" @click="clearCredentials">Clear</button>
         </div>
-      </SettingsSection>
-
-      <SettingsSection title="XPath Tools">
-        <XPathExtractor />
       </SettingsSection>
 
       <SettingsSection title="Live log">

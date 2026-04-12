@@ -366,14 +366,6 @@ export async function postCancelRetry(runId) {
   return handleJson(r)
 }
 
-export async function postOcr(formData) {
-  const r = await fetch('/api/ocr', {
-    method: 'POST',
-    body: formData,
-  })
-  return handleJson(r)
-}
-
 export async function getAutomationPreview() {
   const r = await fetch('/api/automation/preview')
   return handleJson(r)
@@ -453,48 +445,5 @@ export async function listAutomationPresets() {
 
 export async function installAutomationPreset(presetId) {
   const r = await fetch(`/api/automations/presets/${presetId}/install`, { method: 'POST' })
-  return handleJson(r)
-}
-
-export async function getXPathPickerStatus() {
-  const r = await fetch('/api/xpath-picker/status')
-  return handleJson(r)
-}
-
-export async function getXPathPickerPreview() {
-  const r = await fetch('/api/xpath-picker/preview')
-  return handleJson(r)
-}
-
-export async function startXPathPicker(url, headless = false) {
-  const r = await fetch('/api/xpath-picker/start', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ url, headless }),
-  })
-  return handleJson(r)
-}
-
-export async function stopXPathPicker() {
-  const r = await fetch('/api/xpath-picker/stop', { method: 'POST' })
-  return handleJson(r)
-}
-
-export async function navigateXPathPicker(url) {
-  const r = await fetch('/api/xpath-picker/navigate', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ url }),
-  })
-  return handleJson(r)
-}
-
-export async function refreshXPathPicker() {
-  const r = await fetch('/api/xpath-picker/refresh', { method: 'POST' })
-  return handleJson(r)
-}
-
-export async function clearXPathPickerElements() {
-  const r = await fetch('/api/xpath-picker/clear', { method: 'POST' })
   return handleJson(r)
 }

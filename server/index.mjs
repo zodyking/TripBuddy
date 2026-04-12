@@ -10,7 +10,6 @@ import { API_PORT, UPLOADS_DIR } from './config.mjs'
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const DIST_DIR = path.join(__dirname, '..', 'dist')
 import { logBus, emitLog } from './log-bus.mjs'
-import { recognizeImage } from './ocr/recognize.mjs'
 import {
   runScenario,
   cancelRun,
@@ -43,16 +42,6 @@ import {
   cancelBlockRun,
 } from './playwright/blocks.mjs'
 import { listPresets, getPreset } from './automation-presets.mjs'
-import {
-  isPickerActive,
-  getPickerPreview,
-  getSelectedElements,
-  clearSelectedElements,
-  startPickerSession,
-  stopPickerSession,
-  navigatePickerTo,
-  refreshPicker,
-} from './playwright/xpathPicker.mjs'
 import {
   getCheckInFlowPayload,
   writeCheckInFlowFromMerged,
@@ -131,25 +120,6 @@ app.get('/api/events', async (req, reply) => {
   const onEntry = (payload) => send(payload)
   logBus.on('entry', onEntry)
   req.raw.on('close', () => logBus.off('entry', onEntry))
-})
-
-app.post('/api/ocr', async (req, reply) => {
-  try {
-    const results = []
-    const parts = req.parts()
-    for await (const part of parts) {
-      if (part.type === 'file') {
-        const buf = await part.toBuffer()
-        const { text, confidence } = await recognizeImage(buf)
-        results.push({ field: part.fieldname, text, confidence })
-      }
-    }
-    return { results }
-  } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e)
-    emitLog('error', `OCR failed: ${msg}`)
-    return reply.code(500).send({ error: msg })
-  }
 })
 
 app.get('/api/assignment', async () => {
@@ -721,74 +691,6 @@ app.post('/api/automations/presets/:presetId/install', async (req, reply) => {
     console.error(`[presets/install] error:`, msg)
     return reply.code(400).send({ error: msg })
   }
-})
-
-app.get('/api/xpath-picker/status', async () => ({
-  active: isPickerActive(),
-  elements: getSelectedElements(),
-}))
-
-app.get('/api/xpath-picker/preview', async () => getPickerPreview())
-
-app.post('/api/xpath-picker/start', async (req, reply) => {
-  if (isRunnerBusy() || isBlockRunnerBusy()) {
-    return reply.code(409).send({ error: 'Runner busy — cannot start picker' })
-  }
-  if (isPickerActive()) {
-    return reply.code(409).send({ error: 'Picker already active' })
-  }
-  const { url, headless = false } = req.body ?? {}
-  if (!url || typeof url !== 'string') {
-    return reply.code(400).send({ error: 'url required' })
-  }
-  try {
-    await startPickerSession(url, { headless })
-    return { ok: true }
-  } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e)
-    emitLog('error', `XPath picker start failed: ${msg}`)
-    return reply.code(500).send({ error: msg })
-  }
-})
-
-app.post('/api/xpath-picker/stop', async () => {
-  const result = await stopPickerSession()
-  return result
-})
-
-app.post('/api/xpath-picker/navigate', async (req, reply) => {
-  if (!isPickerActive()) {
-    return reply.code(400).send({ error: 'No picker session active' })
-  }
-  const { url } = req.body ?? {}
-  if (!url || typeof url !== 'string') {
-    return reply.code(400).send({ error: 'url required' })
-  }
-  try {
-    await navigatePickerTo(url)
-    return { ok: true }
-  } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e)
-    return reply.code(500).send({ error: msg })
-  }
-})
-
-app.post('/api/xpath-picker/refresh', async (req, reply) => {
-  if (!isPickerActive()) {
-    return reply.code(400).send({ error: 'No picker session active' })
-  }
-  try {
-    await refreshPicker()
-    return { ok: true }
-  } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e)
-    return reply.code(500).send({ error: msg })
-  }
-})
-
-app.post('/api/xpath-picker/clear', async () => {
-  clearSelectedElements()
-  return { ok: true }
 })
 
 // ---------------------------------------------------------------------------
