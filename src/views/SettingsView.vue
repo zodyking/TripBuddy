@@ -755,107 +755,84 @@ onUnmounted(() => {
     <main v-show="settingsTab === 'audio'" class="stack audio-panel">
       <SettingsSection title="Audio Alerts">
         
-        <div class="audio-master-row">
-          <label class="audio-master-toggle">
-            <input
-              type="checkbox"
-              :checked="ttsEnabled"
-              @change="toggleTts($event.target.checked)"
-            />
-            <span class="audio-master-label">Text-to-speech alerts</span>
-          </label>
-          <button type="button" class="btn tap" :disabled="!ttsEnabled" @click="speakTripTtsTest">Test</button>
+        <div class="audio-row">
+          <span class="audio-row-label">Text-to-speech alerts</span>
+          <div class="audio-row-controls">
+            <label class="toggle-switch">
+              <input type="checkbox" :checked="ttsEnabled" @change="toggleTts($event.target.checked)" />
+              <span class="toggle-slider"></span>
+            </label>
+            <button type="button" class="audio-test-btn tap" :disabled="!ttsEnabled" @click="speakTripTtsTest">Test</button>
+          </div>
         </div>
 
-        <div v-if="ttsEnabled" class="audio-bell-row">
-          <label class="alert-toggle">
-            <input
-              type="checkbox"
-              :checked="bellChimeEnabled"
-              @change="toggleBellChime($event.target.checked)"
-            />
-            <span class="alert-toggle-label">Play bell chime before alerts</span>
-          </label>
-          <button type="button" class="btn-sm tap" @click="playTripBellTest">Test</button>
+        <div v-if="ttsEnabled" class="audio-row">
+          <span class="audio-row-label">Play bell chime before alerts</span>
+          <div class="audio-row-controls">
+            <label class="toggle-switch">
+              <input type="checkbox" :checked="bellChimeEnabled" @change="toggleBellChime($event.target.checked)" />
+              <span class="toggle-slider"></span>
+            </label>
+            <button type="button" class="audio-test-btn tap" @click="playTripBellTest">Test</button>
+          </div>
         </div>
 
         <div v-if="ttsEnabled" class="alert-types-section">
-          <p class="alert-types-heading">Alert types</p>
+          <p class="alert-types-heading">Alert Types</p>
 
-          <div class="alert-toggle-row">
-            <label class="alert-toggle">
-              <input
-                type="checkbox"
-                :checked="alertPrefs.tripReady"
-                @change="updateAlertPref('tripReady', $event.target.checked)"
-              />
-              <span class="alert-toggle-label">New trip ready</span>
+          <div class="audio-row">
+            <span class="audio-row-label">New trip ready</span>
+            <label class="toggle-switch">
+              <input type="checkbox" :checked="alertPrefs.tripReady" @change="updateAlertPref('tripReady', $event.target.checked)" />
+              <span class="toggle-slider"></span>
             </label>
           </div>
 
-        <div class="alert-toggle-row">
-            <label class="alert-toggle">
-              <input
-                type="checkbox"
-                :checked="tripStatusChangeOn"
-                @change="toggleTripStatusChange($event.target.checked)"
-              />
-              <span class="alert-toggle-label">Trip status change</span>
+          <div class="audio-row">
+            <span class="audio-row-label">Trip status change</span>
+            <label class="toggle-switch">
+              <input type="checkbox" :checked="tripStatusChangeOn" @change="toggleTripStatusChange($event.target.checked)" />
+              <span class="toggle-slider"></span>
             </label>
           </div>
 
-          <div class="alert-toggle-row">
-            <label class="alert-toggle">
-              <input
-                type="checkbox"
-                :checked="trailerStatusChangeOn"
-                @change="toggleTrailerStatusChange($event.target.checked)"
-              />
-              <span class="alert-toggle-label">Trailer loading finished</span>
+          <div class="audio-row">
+            <span class="audio-row-label">Trailer loading finished</span>
+            <label class="toggle-switch">
+              <input type="checkbox" :checked="trailerStatusChangeOn" @change="toggleTrailerStatusChange($event.target.checked)" />
+              <span class="toggle-slider"></span>
             </label>
           </div>
 
-          <div class="alert-toggle-row">
-            <label class="alert-toggle">
-              <input
-                type="checkbox"
-                :checked="arrivalAlertsOn"
-                @change="toggleArrivalAlerts($event.target.checked)"
-              />
-              <span class="alert-toggle-label">Arrival alerts</span>
+          <div class="audio-row">
+            <span class="audio-row-label">Arrival alerts</span>
+            <label class="toggle-switch">
+              <input type="checkbox" :checked="arrivalAlertsOn" @change="toggleArrivalAlerts($event.target.checked)" />
+              <span class="toggle-slider"></span>
             </label>
           </div>
 
-          <div class="alert-toggle-row">
-            <label class="alert-toggle">
-              <input
-                type="checkbox"
-                :checked="alertPrefs.tractorChange"
-                @change="updateAlertPref('tractorChange', $event.target.checked)"
-              />
-              <span class="alert-toggle-label">Tractor details change</span>
+          <div class="audio-row">
+            <span class="audio-row-label">Tractor details change</span>
+            <label class="toggle-switch">
+              <input type="checkbox" :checked="alertPrefs.tractorChange" @change="updateAlertPref('tractorChange', $event.target.checked)" />
+              <span class="toggle-slider"></span>
             </label>
           </div>
 
-          <div class="alert-toggle-row">
-            <label class="alert-toggle">
-              <input
-                type="checkbox"
-                :checked="alertPrefs.driverChange"
-                @change="updateAlertPref('driverChange', $event.target.checked)"
-              />
-              <span class="alert-toggle-label">Driver details change</span>
+          <div class="audio-row">
+            <span class="audio-row-label">Driver details change</span>
+            <label class="toggle-switch">
+              <input type="checkbox" :checked="alertPrefs.driverChange" @change="updateAlertPref('driverChange', $event.target.checked)" />
+              <span class="toggle-slider"></span>
             </label>
           </div>
 
-          <div class="alert-toggle-row">
-            <label class="alert-toggle">
-              <input
-                type="checkbox"
-                :checked="alertPrefs.checkIn"
-                @change="updateAlertPref('checkIn', $event.target.checked)"
-              />
-              <span class="alert-toggle-label">Check-in results</span>
+          <div class="audio-row">
+            <span class="audio-row-label">Check-in results</span>
+            <label class="toggle-switch">
+              <input type="checkbox" :checked="alertPrefs.checkIn" @change="updateAlertPref('checkIn', $event.target.checked)" />
+              <span class="toggle-slider"></span>
             </label>
           </div>
         </div>
@@ -918,98 +895,105 @@ onUnmounted(() => {
 .audio-panel {
   padding-top: 0.15rem;
 }
-.audio-master-row {
+.audio-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 1rem;
-  padding: 0.5rem 0;
-  margin-bottom: 0.5rem;
-}
-.audio-master-toggle {
-  display: flex;
-  align-items: center;
-  gap: 0.75rem;
-  cursor: pointer;
-  flex: 1;
-}
-.audio-master-toggle input[type="checkbox"] {
-  width: 1.5rem;
-  height: 1.5rem;
-  accent-color: var(--color-accent-purple, #7b4db5);
-  cursor: pointer;
-  flex-shrink: 0;
-}
-.audio-master-label {
-  font-size: 1rem;
-  font-weight: 600;
-  color: var(--color-text-primary, #f4f4f8);
-}
-.audio-bell-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.75rem;
-  padding: 0.5rem 0;
-  margin-bottom: 0.5rem;
-  border-bottom: 1px solid var(--color-border, rgba(255, 255, 255, 0.08));
-}
-.alert-types-section {
-  padding-top: 0.5rem;
-}
-.alert-types-heading {
-  font-size: 0.85rem;
-  font-weight: 600;
-  color: var(--color-text-secondary, #a8a8b8);
-  margin: 0 0 0.5rem;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-}
-.alert-toggle-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.75rem;
   padding: 0.75rem 0;
   border-bottom: 1px solid var(--color-border, rgba(255, 255, 255, 0.08));
+  min-height: 48px;
 }
-.alert-toggle-row:last-child {
+.audio-row:last-child {
   border-bottom: none;
 }
-.alert-toggle {
-  display: flex;
-  align-items: center;
-  gap: 0.75rem;
-  cursor: pointer;
+.audio-row-label {
+  font-size: 0.95rem;
+  color: var(--color-text-primary, #f4f4f8);
   flex: 1;
   min-width: 0;
 }
-.alert-toggle input[type="checkbox"] {
-  width: 1.25rem;
-  height: 1.25rem;
-  accent-color: var(--color-accent-purple, #7b4db5);
-  cursor: pointer;
+.audio-row-controls {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
   flex-shrink: 0;
 }
-.alert-toggle-label {
-  font-size: 0.9rem;
-  color: var(--color-text-primary, #f4f4f8);
+.toggle-switch {
+  position: relative;
+  display: inline-block;
+  width: 44px;
+  height: 24px;
+  flex-shrink: 0;
 }
-.btn-sm {
+.toggle-switch input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+.toggle-slider {
+  position: absolute;
+  cursor: pointer;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: var(--color-bg-tertiary, #2a2a35);
+  border-radius: 24px;
+  transition: background-color 0.2s ease;
+}
+.toggle-slider::before {
+  position: absolute;
+  content: "";
+  height: 18px;
+  width: 18px;
+  left: 3px;
+  bottom: 3px;
+  background-color: #fff;
+  border-radius: 50%;
+  transition: transform 0.2s ease;
+}
+.toggle-switch input:checked + .toggle-slider {
+  background-color: var(--color-accent-purple, #7b4db5);
+}
+.toggle-switch input:checked + .toggle-slider::before {
+  transform: translateX(20px);
+}
+.toggle-switch input:disabled + .toggle-slider {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.audio-test-btn {
   cursor: pointer;
   border-radius: 6px;
-  border: 1px solid var(--color-border, rgba(255, 255, 255, 0.08));
+  border: 1px solid var(--color-border, rgba(255, 255, 255, 0.12));
   background: var(--color-bg-surface, #16161d);
   color: var(--color-text-secondary, #a8a8b8);
-  padding: 0.4rem 0.65rem;
-  font-size: 0.75rem;
+  padding: 0.5rem 1rem;
+  font-size: 0.85rem;
   font-weight: 500;
-  min-height: 32px;
+  min-width: 60px;
+  min-height: 36px;
   transition: var(--transition-colors);
 }
-.btn-sm:hover {
-  background: var(--color-hover, rgba(255, 255, 255, 0.04));
+.audio-test-btn:hover:not(:disabled) {
+  background: var(--color-hover, rgba(255, 255, 255, 0.06));
   color: var(--color-text-primary, #f4f4f8);
+}
+.audio-test-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.alert-types-section {
+  padding-top: 0.25rem;
+}
+.alert-types-heading {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--color-text-secondary, #a8a8b8);
+  margin: 0.5rem 0;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
 }
 .btn-group-sm {
   display: flex;
