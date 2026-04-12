@@ -793,7 +793,10 @@ app.post('/api/xpath-picker/clear', async () => {
 // ---------------------------------------------------------------------------
 // Production static UI serving (after all /api routes)
 // ---------------------------------------------------------------------------
+console.log(`DIST_DIR resolved to: ${DIST_DIR}`)
 const distExists = await fs.stat(DIST_DIR).then(() => true, () => false)
+console.log(`dist folder exists: ${distExists}`)
+
 if (distExists) {
   await app.register(fastifyStatic, {
     root: DIST_DIR,
@@ -804,6 +807,15 @@ if (distExists) {
       return reply.sendFile('index.html')
     }
     return reply.code(404).send({ error: 'Not found' })
+  })
+} else {
+  console.error(`WARNING: dist folder not found at ${DIST_DIR}`)
+  app.get('/', async (req, reply) => {
+    return reply.code(503).send({
+      error: 'UI not available',
+      detail: `dist folder not found at ${DIST_DIR}`,
+      hint: 'The Vue build may have failed or the Dockerfile did not copy dist correctly',
+    })
   })
 }
 
