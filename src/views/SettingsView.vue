@@ -240,15 +240,6 @@ async function saveCredentials() {
   credSaving.value = true
   try {
     const hasBearerInput = credLinehaulToken.value.trim().length > 0
-    const hasBearerOnFile = Boolean(credMeta.value?.hasLinehaulBearer)
-    if (!hasBearerInput && !hasBearerOnFile) {
-      pushLiveLog({
-        type: 'error',
-        message: 'Linehaul bearer token is required',
-        ts: Date.now(),
-      })
-      return
-    }
     const body = {
       username: credUser.value,
       password: credPass.value || undefined,
