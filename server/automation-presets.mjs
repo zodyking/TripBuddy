@@ -93,6 +93,35 @@ export const PRESETS = {
     ],
     variables: {},
   },
+
+  arrive_full: {
+    name: 'Full Arrive Flow',
+    description:
+      'Arrive at destination: dispatch home, sign-in, enter tractor number, confirm arrival, sign out.',
+    triggers: [
+      { id: genId(), type: 'manual', buttonLabel: 'Arrive' },
+    ],
+    conditions: [],
+    actions: [
+      {
+        id: genId(),
+        type: 'goto',
+        url: 'dispatch_entry',
+        waitUntil: 'domcontentloaded',
+      },
+      {
+        id: genId(),
+        type: 'delay',
+        ms: 1500,
+      },
+      {
+        id: genId(),
+        type: 'arriveEndToEnd',
+        tryOktaLogin: true,
+      },
+    ],
+    variables: {},
+  },
 }
 
 export function getPresetIds() {

@@ -286,6 +286,58 @@ app.get('/api/fedex/linehaul/trips', async (req, reply) => {
     })
   }
 
+  const legSeqRaw =
+    typeof q.dailyTripLegSequence === 'string' && q.dailyTripLegSequence.trim()
+      ? q.dailyTripLegSequence.trim()
+      : ''
+  const alreadyCalledRaw = q.alreadyCalled
+  const alreadyCalled =
+    alreadyCalledRaw === undefined || alreadyCalledRaw === ''
+      ? 'false'
+      : String(alreadyCalledRaw)
+
+  /** Dispatch-era trip snapshot: same upstream path, query `dailyTripLegSequence` + `alreadyCalled` only. */
+  if (legSeqRaw && DIGITS_RE.test(legSeqRaw)) {
+    const sp = new URLSearchParams()
+    sp.set('dailyTripLegSequence', legSeqRaw)
+    sp.set('alreadyCalled', alreadyCalled)
+
+    let originIdHeader =
+      typeof q.originId === 'string' && q.originId.trim() ? q.originId.trim() : ''
+    if (!originIdHeader) {
+      let tractorNbr =
+        typeof q.tractorNbr === 'string' && q.tractorNbr.trim()
+          ? q.tractorNbr.trim()
+          : await getTractorNumber()
+      if (tractorNbr && DIGITS_RE.test(tractorNbr)) {
+        const tr = await linehaulGet('tractor', tractorNbr, bearer)
+        const lid = tr.body?.locationId
+        if (lid != null && String(lid).trim() !== '') {
+          originIdHeader = String(lid).trim()
+        }
+      }
+    }
+
+    const result = await linehaulTripsGet(sp.toString(), bearer, {
+      originId: originIdHeader || undefined,
+    })
+
+    if (result.status === 204) {
+      return reply.code(200).send({
+        ok: true,
+        status: 204,
+        body: null,
+        noActiveTrip: true,
+      })
+    }
+
+    return reply.code(result.status).send({
+      ok: result.ok,
+      status: result.status,
+      body: result.body,
+    })
+  }
+
   let driverId =
     typeof q.driverId === 'string' && q.driverId.trim()
       ? q.driverId.trim()
@@ -328,11 +380,6 @@ app.get('/api/fedex/linehaul/trips', async (req, reply) => {
 
   const status =
     typeof q.status === 'string' && q.status.trim() ? q.status.trim() : 'APRVD'
-  const alreadyCalledRaw = q.alreadyCalled
-  const alreadyCalled =
-    alreadyCalledRaw === undefined || alreadyCalledRaw === ''
-      ? 'false'
-      : String(alreadyCalledRaw)
 
   const sp = new URLSearchParams()
   sp.set('driverId', driverId)

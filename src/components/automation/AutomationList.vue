@@ -3,6 +3,13 @@ import { ref, onMounted } from 'vue'
 import { listAutomations, createAutomation, deleteAutomation, duplicateAutomation, runAutomation, listAutomationPresets, installAutomationPreset } from '../../api.js'
 import { pushLiveLog } from '../../stores/liveLogStore.js'
 
+function generateId() {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID().slice(0, 8)
+  }
+  return Math.random().toString(36).slice(2, 10)
+}
+
 const emit = defineEmits(['edit'])
 
 const automations = ref([])
@@ -44,7 +51,7 @@ async function create() {
   try {
     const auto = await createAutomation({
       name: 'New Automation',
-      triggers: [{ id: crypto.randomUUID().slice(0, 8), type: 'manual', buttonLabel: 'Run' }],
+      triggers: [{ id: generateId(), type: 'manual', buttonLabel: 'Run' }],
       conditions: [],
       actions: [],
     })

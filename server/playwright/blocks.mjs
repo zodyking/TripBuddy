@@ -11,6 +11,7 @@ import {
   CHECKIN_LOC_VISIBLE_SHORT_MS,
 } from './checkInFlow.mjs'
 import { runCheckInEndToEnd } from './checkInOrchestration.mjs'
+import { runArriveEndToEnd } from './arriveOrchestration.mjs'
 import { normalizePhoneForFill, clickSignOutModalConfirm } from './postCheckInFlow.mjs'
 import {
   startPreviewCapture,
@@ -68,6 +69,7 @@ const SKIP_SCREENSHOT_TYPES = new Set([
   'parallel',
   'runAutomation',
   'checkInEndToEnd',
+  'arriveEndToEnd',
 ])
 
 /**
@@ -592,6 +594,17 @@ async function executeAction(action, page, ctx) {
         waitForLocationRetry: waitForBlockRetryLocation,
       })
       ctx.variables._checkInPayload = payload
+      break
+    }
+
+    case 'arriveEndToEnd': {
+      if (signal?.aborted) throw new Error('Aborted')
+      const arrivePayload = await runArriveEndToEnd(page, {
+        log,
+        signal,
+        tryOktaLogin: action.tryOktaLogin !== false,
+      })
+      ctx.variables._arrivePayload = arrivePayload
       break
     }
 

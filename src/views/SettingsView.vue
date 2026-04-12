@@ -93,6 +93,8 @@ const linehaulPollTickValues = Array.from(
   (_, i) => i,
 )
 const linehaulManualBusy = ref(false)
+/** Optional digits for Settings → Trip details test (dispatch-era `dailyTripLegSequence`). */
+const linehaulTestTripLegSeq = ref('')
 /** @type {import('vue').Ref<'all' | 'tractor' | 'driver' | 'tripReady' | 'trips'>} */
 const linehaulTestTarget = ref('all')
 const credPass = ref('')
@@ -389,7 +391,16 @@ async function testLinehaulTripReady() {
 
 async function testLinehaulTrips() {
   if (!(await requireApi())) return
-  const r = await fetchFedexLinehaulTrips()
+  const leg = typeof linehaulTestTripLegSeq.value === 'string'
+    ? linehaulTestTripLegSeq.value.trim()
+    : ''
+  const r =
+    leg && /^\d+$/.test(leg)
+      ? await fetchFedexLinehaulTrips({
+          dailyTripLegSequence: leg,
+          alreadyCalled: 'false',
+        })
+      : await fetchFedexLinehaulTrips()
   if (r.noActiveTrip) {
     pushLiveLog({
       type: 'info',
@@ -622,6 +633,17 @@ onUnmounted(() => {
               <option value="tripReady">Trip Ready</option>
               <option value="trips">Trip details</option>
             </select>
+            <input
+              v-show="linehaulTestTarget === 'trips'"
+              v-model="linehaulTestTripLegSeq"
+              class="inp tap linehaul-test-legseq"
+              type="text"
+              inputmode="numeric"
+              autocomplete="off"
+              placeholder="Leg seq (optional)"
+              title="If set (digits only), tests GET trips by dailyTripLegSequence; otherwise default APRVD query."
+              aria-label="Daily trip leg sequence for trip details test"
+            />
             <button
               type="button"
               class="btn primary tap"
@@ -1135,6 +1157,12 @@ onUnmounted(() => {
 }
 .linehaul-test-controls .btn {
   flex: 0 0 auto;
+}
+.linehaul-test-legseq {
+  flex: 1 1 9rem;
+  min-width: 8rem;
+  max-width: 100%;
+  margin-bottom: 0;
 }
 .btn {
   cursor: pointer;

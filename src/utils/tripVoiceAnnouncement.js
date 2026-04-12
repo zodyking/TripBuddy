@@ -241,7 +241,7 @@ export function speakTripTtsTest() {
   try {
     window.speechSynthesis.cancel()
     const u = new SpeechSynthesisUtterance(
-      'New trip ready from Example Origin to Example Destination.',
+      'Trip status changed to assigned. Trailer 1 has finished loading and is now closed.',
     )
     u.rate = 1.08
     u.pitch = 1
@@ -260,4 +260,115 @@ export function playTripBellTest() {
 /** @deprecated Use setTripAlertMode instead */
 export function setTripTtsEnabled(enabled) {
   setTripAlertMode(enabled ? 'tts' : 'off')
+}
+
+let lastTripPhase = ''
+
+/**
+ * Announce trip status phase changes (none → assigned → dispatched → none).
+ * @param {'none' | 'assigned' | 'dispatched'} phase
+ */
+export function maybeAnnounceStatusChange(phase) {
+  if (typeof window === 'undefined') return
+  if (phase === lastTripPhase) return
+  const prev = lastTripPhase
+  lastTripPhase = phase
+  if (!prev) return
+
+  const mode = getTripAlertMode()
+  if (mode === 'off') return
+
+  let text = ''
+  if (phase === 'assigned' && prev !== 'assigned') {
+    text = 'Trip status changed to assigned.'
+  } else if (phase === 'dispatched' && prev !== 'dispatched') {
+    text = 'Trip status changed to dispatched.'
+  } else if (phase === 'none' && prev !== 'none') {
+    text = 'Trip completed.'
+  }
+
+  if (text) {
+    announceText(text, mode)
+  }
+}
+
+/** @type {Map<string, string>} */
+const prevTrailerStatuses = new Map()
+
+/**
+ * Announce trailer load status changes (LDNG → CLSD).
+ * @param {unknown[]} trailers
+ */
+export function maybeAnnounceTrailerStatusChange(trailers) {
+  if (typeof window === 'undefined') return
+  if (!Array.isArray(trailers)) return
+
+  const mode = getTripAlertMode()
+  if (mode === 'off') return
+
+  for (const t of trailers) {
+    if (!t || typeof t !== 'object') continue
+    const tr = /** @type {Record<string, unknown>} */ (t)
+    const order = String(tr.trlrOrder ?? '')
+    if (!order) continue
+
+    const status = String(tr.detlCodeLoadStatus ?? '').toUpperCase()
+    const prev = prevTrailerStatuses.get(order)
+
+    if (prev === 'LDNG' && status === 'CLSD') {
+      const text = `Trailer ${order} has finished loading and is now closed.`
+      announceText(text, mode)
+    }
+
+    prevTrailerStatuses.set(order, status)
+  }
+}
+
+/**
+ * Reset trailer status tracking (call when trip clears).
+ */
+export function clearTrailerStatusTracking() {
+  prevTrailerStatuses.clear()
+}
+
+/**
+ * Reset trip phase tracking (call on unmount).
+ */
+export function clearTripPhaseTracking() {
+  lastTripPhase = ''
+}
+
+/**
+ * Shared announcement logic for TTS and/or bell.
+ * @param {string} text
+ * @param {TripAlertMode} mode
+ */
+function announceText(text, mode) {
+  if (typeof window === 'undefined') return
+
+  evaluateGestureGate()
+
+  const wantTts = mode === 'tts' || mode === 'both'
+  const wantBell = mode === 'bell' || mode === 'both'
+
+  if (!gestureUnlocked) {
+    return
+  }
+
+  if (wantTts && window.speechSynthesis) {
+    try {
+      window.speechSynthesis.cancel()
+      const u = new SpeechSynthesisUtterance(text)
+      u.rate = 1.08
+      u.pitch = 1
+      u.volume = 1
+      window.speechSynthesis.speak(u)
+    } catch {
+      /* ignore */
+    }
+  }
+
+  if (wantBell) {
+    playBellSound()
+  }
 }

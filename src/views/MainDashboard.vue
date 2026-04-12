@@ -34,6 +34,7 @@ import {
   linehaulFetching,
   linehaulLocationMatch,
   refreshLinehaulApis,
+  tripPhase,
 } from '../stores/linehaulSnapshotStore.js'
 import {
   registerApiRecover,
@@ -50,7 +51,7 @@ import { parseTripReadyBoolean } from '../utils/tripReadyParse.js'
 import {
   extractOriginDest,
   hasTripOriginAndDestination,
-  buildTrailerCards,
+  buildEnhancedTrailerCards,
   buildDollySection,
 } from '../utils/tripDetailsDisplay.js'
 import { formatLinehaulLocationForDisplay } from '../utils/linehaulLocationDisplay.js'
@@ -60,6 +61,10 @@ import {
   unlockTripVoiceFromUserGesture,
   tripVoiceShowUnlockHint,
   isTripAlertEnabled,
+  maybeAnnounceStatusChange,
+  maybeAnnounceTrailerStatusChange,
+  clearTrailerStatusTracking,
+  clearTripPhaseTracking,
 } from '../utils/tripVoiceAnnouncement.js'
 import {
   announceTractorChange,
@@ -95,6 +100,10 @@ const destLocationError = ref('')
 /** @type {import('vue').Ref<unknown>} */
 const destLocationBody = ref(null)
 
+const trailerGpsModalOpen = ref(false)
+/** @type {import('vue').Ref<{ order: string, trlrNbr: string, lat: number, lng: number } | null>} */
+const trailerGpsData = ref(null)
+
 const instructions = ref('')
 const tractorLocation = ref('')
 
@@ -108,67 +117,37 @@ const lastPreviewBusy = ref(false)
 const quickActionAutomations = ref([])
 const runningAutomationId = ref(null)
 
-const tripReadyUi = computed(() => {
-  if (linehaulFetching.value) {
-    return { kind: 'loading', text: 'Checking…' }
-  }
-  if (linehaulLastFetchAt.value == null) {
-    return { kind: 'idle', text: 'Not loaded' }
-  }
-  if (
-    linehaulTripsBody.value != null &&
-    hasTripOriginAndDestination(linehaulTripsBody.value)
-  ) {
-    return { kind: 'yes', text: 'Ready', fromTripDetails: true }
-  }
-  if (linehaulTripReadyError.value) {
-    return {
-      kind: 'error',
-      text: linehaulTripReadyError.value,
-    }
-  }
-  if (linehaulTripReadyBody.value != null) {
-    const b = parseTripReadyBoolean(linehaulTripReadyBody.value)
-    if (b === true) return { kind: 'yes', text: 'Ready' }
-    if (b === false) return { kind: 'no', text: 'Not ready' }
-    return { kind: 'unknown', text: 'Status unclear' }
-  }
-  return { kind: 'unknown', text: '—' }
+const tripStatusUi = computed(() => {
+  const phase = tripPhase.value
+  if (phase === 'dispatched') return { kind: 'dispatched', text: 'Dispatched' }
+  if (phase === 'assigned') return { kind: 'assigned', text: 'Assigned' }
+  if (linehaulTripsNoActive.value) return { kind: 'none', text: 'None' }
+  if (linehaulLastFetchAt.value == null) return { kind: 'idle', text: 'Not loaded' }
+  return { kind: 'none', text: 'None' }
 })
 
-const tripReadyDotClass = computed(() => {
-  switch (tripReadyUi.value.kind) {
-    case 'yes':
-      return 'is-yes'
-    case 'no':
-      return 'is-no'
-    case 'error':
-      return 'is-error'
-    case 'loading':
-      return 'is-loading'
+const tripStatusDotClass = computed(() => {
+  switch (tripStatusUi.value.kind) {
+    case 'dispatched':
+      return 'is-dispatched'
+    case 'assigned':
+      return 'is-assigned'
+    case 'none':
+      return 'is-none'
     case 'idle':
       return 'is-idle'
     default:
-      return 'is-unknown'
+      return 'is-none'
   }
 })
 
-const tripReadyDetailTitle = computed(() => {
-  if (tripReadyUi.value.fromTripDetails) {
-    return 'Origin and destination are present in trip details (overrides trip-status when both are set).'
+const tripStatusDetailTitle = computed(() => {
+  const phase = tripPhase.value
+  if (phase === 'dispatched') {
+    return 'Trip is dispatched (DSPCH or driver/tractor ENRT).'
   }
-  if (linehaulTripReadyError.value) return linehaulTripReadyError.value
-  const body = linehaulTripReadyBody.value
-  if (
-    body != null &&
-    typeof body === 'object' &&
-    tripReadyUi.value.kind === 'unknown'
-  ) {
-    try {
-      return JSON.stringify(body)
-    } catch {
-      return ''
-    }
+  if (phase === 'assigned') {
+    return 'Trip is assigned (APRVD) and ready to dispatch.'
   }
   return ''
 })
@@ -176,8 +155,10 @@ const tripReadyDetailTitle = computed(() => {
 const tripOriginDest = computed(() => extractOriginDest(linehaulTripsBody.value))
 
 const tripTrailerCards = computed(() =>
-  buildTrailerCards(linehaulTripsBody.value),
+  buildEnhancedTrailerCards(linehaulTripsBody.value),
 )
+
+const expandedTrailers = ref({})
 
 const tripDollySection = computed(() =>
   buildDollySection(linehaulTripsBody.value),
@@ -422,6 +403,33 @@ watch(
   },
 )
 
+watch(
+  tripPhase,
+  (newPhase, oldPhase) => {
+    if (oldPhase != null) {
+      maybeAnnounceStatusChange(newPhase)
+    }
+    if (newPhase === 'none' && oldPhase !== 'none') {
+      clearTrailerStatusTracking()
+    }
+  },
+)
+
+watch(
+  () => {
+    const body = linehaulTripsBody.value
+    if (!body || typeof body !== 'object') return null
+    const trailers = /** @type {Record<string, unknown>} */ (body).trailers
+    return Array.isArray(trailers) ? trailers : null
+  },
+  (trailers) => {
+    if (trailers) {
+      maybeAnnounceTrailerStatusChange(trailers)
+    }
+  },
+  { deep: true },
+)
+
 let prevTractorFingerprint = ''
 let prevDriverFingerprint = ''
 
@@ -443,6 +451,12 @@ function getDriverFingerprint(body) {
     driverActvStat: body.driverActvStat,
     driverAvlStat: body.driverAvlStat,
   })
+}
+
+/** Green vs red dot: value `act` (case-insensitive) = active OK. */
+function linehaulStatIsAct(value) {
+  if (value == null || value === '') return false
+  return String(value).trim().toLowerCase() === 'act'
 }
 
 watch(
@@ -514,6 +528,34 @@ async function openDestLocationModal() {
 function closeDestLocationModal() {
   destLocationModalOpen.value = false
 }
+
+function openTrailerGpsModal(card) {
+  if (!card.hasGps || card.lat == null || card.lng == null) return
+  trailerGpsData.value = {
+    order: card.order,
+    trlrNbr: card.trlrNbr,
+    lat: card.lat,
+    lng: card.lng,
+  }
+  trailerGpsModalOpen.value = true
+}
+
+function closeTrailerGpsModal() {
+  trailerGpsModalOpen.value = false
+  trailerGpsData.value = null
+}
+
+const trailerGpsMapUrl = computed(() => {
+  if (!trailerGpsData.value) return ''
+  const { lat, lng } = trailerGpsData.value
+  return `https://www.openstreetmap.org/?mlat=${lat}&mlon=${lng}#map=17/${lat}/${lng}`
+})
+
+const trailerGpsEmbedUrl = computed(() => {
+  if (!trailerGpsData.value) return ''
+  const { lat, lng } = trailerGpsData.value
+  return `https://www.openstreetmap.org/export/embed.html?bbox=${lng - 0.005},${lat - 0.003},${lng + 0.005},${lat + 0.003}&layer=mapnik&marker=${lat},${lng}`
+})
 
 async function setupLinehaulPolling() {
   if (linehaulPollTimer) {
@@ -591,6 +633,8 @@ onActivated(() => {
 onUnmounted(() => {
   cancelTripVoiceAnnouncement()
   cancelAllAlerts()
+  clearTrailerStatusTracking()
+  clearTripPhaseTracking()
   unregisterAssignment()
   unregisterRecover()
   if (previewPollTimer) {
@@ -769,6 +813,66 @@ onUnmounted(() => {
       </div>
     </Teleport>
 
+    <Teleport to="body">
+      <div
+        v-if="trailerGpsModalOpen && trailerGpsData"
+        class="portal-modal-backdrop"
+        :style="{ zIndex: PORTAL_Z_LOCATION_MODAL }"
+        role="presentation"
+        @click.self="closeTrailerGpsModal"
+      >
+        <div
+          class="portal-modal trailer-gps-modal"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="trailer-gps-title"
+          @click.stop
+        >
+          <div class="trailer-gps-header">
+            <h3 id="trailer-gps-title" class="trailer-gps-title">
+              Trailer {{ trailerGpsData.order }} Location
+            </h3>
+            <button
+              type="button"
+              class="trailer-gps-close tap"
+              aria-label="Close"
+              @click="closeTrailerGpsModal"
+            >
+              ×
+            </button>
+          </div>
+          <p v-if="trailerGpsData.trlrNbr" class="trailer-gps-id">
+            Trailer #{{ trailerGpsData.trlrNbr }}
+          </p>
+          <div class="trailer-gps-coords">
+            <span>{{ trailerGpsData.lat.toFixed(5) }}, {{ trailerGpsData.lng.toFixed(5) }}</span>
+          </div>
+          <div class="trailer-gps-map-wrap">
+            <iframe
+              :src="trailerGpsEmbedUrl"
+              class="trailer-gps-map"
+              loading="lazy"
+              referrerpolicy="no-referrer"
+              title="Trailer location map"
+            />
+          </div>
+          <div class="modal-actions trailer-gps-actions">
+            <a
+              :href="trailerGpsMapUrl"
+              target="_blank"
+              rel="noopener noreferrer"
+              class="btn secondary tap"
+            >
+              Open in OpenStreetMap
+            </a>
+            <button type="button" class="btn primary tap" @click="closeTrailerGpsModal">
+              Close
+            </button>
+          </div>
+        </div>
+      </div>
+    </Teleport>
+
     <div
       v-if="runErrorBanner"
       class="run-error-banner"
@@ -818,120 +922,156 @@ onUnmounted(() => {
     <section class="panel driver-status-panel">
       <h2>Driver Status</h2>
       <p class="hint driver-status-hint">
-        Assignment vs tractor and driver from FedEx Linehaul. Credentials and Home refresh: Settings → Driver
-        Credentials.
+        FedEx Linehaul tractor and driver snapshot. Refresh: Settings → Driver Credentials (interval or manual).
       </p>
-      <details class="driver-status-details">
-        <summary class="driver-status-summary">Driver &amp; Linehaul details</summary>
-        <div class="driver-status-details-inner">
-          <div class="driver-status-section">
-            <h3 class="driver-status-section-title">Check-in / assignment</h3>
-            <p v-if="!tractorLocation.trim()" class="empty driver-status-section-body">
-              Not set — edit Tractor location under Settings → Dispatch.
-            </p>
-            <p v-else class="read driver-status-section-body">{{ tractorLocation }}</p>
-          </div>
-
-          <div class="driver-status-section driver-status-section--snapshot">
-            <div class="driver-status-snapshot-head">
-              <h3 class="driver-status-section-title">Linehaul snapshot</h3>
-              <div v-if="linehaulFetching" class="linehaul-loading" aria-live="polite">Loading…</div>
-              <p v-else-if="linehaulLastFetchAt != null" class="linehaul-meta">
-                {{ new Date(linehaulLastFetchAt).toLocaleString() }}
-              </p>
-            </div>
-
-            <div v-if="linehaulTractorError || linehaulDriverError" class="linehaul-errors">
-              <p v-if="linehaulTractorError" class="err">Tractor Details: {{ linehaulTractorError }}</p>
-              <p v-if="linehaulDriverError" class="err">Driver Details: {{ linehaulDriverError }}</p>
-            </div>
-            <div
-              v-if="linehaulLocationMatch !== null && (linehaulTractorBody || linehaulDriverBody)"
-              class="match-row"
+      <div class="driver-status-surface">
+        <div class="driver-status-toolbar">
+          <span class="driver-status-toolbar-label">Linehaul</span>
+          <div class="driver-status-toolbar-meta">
+            <span v-if="linehaulFetching" class="linehaul-loading" aria-live="polite">Loading…</span>
+            <time
+              v-else-if="linehaulLastFetchAt != null"
+              class="linehaul-meta"
+              :datetime="new Date(linehaulLastFetchAt).toISOString()"
             >
-              <span class="match-label">Tractor vs driver location</span>
-              <span :class="linehaulLocationMatch ? 'badge match-yes' : 'badge match-no'">
-                {{ linehaulLocationMatch ? 'Aligned' : 'Mismatch' }}
-              </span>
-            </div>
-
-            <div class="driver-status-cards">
-              <div v-if="linehaulTractorBody" class="linehaul-block">
-                <h4 class="linehaul-h3">Tractor Details</h4>
-                <div class="linehaul-compact">
-                  <div class="linehaul-row">
-                    <span v-if="linehaulTractorBody.locationId != null" class="linehaul-chip">
-                      <span class="k">location</span> {{ linehaulTractorBody.locationId }}
-                    </span>
-                    <span v-if="linehaulTractorBody.tractorNbr != null" class="linehaul-chip">
-                      <span class="k">tractor</span> {{ linehaulTractorBody.tractorNbr }}
-                    </span>
-                  </div>
-                  <div class="linehaul-row">
-                    <span v-if="linehaulTractorBody.tractorDomicileAbbrv" class="linehaul-chip">
-                      <span class="k">domicile</span> {{ linehaulTractorBody.tractorDomicileAbbrv }}
-                    </span>
-                    <span v-if="linehaulTractorBody.detlCodeActvStat" class="linehaul-chip">
-                      <span class="k">active</span> {{ linehaulTractorBody.detlCodeActvStat }}
-                    </span>
-                    <span v-if="linehaulTractorBody.detlCodeAvailStat" class="linehaul-chip">
-                      <span class="k">avail</span> {{ linehaulTractorBody.detlCodeAvailStat }}
-                    </span>
-                  </div>
-                </div>
-              </div>
-
-              <div v-if="linehaulDriverBody" class="linehaul-block">
-                <h4 class="linehaul-h3">Driver Details</h4>
-                <div class="linehaul-compact">
-                  <div class="linehaul-row">
-                    <span
-                      v-if="linehaulDriverBody.driverLocation != null && linehaulDriverBody.driverLocation !== ''"
-                      class="linehaul-chip"
-                    >
-                      <span class="k">location</span> {{ linehaulDriverBody.driverLocation }}
-                    </span>
-                    <span v-if="linehaulDriverBody.driverActvStat" class="linehaul-chip">
-                      <span class="k">active</span> {{ linehaulDriverBody.driverActvStat }}
-                    </span>
-                    <span v-if="linehaulDriverBody.driverAvlStat" class="linehaul-chip">
-                      <span class="k">avail</span> {{ linehaulDriverBody.driverAvlStat }}
-                    </span>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            <p
-              v-if="
-                !linehaulFetching &&
-                linehaulLastFetchAt == null &&
-                !linehaulTractorError &&
-                !linehaulDriverError
-              "
-              class="empty driver-status-idle"
-            >
-              Linehaul not loaded — use Settings → Manual fetch or set a refresh interval (save credentials).
-            </p>
+              {{ new Date(linehaulLastFetchAt).toLocaleString() }}
+            </time>
           </div>
         </div>
-      </details>
+
+        <div v-if="linehaulTractorError || linehaulDriverError" class="linehaul-errors">
+          <p v-if="linehaulTractorError" class="err">Tractor Details: {{ linehaulTractorError }}</p>
+          <p v-if="linehaulDriverError" class="err">Driver Details: {{ linehaulDriverError }}</p>
+        </div>
+        <div
+          v-if="linehaulLocationMatch !== null && (linehaulTractorBody || linehaulDriverBody)"
+          class="match-row match-row--tight"
+        >
+          <span class="match-label">Tractor vs driver location</span>
+          <span :class="linehaulLocationMatch ? 'badge match-yes' : 'badge match-no'">
+            {{ linehaulLocationMatch ? 'Aligned' : 'Mismatch' }}
+          </span>
+        </div>
+
+        <div class="driver-status-cards">
+          <div v-if="linehaulTractorBody" class="linehaul-block">
+            <h4 class="linehaul-h3">Tractor</h4>
+            <dl class="linehaul-dl">
+              <div v-if="linehaulTractorBody.locationId != null" class="linehaul-dl-row">
+                <dt>Location</dt>
+                <dd>{{ linehaulTractorBody.locationId }}</dd>
+              </div>
+              <div v-if="linehaulTractorBody.tractorNbr != null" class="linehaul-dl-row">
+                <dt>Tractor</dt>
+                <dd>{{ linehaulTractorBody.tractorNbr }}</dd>
+              </div>
+              <div v-if="linehaulTractorBody.tractorDomicileAbbrv" class="linehaul-dl-row">
+                <dt>Domicile</dt>
+                <dd>{{ linehaulTractorBody.tractorDomicileAbbrv }}</dd>
+              </div>
+              <div v-if="linehaulTractorBody.detlCodeActvStat" class="linehaul-dl-row linehaul-dl-row--stat">
+                <dt>
+                  <span
+                    class="linehaul-stat-dot"
+                    :class="
+                      linehaulStatIsAct(linehaulTractorBody.detlCodeActvStat)
+                        ? 'linehaul-stat-dot--ok'
+                        : 'linehaul-stat-dot--bad'
+                    "
+                    aria-hidden="true"
+                  />
+                  Active
+                </dt>
+                <dd>{{ linehaulTractorBody.detlCodeActvStat }}</dd>
+              </div>
+              <div v-if="linehaulTractorBody.detlCodeAvailStat" class="linehaul-dl-row linehaul-dl-row--stat">
+                <dt>
+                  <span
+                    class="linehaul-stat-dot"
+                    :class="
+                      linehaulStatIsAct(linehaulTractorBody.detlCodeAvailStat)
+                        ? 'linehaul-stat-dot--ok'
+                        : 'linehaul-stat-dot--bad'
+                    "
+                    aria-hidden="true"
+                  />
+                  Status
+                </dt>
+                <dd>{{ linehaulTractorBody.detlCodeAvailStat }}</dd>
+              </div>
+            </dl>
+          </div>
+
+          <div v-if="linehaulDriverBody" class="linehaul-block">
+            <h4 class="linehaul-h3">Driver</h4>
+            <dl class="linehaul-dl">
+              <div
+                v-if="linehaulDriverBody.driverLocation != null && linehaulDriverBody.driverLocation !== ''"
+                class="linehaul-dl-row"
+              >
+                <dt>Location</dt>
+                <dd>{{ linehaulDriverBody.driverLocation }}</dd>
+              </div>
+              <div v-if="linehaulDriverBody.driverActvStat" class="linehaul-dl-row linehaul-dl-row--stat">
+                <dt>
+                  <span
+                    class="linehaul-stat-dot"
+                    :class="
+                      linehaulStatIsAct(linehaulDriverBody.driverActvStat)
+                        ? 'linehaul-stat-dot--ok'
+                        : 'linehaul-stat-dot--bad'
+                    "
+                    aria-hidden="true"
+                  />
+                  Active
+                </dt>
+                <dd>{{ linehaulDriverBody.driverActvStat }}</dd>
+              </div>
+              <div v-if="linehaulDriverBody.driverAvlStat" class="linehaul-dl-row linehaul-dl-row--stat">
+                <dt>
+                  <span
+                    class="linehaul-stat-dot"
+                    :class="
+                      linehaulStatIsAct(linehaulDriverBody.driverAvlStat)
+                        ? 'linehaul-stat-dot--ok'
+                        : 'linehaul-stat-dot--bad'
+                    "
+                    aria-hidden="true"
+                  />
+                  Status
+                </dt>
+                <dd>{{ linehaulDriverBody.driverAvlStat }}</dd>
+              </div>
+            </dl>
+          </div>
+        </div>
+
+        <p
+          v-if="
+            !linehaulFetching &&
+            linehaulLastFetchAt == null &&
+            !linehaulTractorError &&
+            !linehaulDriverError
+          "
+          class="empty driver-status-idle"
+        >
+          Linehaul not loaded — use Settings → Manual fetch or set a refresh interval (save credentials).
+        </p>
+      </div>
     </section>
 
     <section class="panel dispatch-instructions-panel">
       <div class="dispatch-card-toolbar">
         <h2 class="dispatch-instructions-title">Dispatch instructions</h2>
         <div
-          class="trip-ready-inline"
+          class="trip-status-inline"
           role="status"
-          :aria-label="`Trip Ready: ${tripReadyUi.text}`"
-          :title="tripReadyDetailTitle || undefined"
+          :aria-label="`Trip Status: ${tripStatusUi.text}`"
+          :title="tripStatusDetailTitle || undefined"
         >
-          <span class="trip-ready-dot" :class="tripReadyDotClass" aria-hidden="true" />
-          <span class="trip-ready-heading">Trip Ready</span>
-          <span class="trip-ready-state" :class="{ 'trip-ready-state-err': tripReadyUi.kind === 'error' }">{{
-            tripReadyUi.text
-          }}</span>
+          <span class="trip-status-dot" :class="tripStatusDotClass" aria-hidden="true" />
+          <span class="trip-status-heading">Trip Status</span>
+          <span class="trip-status-state">{{ tripStatusUi.text }}</span>
         </div>
       </div>
       <p class="hint trip-voice-hint" role="note">
@@ -980,6 +1120,16 @@ onUnmounted(() => {
     <section v-if="showSealOrTripPanel" class="panel trip-details-panel">
       <h2>Trip details</h2>
       <p class="hint">FedEx trip payload when Linehaul loads (trailers and dolly when present).</p>
+      <p
+        v-if="
+          linehaulTripsBody &&
+          typeof linehaulTripsBody === 'object' &&
+          linehaulTripsBody.tripStatus === 'DSPCH'
+        "
+        class="hint"
+      >
+        Dispatch snapshot (DSPCH); merged with approved trip fields when both are available.
+      </p>
 
       <template v-if="linehaulTripsBody">
         <div class="trip-details-wrap">
@@ -993,19 +1143,74 @@ onUnmounted(() => {
             </dl>
           </details>
 
-          <details
+          <div
             v-for="card in tripTrailerCards"
             :key="card.id"
-            class="trip-details-block"
+            class="trailer-card"
           >
-            <summary class="trip-details-summary">{{ card.title }}</summary>
-            <dl class="trip-details-dl">
-              <template v-for="row in card.rows" :key="row.label">
-                <dt>{{ row.label }}</dt>
-                <dd>{{ row.value }}</dd>
-              </template>
-            </dl>
-          </details>
+            <div
+              class="trailer-card-header"
+              role="button"
+              tabindex="0"
+              :aria-expanded="!!expandedTrailers[card.id]"
+              @click="expandedTrailers[card.id] = !expandedTrailers[card.id]"
+              @keydown.enter.space.prevent="expandedTrailers[card.id] = !expandedTrailers[card.id]"
+            >
+              <div class="trailer-card-main">
+                <div class="trailer-card-title-row">
+                  <span class="trailer-order">Trailer {{ card.order }}</span>
+                  <span v-if="card.trlrNbr" class="trailer-nbr">#{{ card.trlrNbr }}</span>
+                </div>
+                <div class="trailer-card-badges">
+                  <span class="trailer-size-badge" :class="card.size === '20ft' ? 'size-20' : 'size-53'">
+                    {{ card.size }}
+                  </span>
+                  <span class="trailer-status-badge" :class="card.statusClass">
+                    {{ card.statusLabel }}
+                  </span>
+                  <span class="trailer-load-badge" :class="card.loadTypeClass">
+                    {{ card.loadType }}
+                  </span>
+                </div>
+              </div>
+              <div class="trailer-card-actions">
+                <button
+                  v-if="card.hasGps"
+                  type="button"
+                  class="trailer-location-btn tap"
+                  title="View trailer location on map"
+                  aria-label="View trailer location"
+                  @click.stop="openTrailerGpsModal(card)"
+                >
+                  <svg class="trailer-location-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7z"/>
+                    <circle cx="12" cy="9" r="2.5"/>
+                  </svg>
+                </button>
+                <span class="trailer-expand-icon" aria-hidden="true">
+                  {{ expandedTrailers[card.id] ? '−' : '+' }}
+                </span>
+              </div>
+            </div>
+
+            <div v-if="card.summaryRows.length" class="trailer-card-summary">
+              <dl class="trailer-summary-dl">
+                <template v-for="row in card.summaryRows" :key="row.label">
+                  <dt>{{ row.label }}</dt>
+                  <dd>{{ row.value }}</dd>
+                </template>
+              </dl>
+            </div>
+
+            <div v-if="expandedTrailers[card.id] && card.detailRows.length" class="trailer-card-details">
+              <dl class="trailer-details-dl">
+                <template v-for="row in card.detailRows" :key="row.label">
+                  <dt>{{ row.label }}</dt>
+                  <dd>{{ row.value }}</dd>
+                </template>
+              </dl>
+            </div>
+          </div>
         </div>
       </template>
       <p v-else-if="linehaulTripsNoActive" class="empty trip-details-idle">No active trip</p>
@@ -1250,99 +1455,51 @@ onUnmounted(() => {
   margin-top: 0.25rem;
 }
 .driver-status-hint {
-  margin-bottom: 0.65rem;
+  margin-bottom: 0.45rem;
 }
-.driver-status-details {
-  margin-top: 0.2rem;
+.driver-status-surface {
+  margin-top: 0.15rem;
   border: 1px solid #34343e;
   border-radius: 10px;
   background: #18181f;
-  overflow: hidden;
+  padding: 0.5rem 0.6rem 0.6rem;
 }
-.driver-status-summary {
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  font-size: 0.88rem;
-  font-weight: 600;
-  color: var(--text, #e8e8ee);
-  list-style: none;
-  padding: 0.55rem 0.75rem;
-  margin: 0;
-  background: #1e1e26;
-  border-bottom: 1px solid transparent;
-}
-.driver-status-details[open] .driver-status-summary {
-  border-bottom-color: #2e2e38;
-}
-.driver-status-summary::-webkit-details-marker {
-  display: none;
-}
-.driver-status-summary::before {
-  content: '';
-  flex-shrink: 0;
-  width: 0.4rem;
-  height: 0.4rem;
-  border-right: 2px solid var(--muted, #9898a8);
-  border-bottom: 2px solid var(--muted, #9898a8);
-  transform: rotate(-45deg);
-  transition: transform 0.15s ease;
-  margin-top: -0.15rem;
-}
-.driver-status-details[open] .driver-status-summary::before {
-  transform: rotate(45deg);
-  margin-top: 0.1rem;
-}
-.driver-status-details-inner {
-  display: flex;
-  flex-direction: column;
-  gap: 0.75rem;
-  padding: 0.75rem;
-}
-.driver-status-section {
-  padding: 0.65rem 0.75rem;
-  border-radius: 8px;
-  border: 1px solid #34343e;
-  background: #1e1e26;
-}
-.driver-status-section-title {
-  margin: 0 0 0.45rem;
-  font-size: 0.72rem;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  color: var(--muted, #9898a8);
-}
-.driver-status-section-body {
-  margin: 0;
-}
-.driver-status-section--snapshot {
-  padding-bottom: 0.55rem;
-}
-.driver-status-snapshot-head {
+.driver-status-toolbar {
   display: flex;
   flex-wrap: wrap;
-  align-items: baseline;
+  align-items: center;
   justify-content: space-between;
   gap: 0.35rem 0.75rem;
-  margin-bottom: 0.5rem;
+  margin-bottom: 0.45rem;
+  padding-bottom: 0.4rem;
+  border-bottom: 1px solid #2a2a34;
 }
-.driver-status-snapshot-head .driver-status-section-title {
-  margin: 0;
+.driver-status-toolbar-label {
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted, #9898a8);
 }
-.driver-status-snapshot-head .linehaul-loading {
-  margin: 0;
-  font-size: 0.82rem;
+.driver-status-toolbar-meta {
+  min-height: 1.25rem;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
 }
-.driver-status-snapshot-head .linehaul-meta {
+.driver-status-toolbar .linehaul-loading {
   margin: 0;
   font-size: 0.78rem;
+}
+.driver-status-toolbar .linehaul-meta {
+  margin: 0;
+  font-size: 0.75rem;
+  color: var(--muted, #9898a8);
 }
 .driver-status-cards {
   display: grid;
   grid-template-columns: 1fr;
-  gap: 0.6rem;
+  gap: 0.45rem;
 }
 @media (min-width: 560px) {
   .driver-status-cards {
@@ -1351,7 +1508,60 @@ onUnmounted(() => {
 }
 .driver-status-idle {
   margin: 0.35rem 0 0;
-  font-size: 0.88rem;
+  font-size: 0.82rem;
+}
+.linehaul-stat-dot {
+  display: inline-block;
+  width: 0.45rem;
+  height: 0.45rem;
+  border-radius: 50%;
+  margin-right: 0.35rem;
+  vertical-align: 0.08em;
+  flex-shrink: 0;
+}
+.linehaul-stat-dot--ok {
+  background: var(--color-success, #22c55e);
+  box-shadow: 0 0 0 1px rgba(34, 197, 94, 0.35);
+}
+.linehaul-stat-dot--bad {
+  background: var(--color-error, #ef4444);
+  box-shadow: 0 0 0 1px rgba(239, 68, 68, 0.35);
+}
+.linehaul-dl {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.28rem;
+}
+.linehaul-dl-row {
+  display: grid;
+  grid-template-columns: minmax(4.5rem, 32%) 1fr;
+  gap: 0.35rem 0.5rem;
+  align-items: baseline;
+  font-size: 0.78rem;
+  line-height: 1.35;
+}
+.linehaul-dl-row dt {
+  margin: 0;
+  font-weight: 600;
+  color: var(--muted, #9898a8);
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  display: flex;
+  align-items: center;
+}
+.linehaul-dl-row dd {
+  margin: 0;
+  color: var(--text, #e8e8ee);
+  font-weight: 500;
+  word-break: break-word;
+}
+.linehaul-dl-row--stat dt {
+  text-transform: none;
+  letter-spacing: 0.02em;
+  font-size: 0.72rem;
+  color: var(--text, #e0e0e8);
 }
 .loc-retry-modal {
   display: flex;
@@ -1621,16 +1831,17 @@ onUnmounted(() => {
   color: #90caf9;
   margin: 0.25rem 0 0.5rem;
 }
-.driver-status-section--snapshot .linehaul-errors {
-  margin-bottom: 0.45rem;
+.driver-status-surface .linehaul-errors {
+  margin-bottom: 0.4rem;
 }
 .linehaul-errors .err {
   margin: 0.25rem 0;
   font-size: 0.85rem;
 }
-.driver-status-section--snapshot .match-row {
+.driver-status-surface .match-row--tight {
   margin-top: 0;
-  margin-bottom: 0.6rem;
+  margin-bottom: 0.45rem;
+  padding: 0.4rem 0.55rem;
 }
 .match-row {
   display: flex;
@@ -1665,45 +1876,20 @@ onUnmounted(() => {
 }
 .driver-status-cards .linehaul-block {
   margin-top: 0;
-  padding: 0.55rem 0.6rem;
+  padding: 0.45rem 0.5rem;
   border-radius: 8px;
   border: 1px solid #34343e;
-  background: #25252e;
+  background: #22222c;
 }
 .linehaul-block {
   margin-top: 0.5rem;
 }
 .linehaul-h3 {
-  margin: 0 0 0.45rem;
-  font-size: 0.88rem;
-  font-weight: 600;
+  margin: 0 0 0.35rem;
+  font-size: 0.78rem;
+  font-weight: 700;
   color: var(--text, #e8e8ee);
-  letter-spacing: 0.01em;
-}
-.linehaul-compact {
-  display: flex;
-  flex-direction: column;
-  gap: 0.4rem;
-}
-.linehaul-row {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: 0.4rem 0.55rem;
-}
-.linehaul-chip {
-  font-size: 0.8rem;
-  line-height: 1.35;
-  padding: 0.22rem 0.5rem;
-  border-radius: 6px;
-  background: #1a1a22;
-  border: 1px solid #3a3a48;
-}
-.linehaul-chip .k {
-  margin-right: 0.25rem;
-  font-size: 0.72rem;
-  text-transform: uppercase;
-  letter-spacing: 0.03em;
+  letter-spacing: 0.02em;
 }
 .dispatch-card-toolbar {
   display: flex;
@@ -1724,7 +1910,7 @@ onUnmounted(() => {
 .dispatch-instructions-panel .dispatch-card-toolbar + .empty {
   margin-top: 0;
 }
-.trip-ready-inline {
+.trip-status-inline {
   display: inline-flex;
   align-items: center;
   gap: 0.45rem;
@@ -1732,11 +1918,11 @@ onUnmounted(() => {
   max-width: 100%;
   font-size: 0.85rem;
 }
-.trip-ready-heading {
+.trip-status-heading {
   color: var(--muted, #9898a8);
   font-weight: 600;
 }
-.trip-ready-state {
+.trip-status-state {
   font-weight: 600;
   color: var(--text, #e8e8ee);
   min-width: 0;
@@ -1745,58 +1931,27 @@ onUnmounted(() => {
   white-space: nowrap;
   max-width: 14rem;
 }
-.trip-ready-state-err {
-  color: #ffab91;
-  white-space: normal;
-  max-width: min(18rem, 100%);
-}
-.trip-ready-dot {
+.trip-status-dot {
   width: 0.625rem;
   height: 0.625rem;
   border-radius: var(--radius-full, 9999px);
   flex-shrink: 0;
   transition: var(--transition-colors);
 }
-.trip-ready-dot.is-yes {
+.trip-status-dot.is-dispatched {
+  background: var(--color-accent-purple, #7b4db5);
+  box-shadow: 0 0 8px rgba(123, 77, 181, 0.5), 0 0 0 2px rgba(123, 77, 181, 0.2);
+}
+.trip-status-dot.is-assigned {
   background: var(--color-success, #22c55e);
   box-shadow: 0 0 8px rgba(34, 197, 94, 0.5), 0 0 0 2px rgba(34, 197, 94, 0.2);
 }
-.trip-ready-dot.is-no {
-  background: var(--color-error, #ef4444);
-  box-shadow: 0 0 8px rgba(239, 68, 68, 0.5), 0 0 0 2px rgba(239, 68, 68, 0.2);
-}
-.trip-ready-dot.is-error {
-  background: var(--color-warning, #f59e0b);
-  box-shadow: 0 0 6px rgba(245, 158, 11, 0.4);
-}
-.trip-ready-dot.is-unknown {
+.trip-status-dot.is-none {
   background: var(--color-text-tertiary, #6e6e7e);
 }
-.trip-ready-dot.is-idle {
+.trip-status-dot.is-idle {
   background: var(--color-text-tertiary, #6e6e7e);
   opacity: 0.6;
-}
-.trip-ready-dot.is-loading {
-  background: var(--color-info, #3b82f6);
-  animation: tripReadyPulse 1.2s ease-in-out infinite;
-  box-shadow: 0 0 8px rgba(59, 130, 246, 0.5);
-}
-@keyframes tripReadyPulse {
-  0%,
-  100% {
-    opacity: 1;
-    transform: scale(1);
-  }
-  50% {
-    opacity: 0.55;
-    transform: scale(0.92);
-  }
-}
-@media (prefers-reduced-motion: reduce) {
-  .trip-ready-dot.is-loading {
-    animation: none;
-    opacity: 0.75;
-  }
 }
 .dispatch-instructions-body {
   margin-top: 0;
@@ -2124,13 +2279,297 @@ onUnmounted(() => {
     animation: none;
   }
 
-  .trip-ready-dot.is-loading {
-    animation: none;
-    opacity: 0.75;
-  }
-
   .btn.primary:hover {
     transform: none;
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   TRAILER CARDS — Enhanced design
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.trailer-card {
+  border: 1px solid #34343e;
+  border-radius: 10px;
+  background: #1e1e26;
+  overflow: hidden;
+  transition: border-color 0.15s ease;
+}
+.trailer-card:hover {
+  border-color: #48485a;
+}
+.trailer-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.6rem 0.75rem;
+  cursor: pointer;
+  user-select: none;
+  background: #22222c;
+}
+.trailer-card-header:focus-visible {
+  outline: 2px solid var(--color-accent-purple, #7b4db5);
+  outline-offset: -2px;
+}
+.trailer-card-main {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  min-width: 0;
+  flex: 1;
+}
+.trailer-card-title-row {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+.trailer-order {
+  font-weight: 700;
+  font-size: 0.9rem;
+  color: var(--text, #e8e8ee);
+}
+.trailer-nbr {
+  font-size: 0.78rem;
+  color: var(--muted, #9898a8);
+  font-family: monospace;
+}
+.trailer-card-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+.trailer-size-badge,
+.trailer-status-badge,
+.trailer-load-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.15rem 0.45rem;
+  border-radius: 4px;
+  font-size: 0.65rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+.trailer-size-badge {
+  background: #2a3a4a;
+  color: #7dd3fc;
+  border: 1px solid #3d5a80;
+}
+.trailer-size-badge.size-20 {
+  background: #3a2a4a;
+  color: #c4b5fd;
+  border-color: #5d4a80;
+}
+.trailer-status-badge {
+  background: #2e2e38;
+  color: #9898a8;
+  border: 1px solid #3e3e48;
+}
+.trailer-status-badge.status-loading {
+  background: rgba(59, 130, 246, 0.15);
+  color: #60a5fa;
+  border-color: rgba(59, 130, 246, 0.3);
+}
+.trailer-status-badge.status-closed {
+  background: rgba(34, 197, 94, 0.15);
+  color: #4ade80;
+  border-color: rgba(34, 197, 94, 0.3);
+}
+.trailer-load-badge {
+  background: #2e2e38;
+  color: #9898a8;
+  border: 1px solid #3e3e48;
+}
+.trailer-load-badge.load-full {
+  background: rgba(251, 146, 60, 0.15);
+  color: #fb923c;
+  border-color: rgba(251, 146, 60, 0.3);
+}
+.trailer-load-badge.load-empty {
+  background: rgba(156, 163, 175, 0.1);
+  color: #9ca3af;
+  border-color: rgba(156, 163, 175, 0.25);
+}
+.trailer-card-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  flex-shrink: 0;
+}
+.trailer-location-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 2rem;
+  height: 2rem;
+  border-radius: 6px;
+  border: 1px solid #3d5a80;
+  background: #2a3a4a;
+  color: #7dd3fc;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+.trailer-location-btn:hover {
+  background: #3a4a5a;
+  border-color: #5d7a9a;
+}
+.trailer-location-btn:focus-visible {
+  outline: 2px solid #7dd3fc;
+  outline-offset: 2px;
+}
+.trailer-location-icon {
+  width: 1rem;
+  height: 1rem;
+}
+.trailer-expand-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.5rem;
+  height: 1.5rem;
+  font-size: 1.1rem;
+  font-weight: 600;
+  color: var(--muted, #9898a8);
+}
+.trailer-card-summary {
+  padding: 0.5rem 0.75rem;
+  border-top: 1px solid #2e2e38;
+  background: #1a1a22;
+}
+.trailer-summary-dl {
+  display: grid;
+  grid-template-columns: minmax(4.5rem, auto) 1fr;
+  gap: 0.3rem 0.65rem;
+  margin: 0;
+  font-size: 0.8rem;
+  line-height: 1.35;
+}
+.trailer-summary-dl dt {
+  margin: 0;
+  color: var(--muted, #9898a8);
+  font-weight: 600;
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+.trailer-summary-dl dd {
+  margin: 0;
+  color: var(--text, #e8e8ee);
+  font-weight: 600;
+  word-break: break-word;
+}
+.trailer-card-details {
+  padding: 0.5rem 0.75rem 0.65rem;
+  border-top: 1px solid #2e2e38;
+  background: #16161e;
+}
+.trailer-details-dl {
+  display: grid;
+  grid-template-columns: minmax(5rem, auto) 1fr;
+  gap: 0.3rem 0.65rem;
+  margin: 0;
+  font-size: 0.76rem;
+  line-height: 1.35;
+}
+.trailer-details-dl dt {
+  margin: 0;
+  color: var(--muted, #9898a8);
+  font-weight: 600;
+  font-size: 0.68rem;
+}
+.trailer-details-dl dd {
+  margin: 0;
+  color: var(--text, #c8c8d8);
+  word-break: break-word;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   TRAILER GPS MODAL
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.trailer-gps-modal {
+  max-width: 28rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+}
+.trailer-gps-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+.trailer-gps-title {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 600;
+}
+.trailer-gps-close {
+  flex-shrink: 0;
+  width: 2.25rem;
+  height: 2.25rem;
+  border-radius: 8px;
+  border: 1px solid var(--border, #2e2e38);
+  background: #2a2a34;
+  color: var(--text, #e8e8ee);
+  font-size: 1.25rem;
+  line-height: 1;
+  cursor: pointer;
+}
+.trailer-gps-id {
+  margin: 0;
+  font-size: 0.82rem;
+  color: var(--muted, #9898a8);
+}
+.trailer-gps-coords {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.4rem 0.6rem;
+  background: #12121a;
+  border: 1px solid #2e2e38;
+  border-radius: 6px;
+  font-family: monospace;
+  font-size: 0.8rem;
+  color: #7dd3fc;
+}
+.trailer-gps-map-wrap {
+  position: relative;
+  width: 100%;
+  height: 0;
+  padding-bottom: 56.25%;
+  border-radius: 8px;
+  overflow: hidden;
+  border: 1px solid #34343e;
+  background: #0a0a0f;
+}
+.trailer-gps-map {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  border: 0;
+}
+.trailer-gps-actions {
+  display: flex;
+  gap: 0.5rem;
+  justify-content: flex-end;
+  margin-top: 0.25rem;
+}
+.trailer-gps-actions .btn {
+  flex: 1;
+  text-align: center;
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+@media (min-width: 400px) {
+  .trailer-gps-actions .btn {
+    flex: 0 1 auto;
   }
 }
 </style>

@@ -19,8 +19,129 @@ export const linehaulTripsBody = ref(null)
 export const linehaulTripsError = ref(null)
 /** FedEx returned HTTP 204 — no trip payload (not an error). */
 export const linehaulTripsNoActive = ref(false)
+/** Last `dailyTripLegSequence` seen from any successful trip payload (for dispatch-era refetch). */
+export const lastDailyTripLegSequence = ref(null)
 export const linehaulLastFetchAt = ref(null)
 export const linehaulFetching = ref(false)
+
+/** Cached full trip snapshot (from APRVD) with trailer details for persistence after dispatch. */
+export const cachedTripSnapshot = ref(null)
+/** Previous driver availability status to detect ENRT→ACT transition. */
+let prevDriverAvlStat = null
+
+/**
+ * Trip lifecycle phase: 'none' | 'assigned' | 'dispatched'.
+ * Dispatched = tripStatus DSPCH or driver/tractor status ENRT.
+ * Assigned = tripStatus APRVD with trip body present.
+ * None = no active trip.
+ */
+export const tripPhase = computed(() => {
+  const tb = linehaulTripsBody.value
+  const dBody = linehaulDriverBody.value
+  const tBody = linehaulTractorBody.value
+
+  const tripStatus =
+    tb != null && typeof tb === 'object' && !Array.isArray(tb)
+      ? /** @type {Record<string, unknown>} */ (tb).tripStatus
+      : null
+
+  const driverStat =
+    dBody != null && typeof dBody === 'object'
+      ? String(dBody.driverAvlStat ?? '').toUpperCase()
+      : ''
+  const tractorStat =
+    tBody != null && typeof tBody === 'object'
+      ? String(tBody.detlCodeAvailStat ?? '').toUpperCase()
+      : ''
+
+  if (
+    tripStatus === 'DSPCH' ||
+    driverStat === 'ENRT' ||
+    tractorStat === 'ENRT'
+  ) {
+    return 'dispatched'
+  }
+  if (tripStatus === 'APRVD' && tb != null) {
+    return 'assigned'
+  }
+  if (tb != null) {
+    return 'assigned'
+  }
+  return 'none'
+})
+
+/**
+ * Merge trailer arrays by trlrOrder, keeping the richer object (more non-empty fields).
+ * @param {unknown[]} base
+ * @param {unknown[]} incoming
+ * @returns {unknown[]}
+ */
+function mergeTrailerArrays(base, incoming) {
+  const map = new Map()
+  for (const t of base) {
+    if (t && typeof t === 'object' && !Array.isArray(t)) {
+      const order = /** @type {Record<string, unknown>} */ (t).trlrOrder
+      const key = order != null ? String(order) : `_idx_${map.size}`
+      map.set(key, { .../** @type {Record<string, unknown>} */ (t) })
+    }
+  }
+  for (const t of incoming) {
+    if (t && typeof t === 'object' && !Array.isArray(t)) {
+      const inc = /** @type {Record<string, unknown>} */ (t)
+      const order = inc.trlrOrder
+      const key = order != null ? String(order) : `_idx_${map.size}`
+      const existing = map.get(key)
+      if (existing) {
+        for (const [k, v] of Object.entries(inc)) {
+          if (v !== null && v !== undefined && v !== '') {
+            existing[k] = v
+          }
+        }
+      } else {
+        map.set(key, { ...inc })
+      }
+    }
+  }
+  return Array.from(map.values())
+}
+
+/**
+ * Deep merge preserving non-empty values. Empty = null, undefined, '', or empty array [].
+ * Trailers array is merged by trlrOrder.
+ * @param {Record<string, unknown> | null} base
+ * @param  {...(Record<string, unknown> | null | undefined)} sources
+ * @returns {Record<string, unknown> | null}
+ */
+function deepMergeNonEmpty(base, ...sources) {
+  if (!base) base = {}
+  const result = { ...base }
+  for (const src of sources) {
+    if (!src || typeof src !== 'object' || Array.isArray(src)) continue
+    for (const [k, v] of Object.entries(src)) {
+      if (v === null || v === undefined || v === '') continue
+      if (Array.isArray(v) && v.length === 0) continue
+      if (k === 'trailers' && Array.isArray(v)) {
+        const baseTrailers = Array.isArray(result.trailers) ? result.trailers : []
+        result.trailers = mergeTrailerArrays(baseTrailers, v)
+      } else {
+        result[k] = v
+      }
+    }
+  }
+  return Object.keys(result).length > 0 ? result : null
+}
+
+/**
+ * @param {unknown} body
+ * @returns {string | null}
+ */
+function tripBodyDailySeq(body) {
+  if (body == null || typeof body !== 'object' || Array.isArray(body)) return null
+  const s = /** @type {Record<string, unknown>} */ (body).dailyTripLegSequence
+  if (s == null) return null
+  const str = String(s).trim()
+  return /^\d+$/.test(str) ? str : null
+}
 
 /** Same rule as server getLinehaulDriverId: digits-only username, else employeeNumber. */
 export function linehaulDriverIdFromCredMeta(meta) {
@@ -140,19 +261,125 @@ async function refreshLinehaulApisImpl(attempt) {
     }
   }
 
-  const trips = await fetchFedexLinehaulTrips({})
-  if (trips.noActiveTrip) {
+  const tripsAprvd = await fetchFedexLinehaulTrips({})
+
+  let seqFromAprvd = null
+  if (tripsAprvd.ok && tripsAprvd.body != null && typeof tripsAprvd.body === 'object') {
+    seqFromAprvd = tripBodyDailySeq(tripsAprvd.body)
+  }
+  if (seqFromAprvd) {
+    lastDailyTripLegSequence.value = seqFromAprvd
+  }
+  const seqForLeg = seqFromAprvd ?? lastDailyTripLegSequence.value
+
+  /** @type {{ ok: boolean, status: number, body?: unknown, error?: string, noActiveTrip?: boolean } | null} */
+  let tripsByLeg = null
+  if (seqForLeg) {
+    const originId =
+      tractorBody?.locationId != null &&
+      String(tractorBody.locationId).trim() !== ''
+        ? String(tractorBody.locationId).trim()
+        : ''
+    tripsByLeg = await fetchFedexLinehaulTrips({
+      dailyTripLegSequence: seqForLeg,
+      alreadyCalled: 'false',
+      ...(originId ? { originId } : {}),
+    })
+  }
+
+  if (tripsByLeg?.ok && tripsByLeg.body != null && typeof tripsByLeg.body === 'object') {
+    const seqL = tripBodyDailySeq(tripsByLeg.body)
+    if (seqL) lastDailyTripLegSequence.value = seqL
+  }
+
+  const currentDriverAvlStat =
+    dr.ok && dr.body && typeof dr.body === 'object'
+      ? String(dr.body.driverAvlStat ?? '').toUpperCase()
+      : ''
+
+  if (
+    prevDriverAvlStat === 'ENRT' &&
+    currentDriverAvlStat !== 'ENRT' &&
+    currentDriverAvlStat !== ''
+  ) {
+    cachedTripSnapshot.value = null
+    lastDailyTripLegSequence.value = null
+  }
+  prevDriverAvlStat = currentDriverAvlStat
+
+  /** @type {Record<string, unknown> | null} */
+  let aprvdBody = null
+  if (tripsAprvd.ok && tripsAprvd.body != null && !tripsAprvd.noActiveTrip) {
+    const b = tripsAprvd.body
+    if (typeof b === 'object' && !Array.isArray(b)) {
+      aprvdBody = /** @type {Record<string, unknown>} */ (b)
+    }
+  }
+
+  /** @type {Record<string, unknown> | null} */
+  let dspchBody = null
+  if (
+    tripsByLeg != null &&
+    tripsByLeg.ok &&
+    tripsByLeg.body != null &&
+    !tripsByLeg.noActiveTrip
+  ) {
+    const leg = tripsByLeg.body
+    if (typeof leg === 'object' && leg !== null && !Array.isArray(leg)) {
+      dspchBody = /** @type {Record<string, unknown>} */ (leg)
+    }
+  }
+
+  if (
+    aprvdBody &&
+    Array.isArray(aprvdBody.trailers) &&
+    aprvdBody.trailers.length > 0
+  ) {
+    cachedTripSnapshot.value = { ...aprvdBody }
+  }
+
+  const cached =
+    cachedTripSnapshot.value != null &&
+    typeof cachedTripSnapshot.value === 'object'
+      ? /** @type {Record<string, unknown>} */ (cachedTripSnapshot.value)
+      : null
+
+  const merged = deepMergeNonEmpty(cached, aprvdBody, dspchBody)
+
+  if (merged != null) {
+    linehaulTripsBody.value = merged
+    linehaulTripsError.value = null
+    linehaulTripsNoActive.value = false
+  } else if (
+    tripsAprvd.noActiveTrip &&
+    !(
+      tripsByLeg != null &&
+      tripsByLeg.ok &&
+      tripsByLeg.body != null &&
+      !tripsByLeg.noActiveTrip
+    ) &&
+    cachedTripSnapshot.value == null
+  ) {
     linehaulTripsBody.value = null
     linehaulTripsError.value = null
     linehaulTripsNoActive.value = true
-  } else if (trips.ok && trips.body !== undefined) {
-    linehaulTripsBody.value = trips.body
-    linehaulTripsError.value = null
-    linehaulTripsNoActive.value = false
   } else {
-    linehaulTripsBody.value = null
-    linehaulTripsNoActive.value = false
-    linehaulTripsError.value = trips.error || 'Trip details request failed'
+    if (cachedTripSnapshot.value != null) {
+      linehaulTripsBody.value = cachedTripSnapshot.value
+      linehaulTripsError.value = null
+      linehaulTripsNoActive.value = false
+    } else {
+      linehaulTripsBody.value = null
+      linehaulTripsNoActive.value = false
+      const aprErr =
+        tripsAprvd.ok || tripsAprvd.noActiveTrip ? null : tripsAprvd.error
+      const legErr =
+        tripsByLeg && !tripsByLeg.ok && !tripsByLeg.noActiveTrip
+          ? tripsByLeg.error
+          : null
+      linehaulTripsError.value =
+        aprErr || legErr || 'Trip details request failed'
+    }
   }
 
   const authFailed =
@@ -160,7 +387,8 @@ async function refreshLinehaulApisImpl(attempt) {
     (isAuthFailure(tr) ||
       isAuthFailure(dr) ||
       isAuthFailure(trip) ||
-      isAuthFailure(trips))
+      isAuthFailure(tripsAprvd) ||
+      (tripsByLeg != null && isAuthFailure(tripsByLeg)))
 
   if (authFailed) {
     pushLiveLog({

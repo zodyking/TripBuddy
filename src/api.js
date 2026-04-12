@@ -185,6 +185,7 @@ export async function fetchFedexLinehaulTripStatus(opts = {}) {
 /**
  * Current trip details (`GET …/trips`) — never throws.
  * Omit opts to use server defaults (driver, tractor, location from tractor API).
+ * Pass `dailyTripLegSequence` (digits) to use dispatch-era query only (`alreadyCalled` forwarded).
  * @returns {{ ok: boolean, status: number, body?: unknown, error?: string, noActiveTrip?: boolean }}
  */
 export async function fetchFedexLinehaulTrips(opts = {}) {
@@ -196,6 +197,7 @@ export async function fetchFedexLinehaulTrips(opts = {}) {
     'status',
     'alreadyCalled',
     'originId',
+    'dailyTripLegSequence',
   ]
   for (const k of keys) {
     if (opts[k] !== undefined && opts[k] !== null && String(opts[k]).trim() !== '') {

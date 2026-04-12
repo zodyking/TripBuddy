@@ -146,11 +146,11 @@ onUnmounted(() => {
 
 <style scoped>
 .app-shell {
-  min-height: 100vh;
-  min-height: 100dvh;
+  height: 100vh;
+  height: 100dvh;
   display: flex;
   flex-direction: column;
-  padding-bottom: calc(var(--nav-height, 4rem) + env(safe-area-inset-bottom, 0));
+  overflow: hidden;
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
@@ -247,7 +247,7 @@ onUnmounted(() => {
   align-items: center;
   justify-content: center;
   border-radius: var(--radius-full, 9999px);
-  background: var(--gradient-accent, linear-gradient(135deg, #7b4db5 0%, #ff6b1a 100%));
+  background: var(--color-accent-purple, #7b4db5);
   font-size: var(--text-xs, 0.6875rem);
   font-weight: var(--weight-bold, 700);
   color: white;
@@ -286,12 +286,10 @@ onUnmounted(() => {
 
 .api-status.is-ok .api-dot {
   background: var(--color-success, #22c55e);
-  box-shadow: 0 0 8px rgba(34, 197, 94, 0.5);
 }
 
 .api-status.is-offline .api-dot {
   background: var(--color-error, #ef4444);
-  box-shadow: 0 0 8px rgba(239, 68, 68, 0.5);
 }
 
 .api-label {
@@ -357,10 +355,14 @@ onUnmounted(() => {
    ═══════════════════════════════════════════════════════════════════════════ */
 .app-main {
   flex: 1;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior-y: contain;
   max-width: var(--app-content-max, 40rem);
   width: 100%;
   margin-inline: auto;
   padding-inline: var(--space-4, 1rem);
+  padding-bottom: calc(var(--nav-height, 4rem) + env(safe-area-inset-bottom, 0) + 1rem);
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
@@ -427,12 +429,12 @@ onUnmounted(() => {
   transform: translateX(-50%);
   width: 2.5rem;
   height: 2px;
-  background: var(--gradient-accent, linear-gradient(135deg, #7b4db5 0%, #ff6b1a 100%));
+  background: var(--color-accent-purple, #7b4db5);
   border-radius: 0 0 var(--radius-full, 9999px) var(--radius-full, 9999px);
 }
 
 .nav-item.is-active .nav-icon {
-  color: var(--color-accent-purple-light, #9d6fd7);
+  color: var(--color-accent-purple, #7b4db5);
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
@@ -442,16 +444,33 @@ onUnmounted(() => {
 /* Small mobile (up to 374px) */
 @media (max-width: 374px) {
   .header-inner {
-    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-    gap: var(--space-2, 0.5rem);
+    grid-template-columns: auto 1fr auto;
+    gap: var(--space-1-5, 0.375rem);
+    padding-inline: var(--space-2, 0.5rem);
+  }
+
+  .header-left {
+    gap: var(--space-1-5, 0.375rem);
+  }
+
+  .brand {
+    font-size: var(--text-base, 0.9375rem);
+  }
+
+  .header-divider {
+    display: none;
+  }
+
+  .header-title {
+    display: none;
   }
 
   .header-center {
     display: none;
   }
 
-  .header-title {
-    font-size: var(--text-sm, 0.8125rem);
+  .api-status {
+    padding: var(--space-0-5, 0.125rem) var(--space-1-5, 0.375rem);
   }
 
   .api-label {
