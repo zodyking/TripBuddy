@@ -1,5 +1,5 @@
 <script setup>
-import { ref, reactive, computed, onMounted, onUnmounted } from 'vue'
+import { ref, reactive, computed, onMounted, onUnmounted, watch } from 'vue'
 import {
   getAssignment,
   postRun,
@@ -32,12 +32,28 @@ import SettingsSection from '../components/settings/SettingsSection.vue'
 import AutomationList from '../components/automation/AutomationList.vue'
 import AutomationEditor from '../components/automation/AutomationEditor.vue'
 import XPathExtractor from '../components/settings/XPathExtractor.vue'
+import {
+  getTripAlertMode,
+  setTripAlertMode,
+  speakTripTtsTest,
+  playTripBellTest,
+} from '../utils/tripVoiceAnnouncement.js'
 
 /** Shown when a secret is on file but the user has not typed a new value (password inputs stay masked). */
 const SECRET_SAVED_MASK = '••••••••••••••••'
 
-/** @type {import('vue').Ref<'general' | 'automation'>} */
+/** @type {import('vue').Ref<'general' | 'automation' | 'audio'>} */
 const settingsTab = ref('general')
+
+/** @type {import('vue').Ref<'off' | 'tts' | 'bell' | 'both'>} */
+const tripAlertMode = ref(getTripAlertMode())
+
+function setTripAlertModeUi(
+  /** @type {'off' | 'tts' | 'bell' | 'both'} */ mode,
+) {
+  tripAlertMode.value = mode
+  setTripAlertMode(mode)
+}
 
 const editingAutomationId = ref(null)
 
@@ -548,6 +564,7 @@ function clearAssignmentAlert() {
 }
 
 onMounted(() => {
+  tripAlertMode.value = getTripAlertMode()
   unregisterAssignment = registerAssignmentListener((data) => {
     assignmentAlert.value = {
       ts: data.ts,
@@ -558,6 +575,10 @@ onMounted(() => {
   unregisterRecover = registerApiRecover(reconnectLiveLogStream)
   loadCredentials()
   loadAssignmentState()
+})
+
+watch(settingsTab, (tab) => {
+  if (tab === 'audio') tripAlertMode.value = getTripAlertMode()
 })
 
 onUnmounted(() => {
@@ -594,6 +615,16 @@ onUnmounted(() => {
         @click="settingsTab = 'automation'"
       >
         Automation
+      </button>
+      <button
+        type="button"
+        class="tab-btn tap"
+        role="tab"
+        :aria-selected="settingsTab === 'audio'"
+        :class="{ active: settingsTab === 'audio' }"
+        @click="settingsTab = 'audio'"
+      >
+        Audio
       </button>
     </div>
 
@@ -813,6 +844,55 @@ onUnmounted(() => {
         @edit="openAutomationEditor"
       />
     </div>
+
+    <main v-show="settingsTab === 'audio'" class="stack audio-panel">
+      <SettingsSection title="Trip ready alerts">
+        <p class="hint tight">
+          Alerts play on <strong>this device</strong> (phone, tablet, or PC) — not on the server. Turn volume up. On
+          some phones you may need to tap “enable” on Home before the first alert after opening the app.
+        </p>
+        <p class="lbl audio-mode-label">When a new trip appears (origin + destination)</p>
+        <div class="audio-mode-grid" role="group" aria-label="Trip alert type">
+          <button
+            type="button"
+            class="audio-mode-btn tap"
+            :class="{ active: tripAlertMode === 'off' }"
+            @click="setTripAlertModeUi('off')"
+          >
+            Off
+          </button>
+          <button
+            type="button"
+            class="audio-mode-btn tap"
+            :class="{ active: tripAlertMode === 'tts' }"
+            @click="setTripAlertModeUi('tts')"
+          >
+            Speech
+          </button>
+          <button
+            type="button"
+            class="audio-mode-btn tap"
+            :class="{ active: tripAlertMode === 'bell' }"
+            @click="setTripAlertModeUi('bell')"
+          >
+            Bell
+          </button>
+          <button
+            type="button"
+            class="audio-mode-btn tap"
+            :class="{ active: tripAlertMode === 'both' }"
+            @click="setTripAlertModeUi('both')"
+          >
+            Speech + bell
+          </button>
+        </div>
+        <p class="lbl audio-test-label">Test on this device</p>
+        <div class="audio-test-row">
+          <button type="button" class="btn tap" @click="speakTripTtsTest">Test speech</button>
+          <button type="button" class="btn tap" @click="playTripBellTest">Test bell</button>
+        </div>
+      </SettingsSection>
+    </main>
   </div>
 </template>
 
@@ -847,6 +927,50 @@ onUnmounted(() => {
 }
 .automation-wrap {
   margin-top: 0;
+}
+.audio-panel {
+  padding-top: 0.15rem;
+}
+.audio-mode-label {
+  margin-top: 0.25rem;
+}
+.audio-mode-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.45rem;
+  margin-bottom: 0.75rem;
+}
+@media (min-width: 420px) {
+  .audio-mode-grid {
+    grid-template-columns: repeat(4, 1fr);
+  }
+}
+.audio-mode-btn {
+  cursor: pointer;
+  border-radius: 8px;
+  border: 1px solid var(--border, #2e2e38);
+  background: #1e1e26;
+  color: var(--muted, #9898a8);
+  padding: 0.5rem 0.45rem;
+  font-size: 0.82rem;
+  font-weight: 600;
+  min-height: 44px;
+  line-height: 1.2;
+}
+.audio-mode-btn.active {
+  background: #2a2a34;
+  color: var(--text, #e8e8ee);
+  border-color: #5c2d91;
+  box-shadow: 0 0 0 1px rgba(92, 45, 145, 0.35);
+}
+.audio-test-label {
+  margin-top: 0.5rem;
+}
+.audio-test-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-bottom: 0.25rem;
 }
 .dispatch-msg {
   font-size: 0.9rem;

@@ -59,7 +59,7 @@ import {
   cancelTripVoiceAnnouncement,
   unlockTripVoiceFromUserGesture,
   tripVoiceShowUnlockHint,
-  isTripTtsEnabled,
+  isTripAlertEnabled,
 } from '../utils/tripVoiceAnnouncement.js'
 
 const PORTAL_Z_BANNER = 2_147_483_000
@@ -209,7 +209,7 @@ const showSealOrTripPanel = computed(
 )
 
 const tripVoiceUnlockHint = ref(false)
-const tripTtsOn = computed(() => isTripTtsEnabled())
+const tripAlertOn = computed(() => isTripAlertEnabled())
 
 function syncTripVoiceUnlockHint() {
   tripVoiceUnlockHint.value = tripVoiceShowUnlockHint()
@@ -870,17 +870,18 @@ onUnmounted(() => {
         </div>
       </div>
       <p class="hint trip-voice-hint" role="note">
-        Trip voice plays on this device’s speaker or headset (not the server). Turn the volume up.
+        Trip alerts (speech and/or bell) play on this device’s speaker or headset (not the server). Turn the volume up.
+        Change mode under Settings → Audio.
       </p>
       <div
-        v-if="tripVoiceUnlockHint && isTripTtsEnabled()"
+        v-if="tripVoiceUnlockHint && tripAlertOn"
         class="trip-voice-unlock-banner"
         role="status"
       >
         <button type="button" class="tap trip-voice-unlock-btn" @click="onUnlockTripVoiceTap">
-          Tap to enable trip voice
+          Tap to enable trip alerts
         </button>
-        <span class="trip-voice-unlock-sub">Some phones and tablets require a tap before spoken alerts can play.</span>
+        <span class="trip-voice-unlock-sub">Some phones and tablets require a tap before alerts can play.</span>
       </div>
       <div
         v-if="linehaulTripsBody && !linehaulTripsError"
