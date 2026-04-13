@@ -1,9 +1,11 @@
 /**
- * Trip-ready alerts on **this device** (TTS and/or bell). Not the Node server.
+ * Trip-related alerts on **this device** (TTS and/or bell).
+ * All announcements go through the unified queue in alertAudioQueue.js.
  * Bell: `public/sounds/trip-ready-bell.mp3` (Mixkit preview SFX, royalty-free — mixkit.co).
  */
 import { extractOriginDest, hasTripOriginAndDestination } from './tripDetailsDisplay.js'
 import { pushLiveLog } from '../stores/liveLogStore.js'
+import { enqueueAnnouncement, speakDirect, cancelAllAlerts } from './alertAudioQueue.js'
 
 const OLD_TTS_KEY = 'fedexTripTtsEnabled'
 const MODE_KEY = 'fedexTripAlertMode'
@@ -13,7 +15,6 @@ const ARRIVAL_ALERTS_KEY = 'fedexArrivalAlertsEnabled'
 
 /** 
  * Audio mode: off = no alerts, tts = speech only, both = bell chime before speech
- * Note: 'bell' (standalone) is deprecated - bell is now only a chime prefix for TTS
  * @typedef {'off' | 'tts' | 'both'} TripAlertMode 
  */
 
@@ -21,7 +22,6 @@ const ARRIVAL_ALERTS_KEY = 'fedexArrivalAlertsEnabled'
 export function getTripAlertMode() {
   if (typeof window === 'undefined' || !window.localStorage) return 'tts'
   const raw = window.localStorage.getItem(MODE_KEY)
-  // Migrate old 'bell' mode to 'tts' (bell-only no longer supported)
   if (raw === 'bell') return 'tts'
   if (raw === 'off' || raw === 'tts' || raw === 'both') return raw
   const legacy = window.localStorage.getItem(OLD_TTS_KEY)
@@ -116,15 +116,12 @@ export function tripVoiceLikelyNeedsUserGesture() {
 }
 
 let lastFingerprint = ''
-/** @type {{ fp: string, text: string, wantTts: boolean, wantBell: boolean } | null} */
+/** @type {{ fp: string, text: string, bell: boolean } | null} */
 let pendingAnnouncement = null
 
 let gestureRuleEvaluated = false
 /** On touch-primary devices, false until {@link unlockTripVoiceFromUserGesture}. */
 let gestureUnlocked = true
-
-/** @type {HTMLAudioElement | null} */
-let currentBellAudio = null
 
 function evaluateGestureGate() {
   if (gestureRuleEvaluated || typeof window === 'undefined') return
@@ -133,130 +130,36 @@ function evaluateGestureGate() {
 }
 
 /**
- * Play bell sound (fire and forget).
- */
-function playBellSound() {
-  if (typeof window === 'undefined') return
-  const url = getTripBellSoundUrl()
-  pushLiveLog({ type: 'info', message: `[Bell] triggered: ${url}`, ts: Date.now() })
-  try {
-    if (currentBellAudio) {
-      currentBellAudio.pause()
-      currentBellAudio = null
-    }
-    const a = new Audio(url)
-    currentBellAudio = a
-    a.addEventListener('ended', () => {
-      if (currentBellAudio === a) currentBellAudio = null
-      pushLiveLog({ type: 'info', message: `[Bell] success: ${url}`, ts: Date.now() })
-    }, { once: true })
-    a.addEventListener('error', () => {
-      pushLiveLog({ type: 'error', message: `[Bell] failed: ${url}`, ts: Date.now() })
-    }, { once: true })
-    a.play()
-      .then(() => {
-        pushLiveLog({ type: 'info', message: `[Bell] started: ${url}`, ts: Date.now() })
-      })
-      .catch((e) => {
-        pushLiveLog({ type: 'error', message: `[Bell] play rejected: ${e.message || e}`, ts: Date.now() })
-      })
-  } catch (e) {
-    pushLiveLog({ type: 'error', message: `[Bell] exception: ${e.message || e}`, ts: Date.now() })
-  }
-}
-
-/**
- * Play bell sound, then speak TTS after 2-second delay.
- * @param {string} text
- */
-function playBellThenSpeak(text) {
-  playBellSound()
-  setTimeout(() => {
-    speakUtterance(text)
-  }, 2000)
-}
-
-/**
  * Preview sample text using current trip alert mode (Settings Test buttons).
- * `tts` = immediate speech; `both` = bell then speech after delay; `off` = no-op.
+ * Uses direct speech (bypasses queue) for user-initiated tests.
  * @param {string} text
  */
 export function previewTripAlertSample(text) {
   if (typeof window === 'undefined') return
   const mode = getTripAlertMode()
   if (mode === 'off') return
-  if (mode === 'both') {
-    playBellThenSpeak(text)
-  } else if (window.speechSynthesis) {
-    speakUtterance(text)
-  }
+  speakDirect(text, { bell: mode === 'both' })
 }
 
 function flushPendingTripAlert() {
   if (typeof window === 'undefined' || !pendingAnnouncement) return
-  const { fp, text, wantTts, wantBell } = pendingAnnouncement
+  const { fp, text, bell } = pendingAnnouncement
   pendingAnnouncement = null
   lastFingerprint = fp
   pushLiveLog({ type: 'info', message: `[TripVoice] flushing pending: ${text}`, ts: Date.now() })
-  
-  if (wantBell && wantTts) {
-    playBellThenSpeak(text)
-  } else if (wantTts && window.speechSynthesis) {
-    speakUtterance(text)
-  } else if (wantBell) {
-    playBellSound()
-  }
-}
-
-/**
- * Shared utterance speaker with logging.
- * @param {string} text
- */
-function speakUtterance(text) {
-  if (typeof window === 'undefined' || !window.speechSynthesis) {
-    pushLiveLog({ type: 'warn', message: `[TripVoice] skipped: no speechSynthesis`, ts: Date.now() })
-    return
-  }
-  try {
-    window.speechSynthesis.cancel()
-    const u = new SpeechSynthesisUtterance(text)
-    u.rate = 1.08
-    u.pitch = 1
-    u.volume = 1
-
-    u.onstart = () => {
-      pushLiveLog({ type: 'info', message: `[TripVoice] started: ${text}`, ts: Date.now() })
-    }
-    u.onend = () => {
-      pushLiveLog({ type: 'info', message: `[TripVoice] success: ${text}`, ts: Date.now() })
-    }
-    u.onerror = (e) => {
-      pushLiveLog({ type: 'error', message: `[TripVoice] failed: ${text} - ${e.error || 'unknown'}`, ts: Date.now() })
-    }
-
-    window.speechSynthesis.speak(u)
-    pushLiveLog({ type: 'info', message: `[TripVoice] triggered: ${text}`, ts: Date.now() })
-  } catch (e) {
-    pushLiveLog({ type: 'error', message: `[TripVoice] exception: ${e.message || e}`, ts: Date.now() })
-  }
+  enqueueAnnouncement(text, { bell, category: `newTrip:${fp}` })
 }
 
 /**
  * Call from a click / pointer handler so the first announcement can play on iOS / Android.
- * This MUST call speechSynthesis.speak() directly to prime the browser - just setting a flag doesn't work on iOS.
+ * This MUST call speechSynthesis.speak() directly to prime the browser.
  */
 export function unlockTripVoiceFromUserGesture() {
   if (typeof window === 'undefined') return
   gestureUnlocked = true
   
   const mode = getTripAlertMode()
-  
-  // Play bell + TTS with delay, or just TTS immediately
-  if (mode === 'both') {
-    playBellThenSpeak('Text to speech alerts active.')
-  } else if (window.speechSynthesis) {
-    speakUtterance('Text to speech alerts active.')
-  }
+  speakDirect('Text to speech alerts active.', { bell: mode === 'both' })
   
   flushPendingTripAlert()
 }
@@ -292,8 +195,6 @@ export function maybeAnnounceNewTrip(tripsBody, noActiveTrip) {
   const mode = getTripAlertMode()
   if (mode === 'off') return
 
-  if (!window.speechSynthesis) return
-
   evaluateGestureGate()
 
   if (noActiveTrip || tripsBody == null) {
@@ -311,42 +212,23 @@ export function maybeAnnounceNewTrip(tripsBody, noActiveTrip) {
   const o = toSpeechPhrase(origin)
   const d = toSpeechPhrase(destination)
   const text = `New trip ready from ${o} to ${d}.`
-  const wantBell = mode === 'both'
+  const bell = mode === 'both'
 
   if (!gestureUnlocked) {
     if (pendingAnnouncement?.fp === fp) return
-    pendingAnnouncement = { fp, text, wantTts: true, wantBell }
+    pendingAnnouncement = { fp, text, bell }
     pushLiveLog({ type: 'warn', message: `[TripVoice] queued pending (gesture locked): ${text}`, ts: Date.now() })
     return
   }
 
   lastFingerprint = fp
   pushLiveLog({ type: 'info', message: `[TripVoice] announcing new trip: ${text}`, ts: Date.now() })
-  
-  // Bell + TTS with delay, or just TTS immediately
-  if (wantBell) {
-    playBellThenSpeak(text)
-  } else {
-    speakUtterance(text)
-  }
+  enqueueAnnouncement(text, { bell, category: `newTrip:${fp}` })
 }
 
 /** Stop any in-flight announcement (e.g. on unmount). */
 export function cancelTripVoiceAnnouncement() {
-  if (typeof window === 'undefined') return
-  try {
-    window.speechSynthesis?.cancel()
-  } catch {
-    /* ignore */
-  }
-  if (currentBellAudio) {
-    try {
-      currentBellAudio.pause()
-    } catch {
-      /* ignore */
-    }
-    currentBellAudio = null
-  }
+  cancelAllAlerts()
 }
 
 /** Settings: test speech (same voice as trip alert). */
@@ -354,13 +236,22 @@ export function speakTripTtsTest() {
   if (typeof window === 'undefined' || !window.speechSynthesis) return
   const text = 'Text to speech alerts active.'
   pushLiveLog({ type: 'info', message: `[TripVoice] test triggered: ${text}`, ts: Date.now() })
-  speakUtterance(text)
+  speakDirect(text)
 }
 
 /** Settings: test bell sound. */
 export function playTripBellTest() {
   pushLiveLog({ type: 'info', message: `[TripVoice] bell test triggered`, ts: Date.now() })
-  playBellSound()
+  if (typeof window === 'undefined') return
+  const url = getTripBellSoundUrl()
+  try {
+    const audio = new Audio(url)
+    audio.play().catch((e) => {
+      pushLiveLog({ type: 'error', message: `[Bell] play rejected: ${e.message || e}`, ts: Date.now() })
+    })
+  } catch (e) {
+    pushLiveLog({ type: 'error', message: `[Bell] exception: ${e.message || e}`, ts: Date.now() })
+  }
 }
 
 /** @deprecated Use setTripAlertMode instead */
@@ -406,7 +297,7 @@ export function maybeAnnounceStatusChange(phase) {
 
   if (text) {
     pushLiveLog({ type: 'info', message: `[TripVoice] announcing status change: ${text}`, ts: Date.now() })
-    announceText(text, mode)
+    enqueueAnnouncement(text, { bell: mode === 'both', category: `statusChange:${phase}` })
   }
 }
 
@@ -447,7 +338,7 @@ export function maybeAnnounceTrailerStatusChange(trailers) {
     if (prev === 'LDNG' && status === 'CLSD') {
       const text = `Trailer ${order} has finished loading and is now closed.`
       pushLiveLog({ type: 'info', message: `[TripVoice] trailer status change: ${text}`, ts: Date.now() })
-      announceText(text, mode)
+      enqueueAnnouncement(text, { bell: mode === 'both', category: `trailer:${order}` })
     }
 
     prevTrailerStatuses.set(order, status)
@@ -469,38 +360,7 @@ export function clearTripPhaseTracking() {
 }
 
 /**
- * Shared announcement logic for TTS with optional bell chime prefix.
- * Bell plays BEFORE TTS as a chime prefix (2-second delay).
- * @param {string} text
- * @param {TripAlertMode} mode
- * @param {{ force?: boolean }} [opts] - If force is true, bypass gesture gate (use for user-initiated actions)
- */
-function announceText(text, mode, opts = {}) {
-  if (typeof window === 'undefined') return
-  if (mode === 'off') return
-
-  evaluateGestureGate()
-
-  const wantBell = mode === 'both'
-
-  if (!gestureUnlocked && !opts.force) {
-    pushLiveLog({ type: 'warn', message: `[TripVoice] blocked by gesture gate: ${text}`, ts: Date.now() })
-    return
-  }
-
-  pushLiveLog({ type: 'info', message: `[TripVoice] announceText: ${text} (bell=${wantBell})`, ts: Date.now() })
-
-  // Bell + TTS with 2-second delay, or just TTS immediately
-  if (wantBell) {
-    playBellThenSpeak(text)
-  } else if (window.speechSynthesis) {
-    speakUtterance(text)
-  }
-}
-
-/**
  * Announce successful arrival at destination.
- * Uses force mode since this is triggered by user-initiated automation.
  */
 export function announceArrivalSuccess() {
   pushLiveLog({ type: 'info', message: `[TripVoice] announceArrivalSuccess called`, ts: Date.now() })
@@ -514,12 +374,11 @@ export function announceArrivalSuccess() {
     pushLiveLog({ type: 'warn', message: `[TripVoice] skipping arrival success: disabled in prefs`, ts: Date.now() })
     return
   }
-  announceText('Arrived at destination successfully.', mode, { force: true })
+  enqueueAnnouncement('Arrived at destination successfully.', { bell: mode === 'both', category: 'arrivalSuccess' })
 }
 
 /**
  * Announce that tractor was already arrived by geofence.
- * Uses force mode since this is triggered by user-initiated automation.
  */
 export function announceGeofenceArrival() {
   pushLiveLog({ type: 'info', message: `[TripVoice] announceGeofenceArrival called`, ts: Date.now() })
@@ -533,5 +392,5 @@ export function announceGeofenceArrival() {
     pushLiveLog({ type: 'warn', message: `[TripVoice] skipping geofence arrival: disabled in prefs`, ts: Date.now() })
     return
   }
-  announceText('Tractor already arrived by geofence.', mode, { force: true })
+  enqueueAnnouncement('Tractor already arrived by geofence.', { bell: mode === 'both', category: 'geofenceArrival' })
 }

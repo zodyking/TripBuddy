@@ -1,19 +1,12 @@
 /**
- * Sequential audio alert queue system.
- * Uses direct speechSynthesis.speak() (fire and forget) like the working trip-ready approach.
+ * Unified sequential audio/TTS queue system.
+ * All announcements go through this queue to prevent canceling each other.
+ * Waits for each utterance to finish (via onend) before starting the next.
  */
 
 import { pushLiveLog } from '../stores/liveLogStore.js'
-import { previewTripAlertSample } from './tripVoiceAnnouncement.js'
 
 const PREFS_KEY = 'fedexAlertPrefs'
-
-const PRIORITY = {
-  error: 4,
-  tripReady: 3,
-  change: 2,
-  info: 1,
-}
 
 const DEFAULT_PREFS = {
   tripReady: true,
@@ -47,24 +40,6 @@ export function setAlertPrefs(prefs) {
   }
 }
 
-/** @typedef {'tripReady' | 'tractorChange' | 'driverChange' | 'checkInSuccess' | 'checkInFail' | 'apiReconnect'} AlertType */
-
-/**
- * @typedef {Object} QueuedAlert
- * @property {AlertType} type
- * @property {number} priority
- * @property {string} [text] - TTS text
- * @property {string} [soundUrl] - Sound file URL (only for trip-ready bell)
- * @property {number} ts - Enqueue timestamp for dedup
- */
-
-/** @type {QueuedAlert[]} */
-let alertQueue = []
-let isPlaying = false
-let currentAudio = null
-
-const DEDUP_WINDOW_MS = 2000
-
 function getSoundUrl(filename) {
   const base = import.meta.env.BASE_URL || '/'
   const normalized = base.endsWith('/') ? base : `${base}/`
@@ -76,12 +51,55 @@ export const ALERT_SOUNDS = {
 }
 
 /**
- * Play audio (fire and forget - don't wait for completion).
- * @param {string} url
+ * @typedef {Object} QueuedItem
+ * @property {string} text - TTS text to speak
+ * @property {boolean} [bell] - Play bell chime before TTS
+ * @property {string} [category] - For dedup (e.g. 'tractorChange', 'newTrip')
+ * @property {number} ts - Enqueue timestamp
  */
-function playAudioAsync(url) {
+
+/** @type {QueuedItem[]} */
+let speechQueue = []
+let isSpeaking = false
+let currentAudio = null
+let currentUtterance = null
+
+const DEDUP_WINDOW_MS = 2000
+
+/**
+ * Process next item in queue. Waits for current speech to finish via onend.
+ */
+function processNextSpeech() {
   if (typeof window === 'undefined') return
-  pushLiveLog({ type: 'info', message: `[Audio] triggered: ${url}`, ts: Date.now() })
+  if (isSpeaking || speechQueue.length === 0) return
+
+  const item = speechQueue.shift()
+  if (!item) return
+
+  isSpeaking = true
+  pushLiveLog({ type: 'info', message: `[Queue] processing: ${item.text}`, ts: Date.now() })
+
+  if (item.bell) {
+    playBellThenSpeak(item.text)
+  } else {
+    speakText(item.text)
+  }
+}
+
+/**
+ * Play bell sound, then speak text after bell ends.
+ * @param {string} text
+ */
+function playBellThenSpeak(text) {
+  if (typeof window === 'undefined') {
+    isSpeaking = false
+    processNextSpeech()
+    return
+  }
+
+  const url = ALERT_SOUNDS.tripReady
+  pushLiveLog({ type: 'info', message: `[Queue] bell triggered: ${url}`, ts: Date.now() })
+
   try {
     if (currentAudio) {
       currentAudio.pause()
@@ -89,187 +107,208 @@ function playAudioAsync(url) {
     }
     const audio = new Audio(url)
     currentAudio = audio
+
     audio.addEventListener('ended', () => {
       if (currentAudio === audio) currentAudio = null
-      pushLiveLog({ type: 'info', message: `[Audio] success: ${url}`, ts: Date.now() })
+      pushLiveLog({ type: 'info', message: `[Queue] bell ended, speaking: ${text}`, ts: Date.now() })
+      setTimeout(() => speakText(text), 300)
     }, { once: true })
+
     audio.addEventListener('error', () => {
-      pushLiveLog({ type: 'error', message: `[Audio] failed: ${url}`, ts: Date.now() })
+      pushLiveLog({ type: 'error', message: `[Queue] bell failed, speaking anyway: ${text}`, ts: Date.now() })
+      if (currentAudio === audio) currentAudio = null
+      speakText(text)
     }, { once: true })
-    audio.play()
-      .then(() => {
-        pushLiveLog({ type: 'info', message: `[Audio] started: ${url}`, ts: Date.now() })
-      })
-      .catch((e) => {
-        pushLiveLog({ type: 'error', message: `[Audio] play rejected: ${e.message || e}`, ts: Date.now() })
-      })
+
+    audio.play().catch((e) => {
+      pushLiveLog({ type: 'error', message: `[Queue] bell play rejected: ${e.message || e}`, ts: Date.now() })
+      speakText(text)
+    })
   } catch (e) {
-    pushLiveLog({ type: 'error', message: `[Audio] exception: ${e.message || e}`, ts: Date.now() })
+    pushLiveLog({ type: 'error', message: `[Queue] bell exception: ${e.message || e}`, ts: Date.now() })
+    speakText(text)
   }
 }
 
 /**
- * Speak TTS (fire and forget - don't wait for completion).
- * This matches the working trip-ready approach.
+ * Speak text and wait for completion via onend before processing next.
  * @param {string} text
  */
-function speakTts(text) {
+function speakText(text) {
   if (typeof window === 'undefined' || !window.speechSynthesis) {
-    pushLiveLog({ type: 'warn', message: `[TTS] skipped: no speechSynthesis available`, ts: Date.now() })
+    pushLiveLog({ type: 'warn', message: `[Queue] skipped (no speechSynthesis): ${text}`, ts: Date.now() })
+    isSpeaking = false
+    processNextSpeech()
     return
   }
+
   try {
-    window.speechSynthesis.cancel()
-    const utterance = new SpeechSynthesisUtterance(text)
-    utterance.rate = 1.05
-    utterance.pitch = 1
-    utterance.volume = 1
+    const u = new SpeechSynthesisUtterance(text)
+    u.rate = 1.05
+    u.pitch = 1
+    u.volume = 1
+    currentUtterance = u
 
-    utterance.onstart = () => {
-      pushLiveLog({ type: 'info', message: `[TTS] started: ${text}`, ts: Date.now() })
-    }
-    utterance.onend = () => {
-      pushLiveLog({ type: 'info', message: `[TTS] success: ${text}`, ts: Date.now() })
-    }
-    utterance.onerror = (e) => {
-      pushLiveLog({ type: 'error', message: `[TTS] failed: ${text} - ${e.error || 'unknown'}`, ts: Date.now() })
+    u.onstart = () => {
+      pushLiveLog({ type: 'info', message: `[Queue] TTS started: ${text}`, ts: Date.now() })
     }
 
-    window.speechSynthesis.speak(utterance)
-    pushLiveLog({ type: 'info', message: `[TTS] triggered: ${text}`, ts: Date.now() })
+    u.onend = () => {
+      pushLiveLog({ type: 'info', message: `[Queue] TTS ended: ${text}`, ts: Date.now() })
+      currentUtterance = null
+      isSpeaking = false
+      processNextSpeech()
+    }
+
+    u.onerror = (e) => {
+      pushLiveLog({ type: 'error', message: `[Queue] TTS error: ${text} - ${e.error || 'unknown'}`, ts: Date.now() })
+      currentUtterance = null
+      isSpeaking = false
+      processNextSpeech()
+    }
+
+    window.speechSynthesis.speak(u)
+    pushLiveLog({ type: 'info', message: `[Queue] TTS triggered: ${text}`, ts: Date.now() })
   } catch (e) {
-    pushLiveLog({ type: 'error', message: `[TTS] exception: ${e.message || e}`, ts: Date.now() })
+    pushLiveLog({ type: 'error', message: `[Queue] TTS exception: ${e.message || e}`, ts: Date.now() })
+    currentUtterance = null
+    isSpeaking = false
+    processNextSpeech()
   }
-}
-
-function processQueue() {
-  if (isPlaying || alertQueue.length === 0) return
-
-  alertQueue.sort((a, b) => b.priority - a.priority)
-  const alert = alertQueue.shift()
-  if (!alert) return
-
-  isPlaying = true
-  pushLiveLog({ type: 'info', message: `[AlertQueue] playing: ${alert.type} - ${alert.text || '(no text)'}`, ts: Date.now() })
-
-  if (alert.soundUrl) {
-    playAudioAsync(alert.soundUrl)
-  }
-  if (alert.text) {
-    speakTts(alert.text)
-  }
-
-  setTimeout(() => {
-    isPlaying = false
-    processQueue()
-  }, 100)
 }
 
 /**
- * Enqueue an alert. Deduplicates rapid same-type alerts.
- * @param {AlertType} type
- * @param {{ text?: string, soundUrl?: string, priority?: number }} options
+ * Unified announcement entry point. All TTS goes through here.
+ * @param {string} text - Text to speak
+ * @param {{ bell?: boolean, category?: string }} [opts]
  */
-export function enqueueAlert(type, options = {}) {
+export function enqueueAnnouncement(text, opts = {}) {
   if (typeof window === 'undefined') return
-
-  const prefs = getAlertPrefs()
-  
-  if (type === 'tractorChange' && !prefs.tractorChange) {
-    pushLiveLog({ type: 'warn', message: `[AlertQueue] blocked: tractorChange disabled in prefs`, ts: Date.now() })
-    return
-  }
-  if (type === 'driverChange' && !prefs.driverChange) {
-    pushLiveLog({ type: 'warn', message: `[AlertQueue] blocked: driverChange disabled in prefs`, ts: Date.now() })
-    return
-  }
-  if ((type === 'checkInSuccess' || type === 'checkInFail') && !prefs.checkIn) {
-    pushLiveLog({ type: 'warn', message: `[AlertQueue] blocked: checkIn disabled in prefs`, ts: Date.now() })
-    return
-  }
-  if (type === 'apiReconnect' && !prefs.apiReconnect) {
-    pushLiveLog({ type: 'warn', message: `[AlertQueue] blocked: apiReconnect disabled in prefs`, ts: Date.now() })
-    return
-  }
+  if (!text || typeof text !== 'string') return
 
   const now = Date.now()
-  const existingIndex = alertQueue.findIndex(
-    (a) => a.type === type && now - a.ts < DEDUP_WINDOW_MS
+  const category = opts.category || text
+
+  const existingIndex = speechQueue.findIndex(
+    (item) => item.category === category && now - item.ts < DEDUP_WINDOW_MS
   )
+
   if (existingIndex !== -1) {
-    alertQueue[existingIndex] = {
-      type,
-      priority: options.priority ?? PRIORITY.change,
-      text: options.text,
-      soundUrl: options.soundUrl,
-      ts: now,
-    }
-    pushLiveLog({ type: 'info', message: `[AlertQueue] dedup updated: ${type}`, ts: Date.now() })
+    speechQueue[existingIndex] = { text, bell: opts.bell, category, ts: now }
+    pushLiveLog({ type: 'info', message: `[Queue] dedup updated: ${text}`, ts: Date.now() })
   } else {
-    alertQueue.push({
-      type,
-      priority: options.priority ?? PRIORITY.change,
-      text: options.text,
-      soundUrl: options.soundUrl,
-      ts: now,
-    })
-    pushLiveLog({ type: 'info', message: `[AlertQueue] enqueued: ${type} - ${options.text || '(no text)'}`, ts: Date.now() })
+    speechQueue.push({ text, bell: opts.bell, category, ts: now })
+    pushLiveLog({ type: 'info', message: `[Queue] enqueued: ${text}`, ts: Date.now() })
   }
 
-  processQueue()
+  processNextSpeech()
+}
+
+/**
+ * Direct speech for user-initiated tests (bypasses queue, works on iOS).
+ * @param {string} text
+ * @param {{ bell?: boolean }} [opts]
+ */
+export function speakDirect(text, opts = {}) {
+  if (typeof window === 'undefined') return
+
+  if (opts.bell) {
+    const url = ALERT_SOUNDS.tripReady
+    try {
+      const audio = new Audio(url)
+      audio.addEventListener('ended', () => {
+        setTimeout(() => speakDirectTts(text), 300)
+      }, { once: true })
+      audio.addEventListener('error', () => speakDirectTts(text), { once: true })
+      audio.play().catch(() => speakDirectTts(text))
+    } catch {
+      speakDirectTts(text)
+    }
+  } else {
+    speakDirectTts(text)
+  }
+}
+
+function speakDirectTts(text) {
+  if (typeof window === 'undefined' || !window.speechSynthesis) return
+  try {
+    window.speechSynthesis.cancel()
+    const u = new SpeechSynthesisUtterance(text)
+    u.rate = 1.05
+    u.pitch = 1
+    u.volume = 1
+    u.onstart = () => pushLiveLog({ type: 'info', message: `[Direct] TTS started: ${text}`, ts: Date.now() })
+    u.onend = () => pushLiveLog({ type: 'info', message: `[Direct] TTS ended: ${text}`, ts: Date.now() })
+    u.onerror = (e) => pushLiveLog({ type: 'error', message: `[Direct] TTS error: ${text} - ${e.error}`, ts: Date.now() })
+    window.speechSynthesis.speak(u)
+  } catch (e) {
+    pushLiveLog({ type: 'error', message: `[Direct] TTS exception: ${e.message || e}`, ts: Date.now() })
+  }
 }
 
 export function announceTractorChange() {
+  const prefs = getAlertPrefs()
+  if (!prefs.tractorChange) {
+    pushLiveLog({ type: 'warn', message: `[Alert] tractorChange blocked by prefs`, ts: Date.now() })
+    return
+  }
   pushLiveLog({ type: 'info', message: `[Alert] announceTractorChange called`, ts: Date.now() })
-  enqueueAlert('tractorChange', {
-    text: 'Tractor details updated.',
-    priority: PRIORITY.change,
-  })
+  enqueueAnnouncement('Tractor details updated.', { category: 'tractorChange' })
 }
 
 export function announceDriverChange() {
+  const prefs = getAlertPrefs()
+  if (!prefs.driverChange) {
+    pushLiveLog({ type: 'warn', message: `[Alert] driverChange blocked by prefs`, ts: Date.now() })
+    return
+  }
   pushLiveLog({ type: 'info', message: `[Alert] announceDriverChange called`, ts: Date.now() })
-  enqueueAlert('driverChange', {
-    text: 'Driver details updated.',
-    priority: PRIORITY.change,
-  })
+  enqueueAnnouncement('Driver details updated.', { category: 'driverChange' })
 }
 
 export function announceCheckInSuccess() {
+  const prefs = getAlertPrefs()
+  if (!prefs.checkIn) {
+    pushLiveLog({ type: 'warn', message: `[Alert] checkIn blocked by prefs`, ts: Date.now() })
+    return
+  }
   pushLiveLog({ type: 'info', message: `[Alert] announceCheckInSuccess called`, ts: Date.now() })
-  enqueueAlert('checkInSuccess', {
-    text: 'Check-in successful.',
-    priority: PRIORITY.info,
-  })
+  enqueueAnnouncement('Check-in successful.', { category: 'checkInSuccess' })
 }
 
 export function announceCheckInFail() {
+  const prefs = getAlertPrefs()
+  if (!prefs.checkIn) {
+    pushLiveLog({ type: 'warn', message: `[Alert] checkIn blocked by prefs`, ts: Date.now() })
+    return
+  }
   pushLiveLog({ type: 'info', message: `[Alert] announceCheckInFail called`, ts: Date.now() })
-  enqueueAlert('checkInFail', {
-    text: 'Check-in failed.',
-    priority: PRIORITY.error,
-  })
+  enqueueAnnouncement('Check-in failed.', { category: 'checkInFail' })
 }
 
 export function announceCheckInTripReady() {
+  const prefs = getAlertPrefs()
+  if (!prefs.checkIn) {
+    pushLiveLog({ type: 'warn', message: `[Alert] checkIn blocked by prefs`, ts: Date.now() })
+    return
+  }
   pushLiveLog({ type: 'info', message: `[Alert] announceCheckInTripReady called`, ts: Date.now() })
-  enqueueAlert('checkInSuccess', {
-    text: 'Check in successful. Trip ready and acknowledged.',
-    priority: PRIORITY.tripReady,
-  })
+  enqueueAnnouncement('Check in successful. Trip ready and acknowledged.', { category: 'checkInTripReady' })
 }
 
 export function announceApiReconnect() {
+  const prefs = getAlertPrefs()
+  if (!prefs.apiReconnect) {
+    pushLiveLog({ type: 'warn', message: `[Alert] apiReconnect blocked by prefs`, ts: Date.now() })
+    return
+  }
   pushLiveLog({ type: 'info', message: `[Alert] announceApiReconnect called`, ts: Date.now() })
-  enqueueAlert('apiReconnect', {
-    text: 'API reconnected.',
-    priority: PRIORITY.info,
-  })
+  enqueueAnnouncement('API reconnected.', { category: 'apiReconnect' })
 }
 
 export function cancelAllAlerts() {
-  alertQueue = []
-  isPlaying = false
+  speechQueue = []
+  isSpeaking = false
   if (typeof window !== 'undefined') {
     try {
       window.speechSynthesis?.cancel()
@@ -285,28 +324,26 @@ export function cancelAllAlerts() {
       currentAudio = null
     }
   }
+  currentUtterance = null
+  pushLiveLog({ type: 'info', message: `[Queue] all alerts cancelled`, ts: Date.now() })
 }
 
-/**
- * Test functions call speechSynthesis directly (not through queue) to work on iOS.
- * The queue doesn't work on iOS because it's not triggered by a user gesture.
- */
 export function testTractorChangeAlert() {
   pushLiveLog({ type: 'info', message: `[Test] testTractorChangeAlert called`, ts: Date.now() })
-  previewTripAlertSample('Tractor details updated.')
+  speakDirect('Tractor details updated.')
 }
 
 export function testDriverChangeAlert() {
   pushLiveLog({ type: 'info', message: `[Test] testDriverChangeAlert called`, ts: Date.now() })
-  previewTripAlertSample('Driver details updated.')
+  speakDirect('Driver details updated.')
 }
 
 export function testSuccessAlert() {
   pushLiveLog({ type: 'info', message: `[Test] testSuccessAlert called`, ts: Date.now() })
-  previewTripAlertSample('Check-in successful.')
+  speakDirect('Check-in successful.')
 }
 
 export function testErrorAlert() {
   pushLiveLog({ type: 'info', message: `[Test] testErrorAlert called`, ts: Date.now() })
-  previewTripAlertSample('Check-in failed.')
+  speakDirect('Check-in failed.')
 }
