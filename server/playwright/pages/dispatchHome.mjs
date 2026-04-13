@@ -1,4 +1,4 @@
-import { MENU } from '../selectors.mjs'
+import { MENU, HOMEPAGE_MENU_IDS } from '../selectors.mjs'
 
 /** Short labels for live log / UI (matches MENU keys). */
 const MENU_LABEL = {
@@ -18,7 +18,23 @@ export function menuHumanName(key) {
 function menuButton(page, key) {
   const spec = MENU[key]
   if (!spec) throw new Error(`Unknown menu key: ${key}`)
-  return page.getByRole(spec.role, { name: spec.name, exact: spec.exact })
+  const roleOpts = { name: spec.name }
+  if (spec.exact === true) roleOpts.exact = true
+  return page.getByRole(spec.role, roleOpts)
+}
+
+/**
+ * Prefer stable homepage IDs when present (visible), else role+name from MENU.
+ * @param {import('playwright').Page} page
+ * @param {'checkIn' | 'inspectAndCheckOut'} key
+ */
+async function homepageMenuButtonOrRole(page, key) {
+  const idSel = HOMEPAGE_MENU_IDS[key]
+  if (idSel) {
+    const byId = page.locator(idSel).first()
+    if (await byId.isVisible().catch(() => false)) return byId
+  }
+  return menuButton(page, key)
 }
 
 export async function clickMenuIfEnabled(page, key, log) {
@@ -52,8 +68,8 @@ export async function clickMenuIfEnabled(page, key, log) {
  * >}
  */
 export async function inspectCheckoutHomeGate(page, log) {
-  const checkIn = menuButton(page, 'checkIn')
-  const inspect = menuButton(page, 'inspectAndCheckOut')
+  const checkIn = await homepageMenuButtonOrRole(page, 'checkIn')
+  const inspect = await homepageMenuButtonOrRole(page, 'inspectAndCheckOut')
   const ciVis = await checkIn.isVisible().catch(() => false)
   const inVis = await inspect.isVisible().catch(() => false)
   if (!ciVis || !inVis) {
