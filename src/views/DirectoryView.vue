@@ -1,6 +1,7 @@
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, nextTick } from 'vue'
 import { fetchDirectory } from '../api.js'
+import DirectoryMap from '../components/DirectoryMap.vue'
 
 /** @type {import('vue').Ref<Array<{
  *   locationId: string,
@@ -30,6 +31,46 @@ const filteredLocations = computed(() => {
       loc.address.toLowerCase().includes(q),
   )
 })
+
+/** Locations with valid coordinates for the map (follows search filter). */
+const mapPins = computed(() => {
+  const out = []
+  for (const loc of filteredLocations.value) {
+    const lat = loc.latitude != null ? Number(loc.latitude) : NaN
+    const lng = loc.longitude != null ? Number(loc.longitude) : NaN
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) continue
+    out.push({
+      locationId: String(loc.locationId),
+      lat,
+      lng,
+    })
+  }
+  return out
+})
+
+const showMapNoCoordsNotice = computed(
+  () =>
+    !loading.value &&
+    filteredLocations.value.length > 0 &&
+    mapPins.value.length === 0,
+)
+
+function prefersReducedMotion() {
+  if (typeof window === 'undefined') return false
+  return window.matchMedia('(prefers-reduced-motion: reduce)').matches
+}
+
+function onMapSelect(locationId) {
+  expandedId.value = locationId
+  nextTick(() => {
+    document
+      .getElementById(`dir-loc-${locationId}`)
+      ?.scrollIntoView({
+        behavior: prefersReducedMotion() ? 'auto' : 'smooth',
+        block: 'nearest',
+      })
+  })
+}
 
 async function loadDirectory() {
   loading.value = true
@@ -119,6 +160,39 @@ onMounted(() => {
       </button>
     </header>
 
+    <div v-if="mapPins.length > 0" class="directory-map-section">
+      <DirectoryMap
+        :pins="mapPins"
+        :highlight-id="expandedId"
+        @select="onMapSelect"
+      />
+    </div>
+
+    <div
+      v-if="showMapNoCoordsNotice"
+      class="map-no-coords-notice"
+      role="status"
+    >
+      <svg
+        class="map-no-coords-icon"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="2"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+        aria-hidden="true"
+      >
+        <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z" />
+        <circle cx="12" cy="10" r="3" />
+      </svg>
+      <p>
+        None of these locations have saved coordinates yet. Open
+        <strong>Destination</strong> on the Home dispatch card to load details and
+        save them to the directory.
+      </p>
+    </div>
+
     <div class="search-bar">
       <svg
         class="search-icon"
@@ -199,6 +273,7 @@ onMounted(() => {
     <ul v-else class="location-list">
       <li
         v-for="loc in filteredLocations"
+        :id="'dir-loc-' + loc.locationId"
         :key="loc.locationId"
         class="location-card"
         :class="{ 'is-expanded': expandedId === loc.locationId }"
@@ -310,6 +385,41 @@ onMounted(() => {
   font-weight: var(--weight-bold, 700);
   color: var(--color-text-primary, #f4f4f8);
   margin: 0;
+}
+
+.directory-map-section {
+  margin-bottom: var(--space-4, 1rem);
+}
+
+.map-no-coords-notice {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3, 0.75rem);
+  padding: var(--space-3, 0.75rem) var(--space-4, 1rem);
+  margin-bottom: var(--space-4, 1rem);
+  border-radius: var(--radius-lg, 0.75rem);
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--color-border, rgba(255, 255, 255, 0.08));
+}
+
+.map-no-coords-icon {
+  width: 1.5rem;
+  height: 1.5rem;
+  flex-shrink: 0;
+  color: var(--color-accent-purple, #7b4db5);
+  margin-top: 0.125rem;
+}
+
+.map-no-coords-notice p {
+  margin: 0;
+  font-size: var(--text-sm, 0.875rem);
+  line-height: var(--leading-snug, 1.375);
+  color: var(--color-text-secondary, #a0a0b0);
+}
+
+.map-no-coords-notice strong {
+  color: var(--color-text-primary, #f4f4f8);
+  font-weight: var(--weight-semibold, 600);
 }
 
 .refresh-btn {
