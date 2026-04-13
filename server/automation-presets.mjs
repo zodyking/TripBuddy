@@ -57,7 +57,8 @@ export const PRESETS = {
 
   inspect_checkout: {
     name: 'Inspect & Checkout',
-    description: 'Open Inspect and Check Out menu, fill form fields.',
+    description:
+      'Dispatch home, sign-in, then gate: Check In grayed and Inspect active opens Inspect & Check Out (phase 1; more steps later).',
     triggers: [
       { id: genId(), type: 'manual', buttonLabel: 'Inspect/Checkout' },
     ],
@@ -76,14 +77,7 @@ export const PRESETS = {
       },
       {
         id: genId(),
-        type: 'openMenu',
-        menuKey: 'inspectAndCheckOut',
-      },
-      {
-        id: genId(),
-        type: 'waitForLoadState',
-        state: 'domcontentloaded',
-        timeout: 30000,
+        type: 'inspectCheckoutHomeGate',
       },
     ],
     variables: {},

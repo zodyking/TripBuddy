@@ -8,6 +8,7 @@ import {
   announceCheckInFail,
   announceCheckInTripReady,
   announceCheckInNewTrip,
+  announceInspectCheckoutCancelled,
 } from '../../utils/alertAudioQueue.js'
 
 function generateId() {
@@ -109,30 +110,35 @@ async function run(id, name) {
   try {
     const result = await runAutomation(id, { headless: true })
     if (result.ok) {
-      const arrivePayload = result.variables?._arrivePayload
-      if (arrivePayload && typeof arrivePayload === 'object') {
-        if (arrivePayload.alreadyArrivedByGeofence === true) {
-          announceGeofenceArrival()
-        } else {
-          announceArrivalSuccess()
+      if (result.variables?._inspectCheckoutCancelled === true) {
+        pushLiveLog({ type: 'info', message: 'No trip to inspect', ts: Date.now() })
+        announceInspectCheckoutCancelled()
+      } else {
+        const arrivePayload = result.variables?._arrivePayload
+        if (arrivePayload && typeof arrivePayload === 'object') {
+          if (arrivePayload.alreadyArrivedByGeofence === true) {
+            announceGeofenceArrival()
+          } else {
+            announceArrivalSuccess()
+          }
         }
-      }
-      const checkInPayload = result.variables?._checkInPayload
-      if (checkInPayload && typeof checkInPayload === 'object') {
-        if (checkInPayload.checkInNewTripFound === true) {
-          announceCheckInNewTrip()
-        } else if (checkInPayload.tripReadyAcknowledged === true) {
-          announceCheckInTripReady()
-        } else if (
-          checkInPayload.missionComplete === true ||
-          checkInPayload.signedOut === true
-        ) {
-          announceCheckInSuccess()
-        } else if (checkInPayload.success === false) {
-          announceCheckInFail()
+        const checkInPayload = result.variables?._checkInPayload
+        if (checkInPayload && typeof checkInPayload === 'object') {
+          if (checkInPayload.checkInNewTripFound === true) {
+            announceCheckInNewTrip()
+          } else if (checkInPayload.tripReadyAcknowledged === true) {
+            announceCheckInTripReady()
+          } else if (
+            checkInPayload.missionComplete === true ||
+            checkInPayload.signedOut === true
+          ) {
+            announceCheckInSuccess()
+          } else if (checkInPayload.success === false) {
+            announceCheckInFail()
+          }
         }
+        pushLiveLog({ type: 'info', message: `Ran: ${name}`, ts: Date.now() })
       }
-      pushLiveLog({ type: 'info', message: `Ran: ${name}`, ts: Date.now() })
     } else {
       pushLiveLog({ type: 'error', message: result.error || 'Failed', ts: Date.now() })
     }

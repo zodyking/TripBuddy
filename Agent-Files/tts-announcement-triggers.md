@@ -12,7 +12,7 @@ Purpose: map **what event** in the app leads to **which spoken phrase**, which *
 | Trip status changes | `fedexTripStatusChangeEnabled` | Assigned / dispatched / completed phrases. |
 | Trailer status changes | `fedexTrailerStatusChangeEnabled` | LDNG → CLSD per trailer. |
 | Arrival alerts | `fedexArrivalAlertsEnabled` | Arrival success + geofence arrival. |
-| Alert prefs (tractor/driver/check-in/API) | `fedexAlertPrefs` | `tractorChange`, `driverChange`, `checkIn`, `apiReconnect` (defaults: first three on, API reconnect off). |
+| Alert prefs (tractor/driver/check-in/inspect/API) | `fedexAlertPrefs` | `tractorChange`, `driverChange`, `checkIn`, `inspectCheckout`, `apiReconnect` (defaults: first four on, API reconnect off). |
 
 Queue: items play **one after another** (wait for `SpeechSynthesisUtterance` `onend`). Same **category** within **2s** dedupes to the latest text.
 
@@ -86,6 +86,7 @@ Called from [`MainDashboard.vue`](../src/views/MainDashboard.vue) and [`Automati
 | `announceCheckInFail` | "Check-in failed." | `checkIn` |
 | `announceCheckInTripReady` | "Check in successful. Trip ready and acknowledged." | `checkIn` |
 | `announceCheckInNewTrip` | "Check-in successful, new trip found" (trip summary + Begin inspection page) | `checkIn` |
+| `announceInspectCheckoutCancelled` | "Inspect & check out cancelled, no trip to inspect" (home gate: Check In active, Inspect disabled) | `inspectCheckout` |
 | `announceApiReconnect` | "API reconnected." | `apiReconnect` (default **false**) |
 
 `announceApiReconnect` is exported but **not wired** to any caller in the repo as of this doc (available for future reconnect hooks).

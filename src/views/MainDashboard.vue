@@ -76,6 +76,7 @@ import {
   announceCheckInFail,
   announceCheckInTripReady,
   announceCheckInNewTrip,
+  announceInspectCheckoutCancelled,
   cancelAllAlerts,
 } from '../utils/alertAudioQueue.js'
 
@@ -239,33 +240,38 @@ async function runQuickAction(auto) {
     }
     const result = await runAutomation(auto.id, { headless: true })
     if (result.ok) {
-      const arrivePayload = result.variables?._arrivePayload
-      if (arrivePayload && typeof arrivePayload === 'object') {
-        if (arrivePayload.alreadyArrivedByGeofence === true) {
-          announceGeofenceArrival()
-        } else {
-          announceArrivalSuccess()
-        }
-      }
-      const checkInPayload = result.variables?._checkInPayload
-      if (checkInPayload && typeof checkInPayload === 'object') {
-        if (checkInPayload.checkInNewTripFound === true) {
-          announceCheckInNewTrip()
-        } else if (checkInPayload.tripReadyAcknowledged === true) {
-          announceCheckInTripReady()
-        } else if (
-          checkInPayload.missionComplete === true ||
-          checkInPayload.signedOut === true
-        ) {
-          announceCheckInSuccess()
-        } else if (checkInPayload.success === false) {
-          announceCheckInFail()
-        }
-      }
-      if (result.variables?._bannerDetected === false) {
-        checkInSuccessBanner.value = `${auto.manualButtonLabel || auto.name} completed`
+      if (result.variables?._inspectCheckoutCancelled === true) {
+        runMsg.value = 'No trip to inspect'
+        announceInspectCheckoutCancelled()
       } else {
-        runMsg.value = `${auto.manualButtonLabel || auto.name} completed`
+        const arrivePayload = result.variables?._arrivePayload
+        if (arrivePayload && typeof arrivePayload === 'object') {
+          if (arrivePayload.alreadyArrivedByGeofence === true) {
+            announceGeofenceArrival()
+          } else {
+            announceArrivalSuccess()
+          }
+        }
+        const checkInPayload = result.variables?._checkInPayload
+        if (checkInPayload && typeof checkInPayload === 'object') {
+          if (checkInPayload.checkInNewTripFound === true) {
+            announceCheckInNewTrip()
+          } else if (checkInPayload.tripReadyAcknowledged === true) {
+            announceCheckInTripReady()
+          } else if (
+            checkInPayload.missionComplete === true ||
+            checkInPayload.signedOut === true
+          ) {
+            announceCheckInSuccess()
+          } else if (checkInPayload.success === false) {
+            announceCheckInFail()
+          }
+        }
+        if (result.variables?._bannerDetected === false) {
+          checkInSuccessBanner.value = `${auto.manualButtonLabel || auto.name} completed`
+        } else {
+          runMsg.value = `${auto.manualButtonLabel || auto.name} completed`
+        }
       }
     } else {
       setRunErrorBanner(result.error || 'Failed')

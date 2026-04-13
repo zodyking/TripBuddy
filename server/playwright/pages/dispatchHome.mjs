@@ -40,6 +40,45 @@ export async function clickMenuIfEnabled(page, key, log) {
 }
 
 /**
+ * Inspect & Check Out phase-1 gate: Check In must be disabled and Inspect & Check Out enabled.
+ * Inverse (Check In enabled, Inspect disabled) means no trip to inspect.
+ *
+ * @param {import('playwright').Page} page
+ * @param {(type: string, message: string, extra?: object) => void} log
+ * @returns {Promise<
+ *   | { outcome: 'opened' }
+ *   | { outcome: 'no_trip' }
+ *   | { outcome: 'ambiguous'; reason: string; checkInEnabled?: boolean; inspectEnabled?: boolean }
+ * >}
+ */
+export async function inspectCheckoutHomeGate(page, log) {
+  const checkIn = menuButton(page, 'checkIn')
+  const inspect = menuButton(page, 'inspectAndCheckOut')
+  const ciVis = await checkIn.isVisible().catch(() => false)
+  const inVis = await inspect.isVisible().catch(() => false)
+  if (!ciVis || !inVis) {
+    log('warn', 'Inspect/checkout gate: Check In or Inspect and Check Out not visible')
+    return { outcome: 'ambiguous', reason: 'buttons_not_visible' }
+  }
+  const ciEn = await checkIn.isEnabled().catch(() => false)
+  const inEn = await inspect.isEnabled().catch(() => false)
+  if (!ciEn && inEn) {
+    await inspect.click()
+    log('info', 'Opened Inspect and Check Out (home gate passed)')
+    return { outcome: 'opened' }
+  }
+  if (ciEn && !inEn) {
+    return { outcome: 'no_trip' }
+  }
+  return {
+    outcome: 'ambiguous',
+    reason: 'unexpected_button_states',
+    checkInEnabled: ciEn,
+    inspectEnabled: inEn,
+  }
+}
+
+/**
  * Fingerprint home/dashboard for assignment polling: welcome text + button states.
  */
 export async function captureHomeFingerprint(page) {

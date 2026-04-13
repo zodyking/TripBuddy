@@ -41,6 +41,7 @@ export const BLOCK_CATEGORIES = {
     icon: 'truck',
     blocks: [
       'ensureSignedIn',
+      'inspectCheckoutHomeGate',
       'checkInEndToEnd',
       'openMenu',
       'fillCheckInForm',
@@ -331,6 +332,13 @@ export const BLOCK_DEFINITIONS = {
     fields: [
       { key: 'timeout', label: 'Timeout (ms)', type: 'number', min: 0, max: 300000, default: 60000 },
     ],
+  },
+  inspectCheckoutHomeGate: {
+    type: 'inspectCheckoutHomeGate',
+    label: 'Inspect & Check Out — home gate',
+    category: 'fedex',
+    icon: 'clipboard-check',
+    fields: [],
   },
   openMenu: {
     type: 'openMenu',

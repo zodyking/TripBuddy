@@ -1,7 +1,11 @@
 import { DISPATCH_ENTRY_URL } from '../config.mjs'
 import { emitLog } from '../log-bus.mjs'
 import { ensureContext, getOrCreatePage, closeContext } from './browser.mjs'
-import { clickMenuIfEnabled, menuHumanName } from './pages/dispatchHome.mjs'
+import {
+  clickMenuIfEnabled,
+  menuHumanName,
+  inspectCheckoutHomeGate,
+} from './pages/dispatchHome.mjs'
 import { ensureDispatchAppReady } from './dispatchAuthGate.mjs'
 import { getUsername, getDecryptedPassword, getTractorNumber } from '../credentials-store.mjs'
 import { readAssignment, writeAssignment } from '../assignment-store.mjs'
@@ -70,6 +74,7 @@ const SKIP_SCREENSHOT_TYPES = new Set([
   'runAutomation',
   'checkInEndToEnd',
   'arriveEndToEnd',
+  'inspectCheckoutHomeGate',
 ])
 
 /**
@@ -571,6 +576,24 @@ async function executeAction(action, page, ctx) {
       })
       log('info', 'Ensured signed in')
       break
+    }
+
+    case 'inspectCheckoutHomeGate': {
+      if (signal?.aborted) throw new Error('Aborted')
+      const gate = await inspectCheckoutHomeGate(page, log)
+      if (gate.outcome === 'opened') break
+      if (gate.outcome === 'no_trip') {
+        ctx.variables._inspectCheckoutCancelled = true
+        log('info', 'No trip to inspect', { inspectCheckoutCancelled: true })
+        throw new Error('STOP: No trip to inspect')
+      }
+      throw new Error(
+        `Inspect/checkout gate: cannot continue (${gate.reason}${
+          gate.checkInEnabled !== undefined
+            ? ` — Check In enabled=${gate.checkInEnabled}, Inspect enabled=${gate.inspectEnabled}`
+            : ''
+        })`,
+      )
     }
 
     case 'openMenu': {

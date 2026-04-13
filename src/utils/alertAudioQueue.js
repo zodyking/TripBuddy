@@ -13,6 +13,7 @@ const DEFAULT_PREFS = {
   tractorChange: true,
   driverChange: true,
   checkIn: true,
+  inspectCheckout: true,
   apiReconnect: false,
 }
 
@@ -304,6 +305,18 @@ export function announceCheckInNewTrip() {
   }
   pushLiveLog({ type: 'info', message: `[Alert] announceCheckInNewTrip called`, ts: Date.now() })
   enqueueAnnouncement('Check-in successful, new trip found', { category: 'checkInNewTrip' })
+}
+
+export function announceInspectCheckoutCancelled() {
+  const prefs = getAlertPrefs()
+  if (!prefs.inspectCheckout) {
+    pushLiveLog({ type: 'warn', message: `[Alert] inspectCheckout blocked by prefs`, ts: Date.now() })
+    return
+  }
+  pushLiveLog({ type: 'info', message: `[Alert] announceInspectCheckoutCancelled called`, ts: Date.now() })
+  enqueueAnnouncement('Inspect & check out cancelled, no trip to inspect', {
+    category: 'inspectCheckoutCancelled',
+  })
 }
 
 export function announceApiReconnect() {
