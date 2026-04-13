@@ -58,7 +58,7 @@ export const PRESETS = {
   inspect_checkout: {
     name: 'Inspect & Checkout',
     description:
-      'Dispatch home, sign-in, then gate: Check In grayed and Inspect active opens Inspect & Check Out (phase 1; more steps later).',
+      'Dispatch home, sign-in, home gate, then warning/begin inspection, dolly/seals/trailer steps (assignment field values + prompts when missing).',
     triggers: [
       { id: genId(), type: 'manual', buttonLabel: 'Inspect/Checkout' },
     ],
@@ -78,6 +78,10 @@ export const PRESETS = {
       {
         id: genId(),
         type: 'inspectCheckoutHomeGate',
+      },
+      {
+        id: genId(),
+        type: 'inspectCheckoutContinue',
       },
     ],
     variables: {},

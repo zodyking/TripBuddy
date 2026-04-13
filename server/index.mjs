@@ -39,6 +39,8 @@ import {
   isBlockRunnerBusy,
   submitBlockRetryLocation,
   cancelBlockRetry,
+  submitBlockInspectField,
+  cancelBlockInspectField,
   cancelBlockRun,
 } from './playwright/blocks.mjs'
 import { listPresets, getPreset } from './automation-presets.mjs'
@@ -561,6 +563,17 @@ app.post('/api/run/retry-location', async (req, reply) => {
   return { ok: true }
 })
 
+/** In-browser Inspect & Check Out: supply dolly / seal / trailer value while automation waits. */
+app.post('/api/run/retry-inspect-field', async (req, reply) => {
+  const { runId, value } = req.body ?? {}
+  if (!runId || typeof runId !== 'string') {
+    return reply.code(400).send({ error: 'runId required' })
+  }
+  const r = submitBlockInspectField(runId, typeof value === 'string' ? value : String(value ?? ''))
+  if (!r.ok) return reply.code(400).send(r)
+  return { ok: true }
+})
+
 /** Cancel waiting for in-browser location retry; aborts the run. */
 app.post('/api/run/cancel-retry', async (req, reply) => {
   const { runId } = req.body ?? {}
@@ -570,7 +583,12 @@ app.post('/api/run/cancel-retry', async (req, reply) => {
   let r = cancelCheckInRetry(runId)
   if (!r.ok) {
     r = cancelBlockRetry(runId)
-    if (r.ok) cancelBlockRun()
+    if (!r.ok) {
+      r = cancelBlockInspectField(runId)
+      if (r.ok) cancelBlockRun()
+    } else {
+      cancelBlockRun()
+    }
   } else {
     cancelRun()
   }

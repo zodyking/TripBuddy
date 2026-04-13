@@ -17,6 +17,7 @@ import {
   listAutomations,
   runAutomation,
   postRetryLocation,
+  postRetryInspectField,
   postCancelRetry,
   fetchFedexLinehaulLocation,
 } from '../api.js'
@@ -36,6 +37,8 @@ import {
   refreshLinehaulApis,
   tripPhase,
   linehaulDriverIdFromCredMeta,
+  prePlanTripSnapshot,
+  hasPrePlanTrip,
 } from '../stores/linehaulSnapshotStore.js'
 import {
   registerApiRecover,
@@ -58,6 +61,7 @@ import {
 import { formatLinehaulLocationForDisplay } from '../utils/linehaulLocationDisplay.js'
 import {
   maybeAnnounceNewTrip,
+  maybeAnnouncePrePlanTrip,
   cancelTripVoiceAnnouncement,
   unlockTripVoiceFromUserGesture,
   tripVoiceShowUnlockHint,
@@ -99,6 +103,13 @@ const locationRetryInput = ref('')
 const locationRetrySubmitting = ref(false)
 const inBrowserRetryRunId = ref(null)
 const streamBannerHandledKey = ref(null)
+
+const inspectFieldOpen = ref(false)
+const inspectFieldMessage = ref('')
+const inspectFieldInput = ref('')
+const inspectFieldSubmitting = ref(false)
+const inspectFieldRunId = ref(null)
+const inspectFieldKeyLabel = ref('')
 
 const destLocationModalOpen = ref(false)
 const destLocationLoading = ref(false)
@@ -158,6 +169,10 @@ const tripStatusDetailTitle = computed(() => {
 })
 
 const tripOriginDest = computed(() => extractOriginDest(linehaulTripsBody.value))
+const prePlanOriginDest = computed(() => extractOriginDest(prePlanTripSnapshot.value))
+
+/** 0 = current trip, 1 = pre-plan trip */
+const dispatchSlideIndex = ref(0)
 
 const tripTrailerCards = computed(() =>
   buildEnhancedTrailerCards(linehaulTripsBody.value),
@@ -365,6 +380,78 @@ async function saveLocationAndRetry() {
   }
 }
 
+async function openInspectFieldModal(message, runId, fieldLabel = '') {
+  inspectFieldMessage.value = message
+  inspectFieldInput.value = ''
+  inspectFieldKeyLabel.value = fieldLabel ? String(fieldLabel) : 'Value'
+  if (runId) inspectFieldRunId.value = runId
+  await nextTick()
+  inspectFieldOpen.value = true
+}
+
+async function cancelInspectField() {
+  if (inspectFieldSubmitting.value) return
+  const rid = inspectFieldRunId.value
+  inspectFieldOpen.value = false
+  inspectFieldMessage.value = ''
+  inspectFieldInput.value = ''
+  inspectFieldKeyLabel.value = ''
+  if (rid) {
+    try {
+      await postCancelRetry(rid)
+    } catch {
+      /* run may have ended */
+    }
+    inspectFieldRunId.value = null
+  }
+}
+
+async function saveInspectField() {
+  if (inspectFieldSubmitting.value) return
+  const v = inspectFieldInput.value.trim()
+  if (!v) return
+  inspectFieldSubmitting.value = true
+  dismissRunErrorBanner()
+  try {
+    const rid = inspectFieldRunId.value
+    if (rid) {
+      await postRetryInspectField(rid, v)
+      inspectFieldOpen.value = false
+      inspectFieldMessage.value = ''
+      inspectFieldInput.value = ''
+      inspectFieldKeyLabel.value = ''
+      inspectFieldRunId.value = null
+    }
+  } catch (e) {
+    setRunErrorBanner(e instanceof Error ? e.message : String(e))
+  } finally {
+    inspectFieldSubmitting.value = false
+  }
+}
+
+function handleInspectFieldFromLiveLog() {
+  if (!runningAutomationId.value) return
+  const start = runStartTs.value
+  if (start == null) return
+  const list = liveLogEntries.value
+  for (let i = list.length - 1; i >= 0; i--) {
+    const e = list[i]
+    if (e.ts < start) break
+    if (
+      e.inspectFieldRetryNeeded === true &&
+      typeof e.runId === 'string' &&
+      typeof e.message === 'string' &&
+      e.message.trim() !== ''
+    ) {
+      const key = `inf:${e.runId}:${e.ts}:${e.field != null ? String(e.field) : ''}`
+      if (streamBannerHandledKey.value === key) return
+      streamBannerHandledKey.value = key
+      void openInspectFieldModal(e.message, e.runId, e.field != null ? String(e.field) : '')
+      return
+    }
+  }
+}
+
 function handleCheckInBannerFromLiveLog() {
   if (!runningAutomationId.value) return
   const start = runStartTs.value
@@ -425,18 +512,20 @@ function handleCheckInBannerFromLiveLog() {
 watch(
   liveLogEntries,
   () => {
+    handleInspectFieldFromLiveLog()
     handleCheckInBannerFromLiveLog()
   },
   { deep: true },
 )
 
 watch(
-  [linehaulTripsBody, linehaulTripsNoActive],
+  [linehaulTripsBody, linehaulTripsNoActive, prePlanTripSnapshot],
   () => {
     maybeAnnounceNewTrip(
       linehaulTripsBody.value,
       linehaulTripsNoActive.value,
     )
+    maybeAnnouncePrePlanTrip(prePlanTripSnapshot.value)
     syncTripVoiceUnlockHint()
   },
 )
@@ -796,6 +885,61 @@ onUnmounted(() => {
 
     <Teleport to="body">
       <div
+        v-if="inspectFieldOpen"
+        class="portal-modal-backdrop"
+        :style="{ zIndex: PORTAL_Z_MODAL }"
+        role="presentation"
+        @click.self="cancelInspectField"
+      >
+        <div
+          class="portal-modal loc-retry-modal"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="inspect-field-title"
+          @click.stop
+        >
+          <div class="loc-retry-header">
+            <h3 id="inspect-field-title" class="loc-retry-title">Inspect &amp; Check Out</h3>
+            <button
+              type="button"
+              class="loc-retry-close tap"
+              aria-label="Close"
+              @click="cancelInspectField"
+            >
+              ×
+            </button>
+          </div>
+          <p class="modal-lbl inspect-field-msg">{{ inspectFieldMessage }}</p>
+          <label class="modal-lbl" for="inspect-field-inp">{{ inspectFieldKeyLabel }}</label>
+          <input
+            id="inspect-field-inp"
+            v-model="inspectFieldInput"
+            class="modal-inp loc-retry-inp"
+            type="text"
+            autocomplete="off"
+            placeholder="Enter value"
+            :disabled="inspectFieldSubmitting"
+            @keyup.enter="saveInspectField"
+          />
+          <div class="modal-actions loc-retry-actions">
+            <button type="button" class="btn secondary tap" @click="cancelInspectField">
+              Close
+            </button>
+            <button
+              type="button"
+              class="btn primary tap"
+              :disabled="inspectFieldSubmitting || !inspectFieldInput.trim()"
+              @click="saveInspectField"
+            >
+              {{ inspectFieldSubmitting ? 'Submitting…' : 'Submit' }}
+            </button>
+          </div>
+        </div>
+      </div>
+    </Teleport>
+
+    <Teleport to="body">
+      <div
         v-if="destLocationModalOpen"
         class="portal-modal-backdrop"
         :style="{ zIndex: PORTAL_Z_LOCATION_MODAL }"
@@ -894,22 +1038,15 @@ onUnmounted(() => {
           </div>
           <div class="trailer-gps-map-wrap">
             <iframe
-              :src="trailerGpsEmbedUrl"
+              :src="trailerGpsMapUrl"
               class="trailer-gps-map"
               loading="lazy"
               referrerpolicy="no-referrer"
               title="Trailer location map"
+              allow="geolocation"
             />
           </div>
           <div class="modal-actions trailer-gps-actions">
-            <a
-              :href="trailerGpsMapUrl"
-              target="_blank"
-              rel="noopener noreferrer"
-              class="btn secondary tap"
-            >
-              Open in OpenStreetMap
-            </a>
             <button type="button" class="btn primary tap" @click="closeTrailerGpsModal">
               Close
             </button>
@@ -1092,29 +1229,64 @@ onUnmounted(() => {
         <span class="trip-voice-unlock-sub">Some phones and tablets require a tap before alerts can play.</span>
       </div>
       <div
-        v-if="linehaulTripsBody && !linehaulTripsError"
-        class="dispatch-od-row"
-        aria-label="Trip origin and destination"
+        v-if="(linehaulTripsBody || prePlanTripSnapshot) && !linehaulTripsError"
+        class="dispatch-slides-wrap"
       >
-        <div class="dispatch-od-pair dispatch-od-pair--origin">
-          <span class="dispatch-od-label">Origin</span>
-          <span class="dispatch-od-val">{{ tripOriginDest.origin }}</span>
+        <div v-if="hasPrePlanTrip" class="dispatch-slide-dots">
+          <button
+            type="button"
+            class="dispatch-dot tap"
+            :class="{ active: dispatchSlideIndex === 0 }"
+            aria-label="Current trip"
+            @click="dispatchSlideIndex = 0"
+          />
+          <button
+            type="button"
+            class="dispatch-dot tap"
+            :class="{ active: dispatchSlideIndex === 1 }"
+            aria-label="Pre-plan trip"
+            @click="dispatchSlideIndex = 1"
+          />
         </div>
-        <span class="dispatch-od-arrow" aria-hidden="true">→</span>
-        <button
-          type="button"
-          class="dispatch-od-pair dispatch-od-pair--dest dispatch-od-dest-btn tap"
-          :disabled="!tripDestLocationId || !!linehaulTripsError"
-          :title="
-            tripDestLocationId
-              ? 'View destination details from FedEx'
-              : 'No destination location id on trip'
-          "
-          @click="openDestLocationModal"
-        >
-          <span class="dispatch-od-label">Destination</span>
-          <span class="dispatch-od-val">{{ tripOriginDest.destination }}</span>
-        </button>
+
+        <div v-if="dispatchSlideIndex === 0 && linehaulTripsBody" class="dispatch-slide">
+          <div class="dispatch-od-row" aria-label="Trip origin and destination">
+            <div class="dispatch-od-pair dispatch-od-pair--origin">
+              <span class="dispatch-od-label">Origin</span>
+              <span class="dispatch-od-val">{{ tripOriginDest.origin }}</span>
+            </div>
+            <span class="dispatch-od-arrow" aria-hidden="true">→</span>
+            <button
+              type="button"
+              class="dispatch-od-pair dispatch-od-pair--dest dispatch-od-dest-btn tap"
+              :disabled="!tripDestLocationId || !!linehaulTripsError"
+              :title="
+                tripDestLocationId
+                  ? 'View destination details from FedEx'
+                  : 'No destination location id on trip'
+              "
+              @click="openDestLocationModal"
+            >
+              <span class="dispatch-od-label">Destination</span>
+              <span class="dispatch-od-val">{{ tripOriginDest.destination }}</span>
+            </button>
+          </div>
+        </div>
+
+        <div v-if="dispatchSlideIndex === 1 && prePlanTripSnapshot" class="dispatch-slide">
+          <span class="dispatch-preplan-badge">Pre-Plan</span>
+          <div class="dispatch-od-row" aria-label="Pre-plan trip origin and destination">
+            <div class="dispatch-od-pair dispatch-od-pair--origin">
+              <span class="dispatch-od-label">Origin</span>
+              <span class="dispatch-od-val">{{ prePlanOriginDest.origin }}</span>
+            </div>
+            <span class="dispatch-od-arrow" aria-hidden="true">→</span>
+            <div class="dispatch-od-pair dispatch-od-pair--dest">
+              <span class="dispatch-od-label">Destination</span>
+              <span class="dispatch-od-val">{{ prePlanOriginDest.destination }}</span>
+            </div>
+          </div>
+        </div>
       </div>
       <p v-if="!instructions.trim()" class="empty">No instructions yet.</p>
       <p v-else class="read dispatch-instructions-body">{{ instructions }}</p>
@@ -1195,18 +1367,9 @@ onUnmounted(() => {
               </div>
             </div>
 
-            <div v-if="card.summaryRows.length" class="trailer-card-summary">
+            <div v-if="expandedTrailers[card.id] && card.summaryRows.length" class="trailer-card-summary">
               <dl class="trailer-summary-dl">
                 <template v-for="row in card.summaryRows" :key="row.label">
-                  <dt>{{ row.label }}</dt>
-                  <dd>{{ row.value }}</dd>
-                </template>
-              </dl>
-            </div>
-
-            <div v-if="expandedTrailers[card.id] && card.detailRows.length" class="trailer-card-details">
-              <dl class="trailer-details-dl">
-                <template v-for="row in card.detailRows" :key="row.label">
                   <dt>{{ row.label }}</dt>
                   <dd>{{ row.value }}</dd>
                 </template>
@@ -1887,13 +2050,53 @@ onUnmounted(() => {
   color: var(--muted, #9898a8);
   line-height: 1.35;
 }
+.dispatch-slides-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin-bottom: 0.85rem;
+}
+.dispatch-slide-dots {
+  display: flex;
+  justify-content: center;
+  gap: 0.5rem;
+}
+.dispatch-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  border: 1px solid #5a5a6a;
+  background: transparent;
+  cursor: pointer;
+  padding: 0;
+  transition: background 0.15s, border-color 0.15s;
+}
+.dispatch-dot.active {
+  background: #7dd3fc;
+  border-color: #7dd3fc;
+}
+.dispatch-slide {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+.dispatch-preplan-badge {
+  align-self: flex-start;
+  padding: 0.2rem 0.5rem;
+  font-size: 0.68rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  background: #4a3f1a;
+  color: #fcd34d;
+  border-radius: 4px;
+}
 .dispatch-od-row {
   display: flex;
   flex-wrap: nowrap;
   align-items: flex-end;
   justify-content: space-between;
   gap: 0.5rem 0.75rem;
-  margin: 0 0 0.85rem;
   padding: 0.55rem 0.65rem;
   border-radius: 8px;
   background: #22222c;
@@ -2381,7 +2584,9 @@ onUnmounted(() => {
    ═══════════════════════════════════════════════════════════════════════════ */
 
 .trailer-gps-modal {
-  max-width: 28rem;
+  width: min(80vw, 56rem);
+  height: min(80vh, 50rem);
+  max-width: none;
   display: flex;
   flex-direction: column;
   gap: 0.65rem;
@@ -2427,19 +2632,14 @@ onUnmounted(() => {
   color: #7dd3fc;
 }
 .trailer-gps-map-wrap {
-  position: relative;
-  width: 100%;
-  height: 0;
-  padding-bottom: 56.25%;
+  flex: 1 1 auto;
+  min-height: 0;
   border-radius: 8px;
   overflow: hidden;
   border: 1px solid #34343e;
   background: #0a0a0f;
 }
 .trailer-gps-map {
-  position: absolute;
-  top: 0;
-  left: 0;
   width: 100%;
   height: 100%;
   border: 0;

@@ -26,6 +26,8 @@ export const linehaulFetching = ref(false)
 
 /** Cached full trip snapshot (from APRVD) with trailer details for persistence after dispatch. */
 export const cachedTripSnapshot = ref(null)
+/** Pre-plan trip: a second APRVD trip with different dailyTripLegSequence while current trip exists. */
+export const prePlanTripSnapshot = ref(null)
 /** Previous driver availability status to detect ENRT→ACT transition. */
 let prevDriverAvlStat = null
 
@@ -69,6 +71,9 @@ export const tripPhase = computed(() => {
   }
   return 'none'
 })
+
+/** True when a pre-plan trip is queued (different sequence than current). */
+export const hasPrePlanTrip = computed(() => prePlanTripSnapshot.value != null)
 
 /**
  * Merge trailer arrays by trlrOrder, keeping the richer object (more non-empty fields).
@@ -302,7 +307,13 @@ async function refreshLinehaulApisImpl(attempt) {
     currentDriverAvlStat !== 'ENRT' &&
     currentDriverAvlStat !== ''
   ) {
-    cachedTripSnapshot.value = null
+    // Promote pre-plan to current if exists, else clear
+    if (prePlanTripSnapshot.value != null) {
+      cachedTripSnapshot.value = prePlanTripSnapshot.value
+      prePlanTripSnapshot.value = null
+    } else {
+      cachedTripSnapshot.value = null
+    }
     lastDailyTripLegSequence.value = null
   }
   prevDriverAvlStat = currentDriverAvlStat
@@ -330,11 +341,20 @@ async function refreshLinehaulApisImpl(attempt) {
     }
   }
 
+  // Detect pre-plan trip vs normal caching
+  const currentSeq = tripBodyDailySeq(cachedTripSnapshot.value)
+  const incomingSeq = tripBodyDailySeq(aprvdBody)
+
   if (
-    aprvdBody &&
-    Array.isArray(aprvdBody.trailers) &&
-    aprvdBody.trailers.length > 0
+    cachedTripSnapshot.value != null &&
+    incomingSeq != null &&
+    currentSeq != null &&
+    incomingSeq !== currentSeq
   ) {
+    // New trip with different sequence while current exists = pre-plan
+    prePlanTripSnapshot.value = { ...aprvdBody }
+  } else if (aprvdBody && Array.isArray(aprvdBody.trailers) && aprvdBody.trailers.length > 0) {
+    // Normal path: update cached trip
     cachedTripSnapshot.value = { ...aprvdBody }
   }
 

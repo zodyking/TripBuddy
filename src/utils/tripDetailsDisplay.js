@@ -126,7 +126,7 @@ export function parseTrailerMeta(trailer) {
   let loadType = '—'
   let loadTypeClass = 'load-unknown'
   if (emptyFlag === 'N') {
-    loadType = 'Loaded'
+    loadType = 'LOAD'
     loadTypeClass = 'load-full'
   } else if (emptyFlag === 'Y') {
     loadType = 'Empty'
@@ -217,6 +217,7 @@ export function buildEnhancedTrailerCards(body) {
     'latitude',
     'longitude',
     'lastGpsDate',
+    'dailyTripLegConfigSeq',
     ...summaryKeys,
   ])
 
@@ -232,7 +233,6 @@ export function buildEnhancedTrailerCards(body) {
 
       const summaryRows = [
         { label: 'Seal', value: meta.sealNumber },
-        { label: 'Load #', value: fmt(tr.loadNumber) },
         { label: 'Destination', value: meta.loadDest },
         { label: 'Weight', value: meta.pkgWeight },
         { label: 'Due', value: meta.dueDate },

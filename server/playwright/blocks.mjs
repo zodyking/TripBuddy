@@ -22,6 +22,7 @@ import {
   stopPreviewCapture,
   setBlockAutomationBusy,
 } from './runner.mjs'
+import { runInspectCheckoutAfterGate } from './inspectCheckoutOrchestration.mjs'
 
 let runAbort = null
 let runnerBusy = false
@@ -30,6 +31,8 @@ let currentPage = null
 
 /** Pending location retry resolver (like runner.mjs but for block runs) */
 let pendingBlockRetry = null
+/** Pending Inspect & Check Out field (dolly / seal / trailer) from dashboard */
+let pendingBlockInspectField = null
 const BLOCK_RETRY_WAIT_MS = 5 * 60 * 1000
 
 /** FedEx Linehaul banner when saved dispatch location does not match driver location */
@@ -75,6 +78,7 @@ const SKIP_SCREENSHOT_TYPES = new Set([
   'checkInEndToEnd',
   'arriveEndToEnd',
   'inspectCheckoutHomeGate',
+  'inspectCheckoutContinue',
 ])
 
 /**
@@ -104,6 +108,7 @@ export function isBlockRunnerBusy() {
 export function cancelBlockRun() {
   runAbort?.abort()
   rejectPendingBlockRetryIfAny(new Error('Block run cancelled'))
+  rejectPendingBlockInspectFieldIfAny(new Error('Block run cancelled'))
 }
 
 export function getBlockRunId() {
@@ -182,6 +187,79 @@ function rejectPendingBlockRetryIfAny(reason) {
 
 export function hasPendingBlockRetry() {
   return pendingBlockRetry !== null
+}
+
+function waitForBlockInspectField(runId, signal) {
+  return new Promise((resolve, reject) => {
+    if (pendingBlockInspectField) {
+      try {
+        pendingBlockInspectField.reject(new Error('Superseded'))
+      } catch { /* ignore */ }
+      pendingBlockInspectField = null
+    }
+    let state = null
+    const cleanup = () => {
+      if (state?.timeoutId) clearTimeout(state.timeoutId)
+      signal?.removeEventListener('abort', onAbort)
+      if (pendingBlockInspectField === state) pendingBlockInspectField = null
+    }
+    const onAbort = () => {
+      if (!state) return
+      cleanup()
+      reject(new Error('Aborted'))
+    }
+    state = {
+      runId,
+      timeoutId: setTimeout(() => {
+        if (pendingBlockInspectField !== state) return
+        cleanup()
+        reject(new Error('Inspect field input timed out'))
+      }, BLOCK_RETRY_WAIT_MS),
+      resolve: (v) => {
+        cleanup()
+        resolve(v)
+      },
+      reject: (e) => {
+        cleanup()
+        reject(e instanceof Error ? e : new Error(String(e)))
+      },
+    }
+    signal?.addEventListener('abort', onAbort, { once: true })
+    pendingBlockInspectField = state
+  })
+}
+
+/**
+ * @param {string} runId
+ * @param {string} value
+ */
+export function submitBlockInspectField(runId, value) {
+  const v = String(value ?? '').trim()
+  if (!v) return { ok: false, error: 'value required' }
+  if (!pendingBlockInspectField || pendingBlockInspectField.runId !== runId) {
+    return { ok: false, error: 'No pending inspect field input for this run' }
+  }
+  pendingBlockInspectField.resolve(v)
+  return { ok: true }
+}
+
+/**
+ * @param {string} runId
+ */
+export function cancelBlockInspectField(runId) {
+  if (!pendingBlockInspectField || pendingBlockInspectField.runId !== runId) {
+    return { ok: false, error: 'No pending inspect field input' }
+  }
+  pendingBlockInspectField.reject(new Error('Inspect field input cancelled'))
+  return { ok: true }
+}
+
+function rejectPendingBlockInspectFieldIfAny(reason) {
+  if (!pendingBlockInspectField) return
+  try {
+    pendingBlockInspectField.reject(reason instanceof Error ? reason : new Error(String(reason)))
+  } catch { /* ignore */ }
+  pendingBlockInspectField = null
 }
 
 function makeLog(runId) {
@@ -596,6 +674,30 @@ async function executeAction(action, page, ctx) {
       )
     }
 
+    case 'inspectCheckoutContinue': {
+      if (signal?.aborted) throw new Error('Aborted')
+      if (!ctx.runId) throw new Error('inspectCheckoutContinue requires runId')
+      const waitForInspectField = async ({ field, message }) => {
+        log('info', message, {
+          inspectFieldRetryNeeded: true,
+          runId: ctx.runId,
+          field,
+          message,
+        })
+        return waitForBlockInspectField(ctx.runId, signal)
+      }
+      const outcome = await runInspectCheckoutAfterGate(page, {
+        log,
+        signal,
+        runId: ctx.runId,
+        assignment: ctx.assignment,
+        waitForInspectField,
+      })
+      ctx.variables._inspectCheckoutContinue = outcome
+      log('info', 'Inspect & Check Out post-gate finished', { inspectCheckoutContinue: outcome })
+      break
+    }
+
     case 'openMenu': {
       const menuKey = action.menuKey
       const opened = await clickMenuIfEnabled(page, menuKey, log)
@@ -931,6 +1033,7 @@ export async function runAutomation(automation, opts = {}) {
     currentPage = null
     runAbort = null
     rejectPendingBlockRetryIfAny(new Error('Block run ended'))
+    rejectPendingBlockInspectFieldIfAny(new Error('Block run ended'))
     try {
       await closeContext()
     } catch {

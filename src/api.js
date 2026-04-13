@@ -358,6 +358,16 @@ export async function postRetryLocation(runId, location) {
   return handleJson(r)
 }
 
+/** In-browser Inspect & Check Out: dolly / seal / trailer while automation waits. */
+export async function postRetryInspectField(runId, value) {
+  const r = await fetch('/api/run/retry-inspect-field', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ runId, value }),
+  })
+  return handleJson(r)
+}
+
 export async function postCancelRetry(runId) {
   const r = await fetch('/api/run/cancel-retry', {
     method: 'POST',

@@ -42,6 +42,7 @@ export const BLOCK_CATEGORIES = {
     blocks: [
       'ensureSignedIn',
       'inspectCheckoutHomeGate',
+      'inspectCheckoutContinue',
       'checkInEndToEnd',
       'openMenu',
       'fillCheckInForm',
@@ -338,6 +339,13 @@ export const BLOCK_DEFINITIONS = {
     label: 'Inspect & Check Out — home gate',
     category: 'fedex',
     icon: 'clipboard-check',
+    fields: [],
+  },
+  inspectCheckoutContinue: {
+    type: 'inspectCheckoutContinue',
+    label: 'Inspect & Check Out — after gate',
+    category: 'fedex',
+    icon: 'list',
     fields: [],
   },
   openMenu: {

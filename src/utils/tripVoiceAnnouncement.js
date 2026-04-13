@@ -116,6 +116,7 @@ export function tripVoiceLikelyNeedsUserGesture() {
 }
 
 let lastFingerprint = ''
+let lastPrePlanFingerprint = ''
 /** @type {{ fp: string, text: string, bell: boolean } | null} */
 let pendingAnnouncement = null
 
@@ -224,6 +225,40 @@ export function maybeAnnounceNewTrip(tripsBody, noActiveTrip) {
   lastFingerprint = fp
   pushLiveLog({ type: 'info', message: `[TripVoice] announcing new trip: ${text}`, ts: Date.now() })
   enqueueAnnouncement(text, { bell, category: `newTrip:${fp}` })
+}
+
+/**
+ * Announce a pre-plan trip (second trip queued while current is ENRT).
+ * @param {unknown} prePlanBody
+ */
+export function maybeAnnouncePrePlanTrip(prePlanBody) {
+  if (typeof window === 'undefined') return
+  const mode = getTripAlertMode()
+  if (mode === 'off') return
+  evaluateGestureGate()
+  if (prePlanBody == null) {
+    lastPrePlanFingerprint = ''
+    return
+  }
+  if (!hasTripOriginAndDestination(prePlanBody)) return
+
+  const { origin, destination } = extractOriginDest(prePlanBody)
+  const fp = `preplan:${origin}|||${destination}`
+  if (fp === lastPrePlanFingerprint) return
+
+  const o = toSpeechPhrase(origin)
+  const d = toSpeechPhrase(destination)
+  const text = `New pre-plan trip assigned from ${o} to ${d}.`
+  const bell = mode === 'both'
+
+  if (!gestureUnlocked) {
+    pushLiveLog({ type: 'warn', message: `[TripVoice] pre-plan queued (gesture locked): ${text}`, ts: Date.now() })
+    return
+  }
+
+  lastPrePlanFingerprint = fp
+  pushLiveLog({ type: 'info', message: `[TripVoice] announcing pre-plan trip: ${text}`, ts: Date.now() })
+  enqueueAnnouncement(text, { bell, category: `prePlanTrip:${fp}` })
 }
 
 /** Stop any in-flight announcement (e.g. on unmount). */
