@@ -458,3 +458,49 @@ export async function installAutomationPreset(presetId) {
   const r = await fetch(`/api/automations/presets/${presetId}/install`, { method: 'POST' })
   return handleJson(r)
 }
+
+// ---------------------------------------------------------------------------
+// Location Directory
+// ---------------------------------------------------------------------------
+
+/**
+ * Fetch all saved locations from the directory.
+ * @returns {Promise<{ ok: boolean, locations: Array<{
+ *   locationId: string,
+ *   locationName: string,
+ *   abbreviation: string,
+ *   address: string,
+ *   phone: string,
+ *   latitude: number | null,
+ *   longitude: number | null,
+ *   timeZone: string,
+ *   lastUpdated: string,
+ * }> }>}
+ */
+export async function fetchDirectory() {
+  const r = await fetch('/api/directory')
+  return handleJson(r)
+}
+
+/**
+ * Save or update a location in the directory.
+ * @param {{
+ *   locationId: string,
+ *   locationName: string,
+ *   abbreviation: string,
+ *   address: string,
+ *   phone: string,
+ *   latitude: number | null,
+ *   longitude: number | null,
+ *   timeZone: string,
+ * }} data
+ * @returns {Promise<{ ok: boolean, updated: boolean }>}
+ */
+export async function saveLocationToDirectory(data) {
+  const r = await fetch('/api/directory', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  })
+  return handleJson(r)
+}

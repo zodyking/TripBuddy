@@ -2,6 +2,7 @@ import { createRouter, createWebHistory } from 'vue-router'
 import AppShell from '../components/AppShell.vue'
 import MainDashboard from '../views/MainDashboard.vue'
 import SettingsView from '../views/SettingsView.vue'
+import DirectoryView from '../views/DirectoryView.vue'
 
 export const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
@@ -15,6 +16,12 @@ export const router = createRouter({
           name: 'home',
           component: MainDashboard,
           meta: { title: 'Dispatch' },
+        },
+        {
+          path: 'directory',
+          name: 'directory',
+          component: DirectoryView,
+          meta: { title: 'Directory' },
         },
         {
           path: 'settings',

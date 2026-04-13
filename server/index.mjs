@@ -70,6 +70,7 @@ import {
 } from './fedex-linehaul-api.mjs'
 import { TOOL_SECRET_HINT } from './config.mjs'
 import { maybeUpdateAssignmentFromContext } from './assignment-logic.mjs'
+import { listLocations, upsertLocation } from './locations-directory-store.mjs'
 
 await fs.mkdir(UPLOADS_DIR, { recursive: true })
 
@@ -428,6 +429,28 @@ app.get('/api/fedex/linehaul/locations/:locationId', async (req, reply) => {
     status: result.status,
     body: result.body,
   })
+})
+
+// ---------------------------------------------------------------------------
+// Location Directory
+// ---------------------------------------------------------------------------
+app.get('/api/directory', async () => {
+  const locations = await listLocations()
+  return { ok: true, locations }
+})
+
+app.post('/api/directory', async (req, reply) => {
+  try {
+    const data = req.body ?? {}
+    if (!data.locationId) {
+      return reply.code(400).send({ error: 'locationId is required' })
+    }
+    const result = await upsertLocation(data)
+    return { ok: true, ...result }
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e)
+    return reply.code(400).send({ error: msg })
+  }
 })
 
 app.post('/api/fedex/linehaul/capture-bearer', async (req, reply) => {

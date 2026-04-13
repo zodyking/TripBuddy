@@ -219,3 +219,53 @@ function formatPhoneDisplay(v) {
   }
   return String(v).trim()
 }
+
+/**
+ * Extract normalized location data for directory storage.
+ * @param {unknown} body
+ * @returns {{
+ *   locationId: string,
+ *   locationName: string,
+ *   abbreviation: string,
+ *   address: string,
+ *   phone: string,
+ *   latitude: number | null,
+ *   longitude: number | null,
+ *   timeZone: string,
+ * } | null}
+ */
+export function extractLocationForDirectory(body) {
+  const o = unwrapLocationRecord(body)
+  if (!o) return null
+
+  const id = o.locationId ?? o.id
+  if (id == null || String(id).trim() === '') return null
+
+  const parts = collectAddressParts(o)
+  const latRaw = o.latitudeValue ?? o.latitude ?? o.lat
+  const lngRaw = o.longitudeValue ?? o.longitude ?? o.lng ?? o.lon
+
+  let lat = latRaw != null ? Number(latRaw) : null
+  let lng = lngRaw != null ? Number(lngRaw) : null
+  if (lat != null && Number.isNaN(lat)) lat = null
+  if (lng != null && Number.isNaN(lng)) lng = null
+
+  const latD = String(o.latitudeDirection ?? '').toUpperCase()
+  const lngD = String(o.longitudeDirection ?? '').toUpperCase()
+  if (lat != null && latD === 'S') lat = -Math.abs(lat)
+  if (lng != null) {
+    if (lngD === 'W') lng = -Math.abs(lng)
+    else if (lngD === 'E') lng = Math.abs(lng)
+  }
+
+  return {
+    locationId: String(id).trim(),
+    locationName: String(o.locationName ?? o.name ?? o.siteName ?? '').trim(),
+    abbreviation: String(o.locationAbbrv ?? '').trim(),
+    address: formatAddressOneLine(parts),
+    phone: String(o.phoneNumber ?? o.phone ?? o.primaryPhone ?? o.phoneNbr ?? o.telephone ?? '').replace(/\D/g, ''),
+    latitude: lat,
+    longitude: lng,
+    timeZone: String(o.timeZoneCode ?? o.timeZone ?? '').trim(),
+  }
+}

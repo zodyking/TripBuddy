@@ -20,6 +20,7 @@ import {
   postRetryInspectField,
   postCancelRetry,
   fetchFedexLinehaulLocation,
+  saveLocationToDirectory,
 } from '../api.js'
 import {
   linehaulTractorBody,
@@ -58,7 +59,10 @@ import {
   buildEnhancedTrailerCards,
   buildDollySection,
 } from '../utils/tripDetailsDisplay.js'
-import { formatLinehaulLocationForDisplay } from '../utils/linehaulLocationDisplay.js'
+import {
+  formatLinehaulLocationForDisplay,
+  extractLocationForDirectory,
+} from '../utils/linehaulLocationDisplay.js'
 import {
   maybeAnnounceNewTrip,
   maybeAnnouncePrePlanTrip,
@@ -643,6 +647,11 @@ async function openDestLocationModal() {
     return
   }
   destLocationBody.value = r.body ?? null
+
+  const dirEntry = extractLocationForDirectory(r.body)
+  if (dirEntry?.locationId) {
+    saveLocationToDirectory(dirEntry).catch(() => {})
+  }
 }
 
 function closeDestLocationModal() {
