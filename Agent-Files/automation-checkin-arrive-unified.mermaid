@@ -1,0 +1,53 @@
+%% FedExTool — Check-in + Arrive automation (ONE chart: entry, shared gate, both flows, error mapping)
+%% Paste into https://mermaid.live
+
+flowchart TD
+  subgraph entry [1 How the run starts]
+    S([Start])
+    S --> Q{Which API?}
+    Q -->|POST /api/automations/:id/run| PA[goto dispatch_entry]
+    PA --> DLY[sleep 1500ms preset only]
+    DLY --> PIK{preset action}
+    PIK -->|check_in_full| EG
+    PIK -->|arrive_full| EG
+    Q -->|POST /api/run scenario check_in| PB[goto dispatch no preset delay]
+    PB --> EG
+  end
+
+  EG[ensureDispatchAppReady Okta plus stable fdxtools]
+
+  EG --> BR{Next: check-in E2E or arrive E2E?}
+
+  subgraph ci [2 Check-in runCheckInEndToEnd]
+    BR -->|check-in path| FL[fetchDriverLocation API]
+    FL --> FULL[runFullCheckIn forms banners]
+    FULL --> MM{location mismatch banner?}
+    MM -->|yes| WAIT[wait retry location user API]
+    WAIT --> RETRY[retryCheckInWithNewLocation]
+    RETRY --> FULL
+    MM -->|no| OK{success?}
+    OK -->|yes| PH[phone modal and sign out]
+    OK -->|no| BAD[return payload failure]
+    PH --> OUTOK[return success signedOut]
+  end
+
+  subgraph ar [3 Arrive runArriveEndToEnd]
+    BR -->|arrive path| RFA[runFullArrive UI steps]
+    RFA --> GEO{geofence already arrived?}
+    GEO -->|yes| SO[sign out only]
+    GEO -->|no| PHA[phone modal and sign out]
+    SO --> OUTA[return arrivePayload]
+    PHA --> OUTA
+  end
+
+  subgraph er [4 Timeout to user message]
+    TOUT[Playwright waitFor timeout]
+    FMT[formatRunErrorForUser]
+    UX["User: app took too long check connection"]
+    TOUT --> FMT --> UX
+  end
+
+  FULL -.-> TOUT
+  RFA -.-> TOUT
+  PH -.-> TOUT
+  PHA -.-> TOUT

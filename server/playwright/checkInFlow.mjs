@@ -46,7 +46,7 @@ const LOC_AFTER_NAV_MS = CHECKIN_LOC_AFTER_NAV_MS
 /** Max time to poll for FedEx app-banner after submit (banner often appears after >5s) */
 const BANNER_WINDOW_MS = 11_000
 const BANNER_POLL_MS = 80
-const BANNER_INITIAL_MS = 50
+const BANNER_INITIAL_MS = 0
 /** When isVisible() is false (animations), still detect non-empty banner text via textContent */
 const BANNER_TEXT_MIN_LEN = 20
 
@@ -136,7 +136,7 @@ async function waitUntilBeginNewDisabled(page, beginLoc, signal, log) {
       log('info', 'Check-in session ready')
       return
     }
-    await page.waitForTimeout(80)
+    await sleep(50, signal)
   }
   throw new Error(
     'Begin new check-in did not gray out — close the browser session, sign in again, then retry Check in',

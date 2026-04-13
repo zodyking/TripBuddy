@@ -75,6 +75,7 @@ import {
   announceCheckInSuccess,
   announceCheckInFail,
   announceCheckInTripReady,
+  announceCheckInNewTrip,
   cancelAllAlerts,
 } from '../utils/alertAudioQueue.js'
 
@@ -248,9 +249,14 @@ async function runQuickAction(auto) {
       }
       const checkInPayload = result.variables?._checkInPayload
       if (checkInPayload && typeof checkInPayload === 'object') {
-        if (checkInPayload.tripReadyAcknowledged === true) {
+        if (checkInPayload.checkInNewTripFound === true) {
+          announceCheckInNewTrip()
+        } else if (checkInPayload.tripReadyAcknowledged === true) {
           announceCheckInTripReady()
-        } else if (checkInPayload.signedOut === true) {
+        } else if (
+          checkInPayload.missionComplete === true ||
+          checkInPayload.signedOut === true
+        ) {
           announceCheckInSuccess()
         } else if (checkInPayload.success === false) {
           announceCheckInFail()
@@ -397,8 +403,14 @@ function handleCheckInBannerFromLiveLog() {
     }
 
     if (e.checkInComplete === true) {
-      checkInSuccessBanner.value = 'Check in successful'
-      announceCheckInSuccess()
+      if (e.checkInNewTripFound === true) {
+        announceCheckInNewTrip()
+      } else if (e.tripReadyAcknowledged === true) {
+        announceCheckInTripReady()
+      } else {
+        checkInSuccessBanner.value = 'Check in successful'
+        announceCheckInSuccess()
+      }
       return
     }
   }

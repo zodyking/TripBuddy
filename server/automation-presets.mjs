@@ -11,7 +11,7 @@ export const PRESETS = {
   check_in_full: {
     name: 'Full Check-In Flow',
     description:
-      'Same path as dashboard Check in: dispatch home, sign-in gate, full form, banners, location retry, phone modal, sign out.',
+      'Same path as dashboard Check in: dispatch home, sign-in gate, full form, banners, location retry, phone modal, TTS on success (no automated sign-out).',
     triggers: [
       { id: genId(), type: 'manual', buttonLabel: 'Check In' },
     ],
@@ -22,11 +22,6 @@ export const PRESETS = {
         type: 'goto',
         url: 'dispatch_entry',
         waitUntil: 'domcontentloaded',
-      },
-      {
-        id: genId(),
-        type: 'delay',
-        ms: 1500,
       },
       {
         id: genId(),
@@ -108,11 +103,6 @@ export const PRESETS = {
         type: 'goto',
         url: 'dispatch_entry',
         waitUntil: 'domcontentloaded',
-      },
-      {
-        id: genId(),
-        type: 'delay',
-        ms: 1500,
       },
       {
         id: genId(),

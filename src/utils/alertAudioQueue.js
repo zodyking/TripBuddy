@@ -296,6 +296,16 @@ export function announceCheckInTripReady() {
   enqueueAnnouncement('Check in successful. Trip ready and acknowledged.', { category: 'checkInTripReady' })
 }
 
+export function announceCheckInNewTrip() {
+  const prefs = getAlertPrefs()
+  if (!prefs.checkIn) {
+    pushLiveLog({ type: 'warn', message: `[Alert] checkIn blocked by prefs`, ts: Date.now() })
+    return
+  }
+  pushLiveLog({ type: 'info', message: `[Alert] announceCheckInNewTrip called`, ts: Date.now() })
+  enqueueAnnouncement('Check-in successful, new trip found', { category: 'checkInNewTrip' })
+}
+
 export function announceApiReconnect() {
   const prefs = getAlertPrefs()
   if (!prefs.apiReconnect) {

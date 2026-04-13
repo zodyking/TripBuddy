@@ -211,7 +211,7 @@ function buildOrderedValues(values, valueOrder) {
  * @param {AbortSignal} opts.signal
  * @param {boolean} opts.tryOktaLogin
  * @param {string} opts.runId
- * @returns {Promise<{ success: boolean, bannerText?: string, locationMismatch?: boolean, signedOut?: boolean }>}
+ * @returns {Promise<{ success: boolean, bannerText?: string, locationMismatch?: boolean, missionComplete?: boolean, signedOut?: boolean, tripReadyAcknowledged?: boolean, checkInNewTripFound?: boolean }>}
  */
 async function runCheckInWithLocationRetries(page, { log, signal, tryOktaLogin, runId }) {
   return runCheckInEndToEnd(page, {
@@ -225,7 +225,7 @@ async function runCheckInWithLocationRetries(page, { log, signal, tryOktaLogin, 
 
 /**
  * Built-in scenario body only (after initial dispatch URL load).
- * @returns {Promise<{ checkInPayload: { success: boolean, bannerText?: string, locationMismatch?: boolean, signedOut?: boolean } | null }>}
+ * @returns {Promise<{ checkInPayload: { success: boolean, bannerText?: string, locationMismatch?: boolean, missionComplete?: boolean, signedOut?: boolean, tripReadyAcknowledged?: boolean, checkInNewTripFound?: boolean } | null }>}
  */
 async function runBuiltinScenarioBody(
   page,

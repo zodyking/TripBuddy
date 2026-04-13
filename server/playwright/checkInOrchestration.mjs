@@ -3,7 +3,7 @@ import { readAssignment } from '../assignment-store.mjs'
 import { linehaulGet } from '../fedex-linehaul-api.mjs'
 import { ensureDispatchAppReady } from './dispatchAuthGate.mjs'
 import { runFullCheckIn, retryCheckInWithNewLocation } from './checkInFlow.mjs'
-import { runPhoneModalAndSignOut } from './postCheckInFlow.mjs'
+import { runPhoneModalUntilMissionComplete } from './postCheckInFlow.mjs'
 
 /**
  * Fetch driver location from FedEx API.
@@ -40,7 +40,7 @@ async function fetchDriverLocation() {
  * @param {boolean} opts.tryOktaLogin
  * @param {string} opts.runId
  * @param {(runId: string, signal: AbortSignal) => Promise<string>} opts.waitForLocationRetry
- * @returns {Promise<{ success: boolean, bannerText?: string, locationMismatch?: boolean, signedOut?: boolean, tripReadyAcknowledged?: boolean } | undefined>}
+ * @returns {Promise<{ success: boolean, bannerText?: string, locationMismatch?: boolean, missionComplete?: boolean, signedOut?: boolean, tripReadyAcknowledged?: boolean, checkInNewTripFound?: boolean } | undefined>}
  */
 export async function runCheckInEndToEnd(page, opts) {
   const { log, signal, tryOktaLogin, runId, waitForLocationRetry } = opts
@@ -84,18 +84,20 @@ export async function runCheckInEndToEnd(page, opts) {
   }
 
   if (checkInPayload?.success === true) {
-    const a = await readAssignment()
-    const phone = (a.driverPhone || '').trim()
-    if (!phone) {
-      throw new Error(
-        'Set driver phone (Driver Credentials in Settings) before Check in',
-      )
-    }
-    const postResult = await runPhoneModalAndSignOut(page, { phone, log, signal })
+    const postResult = await runPhoneModalUntilMissionComplete(page, {
+      log,
+      signal,
+      getPhone: async () => {
+        const a = await readAssignment()
+        return (a.driverPhone || '').trim()
+      },
+    })
     checkInPayload = {
       ...checkInPayload,
-      signedOut: true,
-      tripReadyAcknowledged: postResult.tripReadyAcknowledged,
+      missionComplete: true,
+      signedOut: false,
+      tripReadyAcknowledged: postResult.tripReadyAcknowledged === true,
+      checkInNewTripFound: postResult.checkInNewTripFound === true,
     }
   }
 

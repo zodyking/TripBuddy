@@ -3,7 +3,12 @@ import { ref, onMounted } from 'vue'
 import { listAutomations, createAutomation, deleteAutomation, duplicateAutomation, runAutomation, listAutomationPresets, installAutomationPreset } from '../../api.js'
 import { pushLiveLog } from '../../stores/liveLogStore.js'
 import { announceGeofenceArrival, announceArrivalSuccess } from '../../utils/tripVoiceAnnouncement.js'
-import { announceCheckInSuccess, announceCheckInFail, announceCheckInTripReady } from '../../utils/alertAudioQueue.js'
+import {
+  announceCheckInSuccess,
+  announceCheckInFail,
+  announceCheckInTripReady,
+  announceCheckInNewTrip,
+} from '../../utils/alertAudioQueue.js'
 
 function generateId() {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
@@ -114,9 +119,14 @@ async function run(id, name) {
       }
       const checkInPayload = result.variables?._checkInPayload
       if (checkInPayload && typeof checkInPayload === 'object') {
-        if (checkInPayload.tripReadyAcknowledged === true) {
+        if (checkInPayload.checkInNewTripFound === true) {
+          announceCheckInNewTrip()
+        } else if (checkInPayload.tripReadyAcknowledged === true) {
           announceCheckInTripReady()
-        } else if (checkInPayload.signedOut === true) {
+        } else if (
+          checkInPayload.missionComplete === true ||
+          checkInPayload.signedOut === true
+        ) {
           announceCheckInSuccess()
         } else if (checkInPayload.success === false) {
           announceCheckInFail()
