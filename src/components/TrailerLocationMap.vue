@@ -1,6 +1,7 @@
 <script setup>
 import {
   ref,
+  computed,
   watch,
   onMounted,
   onBeforeUnmount,
@@ -14,22 +15,27 @@ const props = defineProps({
   lng: { type: Number, required: true },
   /** Shown in marker popup, e.g. "Trailer 1" */
   trailerLabel: { type: String, default: '' },
+  /** From parent: user fix after synchronous getCurrentPosition (WebKit gesture). */
+  userLat: { type: Number, default: null },
+  userLng: { type: Number, default: null },
+  /** Parent still waiting on first geolocation callback */
+  userLocationPending: { type: Boolean, default: false },
+  /** Parent could not obtain a fix */
+  userLocationDenied: { type: Boolean, default: false },
 })
 
 const containerRef = ref(null)
 
-/**
- * idle — before first attempt
- * requesting — automatic attempt in progress
- * active — have a fix (watch may still run)
- * denied — permission or hard failure (show tap button on iOS / Chrome)
- * unavailable — no API
- */
-const userLocStatus = ref(
-  typeof navigator !== 'undefined' && navigator.geolocation
-    ? 'idle'
-    : 'unavailable',
-)
+const hasUserFix = computed(() => {
+  const la = props.userLat
+  const ln = props.userLng
+  return (
+    la != null &&
+    ln != null &&
+    Number.isFinite(la) &&
+    Number.isFinite(ln)
+  )
+})
 
 /** @type {L.Map | null} */
 let map = null
@@ -48,6 +54,7 @@ let geoWatchId = null
 /** @type {ReturnType<typeof setTimeout> | null} */
 let fitDebounce = null
 let geoStopped = false
+let watchStarted = false
 
 function prefersReducedMotion() {
   if (typeof window === 'undefined') return false
@@ -122,7 +129,6 @@ function setUserPosition(lat, lng) {
   } else {
     userMarker.setLatLng(ll)
   }
-  userLocStatus.value = 'active'
   scheduleFitBounds()
 }
 
@@ -131,24 +137,25 @@ function stopWatch() {
     navigator.geolocation.clearWatch(geoWatchId)
   }
   geoWatchId = null
+  watchStarted = false
 }
 
-function startWatch() {
+function startWatchForLiveUpdates() {
   if (
     typeof navigator === 'undefined' ||
     !navigator.geolocation ||
-    geoStopped
+    geoStopped ||
+    watchStarted
   ) {
     return
   }
-  stopWatch()
+  watchStarted = true
   geoWatchId = navigator.geolocation.watchPosition(
     (pos) => {
       setUserPosition(pos.coords.latitude, pos.coords.longitude)
     },
-    (err) => {
-      if (userMarker) return
-      if (err && err.code === 1) userLocStatus.value = 'denied'
+    () => {
+      /* keep last fix */
     },
     {
       enableHighAccuracy: true,
@@ -158,100 +165,18 @@ function startWatch() {
   )
 }
 
-/**
- * iOS (incl. Chrome) often requires a direct user gesture for the first fix.
- * getCurrentPosition tends to work more reliably than watchPosition alone.
- */
-function requestUserLocationFromBrowser(isUserGesture = false) {
-  if (typeof navigator === 'undefined' || !navigator.geolocation) {
-    userLocStatus.value = 'unavailable'
-    return Promise.resolve()
+function applyUserCoordsFromProps() {
+  const la = props.userLat
+  const ln = props.userLng
+  if (
+    la != null &&
+    ln != null &&
+    Number.isFinite(la) &&
+    Number.isFinite(ln)
+  ) {
+    setUserPosition(la, ln)
+    startWatchForLiveUpdates()
   }
-  if (!userMarker) userLocStatus.value = 'requesting'
-
-  const tryGet = (highAccuracy) =>
-    new Promise((resolve, reject) => {
-      navigator.geolocation.getCurrentPosition(
-        (pos) => resolve(pos),
-        (err) => reject(err),
-        {
-          enableHighAccuracy: highAccuracy,
-          maximumAge: highAccuracy ? 0 : 60_000,
-          timeout: highAccuracy ? 25_000 : 20_000,
-        },
-      )
-    })
-
-  return tryGet(true)
-    .then((pos) => {
-      setUserPosition(pos.coords.latitude, pos.coords.longitude)
-      startWatch()
-    })
-    .catch(() =>
-      tryGet(false).then((pos) => {
-        setUserPosition(pos.coords.latitude, pos.coords.longitude)
-        startWatch()
-      }),
-    )
-    .catch((err) => {
-      if (err && err.code === 1) {
-        userLocStatus.value = 'denied'
-      } else if (!userMarker) {
-        userLocStatus.value = isUserGesture ? 'denied' : 'idle'
-      } else {
-        userLocStatus.value = 'active'
-      }
-    })
-}
-
-function onTapShareLocation() {
-  void requestUserLocationFromBrowser(true)
-}
-
-function initGeolocation() {
-  if (typeof navigator === 'undefined' || !navigator.geolocation) {
-    userLocStatus.value = 'unavailable'
-    return
-  }
-  void requestUserLocationFromBrowser(false)
-}
-
-function destroyMap() {
-  geoStopped = true
-  stopWatch()
-  if (fitDebounce) {
-    clearTimeout(fitDebounce)
-    fitDebounce = null
-  }
-  trailerMarker = null
-  userMarker = null
-  overlayLayer = null
-  streetLayer = null
-  satelliteLayer = null
-  if (map) {
-    map.remove()
-    map = null
-  }
-}
-
-function syncTrailerMarker() {
-  if (!map || !overlayLayer) return
-  const ll = trailerLatLng()
-  if (!Number.isFinite(ll.lat) || !Number.isFinite(ll.lng)) return
-
-  const label = props.trailerLabel.trim() || 'Trailer'
-  if (!trailerMarker) {
-    trailerMarker = L.marker(ll, {
-      icon: makeTrailerIcon(),
-      title: label,
-    })
-      .bindPopup(label)
-      .addTo(overlayLayer)
-  } else {
-    trailerMarker.setLatLng(ll)
-    trailerMarker.setPopupContent(label)
-  }
-  scheduleFitBounds()
 }
 
 function initMap() {
@@ -300,12 +225,50 @@ function initMap() {
   overlayLayer = L.layerGroup().addTo(map)
 
   syncTrailerMarker()
-  initGeolocation()
+  applyUserCoordsFromProps()
 
   nextTick(() => {
     map?.invalidateSize()
     setTimeout(() => map?.invalidateSize(), 320)
   })
+}
+
+function destroyMap() {
+  geoStopped = true
+  stopWatch()
+  if (fitDebounce) {
+    clearTimeout(fitDebounce)
+    fitDebounce = null
+  }
+  trailerMarker = null
+  userMarker = null
+  overlayLayer = null
+  streetLayer = null
+  satelliteLayer = null
+  if (map) {
+    map.remove()
+    map = null
+  }
+}
+
+function syncTrailerMarker() {
+  if (!map || !overlayLayer) return
+  const ll = trailerLatLng()
+  if (!Number.isFinite(ll.lat) || !Number.isFinite(ll.lng)) return
+
+  const label = props.trailerLabel.trim() || 'Trailer'
+  if (!trailerMarker) {
+    trailerMarker = L.marker(ll, {
+      icon: makeTrailerIcon(),
+      title: label,
+    })
+      .bindPopup(label)
+      .addTo(overlayLayer)
+  } else {
+    trailerMarker.setLatLng(ll)
+    trailerMarker.setPopupContent(label)
+  }
+  scheduleFitBounds()
 }
 
 onMounted(() => {
@@ -325,6 +288,20 @@ watch(
     nextTick(() => map?.invalidateSize())
   },
 )
+
+watch(
+  () => [props.userLat, props.userLng],
+  () => {
+    applyUserCoordsFromProps()
+  },
+)
+
+watch(
+  () => props.userLocationDenied,
+  (denied) => {
+    if (denied && !userMarker) scheduleFitBounds()
+  },
+)
 </script>
 
 <template>
@@ -340,35 +317,17 @@ watch(
         You
       </span>
     </div>
-    <div
-      v-if="userLocStatus === 'idle' || userLocStatus === 'denied'"
-      class="trailer-loc-actions"
-    >
-      <button
-        type="button"
-        class="trailer-loc-share-btn tap"
-        @click="onTapShareLocation"
-      >
-        {{ userLocStatus === 'denied' ? 'Tap to allow location' : 'Show my location on map' }}
-      </button>
-      <p
-        v-if="userLocStatus === 'denied'"
-        class="trailer-loc-ios-hint"
-      >
-        On iPhone: Settings → Chrome → Location → While Using, then tap the button above.
-      </p>
-    </div>
     <p
-      v-if="userLocStatus === 'requesting'"
+      v-if="userLocationPending && !hasUserFix"
       class="trailer-loc-hint"
     >
       Finding your location…
     </p>
     <p
-      v-if="userLocStatus === 'unavailable'"
+      v-if="userLocationDenied && !hasUserFix && !userLocationPending"
       class="trailer-loc-hint is-muted"
     >
-      This browser cannot access device location.
+      Location unavailable — trailer only. Check site permission in browser settings.
     </p>
   </div>
 </template>
@@ -428,67 +387,25 @@ watch(
   background: #0284c7;
 }
 
-.trailer-loc-actions {
-  position: absolute;
-  z-index: 1000;
-  bottom: 0.45rem;
-  left: 50%;
-  transform: translateX(-50%);
-  width: min(92%, 22rem);
-  display: flex;
-  flex-direction: column;
-  align-items: stretch;
-  gap: 0.35rem;
-  pointer-events: auto;
-}
-
-.trailer-loc-share-btn {
-  width: 100%;
-  padding: 0.55rem 0.75rem;
-  border-radius: 10px;
-  border: 1px solid rgba(255, 255, 255, 0.2);
-  background: linear-gradient(180deg, #4f46e5 0%, #4338ca 100%);
-  color: #f8fafc;
-  font-size: 0.8rem;
-  font-weight: 600;
-  cursor: pointer;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
-}
-
-.trailer-loc-share-btn:active {
-  transform: scale(0.98);
-}
-
-.trailer-loc-ios-hint {
-  margin: 0;
-  padding: 0.35rem 0.5rem;
-  font-size: 0.65rem;
-  line-height: 1.35;
-  text-align: center;
-  color: #334155;
-  background: rgba(255, 255, 255, 0.95);
-  border-radius: 8px;
-  border: 1px solid rgba(0, 0, 0, 0.08);
-}
-
 .trailer-loc-hint {
   position: absolute;
   z-index: 999;
-  bottom: 3.5rem;
-  left: 0;
-  right: 0;
-  margin: 0 auto;
-  max-width: 90%;
-  padding: 0.3rem 0.5rem;
+  bottom: 0.45rem;
+  left: 0.65rem;
+  right: 0.65rem;
+  margin: 0;
+  padding: 0.35rem 0.5rem;
   font-size: 0.68rem;
   line-height: 1.35;
   text-align: center;
   color: #475569;
+  background: rgba(255, 255, 255, 0.94);
+  border-radius: 8px;
+  border: 1px solid rgba(0, 0, 0, 0.08);
   pointer-events: none;
 }
 
 .trailer-loc-hint.is-muted {
-  bottom: 0.5rem;
   color: #64748b;
 }
 
