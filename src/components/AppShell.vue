@@ -59,7 +59,10 @@ onUnmounted(() => {
       </div>
     </div>
 
-    <main class="app-main">
+    <main
+      class="app-main"
+      :class="{ 'app-main--directory': route.name === 'directory' }"
+    >
       <RouterView />
     </main>
 
@@ -292,6 +295,39 @@ onUnmounted(() => {
   margin-inline: auto;
   padding-inline: var(--space-4, 1rem);
   padding-bottom: calc(var(--nav-height, 4rem) + env(safe-area-inset-bottom, 0) + 1rem);
+  min-height: 0;
+}
+
+/* Directory: edge-to-edge horizontal, no centered column — inner view owns scroll regions */
+.app-main.app-main--directory {
+  max-width: none;
+  margin-inline: 0;
+  padding-inline: 0;
+  padding-bottom: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Split-pane directory: only the list column scrolls, not the main element */
+@media (orientation: landscape) and (min-width: 640px) {
+  .app-main.app-main--directory {
+    overflow-y: hidden;
+  }
+}
+
+.app-main.app-main--directory > * {
+  flex: 0 1 auto;
+  display: flex;
+  flex-direction: column;
+}
+
+@media (orientation: landscape) and (min-width: 640px) {
+  .app-main.app-main--directory > * {
+    flex: 1;
+    min-height: 0;
+  }
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════

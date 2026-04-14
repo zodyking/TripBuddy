@@ -23,6 +23,11 @@ const props = defineProps({
     type: String,
     default: '',
   },
+  /** Fill parent height (split-pane directory layout); disables fixed min-height clamp. */
+  fillHeight: {
+    type: Boolean,
+    default: false,
+  },
 })
 
 const emit = defineEmits(['select'])
@@ -165,18 +170,33 @@ function destroyMap() {
   markerLayer = null
 }
 
+/** @type {ResizeObserver | null} */
+let resizeObserver = null
+
 onMounted(() => {
   nextTick(() => {
     initMap()
+    if (props.fillHeight && containerRef.value && typeof ResizeObserver !== 'undefined') {
+      resizeObserver = new ResizeObserver(() => {
+        nextTick(() => {
+          map?.invalidateSize()
+        })
+      })
+      resizeObserver.observe(containerRef.value)
+    }
   })
 })
 
 onBeforeUnmount(() => {
+  if (resizeObserver && containerRef.value) {
+    resizeObserver.unobserve(containerRef.value)
+  }
+  resizeObserver = null
   destroyMap()
 })
 
 watch(
-  () => [props.pins, props.highlightId],
+  () => [props.pins, props.highlightId, props.fillHeight],
   () => {
     syncMarkers()
     nextTick(() => {
@@ -190,6 +210,7 @@ watch(
 <template>
   <div
     class="directory-map-root"
+    :class="{ 'is-fill': fillHeight }"
     role="region"
     aria-label="Map of saved locations"
   >
@@ -207,10 +228,25 @@ watch(
   background: var(--color-bg-elevated, #12121a);
 }
 
+.directory-map-root.is-fill {
+  height: 100%;
+  min-height: 0;
+  border-radius: 0;
+  border-left: none;
+  border-top: none;
+  border-bottom: none;
+  box-shadow: none;
+}
+
 .directory-map-el {
   width: 100%;
   min-height: clamp(16rem, 38vh, 22rem);
   height: clamp(16rem, 38vh, 22rem);
+}
+
+.directory-map-root.is-fill .directory-map-el {
+  min-height: 0;
+  height: 100%;
 }
 
 :deep(.leaflet-container) {

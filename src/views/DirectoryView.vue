@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed, onMounted, nextTick } from 'vue'
+import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue'
 import { fetchDirectory } from '../api.js'
 import DirectoryMap from '../components/DirectoryMap.vue'
 
@@ -127,72 +127,111 @@ function buildTelHref(phone) {
   return ''
 }
 
+/**
+ * Landscape + minimum width: map fixed left, list scrolls right (max map area).
+ * Portrait / narrow: stacked column with normal page scroll.
+ */
+const isLandscapeSplit = ref(false)
+let splitMql = /** @type {MediaQueryList | null} */ (null)
+
+function updateLandscapeSplit() {
+  if (typeof window === 'undefined') return
+  isLandscapeSplit.value = window.matchMedia(
+    '(orientation: landscape) and (min-width: 640px)',
+  ).matches
+}
+
+function onSplitMqlChange() {
+  updateLandscapeSplit()
+}
+
 onMounted(() => {
+  updateLandscapeSplit()
+  if (typeof window !== 'undefined' && window.matchMedia) {
+    splitMql = window.matchMedia(
+      '(orientation: landscape) and (min-width: 640px)',
+    )
+    splitMql.addEventListener('change', onSplitMqlChange)
+  }
   loadDirectory()
+})
+
+onUnmounted(() => {
+  if (splitMql) {
+    splitMql.removeEventListener('change', onSplitMqlChange)
+  }
 })
 </script>
 
 <template>
-  <div class="directory-view">
-    <header class="directory-header">
-      <h1 class="directory-title">Directory</h1>
-      <button
-        type="button"
-        class="refresh-btn tap"
-        :disabled="loading"
-        @click="loadDirectory"
-        aria-label="Refresh directory"
+  <div class="directory-view" :class="{ 'is-split': isLandscapeSplit }">
+    <div class="directory-map-column">
+      <header class="directory-header" :class="{ 'is-compact': isLandscapeSplit }">
+        <h1 class="directory-title">Directory</h1>
+        <button
+          type="button"
+          class="refresh-btn tap"
+          :disabled="loading"
+          @click="loadDirectory"
+          aria-label="Refresh directory"
+        >
+          <svg
+            class="refresh-icon"
+            :class="{ 'is-spinning': loading }"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          >
+            <polyline points="23 4 23 10 17 10" />
+            <polyline points="1 20 1 14 7 14" />
+            <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
+          </svg>
+        </button>
+      </header>
+
+      <div v-if="mapPins.length > 0" class="directory-map-shell">
+        <DirectoryMap
+          :pins="mapPins"
+          :highlight-id="expandedId"
+          :fill-height="isLandscapeSplit"
+          @select="onMapSelect"
+        />
+      </div>
+
+      <div
+        v-if="showMapNoCoordsNotice"
+        class="map-no-coords-notice"
+        role="status"
       >
         <svg
-          class="refresh-icon"
-          :class="{ 'is-spinning': loading }"
+          class="map-no-coords-icon"
           viewBox="0 0 24 24"
           fill="none"
           stroke="currentColor"
           stroke-width="2"
           stroke-linecap="round"
           stroke-linejoin="round"
+          aria-hidden="true"
         >
-          <polyline points="23 4 23 10 17 10" />
-          <polyline points="1 20 1 14 7 14" />
-          <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
+          <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z" />
+          <circle cx="12" cy="10" r="3" />
         </svg>
-      </button>
-    </header>
-
-    <div v-if="mapPins.length > 0" class="directory-map-section">
-      <DirectoryMap
-        :pins="mapPins"
-        :highlight-id="expandedId"
-        @select="onMapSelect"
-      />
+        <p>
+          None of these locations have saved coordinates yet. Open
+          <strong>Destination</strong> on the Home dispatch card to load details and
+          save them to the directory.
+        </p>
+      </div>
     </div>
 
-    <div
-      v-if="showMapNoCoordsNotice"
-      class="map-no-coords-notice"
-      role="status"
-    >
-      <svg
-        class="map-no-coords-icon"
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        stroke-width="2"
-        stroke-linecap="round"
-        stroke-linejoin="round"
-        aria-hidden="true"
+    <div class="directory-list-column" :class="{ 'is-scroll-pane': isLandscapeSplit }">
+      <div
+        class="directory-list-inner"
+        :class="{ 'is-scroll-pane': isLandscapeSplit }"
       >
-        <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z" />
-        <circle cx="12" cy="10" r="3" />
-      </svg>
-      <p>
-        None of these locations have saved coordinates yet. Open
-        <strong>Destination</strong> on the Home dispatch card to load details and
-        save them to the directory.
-      </p>
-    </div>
-
     <div class="search-bar">
       <svg
         class="search-icon"
@@ -364,20 +403,103 @@ onMounted(() => {
     <p v-if="filteredLocations.length" class="location-count">
       {{ filteredLocations.length }} location{{ filteredLocations.length === 1 ? '' : 's' }}
     </p>
+      </div>
+    </div>
   </div>
 </template>
 
 <style scoped>
 .directory-view {
-  padding: var(--space-4, 1rem) 0;
-  padding-bottom: calc(var(--space-8, 2rem) + env(safe-area-inset-bottom, 0));
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  padding-bottom: calc(var(--nav-height, 4rem) + env(safe-area-inset-bottom, 0));
+  flex: 0 0 auto;
+  min-height: min-content;
+}
+
+.directory-view:not(.is-split) {
+  padding-left: max(env(safe-area-inset-left, 0px), var(--space-2, 0.5rem));
+  padding-right: max(env(safe-area-inset-right, 0px), var(--space-2, 0.5rem));
+}
+
+/* Landscape + wide: map left (fixed pane), list scrolls right */
+.directory-view.is-split {
+  flex: 1;
+  min-height: 0;
+  flex-direction: row;
+  align-items: stretch;
+  padding-bottom: calc(var(--nav-height, 4rem) + env(safe-area-inset-bottom, 0));
+  padding-left: 0;
+  padding-right: 0;
+}
+
+.directory-map-column {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+}
+
+.directory-view.is-split .directory-map-column {
+  flex: 0 0 min(52vw, 28rem);
+  border-right: 1px solid var(--color-border, rgba(255, 255, 255, 0.08));
+}
+
+.directory-map-shell {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.directory-view:not(.is-split) .directory-map-shell {
+  flex: none;
+}
+
+.directory-list-column {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.directory-list-inner {
+  flex: 1 1 auto;
+  min-height: 0;
+  padding: var(--space-3, 0.75rem) 0;
+  padding-bottom: var(--space-4, 1rem);
+}
+
+.directory-list-inner.is-scroll-pane {
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+}
+
+.directory-view.is-split .directory-list-inner {
+  padding-top: var(--space-3, 0.75rem);
+  padding-right: max(env(safe-area-inset-right, 0px), var(--space-3, 0.75rem));
+  padding-left: var(--space-3, 0.75rem);
 }
 
 .directory-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  flex-shrink: 0;
   margin-bottom: var(--space-4, 1rem);
+}
+
+.directory-view.is-split .directory-header {
+  padding: var(--space-2, 0.5rem) var(--space-3, 0.75rem);
+  padding-left: max(env(safe-area-inset-left, 0px), var(--space-3, 0.75rem));
+  margin-bottom: var(--space-2, 0.5rem);
+}
+
+.directory-view.is-split .directory-header.is-compact .directory-title {
+  font-size: var(--text-md, 1rem);
 }
 
 .directory-title {
@@ -385,10 +507,6 @@ onMounted(() => {
   font-weight: var(--weight-bold, 700);
   color: var(--color-text-primary, #f4f4f8);
   margin: 0;
-}
-
-.directory-map-section {
-  margin-bottom: var(--space-4, 1rem);
 }
 
 .map-no-coords-notice {
@@ -400,6 +518,11 @@ onMounted(() => {
   border-radius: var(--radius-lg, 0.75rem);
   background: rgba(255, 255, 255, 0.04);
   border: 1px solid var(--color-border, rgba(255, 255, 255, 0.08));
+}
+
+.directory-view.is-split .map-no-coords-notice {
+  margin: 0 var(--space-2, 0.5rem) var(--space-2, 0.5rem);
+  flex-shrink: 0;
 }
 
 .map-no-coords-icon {
