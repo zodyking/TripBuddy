@@ -63,6 +63,7 @@ import {
   formatLinehaulLocationForDisplay,
   extractLocationForDirectory,
 } from '../utils/linehaulLocationDisplay.js'
+import TrailerLocationMap from '../components/TrailerLocationMap.vue'
 import {
   maybeAnnounceNewTrip,
   maybeAnnouncePrePlanTrip,
@@ -726,13 +727,6 @@ function closeTrailerGpsModal() {
   trailerGpsData.value = null
 }
 
-/** OSM main site URL is not embeddable in iframes; use the official embed endpoint. */
-const trailerGpsMapUrl = computed(() => {
-  if (!trailerGpsData.value) return ''
-  const { lat, lng } = trailerGpsData.value
-  return `https://www.openstreetmap.org/export/embed.html?bbox=${lng - 0.005},${lat - 0.003},${lng + 0.005},${lat + 0.003}&layer=mapnik&marker=${lat},${lng}`
-})
-
 /** Credentials snapshot for Driver ID row (same rule as header badges used). */
 const linehaulCredMeta = ref(null)
 
@@ -1093,13 +1087,10 @@ onUnmounted(() => {
             <span>{{ trailerGpsData.lat.toFixed(5) }}, {{ trailerGpsData.lng.toFixed(5) }}</span>
           </div>
           <div class="trailer-gps-map-wrap">
-            <iframe
-              :src="trailerGpsMapUrl"
-              class="trailer-gps-map"
-              loading="lazy"
-              referrerpolicy="no-referrer"
-              title="Trailer location map"
-              allow="geolocation"
+            <TrailerLocationMap
+              :lat="trailerGpsData.lat"
+              :lng="trailerGpsData.lng"
+              :trailer-label="`Trailer ${trailerGpsData.order}${trailerGpsData.trlrNbr ? ` · #${trailerGpsData.trlrNbr}` : ''}`"
             />
           </div>
           <div class="modal-actions trailer-gps-actions">
@@ -2694,11 +2685,6 @@ onUnmounted(() => {
   overflow: hidden;
   border: 1px solid #34343e;
   background: #0a0a0f;
-}
-.trailer-gps-map {
-  width: 100%;
-  height: 100%;
-  border: 0;
 }
 .trailer-gps-actions {
   display: flex;
