@@ -42,6 +42,7 @@ import {
   hasPrePlanTrip,
 } from '../stores/linehaulSnapshotStore.js'
 import {
+  apiOk,
   registerApiRecover,
   ensureFedexApiReady,
 } from '../composables/useApiHealth.js'
@@ -232,6 +233,14 @@ const showSealOrTripPanel = computed(
 
 const tripVoiceUnlockHint = ref(false)
 const tripAlertOn = computed(() => isTripAlertEnabled())
+
+/**
+ * Hide Linehaul error strings while the app API is unreachable or before the first
+ * snapshot fetch finishes — show loading placeholders instead.
+ */
+const suppressHomeLinehaulErrors = computed(
+  () => apiOk.value !== true || linehaulLastFetchAt.value == null,
+)
 
 function syncTripVoiceUnlockHint() {
   tripVoiceUnlockHint.value = tripVoiceShowUnlockHint()
@@ -1251,9 +1260,24 @@ onUnmounted(() => {
           }}</time>
         </p>
 
-        <div v-if="linehaulTractorError || linehaulDriverError" class="linehaul-errors">
+        <div
+          v-if="
+            !suppressHomeLinehaulErrors &&
+            (linehaulTractorError || linehaulDriverError)
+          "
+          class="linehaul-errors"
+        >
           <p v-if="linehaulTractorError" class="err">Tractor Details: {{ linehaulTractorError }}</p>
           <p v-if="linehaulDriverError" class="err">Driver Details: {{ linehaulDriverError }}</p>
+        </div>
+        <div
+          v-else-if="suppressHomeLinehaulErrors && (linehaulTractorError || linehaulDriverError)"
+          class="linehaul-loading-placeholder"
+          aria-hidden="true"
+        >
+          <span class="linehaul-loading-dot" />
+          <span class="linehaul-loading-dot" />
+          <span class="linehaul-loading-dot" />
         </div>
         <div class="driver-status-cards">
           <div v-if="linehaulTractorBody" class="linehaul-block">
@@ -1317,7 +1341,8 @@ onUnmounted(() => {
             !linehaulFetching &&
             linehaulLastFetchAt == null &&
             !linehaulTractorError &&
-            !linehaulDriverError
+            !linehaulDriverError &&
+            apiOk === true
           "
           class="empty driver-status-idle"
         >
@@ -1501,9 +1526,20 @@ onUnmounted(() => {
         </div>
       </template>
       <p v-else-if="linehaulTripsNoActive" class="empty trip-details-idle">No active trip</p>
-      <p v-else-if="linehaulTripsError" class="err trip-details-fetch-err">
+      <p
+        v-else-if="linehaulTripsError && !suppressHomeLinehaulErrors"
+        class="err trip-details-fetch-err"
+      >
         Trip details: {{ linehaulTripsError }}
       </p>
+      <div
+        v-else-if="linehaulTripsError && suppressHomeLinehaulErrors"
+        class="trip-details-loading"
+        aria-busy="true"
+        aria-label="Loading trip details"
+      >
+        <span class="trip-details-loading-spinner" />
+      </div>
     </section>
 
     <section class="panel actions">
@@ -1805,12 +1841,79 @@ onUnmounted(() => {
 }
 .driver-status-cards {
   display: grid;
-  grid-template-columns: 1fr;
-  gap: 0.45rem;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.35rem 0.45rem;
+  align-items: start;
 }
-@media (min-width: 560px) {
+.driver-status-cards:has(> .linehaul-block:only-child) {
+  grid-template-columns: 1fr;
+}
+.driver-status-cards .linehaul-dl-row {
+  font-size: clamp(0.65rem, 1.8vw + 0.45rem, 0.78rem);
+  gap: 0.2rem 0.35rem;
+}
+.driver-status-cards .linehaul-dl-row dt {
+  font-size: clamp(0.58rem, 1.2vw + 0.42rem, 0.68rem);
+}
+.driver-status-cards .linehaul-h3 {
+  font-size: clamp(0.65rem, 1vw + 0.5rem, 0.78rem);
+  margin-bottom: 0.28rem;
+}
+.linehaul-loading-placeholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.35rem;
+  padding: 0.5rem 0;
+  margin-bottom: 0.25rem;
+}
+.linehaul-loading-dot {
+  width: 0.35rem;
+  height: 0.35rem;
+  border-radius: 999px;
+  background: var(--color-text-tertiary, #6e6e7e);
+  animation: linehaul-dot-pulse 1s ease-in-out infinite;
+}
+.linehaul-loading-dot:nth-child(2) {
+  animation-delay: 0.15s;
+}
+.linehaul-loading-dot:nth-child(3) {
+  animation-delay: 0.3s;
+}
+@keyframes linehaul-dot-pulse {
+  0%,
+  80%,
+  100% {
+    opacity: 0.35;
+    transform: scale(0.85);
+  }
+  40% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+.trip-details-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1.25rem 0;
+}
+.trip-details-loading-spinner {
+  width: 1.75rem;
+  height: 1.75rem;
+  border: 2px solid var(--color-border, rgba(255, 255, 255, 0.1));
+  border-top-color: var(--color-accent-purple, #7b4db5);
+  border-radius: 50%;
+  animation: trip-details-spin 0.75s linear infinite;
+}
+@keyframes trip-details-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@media (max-width: 340px) {
   .driver-status-cards {
-    grid-template-columns: 1fr 1fr;
+    grid-template-columns: 1fr;
   }
 }
 .driver-status-idle {
@@ -2060,6 +2163,7 @@ onUnmounted(() => {
 }
 .driver-status-cards .linehaul-block {
   margin-top: 0;
+  min-width: 0;
   padding: 0.45rem 0.5rem;
   border-radius: 8px;
   border: 1px solid #34343e;
