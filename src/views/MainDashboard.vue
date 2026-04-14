@@ -1093,11 +1093,6 @@ onUnmounted(() => {
               :trailer-label="`Trailer ${trailerGpsData.order}${trailerGpsData.trlrNbr ? ` · #${trailerGpsData.trlrNbr}` : ''}`"
             />
           </div>
-          <div class="modal-actions trailer-gps-actions">
-            <button type="button" class="btn primary tap" @click="closeTrailerGpsModal">
-              Close
-            </button>
-          </div>
         </div>
       </div>
     </Teleport>
@@ -2631,12 +2626,12 @@ onUnmounted(() => {
    ═══════════════════════════════════════════════════════════════════════════ */
 
 .trailer-gps-modal {
-  width: min(80vw, 56rem);
-  height: min(80vh, 50rem);
+  width: min(92vw, 58rem);
+  height: min(90vh, 54rem);
   max-width: none;
   display: flex;
   flex-direction: column;
-  gap: 0.65rem;
+  gap: 0.55rem;
 }
 .trailer-gps-header {
   display: flex;
@@ -2685,24 +2680,5 @@ onUnmounted(() => {
   overflow: hidden;
   border: 1px solid #34343e;
   background: #0a0a0f;
-}
-.trailer-gps-actions {
-  display: flex;
-  gap: 0.5rem;
-  justify-content: flex-end;
-  margin-top: 0.25rem;
-}
-.trailer-gps-actions .btn {
-  flex: 1;
-  text-align: center;
-  text-decoration: none;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-}
-@media (min-width: 400px) {
-  .trailer-gps-actions .btn {
-    flex: 0 1 auto;
-  }
 }
 </style>
