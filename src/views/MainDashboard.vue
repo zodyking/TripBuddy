@@ -630,6 +630,62 @@ function dismissAlert() {
   assignmentAlert.value = null
 }
 
+/** Dedupe directory writes for the same trip destination + origin pair. */
+let lastAutoSavedDestKey = ''
+/** Cancels stale async saves when destination or origin changes mid-flight. */
+let destDirectoryAutoSaveGen = 0
+
+/**
+ * Upsert directory entry from Linehaul location API body (same as modal).
+ * @param {unknown} body
+ */
+async function persistDestLocationToDirectoryFromBody(body) {
+  const dirEntry = extractLocationForDirectory(body)
+  if (dirEntry?.locationId) {
+    await saveLocationToDirectory(dirEntry)
+  }
+}
+
+/**
+ * When trip data includes a destination location id, fetch full location from the API
+ * and save to the directory without requiring the user to open the modal.
+ */
+async function fetchAndPersistTripDestinationToDirectory() {
+  const id = tripDestLocationId.value
+  if (!id) return
+  const origin = linehaulOriginIdForApi.value || ''
+  const key = `${id}|${origin}`
+  if (key === lastAutoSavedDestKey) return
+  const myGen = ++destDirectoryAutoSaveGen
+  const r = await fetchFedexLinehaulLocation({
+    locationId: id,
+    originId: origin || undefined,
+  })
+  if (myGen !== destDirectoryAutoSaveGen) return
+  if (!r.ok) return
+  try {
+    await persistDestLocationToDirectoryFromBody(r.body)
+    if (myGen !== destDirectoryAutoSaveGen) return
+    lastAutoSavedDestKey = key
+  } catch {
+    /* ignore persist errors */
+  }
+}
+
+watch(
+  [tripDestLocationId, linehaulOriginIdForApi],
+  () => {
+    const id = tripDestLocationId.value
+    if (!id) {
+      lastAutoSavedDestKey = ''
+      destDirectoryAutoSaveGen += 1
+      return
+    }
+    void fetchAndPersistTripDestinationToDirectory()
+  },
+  { immediate: true },
+)
+
 async function openDestLocationModal() {
   if (!tripDestLocationId.value) return
   destLocationModalOpen.value = true
@@ -647,11 +703,7 @@ async function openDestLocationModal() {
     return
   }
   destLocationBody.value = r.body ?? null
-
-  const dirEntry = extractLocationForDirectory(r.body)
-  if (dirEntry?.locationId) {
-    saveLocationToDirectory(dirEntry).catch(() => {})
-  }
+  void persistDestLocationToDirectoryFromBody(r.body).catch(() => {})
 }
 
 function closeDestLocationModal() {
