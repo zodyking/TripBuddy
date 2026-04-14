@@ -137,7 +137,7 @@ let splitMql = /** @type {MediaQueryList | null} */ (null)
 function updateLandscapeSplit() {
   if (typeof window === 'undefined') return
   isLandscapeSplit.value = window.matchMedia(
-    '(orientation: landscape) and (min-width: 640px)',
+    '(orientation: landscape) and (min-width: 700px)',
   ).matches
 }
 
@@ -145,20 +145,31 @@ function onSplitMqlChange() {
   updateLandscapeSplit()
 }
 
+/** Auto-refresh directory data (replaces manual refresh control). */
+let directoryPollTimer = null
+const DIRECTORY_POLL_MS = 60_000
+
 onMounted(() => {
   updateLandscapeSplit()
   if (typeof window !== 'undefined' && window.matchMedia) {
     splitMql = window.matchMedia(
-      '(orientation: landscape) and (min-width: 640px)',
+      '(orientation: landscape) and (min-width: 700px)',
     )
     splitMql.addEventListener('change', onSplitMqlChange)
   }
   loadDirectory()
+  directoryPollTimer = setInterval(() => {
+    void loadDirectory()
+  }, DIRECTORY_POLL_MS)
 })
 
 onUnmounted(() => {
   if (splitMql) {
     splitMql.removeEventListener('change', onSplitMqlChange)
+  }
+  if (directoryPollTimer) {
+    clearInterval(directoryPollTimer)
+    directoryPollTimer = null
   }
 })
 </script>
@@ -166,32 +177,6 @@ onUnmounted(() => {
 <template>
   <div class="directory-view" :class="{ 'is-split': isLandscapeSplit }">
     <div class="directory-map-column">
-      <header class="directory-header" :class="{ 'is-compact': isLandscapeSplit }">
-        <h1 class="directory-title">Directory</h1>
-        <button
-          type="button"
-          class="refresh-btn tap"
-          :disabled="loading"
-          @click="loadDirectory"
-          aria-label="Refresh directory"
-        >
-          <svg
-            class="refresh-icon"
-            :class="{ 'is-spinning': loading }"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="2"
-            stroke-linecap="round"
-            stroke-linejoin="round"
-          >
-            <polyline points="23 4 23 10 17 10" />
-            <polyline points="1 20 1 14 7 14" />
-            <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
-          </svg>
-        </button>
-      </header>
-
       <div v-if="mapPins.length > 0" class="directory-map-shell">
         <DirectoryMap
           :pins="mapPins"
@@ -232,6 +217,10 @@ onUnmounted(() => {
         class="directory-list-inner"
         :class="{ 'is-scroll-pane': isLandscapeSplit }"
       >
+        <header class="directory-list-heading">
+          <h1 class="directory-title">Directory</h1>
+          <p class="directory-subtitle">Updates automatically</p>
+        </header>
     <div class="search-bar">
       <svg
         class="search-icon"
@@ -442,7 +431,8 @@ onUnmounted(() => {
 }
 
 .directory-view.is-split .directory-map-column {
-  flex: 0 0 min(52vw, 28rem);
+  flex: 1.35 1 0;
+  min-width: 0;
   border-right: 1px solid var(--color-border, rgba(255, 255, 255, 0.08));
 }
 
@@ -484,22 +474,9 @@ onUnmounted(() => {
   padding-left: var(--space-3, 0.75rem);
 }
 
-.directory-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  flex-shrink: 0;
+.directory-list-heading {
   margin-bottom: var(--space-4, 1rem);
-}
-
-.directory-view.is-split .directory-header {
-  padding: var(--space-2, 0.5rem) var(--space-3, 0.75rem);
-  padding-left: max(env(safe-area-inset-left, 0px), var(--space-3, 0.75rem));
-  margin-bottom: var(--space-2, 0.5rem);
-}
-
-.directory-view.is-split .directory-header.is-compact .directory-title {
-  font-size: var(--text-md, 1rem);
+  flex-shrink: 0;
 }
 
 .directory-title {
@@ -507,6 +484,18 @@ onUnmounted(() => {
   font-weight: var(--weight-bold, 700);
   color: var(--color-text-primary, #f4f4f8);
   margin: 0;
+}
+
+.directory-subtitle {
+  margin: 0.2rem 0 0;
+  font-size: var(--text-xs, 0.6875rem);
+  font-weight: var(--weight-medium, 500);
+  color: var(--color-text-tertiary, #6e6e7e);
+  letter-spacing: var(--tracking-wide, 0.025em);
+}
+
+.directory-view.is-split .directory-title {
+  font-size: var(--text-lg, 1.125rem);
 }
 
 .map-no-coords-notice {
@@ -543,44 +532,6 @@ onUnmounted(() => {
 .map-no-coords-notice strong {
   color: var(--color-text-primary, #f4f4f8);
   font-weight: var(--weight-semibold, 600);
-}
-
-.refresh-btn {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 2.25rem;
-  height: 2.25rem;
-  border: none;
-  border-radius: var(--radius-md, 0.5rem);
-  background: rgba(255, 255, 255, 0.06);
-  color: var(--color-text-secondary, #a0a0b0);
-  cursor: pointer;
-  transition: var(--transition-colors);
-}
-
-.refresh-btn:hover:not(:disabled) {
-  background: rgba(255, 255, 255, 0.1);
-  color: var(--color-text-primary, #f4f4f8);
-}
-
-.refresh-btn:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-.refresh-icon {
-  width: 1.125rem;
-  height: 1.125rem;
-}
-
-.refresh-icon.is-spinning {
-  animation: spin 1s linear infinite;
-}
-
-@keyframes spin {
-  from { transform: rotate(0deg); }
-  to { transform: rotate(360deg); }
 }
 
 .search-bar {
@@ -692,8 +643,17 @@ onUnmounted(() => {
   border: 2px solid var(--color-border, rgba(255, 255, 255, 0.08));
   border-top-color: var(--color-accent-purple, #7b4db5);
   border-radius: 50%;
-  animation: spin 0.8s linear infinite;
+  animation: dir-spin 0.8s linear infinite;
   margin-bottom: var(--space-3, 0.75rem);
+}
+
+@keyframes dir-spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .loading-state p {

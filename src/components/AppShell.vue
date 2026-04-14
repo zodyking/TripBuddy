@@ -311,7 +311,7 @@ onUnmounted(() => {
 }
 
 /* Split-pane directory: only the list column scrolls, not the main element */
-@media (orientation: landscape) and (min-width: 640px) {
+@media (orientation: landscape) and (min-width: 700px) {
   .app-main.app-main--directory {
     overflow-y: hidden;
   }
@@ -323,7 +323,7 @@ onUnmounted(() => {
   flex-direction: column;
 }
 
-@media (orientation: landscape) and (min-width: 640px) {
+@media (orientation: landscape) and (min-width: 700px) {
   .app-main.app-main--directory > * {
     flex: 1;
     min-height: 0;
