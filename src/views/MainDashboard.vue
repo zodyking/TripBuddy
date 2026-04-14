@@ -123,7 +123,16 @@ const destLocationError = ref('')
 const destLocationBody = ref(null)
 
 const trailerGpsModalOpen = ref(false)
-/** @type {import('vue').Ref<{ order: string, trlrNbr: string, lat: number, lng: number } | null>} */
+/** @type {import('vue').Ref<{
+ *   order: string,
+ *   trlrNbr: string,
+ *   lat: number,
+ *   lng: number,
+ *   userLat: number | null,
+ *   userLng: number | null,
+ *   userGpsPending: boolean,
+ *   userGeoDenied: boolean,
+ * } | null>} */
 const trailerGpsData = ref(null)
 
 const instructions = ref('')
@@ -711,15 +720,82 @@ function closeDestLocationModal() {
   destLocationModalOpen.value = false
 }
 
+/**
+ * WebKit (iOS Safari / Chrome) only ties geolocation permission to a **synchronous**
+ * call from a user gesture. Calling getCurrentPosition from the map component’s
+ * mount runs after the gesture stack ends, so the prompt never appears. Invoke it
+ * here in the same tick as the pin button click, then pass coords into the map.
+ */
 function openTrailerGpsModal(card) {
   if (!card.hasGps || card.lat == null || card.lng == null) return
+  const hasGeo =
+    typeof navigator !== 'undefined' && !!navigator.geolocation
+
   trailerGpsData.value = {
     order: card.order,
     trlrNbr: card.trlrNbr,
     lat: card.lat,
     lng: card.lng,
+    userLat: null,
+    userLng: null,
+    userGpsPending: hasGeo,
+    userGeoDenied: !hasGeo,
   }
   trailerGpsModalOpen.value = true
+
+  if (!hasGeo) return
+
+  const geoOpts = /** @type {PositionOptions} */ ({
+    enableHighAccuracy: true,
+    maximumAge: 0,
+    timeout: 25_000,
+  })
+
+  navigator.geolocation.getCurrentPosition(
+    (pos) => {
+      if (!trailerGpsModalOpen.value || !trailerGpsData.value) return
+      trailerGpsData.value = {
+        ...trailerGpsData.value,
+        userLat: pos.coords.latitude,
+        userLng: pos.coords.longitude,
+        userGpsPending: false,
+        userGeoDenied: false,
+      }
+    },
+    (err) => {
+      if (err && err.code === 1) {
+        if (!trailerGpsModalOpen.value || !trailerGpsData.value) return
+        trailerGpsData.value = {
+          ...trailerGpsData.value,
+          userGpsPending: false,
+          userGeoDenied: true,
+        }
+        return
+      }
+      navigator.geolocation.getCurrentPosition(
+        (pos) => {
+          if (!trailerGpsModalOpen.value || !trailerGpsData.value) return
+          trailerGpsData.value = {
+            ...trailerGpsData.value,
+            userLat: pos.coords.latitude,
+            userLng: pos.coords.longitude,
+            userGpsPending: false,
+            userGeoDenied: false,
+          }
+        },
+        () => {
+          if (!trailerGpsModalOpen.value || !trailerGpsData.value) return
+          trailerGpsData.value = {
+            ...trailerGpsData.value,
+            userGpsPending: false,
+            userGeoDenied: true,
+          }
+        },
+        { enableHighAccuracy: false, maximumAge: 60_000, timeout: 20_000 },
+      )
+    },
+    geoOpts,
+  )
 }
 
 function closeTrailerGpsModal() {
@@ -1090,6 +1166,10 @@ onUnmounted(() => {
             <TrailerLocationMap
               :lat="trailerGpsData.lat"
               :lng="trailerGpsData.lng"
+              :user-lat="trailerGpsData.userLat"
+              :user-lng="trailerGpsData.userLng"
+              :user-location-pending="trailerGpsData.userGpsPending"
+              :user-location-denied="trailerGpsData.userGeoDenied"
               :trailer-label="`Trailer ${trailerGpsData.order}${trailerGpsData.trlrNbr ? ` · #${trailerGpsData.trlrNbr}` : ''}`"
             />
           </div>
