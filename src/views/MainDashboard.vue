@@ -674,13 +674,8 @@ function closeTrailerGpsModal() {
   trailerGpsData.value = null
 }
 
+/** OSM main site URL is not embeddable in iframes; use the official embed endpoint. */
 const trailerGpsMapUrl = computed(() => {
-  if (!trailerGpsData.value) return ''
-  const { lat, lng } = trailerGpsData.value
-  return `https://www.openstreetmap.org/?mlat=${lat}&mlon=${lng}#map=17/${lat}/${lng}`
-})
-
-const trailerGpsEmbedUrl = computed(() => {
   if (!trailerGpsData.value) return ''
   const { lat, lng } = trailerGpsData.value
   return `https://www.openstreetmap.org/export/embed.html?bbox=${lng - 0.005},${lat - 0.003},${lng + 0.005},${lat + 0.003}&layer=mapnik&marker=${lat},${lng}`
