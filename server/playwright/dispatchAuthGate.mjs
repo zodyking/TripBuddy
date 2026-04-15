@@ -67,7 +67,7 @@ export function assertNotStuckOnPurpleId(page) {
  */
 async function spinStableDispatchOrHandleOkta(
   page,
-  { tryOktaLogin, log, signal, dispatchWaitMs, step },
+  { tryOktaLogin, log, signal, dispatchWaitMs, step, credentialOverride },
   untilTs,
 ) {
   let dispatchStableSince = null
@@ -82,6 +82,7 @@ async function spinStableDispatchOrHandleOkta(
         signal,
         dispatchWaitMs,
         step,
+        credentialOverride,
       })
       return true
     }
@@ -109,16 +110,31 @@ async function spinStableDispatchOrHandleOkta(
  * before Check in continues.
  *
  * @param {import('playwright').Page} page
- * @param {{ tryOktaLogin: boolean, log: (type: string, message: string) => void, signal?: AbortSignal }} opts
+ * @param {{
+ *   tryOktaLogin: boolean,
+ *   log: (type: string, message: string) => void,
+ *   signal?: AbortSignal,
+ *   credentialOverride?: { username: string, password: string } | null,
+ * }} opts
  */
-export async function ensureDispatchAppReady(page, { tryOktaLogin, log, signal }) {
+export async function ensureDispatchAppReady(
+  page,
+  { tryOktaLogin, log, signal, credentialOverride = null },
+) {
   const settleMs = 15_000
   const secondPhaseMs = 12_000
   const thirdPhaseMs = 15_000
   const dispatchWaitMs = 120_000
   const step = 400
 
-  const opts = { tryOktaLogin, log, signal, dispatchWaitMs, step }
+  const opts = {
+    tryOktaLogin,
+    log,
+    signal,
+    dispatchWaitMs,
+    step,
+    credentialOverride,
+  }
 
   await sleep(100, signal).catch(() => {})
 
@@ -159,10 +175,14 @@ export async function ensureDispatchAppReady(page, { tryOktaLogin, log, signal }
  */
 async function handleOktaThenWaitDispatch(
   page,
-  { tryOktaLogin, log, signal, dispatchWaitMs, step },
+  { tryOktaLogin, log, signal, dispatchWaitMs, step, credentialOverride },
 ) {
-  const u = await getUsername()
-  const p = await getDecryptedPassword()
+  let u = credentialOverride?.username?.trim() || null
+  let p = credentialOverride?.password || null
+  if (!u || !p) {
+    u = await getUsername()
+    p = await getDecryptedPassword()
+  }
   const canAuto = Boolean(u && p)
   if (!canAuto) {
     throw new Error(PURPLEID_SIGNIN_MESSAGE)

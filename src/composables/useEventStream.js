@@ -9,7 +9,7 @@ export function useEventStream(opts = {}) {
 
   function connect() {
     if (es) es.close()
-    es = new EventSource('/api/events')
+    es = new EventSource('/api/events', { withCredentials: true })
     streamOk.value = true
     es.onmessage = (ev) => {
       try {

@@ -1,5 +1,6 @@
 <script setup>
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
+import { useRouter } from 'vue-router'
 import {
   getAssignment,
   getCredentials,
@@ -12,6 +13,7 @@ import {
   fetchFedexLinehaulDriver,
   fetchFedexLinehaulTripStatus,
   fetchFedexLinehaulTrips,
+  postAuthLogout,
 } from '../api.js'
 import {
   refreshLinehaulApis,
@@ -54,6 +56,8 @@ import {
 const SECRET_SAVED_MASK = '••••••••••••••••'
 
 /** @type {import('vue').Ref<'general' | 'automation' | 'audio'>} */
+const router = useRouter()
+
 const settingsTab = ref('general')
 
 /** @type {import('vue').Ref<'off' | 'tts' | 'both'>} */
@@ -527,6 +531,15 @@ onUnmounted(() => {
   unregisterAssignment()
   unregisterRecover()
 })
+
+async function logoutApp() {
+  try {
+    await postAuthLogout()
+  } catch {
+    /* still navigate */
+  }
+  await router.push({ name: 'login' })
+}
 </script>
 
 <template>
@@ -567,6 +580,14 @@ onUnmounted(() => {
         @click="settingsTab = 'audio'"
       >
         Audio
+      </button>
+      <button
+        type="button"
+        class="settings-logout tap"
+        aria-label="Sign out of app"
+        @click="logoutApp"
+      >
+        Sign out
       </button>
     </div>
 
@@ -875,6 +896,8 @@ onUnmounted(() => {
    ═══════════════════════════════════════════════════════════════════════════ */
 .settings-tabs {
   display: flex;
+  flex-wrap: wrap;
+  align-items: center;
   gap: var(--space-1, 0.25rem);
   padding: var(--space-1, 0.25rem);
   margin-bottom: var(--space-4, 1rem);
@@ -883,6 +906,26 @@ onUnmounted(() => {
   -webkit-backdrop-filter: blur(var(--blur-md, 12px));
   border: 1px solid var(--color-glass-border, rgba(255, 255, 255, 0.06));
   border-radius: var(--radius-xl, 1rem);
+}
+
+.settings-logout {
+  margin-left: auto;
+  flex: 0 0 auto;
+  padding: var(--space-2, 0.5rem) var(--space-3, 0.75rem);
+  border: 1px solid var(--color-border, rgba(255, 255, 255, 0.12));
+  border-radius: var(--radius-lg, 0.75rem);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--color-text-secondary, #a8a8b8);
+  font-size: var(--text-xs, 0.6875rem);
+  font-weight: var(--weight-semibold, 600);
+  text-transform: uppercase;
+  letter-spacing: var(--tracking-wide, 0.025em);
+}
+
+.settings-logout:hover {
+  color: var(--color-text-primary, #f4f4f8);
+  background: rgba(239, 68, 68, 0.12);
+  border-color: rgba(239, 68, 68, 0.35);
 }
 
 .tab-btn {

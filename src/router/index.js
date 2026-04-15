@@ -3,10 +3,18 @@ import AppShell from '../components/AppShell.vue'
 import MainDashboard from '../views/MainDashboard.vue'
 import SettingsView from '../views/SettingsView.vue'
 import DirectoryView from '../views/DirectoryView.vue'
+import LoginView from '../views/LoginView.vue'
+import { getAuthStatus } from '../api.js'
 
 export const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
   routes: [
+    {
+      path: '/login',
+      name: 'login',
+      component: LoginView,
+      meta: { title: 'Sign in', public: true },
+    },
     {
       path: '/',
       component: AppShell,
@@ -32,6 +40,17 @@ export const router = createRouter({
       ],
     },
   ],
+})
+
+router.beforeEach(async (to) => {
+  if (to.meta?.public) return true
+  try {
+    const s = await getAuthStatus()
+    if (!s.authEnabled || s.authenticated) return true
+  } catch {
+    return { name: 'login', query: { redirect: to.fullPath } }
+  }
+  return { name: 'login', query: { redirect: to.fullPath } }
 })
 
 router.afterEach((to) => {

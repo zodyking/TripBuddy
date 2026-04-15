@@ -56,11 +56,8 @@ function schedulePersist() {
  */
 export function getLiveEventsUrl() {
   if (import.meta.env.DEV) {
-    const o = (import.meta.env.VITE_API_ORIGIN || 'http://127.0.0.1:3847').replace(
-      /\/$/,
-      '',
-    )
-    return `${o}/api/events`
+    // Same-origin via Vite proxy so session cookies (auth) are sent with EventSource.
+    return '/api/events'
   }
   const b = import.meta.env.BASE_URL || '/'
   if (b === '/' || b === '') return '/api/events'

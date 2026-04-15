@@ -3,9 +3,17 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import Fastify from 'fastify'
 import cors from '@fastify/cors'
+import cookie from '@fastify/cookie'
 import multipart from '@fastify/multipart'
 import fastifyStatic from '@fastify/static'
 import { API_PORT, UPLOADS_DIR } from './config.mjs'
+import {
+  isAuthEnabled,
+  createSession,
+  destroySession,
+  isValidSession,
+} from './auth-session.mjs'
+import { verifyCredentialsWithDispatchGate } from './auth-probe.mjs'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const DIST_DIR = path.join(__dirname, '..', 'dist')
@@ -77,9 +85,75 @@ await fs.mkdir(UPLOADS_DIR, { recursive: true })
 const app = Fastify({ logger: false })
 
 // origin: true reflects request Origin — needed for EventSource from Vite dev (e.g. localhost:5173) to API :3847/SSE.
-await app.register(cors, { origin: true })
+await app.register(cors, { origin: true, credentials: true })
+await app.register(cookie, {
+  secret:
+    process.env.FEDEX_TOOL_COOKIE_SECRET ||
+    process.env.FEDEX_TOOL_SECRET ||
+    'fedextool-cookie-dev-only',
+})
 await app.register(multipart, {
   limits: { fileSize: 20 * 1024 * 1024 },
+})
+
+const COOKIE_NAME = 'fedextool_sid'
+
+app.addHook('preHandler', async (req, reply) => {
+  const path = req.url.split('?')[0] || ''
+  if (!path.startsWith('/api')) return
+  if (!isAuthEnabled()) return
+  if (path === '/api/health') return
+  if (path.startsWith('/api/auth/')) return
+  const sid = req.cookies?.[COOKIE_NAME]
+  if (isValidSession(sid)) return
+  return reply.code(401).send({ error: 'Unauthorized', code: 'AUTH_REQUIRED' })
+})
+
+app.get('/api/auth/status', async (req) => {
+  if (!isAuthEnabled()) {
+    return { authEnabled: false, authenticated: true }
+  }
+  const sid = req.cookies?.[COOKIE_NAME]
+  return {
+    authEnabled: true,
+    authenticated: isValidSession(sid),
+  }
+})
+
+app.post('/api/auth/login', async (req, reply) => {
+  if (!isAuthEnabled()) {
+    return { ok: true, authDisabled: true }
+  }
+  const body = req.body ?? {}
+  const username = typeof body.username === 'string' ? body.username : ''
+  const password = typeof body.password === 'string' ? body.password : ''
+  const result = await verifyCredentialsWithDispatchGate(
+    { username, password },
+    {
+      log: () => {},
+    },
+  )
+  if (!result.ok) {
+    return reply
+      .code(401)
+      .send({ ok: false, error: result.error || 'Sign-in failed' })
+  }
+  const id = createSession()
+  reply.setCookie(COOKIE_NAME, id, {
+    path: '/',
+    httpOnly: true,
+    secure: process.env.NODE_ENV === 'production',
+    sameSite: 'lax',
+    maxAge: 7 * 24 * 60 * 60,
+  })
+  return { ok: true }
+})
+
+app.post('/api/auth/logout', async (req, reply) => {
+  const sid = req.cookies?.[COOKIE_NAME]
+  destroySession(sid)
+  reply.clearCookie(COOKIE_NAME, { path: '/' })
+  return { ok: true }
 })
 
 app.get('/api/health', async () => ({
