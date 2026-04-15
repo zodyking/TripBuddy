@@ -51,6 +51,11 @@ let geoWatchId = null
 
 /** @type {L.Map | null} */
 let map = null
+/** @type {L.TileLayer | null} */
+let streetLayer = null
+/** @type {L.TileLayer | null} */
+let satelliteLayer = null
+const activeBaseLayer = ref(/** @type {'street' | 'satellite'} */ ('street'))
 /** @type {L.LayerGroup | null} */
 let markerLayer = null
 /** @type {L.LayerGroup | null} */
@@ -91,7 +96,8 @@ const hasUserFix = computed(() => {
 })
 
 function userMarkerHtml() {
-  return `<div class="directory-map-user-marker" aria-hidden="true"><div class="directory-map-user-dot"></div><div class="directory-map-user-pulse"></div></div>`
+  /* Single centered dot — accuracy circle shows uncertainty (avoids double-ring artifact) */
+  return `<div class="directory-map-user-marker" aria-hidden="true"><div class="directory-map-user-dot"></div></div>`
 }
 
 function pinHtml(locationId, selected) {
@@ -174,7 +180,9 @@ function syncMarkers() {
       className: 'directory-map-div-icon',
       html: pinHtml(id, selected),
       iconSize: [88, 56],
+      /* Tip of stem sits on coordinates */
       iconAnchor: [44, 56],
+      popupAnchor: [0, -56],
     })
 
     const marker = L.marker([lat, lng], {
@@ -232,8 +240,9 @@ function syncUserOverlay() {
     const icon = L.divIcon({
       className: 'directory-map-user-div-icon',
       html: userMarkerHtml(),
-      iconSize: [44, 44],
-      iconAnchor: [22, 22],
+      iconSize: [36, 36],
+      /* Dot center = reported lat/lng (matches typical maps “blue dot”) */
+      iconAnchor: [18, 18],
     })
     userMarker = L.marker(ll, {
       icon,
@@ -361,6 +370,22 @@ function toggleMyLocation() {
   )
 }
 
+function setBaseLayer(mode) {
+  if (!map || !streetLayer || !satelliteLayer) return
+  activeBaseLayer.value = mode
+  if (mode === 'satellite') {
+    map.removeLayer(streetLayer)
+    satelliteLayer.addTo(map)
+  } else {
+    map.removeLayer(satelliteLayer)
+    streetLayer.addTo(map)
+  }
+}
+
+function toggleSatellite() {
+  setBaseLayer(activeBaseLayer.value === 'street' ? 'satellite' : 'street')
+}
+
 function initMap() {
   if (!containerRef.value) return
 
@@ -372,7 +397,7 @@ function initMap() {
 
   map.setView(DEFAULT_CENTER, DEFAULT_ZOOM)
 
-  L.tileLayer(
+  streetLayer = L.tileLayer(
     'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
     {
       attribution:
@@ -380,7 +405,19 @@ function initMap() {
       subdomains: 'abcd',
       maxZoom: 20,
     },
-  ).addTo(map)
+  )
+
+  satelliteLayer = L.tileLayer(
+    'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+    {
+      attribution:
+        'Tiles &copy; Esri &mdash; Source: Esri, Maxar, Earthstar Geographics',
+      maxZoom: 19,
+    },
+  )
+
+  activeBaseLayer.value = 'street'
+  streetLayer.addTo(map)
 
   markerLayer = L.layerGroup().addTo(map)
   userLayer = L.layerGroup().addTo(map)
@@ -404,6 +441,8 @@ function destroyMap() {
   }
   markerLayer = null
   userLayer = null
+  streetLayer = null
+  satelliteLayer = null
 }
 
 /** @type {ResizeObserver | null} */
@@ -453,6 +492,21 @@ watch(
   >
     <div ref="containerRef" class="directory-map-el" />
     <div class="directory-map-locate-wrap">
+      <button
+        type="button"
+        class="directory-map-layer-btn tap"
+        :class="{ 'is-satellite': activeBaseLayer === 'satellite' }"
+        :aria-pressed="activeBaseLayer === 'satellite'"
+        title="Satellite imagery"
+        @click="toggleSatellite"
+      >
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+          <circle cx="12" cy="12" r="9" />
+          <ellipse cx="12" cy="12" rx="9" ry="4" />
+          <path d="M3 12h18" />
+        </svg>
+        <span class="sr-only">Toggle satellite view</span>
+      </button>
       <button
         type="button"
         class="directory-map-locate-btn tap"
@@ -523,6 +577,38 @@ watch(
   clip: rect(0, 0, 0, 0);
   white-space: nowrap;
   border: 0;
+}
+
+.directory-map-layer-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.75rem;
+  height: 2.75rem;
+  border-radius: 999px;
+  border: 1px solid var(--color-border, rgba(255, 255, 255, 0.14));
+  background: rgba(18, 18, 26, 0.92);
+  color: var(--color-text-primary, #f4f4f8);
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.35);
+  cursor: pointer;
+  transition:
+    background 0.15s ease,
+    border-color 0.15s ease,
+    color 0.15s ease;
+}
+
+.directory-map-layer-btn:hover {
+  background: rgba(40, 40, 52, 0.96);
+}
+
+.directory-map-layer-btn.is-satellite {
+  color: #a78bfa;
+  border-color: rgba(167, 139, 250, 0.45);
+}
+
+.directory-map-layer-btn svg {
+  width: 1.2rem;
+  height: 1.2rem;
 }
 
 .directory-map-locate-wrap {
@@ -707,8 +793,8 @@ watch(
 
 .directory-map-user-marker {
   position: relative;
-  width: 44px;
-  height: 44px;
+  width: 36px;
+  height: 36px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -723,34 +809,6 @@ watch(
   background: #38bdf8;
   border: 3px solid #fff;
   box-shadow: 0 1px 4px rgba(0, 0, 0, 0.45);
-}
-
-.directory-map-user-pulse {
-  position: absolute;
-  z-index: 1;
-  width: 36px;
-  height: 36px;
-  border-radius: 999px;
-  background: rgba(56, 189, 248, 0.25);
-  animation: dir-map-user-pulse 2.4s ease-out infinite;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .directory-map-user-pulse {
-    animation: none;
-    opacity: 0.5;
-  }
-}
-
-@keyframes dir-map-user-pulse {
-  0% {
-    transform: scale(0.65);
-    opacity: 0.9;
-  }
-  100% {
-    transform: scale(1.15);
-    opacity: 0;
-  }
 }
 
 .leaflet-marker-icon.directory-map-user-div-icon {

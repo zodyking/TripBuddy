@@ -15,7 +15,7 @@ const props = defineProps({
   lng: { type: Number, required: true },
   /** Shown in marker popup, e.g. "Trailer 1" */
   trailerLabel: { type: String, default: '' },
-  /** From parent: user fix after synchronous getCurrentPosition (WebKit gesture). */
+  /** From parent: first fix after synchronous getCurrentPosition (WebKit gesture). */
   userLat: { type: Number, default: null },
   userLng: { type: Number, default: null },
   /** Parent still waiting on first geolocation callback */
@@ -26,15 +26,14 @@ const props = defineProps({
 
 const containerRef = ref(null)
 
+/** Latest user fix (from props + live watch); accuracy drives the circle only. */
+const userFix = ref(
+  /** @type {{ lat: number, lng: number, accuracyM: number } | null} */ (null),
+)
+
 const hasUserFix = computed(() => {
-  const la = props.userLat
-  const ln = props.userLng
-  return (
-    la != null &&
-    ln != null &&
-    Number.isFinite(la) &&
-    Number.isFinite(ln)
-  )
+  const u = userFix.value
+  return u != null && Number.isFinite(u.lat) && Number.isFinite(u.lng)
 })
 
 /** @type {L.Map | null} */
@@ -45,16 +44,22 @@ let streetLayer = null
 let satelliteLayer = null
 /** @type {L.LayerGroup | null} */
 let overlayLayer = null
+/** @type {L.LayerGroup | null} */
+let userLayer = null
 /** @type {L.Marker | null} */
 let trailerMarker = null
 /** @type {L.Marker | null} */
 let userMarker = null
+/** @type {L.Circle | null} */
+let userAccuracyCircle = null
 /** @type {number | null} */
 let geoWatchId = null
 /** @type {ReturnType<typeof setTimeout> | null} */
 let fitDebounce = null
 let geoStopped = false
 let watchStarted = false
+/** Fit map to trailer+user only once when user first appears (not every GPS tick). */
+let didFitWithUser = false
 
 function prefersReducedMotion() {
   if (typeof window === 'undefined') return false
@@ -68,21 +73,15 @@ function trailerLatLng() {
 function makeTrailerIcon() {
   return L.divIcon({
     className: 'trailer-loc-div-icon',
-    html: '<div class="trailer-loc-pin-inner is-trailer" aria-hidden="true"></div>',
-    iconSize: [32, 40],
-    iconAnchor: [16, 40],
-    popupAnchor: [0, -36],
+    html: '<div class="trailer-loc-pin-ui"><div class="trailer-loc-pin-inner is-trailer" aria-hidden="true"></div><div class="trailer-loc-pin-stem" aria-hidden="true"></div></div>',
+    iconSize: [36, 44],
+    iconAnchor: [18, 44],
+    popupAnchor: [0, -40],
   })
 }
 
-function makeUserIcon() {
-  return L.divIcon({
-    className: 'trailer-loc-div-icon',
-    html: '<div class="trailer-loc-pin-inner is-user" aria-hidden="true"></div>',
-    iconSize: [32, 40],
-    iconAnchor: [16, 40],
-    popupAnchor: [0, -36],
-  })
+function userMarkerHtml() {
+  return `<div class="trailer-loc-user-marker" aria-hidden="true"><div class="trailer-loc-user-dot"></div></div>`
 }
 
 function scheduleFitBounds() {
@@ -93,8 +92,8 @@ function scheduleFitBounds() {
     if (!map || !trailerMarker) return
     const t = trailerMarker.getLatLng()
     const motion = !prefersReducedMotion()
-    if (userMarker) {
-      const u = userMarker.getLatLng()
+    if (userMarker && userFix.value) {
+      const u = L.latLng(userFix.value.lat, userFix.value.lng)
       let b = L.latLngBounds([t, u])
       const ne = b.getNorthEast()
       const sw = b.getSouthWest()
@@ -116,20 +115,89 @@ function scheduleFitBounds() {
   }, 80)
 }
 
-function setUserPosition(lat, lng) {
-  if (!map) return
-  const ll = L.latLng(lat, lng)
+function syncUserOverlay() {
+  if (!map || !userLayer) return
+
+  const u = userFix.value
+  if (!u || !Number.isFinite(u.lat) || !Number.isFinite(u.lng)) {
+    if (userMarker) {
+      userLayer.removeLayer(userMarker)
+      userMarker = null
+    }
+    if (userAccuracyCircle) {
+      userLayer.removeLayer(userAccuracyCircle)
+      userAccuracyCircle = null
+    }
+    return
+  }
+
+  const ll = L.latLng(u.lat, u.lng)
+  const acc =
+    Number.isFinite(u.accuracyM) && u.accuracyM > 0 ? u.accuracyM : 40
+
   if (!userMarker) {
+    const icon = L.divIcon({
+      className: 'trailer-loc-user-div-icon',
+      html: userMarkerHtml(),
+      iconSize: [36, 36],
+      iconAnchor: [18, 18],
+    })
     userMarker = L.marker(ll, {
-      icon: makeUserIcon(),
+      icon,
+      zIndexOffset: 1000,
       title: 'Your location',
     })
-      .bindPopup('Your location')
-      .addTo(map)
+    userMarker.bindPopup('Your location')
+    userMarker.addTo(userLayer)
   } else {
     userMarker.setLatLng(ll)
   }
-  scheduleFitBounds()
+
+  if (userAccuracyCircle) {
+    userAccuracyCircle.setLatLng(ll)
+    userAccuracyCircle.setRadius(acc)
+  } else {
+    userAccuracyCircle = L.circle(ll, {
+      radius: acc,
+      color: '#0284c7',
+      fillColor: '#0284c7',
+      fillOpacity: 0.12,
+      weight: 1,
+      opacity: 0.45,
+    }).addTo(userLayer)
+  }
+}
+
+/**
+ * @param {number} lat
+ * @param {number} lng
+ * @param {number} [accuracyM]
+ * @param {boolean} [fitCamera]
+ */
+function setUserFixFromLatLng(lat, lng, accuracyM = 40, fitCamera = false) {
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return
+  userFix.value = {
+    lat,
+    lng,
+    accuracyM: Number.isFinite(accuracyM) && accuracyM > 0 ? accuracyM : 40,
+  }
+  syncUserOverlay()
+  if (fitCamera && map && trailerMarker && !didFitWithUser) {
+    didFitWithUser = true
+    scheduleFitBounds()
+  }
+}
+
+/**
+ * @param {GeolocationPosition} pos
+ * @param {{ fitCamera?: boolean }} [opts]
+ */
+function applyUserGeolocation(pos, opts = {}) {
+  const fitCamera = opts.fitCamera === true
+  const lat = pos.coords.latitude
+  const lng = pos.coords.longitude
+  const acc = pos.coords.accuracy
+  setUserFixFromLatLng(lat, lng, acc, fitCamera)
 }
 
 function stopWatch() {
@@ -145,26 +213,30 @@ function startWatchForLiveUpdates() {
     typeof navigator === 'undefined' ||
     !navigator.geolocation ||
     geoStopped ||
-    watchStarted
+    watchStarted ||
+    !hasUserFix.value
   ) {
     return
   }
   watchStarted = true
+  let first = true
   geoWatchId = navigator.geolocation.watchPosition(
     (pos) => {
-      setUserPosition(pos.coords.latitude, pos.coords.longitude)
+      applyUserGeolocation(pos, { fitCamera: first })
+      first = false
     },
     () => {
       /* keep last fix */
     },
     {
       enableHighAccuracy: true,
-      maximumAge: 5_000,
-      timeout: 30_000,
+      maximumAge: 2000,
+      timeout: 60_000,
     },
   )
 }
 
+/** Sync initial fix from parent (getCurrentPosition in openTrailerGpsModal). */
 function applyUserCoordsFromProps() {
   const la = props.userLat
   const ln = props.userLng
@@ -174,8 +246,13 @@ function applyUserCoordsFromProps() {
     Number.isFinite(la) &&
     Number.isFinite(ln)
   ) {
-    setUserPosition(la, ln)
+    setUserFixFromLatLng(la, ln, 40, true)
     startWatchForLiveUpdates()
+  } else if (!props.userLocationPending && props.userLocationDenied) {
+    stopWatch()
+    userFix.value = null
+    syncUserOverlay()
+    didFitWithUser = false
   }
 }
 
@@ -183,6 +260,7 @@ function initMap() {
   if (!containerRef.value) return
 
   geoStopped = false
+  didFitWithUser = false
 
   map = L.map(containerRef.value, {
     zoomControl: true,
@@ -223,6 +301,7 @@ function initMap() {
     .addTo(map)
 
   overlayLayer = L.layerGroup().addTo(map)
+  userLayer = L.layerGroup().addTo(map)
 
   syncTrailerMarker()
   applyUserCoordsFromProps()
@@ -242,7 +321,10 @@ function destroyMap() {
   }
   trailerMarker = null
   userMarker = null
+  userAccuracyCircle = null
+  userFix.value = null
   overlayLayer = null
+  userLayer = null
   streetLayer = null
   satelliteLayer = null
   if (map) {
@@ -268,7 +350,10 @@ function syncTrailerMarker() {
     trailerMarker.setLatLng(ll)
     trailerMarker.setPopupContent(label)
   }
-  scheduleFitBounds()
+  /* Trailer moved — refit if we do not have user yet */
+  if (!didFitWithUser) {
+    scheduleFitBounds()
+  }
 }
 
 onMounted(() => {
@@ -290,16 +375,9 @@ watch(
 )
 
 watch(
-  () => [props.userLat, props.userLng],
+  () => [props.userLat, props.userLng, props.userLocationPending, props.userLocationDenied],
   () => {
     applyUserCoordsFromProps()
-  },
-)
-
-watch(
-  () => props.userLocationDenied,
-  (denied) => {
-    if (denied && !userMarker) scheduleFitBounds()
   },
 )
 </script>
@@ -328,6 +406,12 @@ watch(
       class="trailer-loc-hint is-muted"
     >
       Location unavailable — trailer only. Check site permission in browser settings.
+    </p>
+    <p
+      v-if="hasUserFix"
+      class="trailer-loc-hint is-live"
+    >
+      Live location updates while this map is open.
     </p>
   </div>
 </template>
@@ -409,6 +493,10 @@ watch(
   color: #64748b;
 }
 
+.trailer-loc-hint.is-live {
+  color: #0369a1;
+}
+
 :deep(.leaflet-container) {
   font-family: inherit;
   background: #cbd5e1;
@@ -419,6 +507,15 @@ watch(
   border: none;
 }
 
+:deep(.trailer-loc-pin-ui) {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 36px;
+  height: 44px;
+  pointer-events: auto;
+}
+
 :deep(.trailer-loc-pin-inner) {
   width: 28px;
   height: 28px;
@@ -426,15 +523,52 @@ watch(
   transform: rotate(-45deg);
   border: 3px solid #fff;
   box-shadow: 0 2px 6px rgba(0, 0, 0, 0.35);
-  margin: 2px 0 0 2px;
 }
 
 :deep(.trailer-loc-pin-inner.is-trailer) {
   background: #ea580c;
 }
 
-:deep(.trailer-loc-pin-inner.is-user) {
+:deep(.trailer-loc-pin-stem) {
+  width: 0;
+  height: 0;
+  margin-top: -2px;
+  border-left: 5px solid transparent;
+  border-right: 5px solid transparent;
+  border-top: 7px solid #c2410c;
+  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.3));
+}
+
+:deep(.trailer-loc-user-div-icon) {
+  background: transparent !important;
+  border: none !important;
+}
+
+:deep(.trailer-loc-user-marker) {
+  width: 36px;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+:deep(.trailer-loc-user-dot) {
+  width: 16px;
+  height: 16px;
+  border-radius: 999px;
   background: #0284c7;
+  border: 3px solid #fff;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.35);
+}
+
+:deep(.leaflet-marker-icon.trailer-loc-div-icon) {
+  margin-left: 0 !important;
+  margin-top: 0 !important;
+}
+
+:deep(.leaflet-marker-icon.trailer-loc-user-div-icon) {
+  margin-left: 0 !important;
+  margin-top: 0 !important;
 }
 
 :deep(.leaflet-control-layers) {
