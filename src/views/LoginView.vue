@@ -62,9 +62,6 @@ async function onSubmit() {
     <div class="login-main">
       <div class="login-card glass">
         <h1 class="login-title">Sign in</h1>
-        <p class="login-sub">
-          Uses the same credentials as Settings. We verify by opening dispatch and completing PurpleID in the background.
-        </p>
 
         <form class="login-form" @submit.prevent="onSubmit">
           <label class="login-label">
@@ -168,18 +165,10 @@ async function onSubmit() {
 }
 
 .login-title {
-  margin: 0 0 var(--space-2, 0.5rem);
+  margin: 0 0 var(--space-6, 1.5rem);
   font-size: var(--text-xl, 1.3125rem);
   font-weight: var(--weight-semibold, 600);
   color: var(--color-text-primary, #f4f4f8);
-}
-
-.login-sub {
-  margin: 0 0 var(--space-6, 1.5rem);
-  font-size: var(--text-sm, 0.8125rem);
-  line-height: var(--leading-snug, 1.35);
-  color: var(--color-text-tertiary, #6e6e7e);
-  text-align: center;
 }
 
 .login-form {
