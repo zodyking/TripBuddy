@@ -9,6 +9,14 @@ export const DISPATCH_ENTRY_URL =
   'https://fdxtools.fedex.com/grdlhldispatch/home'
 
 /**
+ * Successful app login (Playwright probe) requires landing on this path after PurpleID + dispatch.
+ * Override with FEDEX_DISPATCH_LOGIN_SUCCESS_PATH if FedEx changes routing.
+ */
+export const DISPATCH_LOGIN_SUCCESS_PATH =
+  (process.env.FEDEX_DISPATCH_LOGIN_SUCCESS_PATH || '').trim() ||
+  '/grdlhldispatch/grdlhldispatch/home'
+
+/**
  * Optional: full PurpleID authorize URL for session open only.
  * PKCE params expire — prefer leaving unset so the browser uses DISPATCH_ENTRY_URL and gets a fresh redirect.
  */
