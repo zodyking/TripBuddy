@@ -13,7 +13,7 @@ export const router = createRouter({
       path: '/login',
       name: 'login',
       component: LoginView,
-      meta: { title: 'Sign in', public: true },
+      meta: { title: 'Login', public: true },
     },
     {
       path: '/',
@@ -54,6 +54,10 @@ router.beforeEach(async (to) => {
 })
 
 router.afterEach((to) => {
+  if (to.name === 'login') {
+    document.title = 'Login'
+    return
+  }
   const title = to.matched.find((r) => r.meta?.title)?.meta?.title
   if (title) {
     document.title = `FedExTool — ${title}`

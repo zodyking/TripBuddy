@@ -59,55 +59,59 @@ async function onSubmit() {
 <template>
   <div class="login-page">
     <div class="login-bg-glow" aria-hidden="true" />
-    <div class="login-card glass">
-      <div class="login-brand">
-        <span class="brand-fed">Fed</span><span class="brand-ex">Ex</span>
-        <span class="brand-tool">Tool</span>
+    <div class="login-main">
+      <div class="login-card glass">
+        <h1 class="login-title">Sign in</h1>
+        <p class="login-sub">
+          Uses the same credentials as Settings. We verify by opening dispatch and completing PurpleID in the background.
+        </p>
+
+        <form class="login-form" @submit.prevent="onSubmit">
+          <label class="login-label">
+            <span>Username</span>
+            <input
+              v-model="username"
+              class="login-input"
+              type="text"
+              name="username"
+              autocomplete="username"
+              :disabled="submitting"
+            />
+          </label>
+          <label class="login-label">
+            <span>Password</span>
+            <input
+              v-model="password"
+              class="login-input"
+              type="password"
+              name="password"
+              autocomplete="current-password"
+              :disabled="submitting"
+            />
+          </label>
+
+          <p v-if="errorMsg" class="login-err" role="alert">{{ errorMsg }}</p>
+
+          <button
+            type="submit"
+            class="login-submit tap"
+            :disabled="submitting"
+          >
+            <span v-if="submitting" class="login-submit-inner">
+              <span class="login-spinner" aria-hidden="true" />
+              Verifying…
+            </span>
+            <span v-else>Continue</span>
+          </button>
+        </form>
       </div>
-      <h1 class="login-title">Sign in</h1>
-      <p class="login-sub">
-        Uses the same FedEx credentials as Settings. We verify by opening dispatch and completing PurpleID in the background.
-      </p>
-
-      <form class="login-form" @submit.prevent="onSubmit">
-        <label class="login-label">
-          <span>Username / Driver ID</span>
-          <input
-            v-model="username"
-            class="login-input"
-            type="text"
-            name="username"
-            autocomplete="username"
-            :disabled="submitting"
-          />
-        </label>
-        <label class="login-label">
-          <span>Password</span>
-          <input
-            v-model="password"
-            class="login-input"
-            type="password"
-            name="password"
-            autocomplete="current-password"
-            :disabled="submitting"
-          />
-        </label>
-
-        <p v-if="errorMsg" class="login-err" role="alert">{{ errorMsg }}</p>
-
-        <button
-          type="submit"
-          class="login-submit tap"
-          :disabled="submitting"
-        >
-          <span v-if="submitting" class="login-submit-inner">
-            <span class="login-spinner" aria-hidden="true" />
-            Verifying…
-          </span>
-          <span v-else>Continue</span>
-        </button>
-      </form>
     </div>
+
+    <footer class="login-tos" role="contentinfo">
+      <p class="login-tos-text">
+        By accessing or using this site, you agree to our Terms of Service and all applicable laws. Automated access is strictly prohibited, including bots, scrapers, crawlers, monitoring tools, and similar systems. Access or use by operational security firms, intelligence vendors, surveillance companies, investigative service providers, or similar entities is not permitted without our prior written consent. Unauthorized use may result in blocked access, termination, and legal action.
+      </p>
+    </footer>
   </div>
 </template>
 
@@ -116,29 +120,38 @@ async function onSubmit() {
   min-height: 100vh;
   min-height: 100dvh;
   display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: var(--space-6, 1.5rem);
-  padding-bottom: max(var(--space-6, 1.5rem), env(safe-area-inset-bottom));
+  flex-direction: column;
   position: relative;
-  overflow: hidden;
+  overflow-x: hidden;
 }
 
 .login-bg-glow {
-  position: absolute;
+  position: fixed;
   inset: -40% -20%;
   background:
     radial-gradient(ellipse 50% 40% at 50% 0%, rgba(123, 77, 181, 0.22), transparent 70%),
     radial-gradient(ellipse 40% 30% at 80% 60%, rgba(255, 107, 26, 0.08), transparent 65%);
   pointer-events: none;
+  z-index: 0;
+}
+
+.login-main {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-6, 1.5rem);
+  padding-top: max(var(--space-6, 1.5rem), env(safe-area-inset-top));
+  position: relative;
+  z-index: 1;
 }
 
 .login-card {
-  position: relative;
   width: 100%;
   max-width: 22rem;
   padding: var(--space-8, 2rem) var(--space-6, 1.5rem);
   border-radius: var(--radius-2xl, 1.25rem);
+  text-align: center;
   animation: login-fade 0.45s var(--ease-out) both;
 }
 
@@ -153,28 +166,9 @@ async function onSubmit() {
   }
 }
 
-.login-brand {
-  font-size: var(--text-xl, 1.3125rem);
-  font-weight: var(--weight-bold, 700);
-  letter-spacing: var(--tracking-tight, -0.02em);
-  margin-bottom: var(--space-5, 1.25rem);
-}
-
-.brand-fed {
-  color: var(--color-accent-purple, #7b4db5);
-}
-.brand-ex {
-  color: var(--color-accent-orange, #ff6b1a);
-}
-.brand-tool {
-  margin-left: 0.35rem;
-  color: var(--color-text-secondary, #a8a8b8);
-  font-weight: var(--weight-semibold, 600);
-}
-
 .login-title {
   margin: 0 0 var(--space-2, 0.5rem);
-  font-size: var(--text-lg, 1.125rem);
+  font-size: var(--text-xl, 1.3125rem);
   font-weight: var(--weight-semibold, 600);
   color: var(--color-text-primary, #f4f4f8);
 }
@@ -184,12 +178,14 @@ async function onSubmit() {
   font-size: var(--text-sm, 0.8125rem);
   line-height: var(--leading-snug, 1.35);
   color: var(--color-text-tertiary, #6e6e7e);
+  text-align: center;
 }
 
 .login-form {
   display: flex;
   flex-direction: column;
   gap: var(--space-4, 1rem);
+  text-align: left;
 }
 
 .login-label {
@@ -203,6 +199,10 @@ async function onSubmit() {
   color: var(--color-text-tertiary, #6e6e7e);
 }
 
+.login-label span {
+  text-align: left;
+}
+
 .login-input {
   padding: var(--space-3, 0.75rem) var(--space-3-5, 0.875rem);
   font-size: var(--text-base, 0.9375rem);
@@ -212,6 +212,8 @@ async function onSubmit() {
   border-radius: var(--radius-lg, 0.75rem);
   outline: none;
   transition: var(--transition-colors);
+  width: 100%;
+  box-sizing: border-box;
 }
 
 .login-input:focus {
@@ -227,11 +229,14 @@ async function onSubmit() {
   margin: 0;
   font-size: var(--text-sm, 0.8125rem);
   color: var(--color-error, #ef4444);
+  text-align: center;
 }
 
 .login-submit {
   margin-top: var(--space-1, 0.25rem);
   width: 100%;
+  display: inline-flex;
+  align-items: center;
   justify-content: center;
   min-height: 2.75rem;
   border-radius: var(--radius-lg, 0.75rem);
@@ -275,5 +280,28 @@ async function onSubmit() {
   to {
     transform: rotate(360deg);
   }
+}
+
+.login-tos {
+  flex-shrink: 0;
+  padding: var(--space-4, 1rem) var(--space-4, 1rem)
+    max(var(--space-6, 1.5rem), env(safe-area-inset-bottom));
+  position: relative;
+  z-index: 1;
+  border-top: 1px solid var(--color-border, rgba(255, 255, 255, 0.06));
+  background: linear-gradient(
+    180deg,
+    transparent,
+    rgba(8, 8, 10, 0.92) 30%
+  );
+}
+
+.login-tos-text {
+  margin: 0 auto;
+  max-width: 42rem;
+  font-size: 0.625rem;
+  line-height: 1.45;
+  color: var(--color-text-tertiary, #6e6e7e);
+  text-align: center;
 }
 </style>
