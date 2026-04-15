@@ -41,7 +41,16 @@ async function onSubmit() {
   submitting.value = true
   try {
     await postAuthLogin({ username: u, password: p })
-    await router.replace(redirectTarget())
+    // Full navigation so the session cookie is applied before the app shell loads
+    // (client-side replace alone can leave routes thinking you are still logged out).
+    const target = redirectTarget()
+    if (typeof window !== 'undefined') {
+      const base = import.meta.env.BASE_URL || '/'
+      const path = target.startsWith('/') ? target : `/${target}`
+      window.location.assign(`${base.replace(/\/$/, '')}${path}`)
+      return
+    }
+    await router.replace(target)
   } catch (e) {
     errorMsg.value =
       e instanceof Error ? e.message : 'Sign-in failed. Check credentials.'

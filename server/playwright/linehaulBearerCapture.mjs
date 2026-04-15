@@ -121,8 +121,10 @@ function sleep(ms, signal) {
  *   clearSession?: boolean
  *   bypassValidityProbe?: boolean
  *   credentialOverride?: { username: string, password: string } | null
+ *   fastDispatchGate?: boolean
  * }} [opts]
  * credentialOverride — use these for automated sign-in instead of saved credentials (e.g. app login form).
+ * fastDispatchGate — short waits for app login (pair with tight outer timeout).
  */
 export async function captureAndSaveLinehaulBearer(opts = {}) {
   if (captureBusy) {
@@ -139,6 +141,7 @@ export async function captureAndSaveLinehaulBearer(opts = {}) {
     clearSession = true,
     bypassValidityProbe = false,
     credentialOverride = null,
+    fastDispatchGate = false,
   } = opts
 
   const log = (/** @type {string} */ type, /** @type {string} */ message) => {
@@ -275,6 +278,7 @@ export async function captureAndSaveLinehaulBearer(opts = {}) {
         log,
         signal,
         credentialOverride,
+        fast: fastDispatchGate,
       })
       log(
         'info',

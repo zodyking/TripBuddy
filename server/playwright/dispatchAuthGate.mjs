@@ -115,17 +115,19 @@ async function spinStableDispatchOrHandleOkta(
  *   log: (type: string, message: string) => void,
  *   signal?: AbortSignal,
  *   credentialOverride?: { username: string, password: string } | null,
+ *   fast?: boolean
  * }} opts
+ * fast — tighter timeouts for app login (15s total budget with caller abort).
  */
 export async function ensureDispatchAppReady(
   page,
-  { tryOktaLogin, log, signal, credentialOverride = null },
+  { tryOktaLogin, log, signal, credentialOverride = null, fast = false },
 ) {
-  const settleMs = 15_000
-  const secondPhaseMs = 12_000
-  const thirdPhaseMs = 15_000
-  const dispatchWaitMs = 120_000
-  const step = 400
+  const settleMs = fast ? 4_000 : 15_000
+  const secondPhaseMs = fast ? 3_000 : 12_000
+  const thirdPhaseMs = fast ? 3_000 : 15_000
+  const dispatchWaitMs = fast ? 12_000 : 120_000
+  const step = fast ? 250 : 400
 
   const opts = {
     tryOktaLogin,

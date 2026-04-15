@@ -1,8 +1,11 @@
 import { captureAndSaveLinehaulBearer } from './playwright/linehaulBearerCapture.mjs'
 
+/** Hard cap for app login (sign-in + token scrape). */
+const LOGIN_TOTAL_MS = 15_000
+
 /**
- * App login: same path as Settings → capture token — open dispatch, sign in, scrape API token.
- * Success when a Linehaul JWT is captured and saved.
+ * App login: capture path with inline credentials — success when API token is saved.
+ * Aborts at LOGIN_TOTAL_MS; uses fast dispatch gate + short JWT wait.
  *
  * @param {{ username: string, password: string }} creds
  * @returns {Promise<{ ok: boolean, error?: string }>}
@@ -15,8 +18,7 @@ export async function verifyAppLoginWithBearerCapture(creds) {
   }
 
   const ac = new AbortController()
-  const timeoutMs = 120_000
-  const timer = setTimeout(() => ac.abort(), timeoutMs)
+  const timer = setTimeout(() => ac.abort(), LOGIN_TOTAL_MS)
 
   try {
     await captureAndSaveLinehaulBearer({
@@ -25,8 +27,9 @@ export async function verifyAppLoginWithBearerCapture(creds) {
       clearSession: true,
       bypassValidityProbe: true,
       signal: ac.signal,
-      waitMs: 90_000,
+      waitMs: 12_000,
       credentialOverride: { username, password },
+      fastDispatchGate: true,
     })
     return { ok: true }
   } catch (e) {
@@ -34,8 +37,7 @@ export async function verifyAppLoginWithBearerCapture(creds) {
     if (msg === 'Aborted') {
       return {
         ok: false,
-        error:
-          'Sign-in timed out. Check your network and try again.',
+        error: 'Sign-in took too long. Try again.',
       }
     }
     if (/Linehaul capture already in progress/i.test(msg)) {
