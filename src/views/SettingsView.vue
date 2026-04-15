@@ -14,6 +14,7 @@ import {
   fetchFedexLinehaulTripStatus,
   fetchFedexLinehaulTrips,
   postAuthLogout,
+  getSettingsAccessLog,
 } from '../api.js'
 import {
   refreshLinehaulApis,
@@ -29,6 +30,7 @@ import {
   reconnectLiveLogStream,
 } from '../stores/liveLogStore.js'
 import SettingsSection from '../components/settings/SettingsSection.vue'
+import SecurityAccessMap from '../components/SecurityAccessMap.vue'
 import AutomationList from '../components/automation/AutomationList.vue'
 import AutomationEditor from '../components/automation/AutomationEditor.vue'
 import {
@@ -55,10 +57,53 @@ import {
 /** Shown when a secret is on file but the user has not typed a new value (password inputs stay masked). */
 const SECRET_SAVED_MASK = '••••••••••••••••'
 
-/** @type {import('vue').Ref<'general' | 'automation' | 'audio'>} */
+/** @type {import('vue').Ref<'general' | 'automation' | 'audio' | 'security'>} */
 const router = useRouter()
 
 const settingsTab = ref('general')
+
+/** @type {import('vue').Ref<Array<{
+ *   id: string,
+ *   at: string,
+ *   ip: string,
+ *   latitude: number | null,
+ *   longitude: number | null,
+ *   locationDenied: boolean,
+ *   source: string,
+ * }>>} */
+const accessLogEntries = ref([])
+const accessLogLoading = ref(false)
+const accessLogError = ref('')
+
+const mapAccessPoints = computed(() => {
+  const rows = accessLogEntries.value
+  const out = []
+  for (const r of rows) {
+    if (r.latitude == null || r.longitude == null) continue
+    if (!Number.isFinite(r.latitude) || !Number.isFinite(r.longitude)) continue
+    out.push({
+      id: r.id,
+      ip: r.ip,
+      latitude: r.latitude,
+      longitude: r.longitude,
+    })
+  }
+  return out
+})
+
+async function loadSecurityAccessLog() {
+  accessLogLoading.value = true
+  accessLogError.value = ''
+  try {
+    const res = await getSettingsAccessLog()
+    accessLogEntries.value = Array.isArray(res.entries) ? res.entries : []
+  } catch (e) {
+    accessLogError.value = e instanceof Error ? e.message : String(e)
+    accessLogEntries.value = []
+  } finally {
+    accessLogLoading.value = false
+  }
+}
 
 /** @type {import('vue').Ref<'off' | 'tts' | 'both'>} */
 const tripAlertMode = ref(getTripAlertMode())
@@ -525,6 +570,9 @@ watch(settingsTab, (tab) => {
     arrivalAlertsOn.value = isArrivalAlertsEnabled()
     alertPrefs.value = getAlertPrefs()
   }
+  if (tab === 'security') {
+    void loadSecurityAccessLog()
+  }
 })
 
 onUnmounted(() => {
@@ -580,6 +628,16 @@ async function logoutApp() {
         @click="settingsTab = 'audio'"
       >
         Audio
+      </button>
+      <button
+        type="button"
+        class="tab-btn tap"
+        role="tab"
+        :aria-selected="settingsTab === 'security'"
+        :class="{ active: settingsTab === 'security' }"
+        @click="settingsTab = 'security'"
+      >
+        Security
       </button>
       <button
         type="button"
@@ -881,6 +939,50 @@ async function logoutApp() {
       </SettingsSection>
 
     </main>
+
+    <main v-show="settingsTab === 'security'" class="stack security-panel">
+      <SettingsSection title="Access log" :collapsible="false">
+        <p class="security-lead">
+          Recent sign-in attempts that completed the login gate, with IP and optional browser-reported location.
+        </p>
+        <p v-if="accessLogLoading" class="cred-msg">Loading…</p>
+        <p v-else-if="accessLogError" class="cred-msg cred-msg--error">{{ accessLogError }}</p>
+        <div v-else class="security-map-wrap">
+          <SecurityAccessMap :points="mapAccessPoints" />
+          <p v-if="mapAccessPoints.length === 0" class="security-map-empty">
+            No coordinates recorded yet — locations appear after users share location on the login screen.
+          </p>
+        </div>
+        <div class="access-table-wrap">
+          <table class="access-table" v-if="accessLogEntries.length">
+            <thead>
+              <tr>
+                <th scope="col">Time</th>
+                <th scope="col">IP</th>
+                <th scope="col">Location</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="row in accessLogEntries" :key="row.id">
+                <td>{{ new Date(row.at).toLocaleString() }}</td>
+                <td><code class="access-ip">{{ row.ip }}</code></td>
+                <td>
+                  <template v-if="row.locationDenied">Not shared</template>
+                  <template v-else-if="row.latitude != null && row.longitude != null">
+                    {{ Number(row.latitude).toFixed(4) }}, {{ Number(row.longitude).toFixed(4) }}
+                  </template>
+                  <template v-else>—</template>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+          <p v-else-if="!accessLogLoading && !accessLogError" class="security-empty">
+            No access entries yet.
+          </p>
+        </div>
+        <button type="button" class="btn ghost tap" @click="loadSecurityAccessLog">Refresh</button>
+      </SettingsSection>
+    </main>
   </div>
 </template>
 
@@ -956,6 +1058,73 @@ async function logoutApp() {
 .automation-wrap {
   margin-top: 0;
 }
+.security-panel {
+  max-width: 56rem;
+  margin-inline: auto;
+}
+
+.security-lead {
+  margin: 0 0 var(--space-4, 1rem);
+  font-size: var(--text-sm, 0.8125rem);
+  line-height: 1.5;
+  color: var(--color-text-secondary, #a8a8b8);
+}
+
+.security-map-wrap {
+  margin-bottom: var(--space-5, 1.25rem);
+  position: relative;
+}
+
+.security-map-empty {
+  margin: var(--space-2, 0.5rem) 0 0;
+  font-size: var(--text-xs, 0.6875rem);
+  color: var(--color-text-tertiary, #6e6e7e);
+}
+
+.access-table-wrap {
+  overflow-x: auto;
+  margin-bottom: var(--space-4, 1rem);
+  border-radius: var(--radius-lg, 0.75rem);
+  border: 1px solid var(--color-border, rgba(255, 255, 255, 0.08));
+}
+
+.access-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--text-sm, 0.8125rem);
+}
+
+.access-table th,
+.access-table td {
+  padding: var(--space-3, 0.75rem) var(--space-4, 1rem);
+  text-align: left;
+  border-bottom: 1px solid var(--color-border, rgba(255, 255, 255, 0.06));
+}
+
+.access-table th {
+  font-weight: var(--weight-semibold, 600);
+  color: var(--color-text-tertiary, #6e6e7e);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-size: var(--text-xs, 0.6875rem);
+}
+
+.access-table tbody tr:hover {
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.access-ip {
+  font-size: 0.75rem;
+  color: var(--color-accent-purple, #c4b5fd);
+}
+
+.security-empty {
+  margin: 0;
+  padding: var(--space-4, 1rem);
+  font-size: var(--text-sm, 0.8125rem);
+  color: var(--color-text-tertiary, #6e6e7e);
+}
+
 .audio-panel {
   padding-top: 0.15rem;
 }

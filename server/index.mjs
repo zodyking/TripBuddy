@@ -94,6 +94,7 @@ import {
   upsertLocation,
   updateLocationPhone,
 } from './locations-directory-store.mjs'
+import { appendAccessEntry, listAccessEntries } from './access-log-store.mjs'
 
 await fs.mkdir(UPLOADS_DIR, { recursive: true })
 
@@ -132,12 +133,20 @@ app.addHook('preHandler', async (req) => {
   }
 })
 
+function clientIp(req) {
+  const xf = req.headers['x-forwarded-for']
+  const raw = typeof xf === 'string' ? xf.split(',')[0].trim() : ''
+  if (raw) return raw
+  return req.ip || req.socket?.remoteAddress || ''
+}
+
 app.addHook('preHandler', async (req, reply) => {
   const path = req.url.split('?')[0] || ''
   if (!path.startsWith('/api')) return
   if (!isAuthEnabled()) return
   if (path === '/api/health') return
   if (path.startsWith('/api/auth/')) return
+  if (path === '/api/login/access-log' && req.method === 'POST') return
   const sid = req.cookies?.[COOKIE_NAME]
   if (isValidSession(sid)) return
   return reply.code(401).send({ error: 'Unauthorized', code: 'AUTH_REQUIRED' })
@@ -244,6 +253,33 @@ app.post('/api/auth/logout', async (req, reply) => {
   return { ok: true }
 })
 
+/**
+ * Pre-login: record client IP + optional browser geolocation for security audit.
+ * Does not require session (login page calls this after user shares location).
+ */
+app.post('/api/login/access-log', async (req, reply) => {
+  try {
+    const body = req.body ?? {}
+    const xf = req.headers['x-forwarded-for']
+    const forwardedFor = typeof xf === 'string' ? xf.slice(0, 512) : null
+    const ua = req.headers['user-agent']
+    const entry = await appendAccessEntry({
+      ip: clientIp(req),
+      forwardedFor,
+      latitude: body.latitude,
+      longitude: body.longitude,
+      accuracyM: body.accuracyM,
+      locationDenied: body.locationDenied === true,
+      userAgent: typeof ua === 'string' ? ua : null,
+      source: 'login_ack',
+    })
+    return { ok: true, id: entry.id }
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e)
+    return reply.code(400).send({ ok: false, error: msg })
+  }
+})
+
 app.get('/api/health', async () => ({
   ok: true,
   busy:
@@ -329,6 +365,11 @@ app.put('/api/settings/credentials', async (req, reply) => {
 app.delete('/api/settings/credentials', async () => {
   await clearCredentials()
   return { ok: true }
+})
+
+app.get('/api/settings/access-log', async () => {
+  const entries = await listAccessEntries()
+  return { ok: true, entries }
 })
 
 const DIGITS_RE = /^\d+$/

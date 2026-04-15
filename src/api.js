@@ -73,6 +73,32 @@ export async function postAuthLogout() {
   return handleJson(r)
 }
 
+/**
+ * Record IP + optional geolocation before login (no session required).
+ * @param {{
+ *   latitude?: number | null,
+ *   longitude?: number | null,
+ *   accuracyM?: number | null,
+ *   locationDenied?: boolean,
+ * }} body
+ */
+export async function postLoginAccessLog(body = {}) {
+  const r = await apiFetch('/api/login/access-log', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body ?? {}),
+  })
+  return handleJson(r)
+}
+
+/**
+ * Security audit: recent access attempts with IP and optional coordinates.
+ */
+export async function getSettingsAccessLog() {
+  const r = await apiFetch('/api/settings/access-log')
+  return handleJson(r)
+}
+
 export async function getHealth() {
   const r = await apiFetch('/api/health')
   return handleJson(r)

@@ -1,17 +1,28 @@
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, watch, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { getAuthStatus, postAuthLogin } from '../api.js'
+import { getAuthStatus, postAuthLogin, postLoginAccessLog } from '../api.js'
+import LoginAckMap from '../components/LoginAckMap.vue'
 
-const ACCESS_ACK_KEY = 'fedextool-login-access-ack-v1'
+const ACCESS_ACK_KEY = 'fedextool-login-access-ack-v2'
 
 const route = useRoute()
 const router = useRouter()
 
 const accessAcknowledged = ref(false)
+/** 1 = checkboxes, 2 = location + map */
+const accessStep = ref(1)
 const ackNotBot = ref(false)
 const ackNotAdvertCrawler = ref(false)
 const ackNotSecurityFirm = ref(false)
+
+/** Step 2: browser geolocation */
+const geoLat = ref(/** @type {number | null} */ (null))
+const geoLng = ref(/** @type {number | null} */ (null))
+const geoAccuracyM = ref(/** @type {number | null} */ (null))
+const geoPending = ref(false)
+const geoDenied = ref(false)
+const accessLogSent = ref(false)
 
 const username = ref('')
 const password = ref('')
@@ -20,6 +31,15 @@ const errorMsg = ref('')
 
 const canContinueAck = computed(
   () => ackNotBot.value && ackNotAdvertCrawler.value && ackNotSecurityFirm.value,
+)
+
+const canFinishAccessGate = computed(() => accessLogSent.value)
+
+const mapLat = computed(() => geoLat.value)
+const mapLng = computed(() => geoLng.value)
+const mapAcc = computed(() => geoAccuracyM.value)
+const mapPending = computed(
+  () => geoPending.value || (!geoDenied.value && geoLat.value == null),
 )
 
 function redirectTarget() {
@@ -48,8 +68,72 @@ onMounted(async () => {
   }
 })
 
-function confirmAccessAcknowledgment() {
+function goToAccessStep2() {
   if (!canContinueAck.value) return
+  accessStep.value = 2
+  nextTick(() => {
+    /* Leaflet in step 2 needs layout */
+  })
+}
+
+async function sendAccessLog(payload) {
+  try {
+    await postLoginAccessLog(payload)
+    accessLogSent.value = true
+  } catch {
+    accessLogSent.value = true
+  }
+}
+
+function shareLocationForSecurity() {
+  if (typeof navigator === 'undefined' || !navigator.geolocation) {
+    geoDenied.value = true
+    void sendAccessLog({ locationDenied: true })
+    return
+  }
+  geoPending.value = true
+  geoDenied.value = false
+  geoLat.value = null
+  geoLng.value = null
+  geoAccuracyM.value = null
+
+  navigator.geolocation.getCurrentPosition(
+    async (pos) => {
+      geoPending.value = false
+      geoLat.value = pos.coords.latitude
+      geoLng.value = pos.coords.longitude
+      geoAccuracyM.value =
+        pos.coords.accuracy != null && Number.isFinite(pos.coords.accuracy)
+          ? pos.coords.accuracy
+          : null
+      await sendAccessLog({
+        latitude: geoLat.value,
+        longitude: geoLng.value,
+        accuracyM: geoAccuracyM.value,
+        locationDenied: false,
+      })
+    },
+    async () => {
+      geoPending.value = false
+      geoDenied.value = true
+      await sendAccessLog({ locationDenied: true })
+    },
+    {
+      enableHighAccuracy: true,
+      maximumAge: 0,
+      timeout: 20_000,
+    },
+  )
+}
+
+async function continueWithoutPreciseLocation() {
+  geoPending.value = false
+  geoDenied.value = true
+  await sendAccessLog({ locationDenied: true })
+}
+
+function confirmAccessAcknowledgment() {
+  if (!canFinishAccessGate.value) return
   try {
     sessionStorage.setItem(ACCESS_ACK_KEY, '1')
   } catch {
@@ -57,6 +141,14 @@ function confirmAccessAcknowledgment() {
   }
   accessAcknowledged.value = true
 }
+
+watch(accessStep, (s) => {
+  if (s === 2) {
+    nextTick(() => {
+      window.dispatchEvent(new Event('resize'))
+    })
+  }
+})
 
 async function onSubmit() {
   errorMsg.value = ''
@@ -101,52 +193,101 @@ async function onSubmit() {
         aria-describedby="login-access-desc"
       >
         <div class="login-access-card glass" @click.stop>
-          <h2 id="login-access-title" class="login-access-title">
-            Access acknowledgment
-          </h2>
-          <p id="login-access-desc" class="login-access-lead">
-            This application is for authorized individuals only. Automated systems, bulk data collection, and third-party monitoring are not permitted. Please confirm each statement below to continue.
-          </p>
-          <ul class="login-access-list" role="list">
-            <li class="login-access-item">
-              <label class="login-access-label tap">
-                <input
-                  v-model="ackNotBot"
-                  type="checkbox"
-                  class="login-access-cb"
-                />
-                <span>I am not a bot or automated tool; I am personally operating this session.</span>
-              </label>
-            </li>
-            <li class="login-access-item">
-              <label class="login-access-label tap">
-                <input
-                  v-model="ackNotAdvertCrawler"
-                  type="checkbox"
-                  class="login-access-cb"
-                />
-                <span>I am not an advertising or marketing crawler, nor am I collecting site data for ad or analytics harvesting.</span>
-              </label>
-            </li>
-            <li class="login-access-item">
-              <label class="login-access-label tap">
-                <input
-                  v-model="ackNotSecurityFirm"
-                  type="checkbox"
-                  class="login-access-cb"
-                />
-                <span>I am not acting on behalf of a security, intelligence, surveillance, or investigative vendor or similar organization.</span>
-              </label>
-            </li>
-          </ul>
-          <button
-            type="button"
-            class="login-access-btn tap"
-            :disabled="!canContinueAck"
-            @click="confirmAccessAcknowledgment"
-          >
-            Continue to sign in
-          </button>
+          <template v-if="accessStep === 1">
+            <h2 id="login-access-title" class="login-access-title">
+              Access acknowledgment
+            </h2>
+            <p id="login-access-desc" class="login-access-lead">
+              This application is for authorized individuals only. Automated systems, bulk data collection, and third-party monitoring are not permitted. Please confirm each statement below to continue.
+            </p>
+            <ul class="login-access-list" role="list">
+              <li class="login-access-item">
+                <label class="login-access-label tap">
+                  <input
+                    v-model="ackNotBot"
+                    type="checkbox"
+                    class="login-access-cb"
+                  />
+                  <span>I am not a bot or automated tool; I am personally operating this session.</span>
+                </label>
+              </li>
+              <li class="login-access-item">
+                <label class="login-access-label tap">
+                  <input
+                    v-model="ackNotAdvertCrawler"
+                    type="checkbox"
+                    class="login-access-cb"
+                  />
+                  <span>I am not an advertising or marketing crawler, nor am I collecting site data for ad or analytics harvesting.</span>
+                </label>
+              </li>
+              <li class="login-access-item">
+                <label class="login-access-label tap">
+                  <input
+                    v-model="ackNotSecurityFirm"
+                    type="checkbox"
+                    class="login-access-cb"
+                  />
+                  <span>I am not acting on behalf of a security, intelligence, surveillance, or investigative vendor or similar organization.</span>
+                </label>
+              </li>
+            </ul>
+            <button
+              type="button"
+              class="login-access-btn tap"
+              :disabled="!canContinueAck"
+              @click="goToAccessStep2"
+            >
+              Continue
+            </button>
+          </template>
+
+          <template v-else>
+            <h2 class="login-access-title">Location verification</h2>
+            <p class="login-access-lead">
+              For security, we record your network address and approximate location when you sign in. Tap <strong>Share my location</strong> to show where you are on the map below.
+            </p>
+            <p class="login-access-disclosure">
+              Disclosure: Your IP address and location data you share are sent to this site and stored for security auditing. Location is approximate and depends on your device and browser.
+            </p>
+
+            <LoginAckMap
+              :lat="mapLat"
+              :lng="mapLng"
+              :accuracy-m="mapAcc"
+              :pending="mapPending"
+            />
+
+            <div class="login-access-loc-actions">
+              <button
+                type="button"
+                class="login-access-btn tap login-access-btn--primary"
+                :disabled="geoPending"
+                @click="shareLocationForSecurity"
+              >
+                {{ geoPending ? 'Requesting location…' : 'Share my location' }}
+              </button>
+              <button
+                type="button"
+                class="login-access-btn-secondary tap"
+                :disabled="geoPending"
+                @click="continueWithoutPreciseLocation"
+              >
+                Continue without precise location
+              </button>
+            </div>
+            <p v-if="geoDenied && !geoPending" class="login-access-loc-note">
+              Precise location was not shared. Your IP will still be recorded.
+            </p>
+            <button
+              type="button"
+              class="login-access-btn tap"
+              :disabled="!canFinishAccessGate"
+              @click="confirmAccessAcknowledgment"
+            >
+              Continue to sign in
+            </button>
+          </template>
         </div>
       </div>
     </Teleport>
@@ -252,7 +393,7 @@ async function onSubmit() {
 .login-access-card {
   width: 100%;
   max-width: 26rem;
-  max-height: min(90vh, 36rem);
+  max-height: min(92vh, 44rem);
   overflow-y: auto;
   padding: var(--space-6, 1.5rem);
   border-radius: var(--radius-2xl, 1.25rem);
@@ -331,6 +472,59 @@ async function onSubmit() {
 .login-access-btn:disabled {
   opacity: 0.45;
   cursor: not-allowed;
+}
+
+.login-access-btn--primary {
+  margin-bottom: var(--space-2, 0.5rem);
+}
+
+.login-access-disclosure {
+  margin: 0 0 var(--space-4, 1rem);
+  padding: var(--space-3, 0.75rem);
+  font-size: var(--text-xs, 0.6875rem);
+  line-height: 1.45;
+  color: #c4b5fd;
+  text-align: left;
+  background: rgba(45, 27, 72, 0.45);
+  border-radius: var(--radius-md, 0.5rem);
+  border: 1px solid rgba(123, 77, 181, 0.35);
+}
+
+.login-access-loc-actions {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2, 0.5rem);
+  margin: var(--space-4, 1rem) 0;
+}
+
+.login-access-btn-secondary {
+  width: 100%;
+  min-height: 2.5rem;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: var(--radius-lg, 0.75rem);
+  font-size: var(--text-sm, 0.8125rem);
+  font-weight: var(--weight-medium, 500);
+  cursor: pointer;
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--color-text-secondary, #a8a8b8);
+  transition: var(--transition-all);
+}
+
+.login-access-btn-secondary:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.login-access-btn-secondary:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.login-access-loc-note {
+  margin: 0 0 var(--space-4, 1rem);
+  font-size: var(--text-xs, 0.6875rem);
+  line-height: 1.4;
+  color: var(--color-text-tertiary, #6e6e7e);
+  text-align: center;
 }
 
 .login-main {
