@@ -92,6 +92,14 @@ export async function postLoginAccessLog(body = {}) {
 }
 
 /**
+ * Record client IP on first app load (no session). Server stores source `page_visit`.
+ */
+export async function postVisitPing() {
+  const r = await apiFetch('/api/visit', { method: 'POST' })
+  return handleJson(r)
+}
+
+/**
  * Security audit: recent access attempts with IP and optional coordinates.
  */
 export async function getSettingsAccessLog() {

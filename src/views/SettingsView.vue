@@ -30,7 +30,7 @@ import {
   reconnectLiveLogStream,
 } from '../stores/liveLogStore.js'
 import SettingsSection from '../components/settings/SettingsSection.vue'
-import SecurityAccessMap from '../components/SecurityAccessMap.vue'
+import AccessRowMap from '../components/AccessRowMap.vue'
 import AutomationList from '../components/automation/AutomationList.vue'
 import AutomationEditor from '../components/automation/AutomationEditor.vue'
 import {
@@ -74,22 +74,6 @@ const settingsTab = ref('general')
 const accessLogEntries = ref([])
 const accessLogLoading = ref(false)
 const accessLogError = ref('')
-
-const mapAccessPoints = computed(() => {
-  const rows = accessLogEntries.value
-  const out = []
-  for (const r of rows) {
-    if (r.latitude == null || r.longitude == null) continue
-    if (!Number.isFinite(r.latitude) || !Number.isFinite(r.longitude)) continue
-    out.push({
-      id: r.id,
-      ip: r.ip,
-      latitude: r.latitude,
-      longitude: r.longitude,
-    })
-  }
-  return out
-})
 
 async function loadSecurityAccessLog() {
   accessLogLoading.value = true
@@ -943,35 +927,40 @@ async function logoutApp() {
     <main v-show="settingsTab === 'security'" class="stack security-panel">
       <SettingsSection title="Access log" :collapsible="false">
         <p class="security-lead">
-          Recent sign-in attempts that completed the login gate, with IP and optional browser-reported location.
+          Page visits (IP on load), login gate events, and optional browser-reported coordinates. Each row with coordinates includes its own map.
         </p>
         <p v-if="accessLogLoading" class="cred-msg">Loading…</p>
         <p v-else-if="accessLogError" class="cred-msg cred-msg--error">{{ accessLogError }}</p>
-        <div v-else class="security-map-wrap">
-          <SecurityAccessMap :points="mapAccessPoints" />
-          <p v-if="mapAccessPoints.length === 0" class="security-map-empty">
-            No coordinates recorded yet — locations appear after users share location on the login screen.
-          </p>
-        </div>
-        <div class="access-table-wrap">
+        <div v-else class="access-table-wrap">
           <table class="access-table" v-if="accessLogEntries.length">
             <thead>
               <tr>
                 <th scope="col">Time</th>
                 <th scope="col">IP</th>
+                <th scope="col">Source</th>
                 <th scope="col">Location</th>
+                <th scope="col">Map</th>
               </tr>
             </thead>
             <tbody>
               <tr v-for="row in accessLogEntries" :key="row.id">
                 <td>{{ new Date(row.at).toLocaleString() }}</td>
                 <td><code class="access-ip">{{ row.ip }}</code></td>
+                <td class="access-source">{{ row.source === 'page_visit' ? 'Visit' : row.source === 'login_ack' ? 'Login gate' : (row.source || '—') }}</td>
                 <td>
                   <template v-if="row.locationDenied">Not shared</template>
                   <template v-else-if="row.latitude != null && row.longitude != null">
                     {{ Number(row.latitude).toFixed(4) }}, {{ Number(row.longitude).toFixed(4) }}
                   </template>
                   <template v-else>—</template>
+                </td>
+                <td class="access-map-cell">
+                  <AccessRowMap
+                    v-if="row.latitude != null && row.longitude != null && Number.isFinite(Number(row.latitude)) && Number.isFinite(Number(row.longitude))"
+                    :lat="Number(row.latitude)"
+                    :lng="Number(row.longitude)"
+                  />
+                  <span v-else class="access-map-empty">—</span>
                 </td>
               </tr>
             </tbody>
@@ -1059,7 +1048,7 @@ async function logoutApp() {
   margin-top: 0;
 }
 .security-panel {
-  max-width: 56rem;
+  max-width: 64rem;
   margin-inline: auto;
 }
 
@@ -1070,15 +1059,23 @@ async function logoutApp() {
   color: var(--color-text-secondary, #a8a8b8);
 }
 
-.security-map-wrap {
-  margin-bottom: var(--space-5, 1.25rem);
-  position: relative;
-}
-
-.security-map-empty {
-  margin: var(--space-2, 0.5rem) 0 0;
+.access-source {
   font-size: var(--text-xs, 0.6875rem);
   color: var(--color-text-tertiary, #6e6e7e);
+  white-space: nowrap;
+}
+
+.access-map-cell {
+  vertical-align: top;
+  width: 9rem;
+  min-width: 8rem;
+}
+
+.access-map-empty {
+  display: inline-block;
+  padding: var(--space-4, 1rem) 0;
+  color: var(--color-text-tertiary, #6e6e7e);
+  font-size: var(--text-sm, 0.8125rem);
 }
 
 .access-table-wrap {

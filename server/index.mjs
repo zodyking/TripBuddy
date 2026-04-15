@@ -147,6 +147,7 @@ app.addHook('preHandler', async (req, reply) => {
   if (path === '/api/health') return
   if (path.startsWith('/api/auth/')) return
   if (path === '/api/login/access-log' && req.method === 'POST') return
+  if (path === '/api/visit' && req.method === 'POST') return
   const sid = req.cookies?.[COOKIE_NAME]
   if (isValidSession(sid)) return
   return reply.code(401).send({ error: 'Unauthorized', code: 'AUTH_REQUIRED' })
@@ -278,6 +279,24 @@ app.post('/api/login/access-log', async (req, reply) => {
     const msg = e instanceof Error ? e.message : String(e)
     return reply.code(400).send({ ok: false, error: msg })
   }
+})
+
+/** First load / SPA entry: record IP only (no session). One row per visit ping from client. */
+app.post('/api/visit', async (req) => {
+  const xf = req.headers['x-forwarded-for']
+  const forwardedFor = typeof xf === 'string' ? xf.slice(0, 512) : null
+  const ua = req.headers['user-agent']
+  const entry = await appendAccessEntry({
+    ip: clientIp(req),
+    forwardedFor,
+    latitude: null,
+    longitude: null,
+    accuracyM: null,
+    locationDenied: false,
+    userAgent: typeof ua === 'string' ? ua : null,
+    source: 'page_visit',
+  })
+  return { ok: true, id: entry.id }
 })
 
 app.get('/api/health', async () => ({

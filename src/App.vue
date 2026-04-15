@@ -1,5 +1,19 @@
 <script setup>
-// Root shell: routes render MainDashboard (/) or Settings (/settings).
+import { onMounted } from 'vue'
+import { postVisitPing } from './api.js'
+
+/** One IP capture per tab session when the SPA loads (security audit). */
+const VISIT_PING_KEY = 'fedextool-visit-ping-v1'
+
+onMounted(() => {
+  try {
+    if (sessionStorage.getItem(VISIT_PING_KEY) === '1') return
+    sessionStorage.setItem(VISIT_PING_KEY, '1')
+  } catch {
+    /* private mode — still try ping */
+  }
+  void postVisitPing().catch(() => {})
+})
 </script>
 
 <template>
