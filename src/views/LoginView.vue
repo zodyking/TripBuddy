@@ -1,15 +1,26 @@
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { getAuthStatus, postAuthLogin } from '../api.js'
 
+const ACCESS_ACK_KEY = 'fedextool-login-access-ack-v1'
+
 const route = useRoute()
 const router = useRouter()
+
+const accessAcknowledged = ref(false)
+const ackNotBot = ref(false)
+const ackNotAdvertCrawler = ref(false)
+const ackNotSecurityFirm = ref(false)
 
 const username = ref('')
 const password = ref('')
 const submitting = ref(false)
 const errorMsg = ref('')
+
+const canContinueAck = computed(
+  () => ackNotBot.value && ackNotAdvertCrawler.value && ackNotSecurityFirm.value,
+)
 
 function redirectTarget() {
   const r = route.query.redirect
@@ -21,6 +32,13 @@ function redirectTarget() {
 
 onMounted(async () => {
   try {
+    if (sessionStorage.getItem(ACCESS_ACK_KEY) === '1') {
+      accessAcknowledged.value = true
+    }
+  } catch {
+    /* private mode */
+  }
+  try {
     const s = await getAuthStatus()
     if (!s.authEnabled || s.authenticated) {
       await router.replace(redirectTarget())
@@ -29,6 +47,16 @@ onMounted(async () => {
     /* stay on login */
   }
 })
+
+function confirmAccessAcknowledgment() {
+  if (!canContinueAck.value) return
+  try {
+    sessionStorage.setItem(ACCESS_ACK_KEY, '1')
+  } catch {
+    /* ignore */
+  }
+  accessAcknowledged.value = true
+}
 
 async function onSubmit() {
   errorMsg.value = ''
@@ -41,8 +69,6 @@ async function onSubmit() {
   submitting.value = true
   try {
     await postAuthLogin({ username: u, password: p })
-    // Full navigation so the session cookie is applied before the app shell loads
-    // (client-side replace alone can leave routes thinking you are still logged out).
     const target = redirectTarget()
     if (typeof window !== 'undefined') {
       const base = import.meta.env.BASE_URL || '/'
@@ -63,7 +89,74 @@ async function onSubmit() {
 <template>
   <div class="login-page">
     <div class="login-bg-glow" aria-hidden="true" />
-    <div class="login-main">
+
+    <!-- Mandatory acknowledgment before sign-in -->
+    <Teleport to="body">
+      <div
+        v-if="!accessAcknowledged"
+        class="login-access-overlay"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="login-access-title"
+        aria-describedby="login-access-desc"
+      >
+        <div class="login-access-card glass" @click.stop>
+          <h2 id="login-access-title" class="login-access-title">
+            Access acknowledgment
+          </h2>
+          <p id="login-access-desc" class="login-access-lead">
+            This application is for authorized individuals only. Automated systems, bulk data collection, and third-party monitoring are not permitted. Please confirm each statement below to continue.
+          </p>
+          <ul class="login-access-list" role="list">
+            <li class="login-access-item">
+              <label class="login-access-label tap">
+                <input
+                  v-model="ackNotBot"
+                  type="checkbox"
+                  class="login-access-cb"
+                />
+                <span>I am not a bot or automated tool; I am personally operating this session.</span>
+              </label>
+            </li>
+            <li class="login-access-item">
+              <label class="login-access-label tap">
+                <input
+                  v-model="ackNotAdvertCrawler"
+                  type="checkbox"
+                  class="login-access-cb"
+                />
+                <span>I am not an advertising or marketing crawler, nor am I collecting site data for ad or analytics harvesting.</span>
+              </label>
+            </li>
+            <li class="login-access-item">
+              <label class="login-access-label tap">
+                <input
+                  v-model="ackNotSecurityFirm"
+                  type="checkbox"
+                  class="login-access-cb"
+                />
+                <span>I am not acting on behalf of a security, intelligence, surveillance, or investigative vendor or similar organization.</span>
+              </label>
+            </li>
+          </ul>
+          <button
+            type="button"
+            class="login-access-btn tap"
+            :disabled="!canContinueAck"
+            @click="confirmAccessAcknowledgment"
+          >
+            Continue to sign in
+          </button>
+        </div>
+      </div>
+    </Teleport>
+
+    <div
+      class="login-main"
+      :class="{ 'is-behind-access': !accessAcknowledged }"
+      :inert="!accessAcknowledged"
+      :aria-hidden="!accessAcknowledged"
+    >
       <div class="login-card glass">
         <h1 class="login-title">Sign in</h1>
 
@@ -76,7 +169,7 @@ async function onSubmit() {
               type="text"
               name="username"
               autocomplete="username"
-              :disabled="submitting"
+              :disabled="submitting || !accessAcknowledged"
             />
           </label>
           <label class="login-label">
@@ -87,7 +180,7 @@ async function onSubmit() {
               type="password"
               name="password"
               autocomplete="current-password"
-              :disabled="submitting"
+              :disabled="submitting || !accessAcknowledged"
             />
           </label>
 
@@ -96,7 +189,7 @@ async function onSubmit() {
           <button
             type="submit"
             class="login-submit tap"
-            :disabled="submitting"
+            :disabled="submitting || !accessAcknowledged"
           >
             <span v-if="submitting" class="login-submit-inner">
               <span class="login-spinner" aria-hidden="true" />
@@ -108,7 +201,11 @@ async function onSubmit() {
       </div>
     </div>
 
-    <footer class="login-tos" role="contentinfo">
+    <footer
+      v-show="accessAcknowledged"
+      class="login-tos"
+      role="contentinfo"
+    >
       <h2 class="login-tos-heading">Terms of Use</h2>
       <p class="login-tos-text">
         By accessing or using this site, you agree to our Terms of Service and all applicable laws. Automated access is strictly prohibited, including bots, scrapers, crawlers, monitoring tools, and similar systems. Access or use by operational security firms, intelligence vendors, surveillance companies, investigative service providers, or similar entities is not permitted without our prior written consent. Unauthorized use may result in blocked access, termination, and legal action.
@@ -137,6 +234,105 @@ async function onSubmit() {
   z-index: 0;
 }
 
+/* Access gate */
+.login-access-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 10000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-4, 1rem);
+  padding-bottom: max(var(--space-4, 1rem), env(safe-area-inset-bottom));
+  background: rgba(6, 6, 10, 0.88);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+}
+
+.login-access-card {
+  width: 100%;
+  max-width: 26rem;
+  max-height: min(90vh, 36rem);
+  overflow-y: auto;
+  padding: var(--space-6, 1.5rem);
+  border-radius: var(--radius-2xl, 1.25rem);
+  border: 1px solid rgba(123, 77, 181, 0.35);
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.45), 0 0 0 1px rgba(123, 77, 181, 0.12);
+}
+
+.login-access-title {
+  margin: 0 0 var(--space-3, 0.75rem);
+  font-size: var(--text-lg, 1.125rem);
+  font-weight: var(--weight-semibold, 600);
+  color: var(--color-text-primary, #f4f4f8);
+  text-align: center;
+  letter-spacing: var(--tracking-tight, -0.02em);
+}
+
+.login-access-lead {
+  margin: 0 0 var(--space-5, 1.25rem);
+  font-size: var(--text-sm, 0.8125rem);
+  line-height: 1.5;
+  color: var(--color-text-secondary, #a8a8b8);
+  text-align: center;
+}
+
+.login-access-list {
+  margin: 0 0 var(--space-5, 1.25rem);
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3, 0.75rem);
+}
+
+.login-access-item {
+  margin: 0;
+}
+
+.login-access-label {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3, 0.75rem);
+  font-size: var(--text-sm, 0.8125rem);
+  line-height: 1.45;
+  color: var(--color-text-primary, #e8e8ee);
+  cursor: pointer;
+  text-align: left;
+}
+
+.login-access-cb {
+  flex-shrink: 0;
+  width: 1.1rem;
+  height: 1.1rem;
+  margin-top: 0.15rem;
+  accent-color: var(--color-accent-purple, #7b4db5);
+  cursor: pointer;
+}
+
+.login-access-btn {
+  width: 100%;
+  min-height: 2.75rem;
+  border: none;
+  border-radius: var(--radius-lg, 0.75rem);
+  font-size: var(--text-sm, 0.8125rem);
+  font-weight: var(--weight-semibold, 600);
+  cursor: pointer;
+  background: var(--color-accent-purple, #7b4db5);
+  color: #fff;
+  box-shadow: var(--shadow-sm, 0 2px 4px rgba(0, 0, 0, 0.25));
+  transition: var(--transition-all);
+}
+
+.login-access-btn:hover:not(:disabled) {
+  box-shadow: var(--shadow-glow-purple, 0 0 20px rgba(123, 77, 181, 0.35));
+}
+
+.login-access-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
 .login-main {
   flex: 1;
   display: flex;
@@ -146,6 +342,12 @@ async function onSubmit() {
   padding-top: max(var(--space-6, 1.5rem), env(safe-area-inset-top));
   position: relative;
   z-index: 1;
+}
+
+.login-main.is-behind-access {
+  filter: blur(2px);
+  user-select: none;
+  pointer-events: none;
 }
 
 .login-card {
@@ -282,12 +484,12 @@ async function onSubmit() {
     max(var(--space-6, 1.5rem), env(safe-area-inset-bottom));
   position: relative;
   z-index: 1;
-  border-top: 1px solid rgba(248, 113, 113, 0.25);
+  border-top: 1px solid rgba(123, 77, 181, 0.3);
   background: linear-gradient(
     180deg,
     transparent,
-    rgba(40, 10, 10, 0.5) 25%,
-    rgba(8, 8, 10, 0.95) 55%
+    rgba(45, 27, 72, 0.35) 30%,
+    rgba(8, 8, 10, 0.96) 60%
   );
 }
 
@@ -297,7 +499,7 @@ async function onSubmit() {
   font-weight: var(--weight-semibold, 600);
   letter-spacing: var(--tracking-wide, 0.025em);
   text-align: center;
-  color: #fca5a5;
+  color: #c4b5fd;
 }
 
 .login-tos-text {
@@ -305,7 +507,7 @@ async function onSubmit() {
   max-width: 42rem;
   font-size: var(--text-xs, 0.6875rem);
   line-height: 1.55;
-  color: #fecaca;
+  color: #ddd6fe;
   text-align: center;
   text-wrap: pretty;
 }
