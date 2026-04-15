@@ -60,7 +60,7 @@ const activeBaseLayer = ref(/** @type {'street' | 'satellite'} */ ('street'))
 let markerLayer = null
 /** @type {L.LayerGroup | null} */
 let userLayer = null
-/** @type {L.Marker | null} */
+/** @type {L.CircleMarker | null} */
 let userMarker = null
 /** @type {L.Circle | null} */
 let userAccuracyCircle = null
@@ -94,11 +94,6 @@ const hasUserFix = computed(() => {
     Number.isFinite(u.lng)
   )
 })
-
-function userMarkerHtml() {
-  /* Single centered dot — accuracy circle shows uncertainty (avoids double-ring artifact) */
-  return `<div class="directory-map-user-marker" aria-hidden="true"><div class="directory-map-user-dot"></div></div>`
-}
 
 function pinHtml(locationId, selected) {
   const esc = String(locationId)
@@ -236,24 +231,7 @@ function syncUserOverlay() {
   const acc =
     Number.isFinite(u.accuracyM) && u.accuracyM > 0 ? u.accuracyM : 40
 
-  if (!userMarker) {
-    const icon = L.divIcon({
-      className: 'directory-map-user-div-icon',
-      html: userMarkerHtml(),
-      iconSize: [36, 36],
-      /* Dot center = reported lat/lng (matches typical maps “blue dot”) */
-      iconAnchor: [18, 18],
-    })
-    userMarker = L.marker(ll, {
-      icon,
-      zIndexOffset: 1000,
-    })
-    userMarker.bindTooltip('Your location', { direction: 'top', offset: [0, -18] })
-    userMarker.addTo(userLayer)
-  } else {
-    userMarker.setLatLng(ll)
-  }
-
+  /* Accuracy ring first (geographic meters), then dot on top — both share the same lat/lng. */
   if (userAccuracyCircle) {
     userAccuracyCircle.setLatLng(ll)
     userAccuracyCircle.setRadius(acc)
@@ -266,6 +244,26 @@ function syncUserOverlay() {
       weight: 1,
       opacity: 0.45,
     }).addTo(userLayer)
+  }
+
+  /**
+   * CircleMarker is centered on lat/lng in projection (same anchor model as L.circle),
+   * so the dot does not drift vs the accuracy ring when zooming — unlike HTML divIcon markers.
+   */
+  if (!userMarker) {
+    userMarker = L.circleMarker(ll, {
+      radius: 7,
+      stroke: true,
+      color: '#38bdf8',
+      weight: 2.5,
+      opacity: 1,
+      fillColor: '#ffffff',
+      fillOpacity: 1,
+    })
+    userMarker.bindTooltip('Your location', { direction: 'top', offset: [0, -10] })
+    userMarker.addTo(userLayer)
+  } else {
+    userMarker.setLatLng(ll)
   }
 }
 
@@ -786,33 +784,4 @@ watch(
   margin-top: 0 !important;
 }
 
-.directory-map-user-div-icon {
-  background: transparent !important;
-  border: none !important;
-}
-
-.directory-map-user-marker {
-  position: relative;
-  width: 36px;
-  height: 36px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.directory-map-user-dot {
-  position: relative;
-  z-index: 2;
-  width: 16px;
-  height: 16px;
-  border-radius: 999px;
-  background: #38bdf8;
-  border: 3px solid #fff;
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.45);
-}
-
-.leaflet-marker-icon.directory-map-user-div-icon {
-  margin-left: 0 !important;
-  margin-top: 0 !important;
-}
 </style>

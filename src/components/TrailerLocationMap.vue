@@ -48,7 +48,7 @@ let overlayLayer = null
 let userLayer = null
 /** @type {L.Marker | null} */
 let trailerMarker = null
-/** @type {L.Marker | null} */
+/** @type {L.CircleMarker | null} */
 let userMarker = null
 /** @type {L.Circle | null} */
 let userAccuracyCircle = null
@@ -78,10 +78,6 @@ function makeTrailerIcon() {
     iconAnchor: [18, 44],
     popupAnchor: [0, -40],
   })
-}
-
-function userMarkerHtml() {
-  return `<div class="trailer-loc-user-marker" aria-hidden="true"><div class="trailer-loc-user-dot"></div></div>`
 }
 
 function scheduleFitBounds() {
@@ -135,24 +131,6 @@ function syncUserOverlay() {
   const acc =
     Number.isFinite(u.accuracyM) && u.accuracyM > 0 ? u.accuracyM : 40
 
-  if (!userMarker) {
-    const icon = L.divIcon({
-      className: 'trailer-loc-user-div-icon',
-      html: userMarkerHtml(),
-      iconSize: [36, 36],
-      iconAnchor: [18, 18],
-    })
-    userMarker = L.marker(ll, {
-      icon,
-      zIndexOffset: 1000,
-      title: 'Your location',
-    })
-    userMarker.bindPopup('Your location')
-    userMarker.addTo(userLayer)
-  } else {
-    userMarker.setLatLng(ll)
-  }
-
   if (userAccuracyCircle) {
     userAccuracyCircle.setLatLng(ll)
     userAccuracyCircle.setRadius(acc)
@@ -165,6 +143,22 @@ function syncUserOverlay() {
       weight: 1,
       opacity: 0.45,
     }).addTo(userLayer)
+  }
+
+  if (!userMarker) {
+    userMarker = L.circleMarker(ll, {
+      radius: 7,
+      stroke: true,
+      color: '#0284c7',
+      weight: 2.5,
+      opacity: 1,
+      fillColor: '#ffffff',
+      fillOpacity: 1,
+    })
+    userMarker.bindPopup('Your location')
+    userMarker.addTo(userLayer)
+  } else {
+    userMarker.setLatLng(ll)
   }
 }
 
@@ -539,34 +533,7 @@ watch(
   filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.3));
 }
 
-:deep(.trailer-loc-user-div-icon) {
-  background: transparent !important;
-  border: none !important;
-}
-
-:deep(.trailer-loc-user-marker) {
-  width: 36px;
-  height: 36px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-:deep(.trailer-loc-user-dot) {
-  width: 16px;
-  height: 16px;
-  border-radius: 999px;
-  background: #0284c7;
-  border: 3px solid #fff;
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.35);
-}
-
 :deep(.leaflet-marker-icon.trailer-loc-div-icon) {
-  margin-left: 0 !important;
-  margin-top: 0 !important;
-}
-
-:deep(.leaflet-marker-icon.trailer-loc-user-div-icon) {
   margin-left: 0 !important;
   margin-top: 0 !important;
 }
