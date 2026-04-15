@@ -22,7 +22,6 @@ const geoLng = ref(/** @type {number | null} */ (null))
 const geoAccuracyM = ref(/** @type {number | null} */ (null))
 const geoPending = ref(false)
 const geoDenied = ref(false)
-const accessLogSent = ref(false)
 
 const username = ref('')
 const password = ref('')
@@ -33,13 +32,21 @@ const canContinueAck = computed(
   () => ackNotBot.value && ackNotAdvertCrawler.value && ackNotSecurityFirm.value,
 )
 
-const canFinishAccessGate = computed(() => accessLogSent.value)
+/** Step 2 complete only after a successful browser location fix (no skip). */
+const locationReceived = computed(
+  () =>
+    geoLat.value != null &&
+    geoLng.value != null &&
+    Number.isFinite(geoLat.value) &&
+    Number.isFinite(geoLng.value),
+)
 
 const mapLat = computed(() => geoLat.value)
 const mapLng = computed(() => geoLng.value)
 const mapAcc = computed(() => geoAccuracyM.value)
+/** Map shows NYC until we have a fix; after denial, fall back to default view. */
 const mapPending = computed(
-  () => geoPending.value || (!geoDenied.value && geoLat.value == null),
+  () => geoPending.value || (geoLat.value == null && !geoDenied.value),
 )
 
 function redirectTarget() {
@@ -79,16 +86,14 @@ function goToAccessStep2() {
 async function sendAccessLog(payload) {
   try {
     await postLoginAccessLog(payload)
-    accessLogSent.value = true
   } catch {
-    accessLogSent.value = true
+    /* still allow continue if coords are valid — server may be unreachable */
   }
 }
 
 function shareLocationForSecurity() {
   if (typeof navigator === 'undefined' || !navigator.geolocation) {
     geoDenied.value = true
-    void sendAccessLog({ locationDenied: true })
     return
   }
   geoPending.value = true
@@ -126,20 +131,22 @@ function shareLocationForSecurity() {
   )
 }
 
-async function continueWithoutPreciseLocation() {
-  geoPending.value = false
-  geoDenied.value = true
-  await sendAccessLog({ locationDenied: true })
-}
-
 function confirmAccessAcknowledgment() {
-  if (!canFinishAccessGate.value) return
+  if (!locationReceived.value) return
   try {
     sessionStorage.setItem(ACCESS_ACK_KEY, '1')
   } catch {
     /* ignore */
   }
   accessAcknowledged.value = true
+}
+
+function onStep2PrimaryClick() {
+  if (locationReceived.value) {
+    confirmAccessAcknowledgment()
+  } else {
+    shareLocationForSecurity()
+  }
 }
 
 watch(accessStep, (s) => {
@@ -245,7 +252,7 @@ async function onSubmit() {
           <template v-else>
             <h2 class="login-access-title">Location verification</h2>
             <p class="login-access-lead">
-              For security, we record your network address and approximate location when you sign in. Tap <strong>Share my location</strong> to show where you are on the map below.
+              For security, we record your network address and approximate location when you sign in. Use the button below to share your location and show it on the map.
             </p>
             <p class="login-access-disclosure">
               Disclosure: Your IP address and location data you share are sent to this site and stored for security auditing. Location is approximate and depends on your device and browser.
@@ -263,30 +270,16 @@ async function onSubmit() {
                 type="button"
                 class="login-access-btn tap login-access-btn--primary"
                 :disabled="geoPending"
-                @click="shareLocationForSecurity"
+                @click="onStep2PrimaryClick"
               >
-                {{ geoPending ? 'Requesting location…' : 'Share my location' }}
-              </button>
-              <button
-                type="button"
-                class="login-access-btn-secondary tap"
-                :disabled="geoPending"
-                @click="continueWithoutPreciseLocation"
-              >
-                Continue without precise location
+                <template v-if="geoPending">Requesting location…</template>
+                <template v-else-if="locationReceived">Continue to sign in</template>
+                <template v-else>Share my location</template>
               </button>
             </div>
-            <p v-if="geoDenied && !geoPending" class="login-access-loc-note">
-              Precise location was not shared. Your IP will still be recorded.
+            <p v-if="geoDenied && !geoPending && !locationReceived" class="login-access-loc-note">
+              Location is required. Allow access in your browser prompt, then tap Share my location again.
             </p>
-            <button
-              type="button"
-              class="login-access-btn tap"
-              :disabled="!canFinishAccessGate"
-              @click="confirmAccessAcknowledgment"
-            >
-              Continue to sign in
-            </button>
           </template>
         </div>
       </div>
@@ -474,10 +467,6 @@ async function onSubmit() {
   cursor: not-allowed;
 }
 
-.login-access-btn--primary {
-  margin-bottom: var(--space-2, 0.5rem);
-}
-
 .login-access-disclosure {
   margin: 0 0 var(--space-4, 1rem);
   padding: var(--space-3, 0.75rem);
@@ -495,28 +484,6 @@ async function onSubmit() {
   flex-direction: column;
   gap: var(--space-2, 0.5rem);
   margin: var(--space-4, 1rem) 0;
-}
-
-.login-access-btn-secondary {
-  width: 100%;
-  min-height: 2.5rem;
-  border: 1px solid rgba(255, 255, 255, 0.14);
-  border-radius: var(--radius-lg, 0.75rem);
-  font-size: var(--text-sm, 0.8125rem);
-  font-weight: var(--weight-medium, 500);
-  cursor: pointer;
-  background: rgba(255, 255, 255, 0.06);
-  color: var(--color-text-secondary, #a8a8b8);
-  transition: var(--transition-all);
-}
-
-.login-access-btn-secondary:hover:not(:disabled) {
-  background: rgba(255, 255, 255, 0.1);
-}
-
-.login-access-btn-secondary:disabled {
-  opacity: 0.45;
-  cursor: not-allowed;
 }
 
 .login-access-loc-note {
