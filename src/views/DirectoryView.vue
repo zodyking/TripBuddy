@@ -219,7 +219,7 @@ onUnmounted(() => {
 <template>
   <div class="directory-view" :class="{ 'is-split': isLandscapeSplit }">
     <div class="directory-map-column">
-      <div v-if="mapPins.length > 0" class="directory-map-shell">
+      <div class="directory-map-shell">
         <DirectoryMap
           :pins="mapPins"
           :highlight-id="expandedId"

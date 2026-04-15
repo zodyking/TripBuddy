@@ -5,9 +5,14 @@ import {
   onMounted,
   onBeforeUnmount,
   nextTick,
+  computed,
 } from 'vue'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
+
+/** Default view when there are no directory pins (Manhattan). */
+const DEFAULT_CENTER = Object.freeze([40.7128, -74.006])
+const DEFAULT_ZOOM = 11
 
 /**
  * @typedef {{ locationId: string, lat: number, lng: number }} MapPin
@@ -34,15 +39,32 @@ const emit = defineEmits(['select'])
 
 const containerRef = ref(/** @type {HTMLElement | null} */ (null))
 
+/** Live user fix from Geolocation API (updated by watchPosition). */
+const userFix = ref(
+  /** @type {{ lat: number, lng: number, accuracyM: number } | null} */ (null),
+)
+const geoTracking = ref(false)
+const geoPending = ref(false)
+const geoDenied = ref(false)
+/** @type {number | null} */
+let geoWatchId = null
+
 /** @type {L.Map | null} */
 let map = null
 /** @type {L.LayerGroup | null} */
 let markerLayer = null
+/** @type {L.LayerGroup | null} */
+let userLayer = null
+/** @type {L.Marker | null} */
+let userMarker = null
+/** @type {L.Circle | null} */
+let userAccuracyCircle = null
 /** @type {Map<string, L.Marker>} */
 const markersById = new Map()
 
 /** Signature of pin positions only — changes when filter/pins change, not when highlight changes */
 const prevPinsSig = ref('')
+const prevHadPins = ref(/** @type {boolean | null} */ (null))
 
 function pinsSignature() {
   return JSON.stringify(
@@ -59,6 +81,19 @@ function prefersReducedMotion() {
   return window.matchMedia('(prefers-reduced-motion: reduce)').matches
 }
 
+const hasUserFix = computed(() => {
+  const u = userFix.value
+  return (
+    u != null &&
+    Number.isFinite(u.lat) &&
+    Number.isFinite(u.lng)
+  )
+})
+
+function userMarkerHtml() {
+  return `<div class="directory-map-user-marker" aria-hidden="true"><div class="directory-map-user-dot"></div><div class="directory-map-user-pulse"></div></div>`
+}
+
 function pinHtml(locationId, selected) {
   const esc = String(locationId)
     .replace(/&/g, '&amp;')
@@ -69,16 +104,65 @@ function pinHtml(locationId, selected) {
   return `<div class="directory-map-marker-ui"><div class="directory-map-pin-inner${sel}"><span class="directory-map-pin-label">${esc}</span></div><div class="directory-map-pin-stem" aria-hidden="true"></div></div>`
 }
 
+function allBoundsLatLngs() {
+  /** @type {L.LatLng[]} */
+  const pts = []
+  for (const p of props.pins) {
+    const lat = Number(p.lat)
+    const lng = Number(p.lng)
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) continue
+    pts.push(L.latLng(lat, lng))
+  }
+  const u = userFix.value
+  if (
+    u &&
+    Number.isFinite(u.lat) &&
+    Number.isFinite(u.lng)
+  ) {
+    pts.push(L.latLng(u.lat, u.lng))
+  }
+  return pts
+}
+
+function applyDefaultOrFitView(pinsChanged) {
+  if (!map) return
+  const motion = prefersReducedMotion()
+  const pts = allBoundsLatLngs()
+
+  if (pts.length === 0) {
+    map.setView(DEFAULT_CENTER, DEFAULT_ZOOM, { animate: false })
+    return
+  }
+
+  if (pts.length === 1) {
+    map.setView(pts[0], 13, { animate: pinsChanged && !motion })
+    return
+  }
+
+  const bounds = L.latLngBounds(pts)
+  map.fitBounds(bounds, {
+    padding: [40, 40],
+    maxZoom: 14,
+    animate: pinsChanged && !motion,
+  })
+}
+
 function syncMarkers() {
   if (!map || !markerLayer) return
 
   const sig = pinsSignature()
   const pinsChanged = sig !== prevPinsSig.value
+  const hadPins = props.pins.some((p) => {
+    const la = Number(p.lat)
+    const ln = Number(p.lng)
+    return Number.isFinite(la) && Number.isFinite(ln)
+  })
+  const hadPinsChanged =
+    prevHadPins.value !== null && prevHadPins.value !== hadPins
 
   markerLayer.clearLayers()
   markersById.clear()
 
-  const latlngs = []
   for (const p of props.pins) {
     const lat = Number(p.lat)
     const lng = Number(p.lng)
@@ -102,35 +186,179 @@ function syncMarkers() {
     })
     marker.addTo(markerLayer)
     markersById.set(id, marker)
-    latlngs.push([lat, lng])
   }
-
-  if (latlngs.length === 0) {
-    prevPinsSig.value = sig
-    return
-  }
-
-  const motion = prefersReducedMotion()
 
   if (pinsChanged) {
     prevPinsSig.value = sig
-    if (latlngs.length === 1) {
-      const ll = latlngs[0]
-      map.setView(ll, 11, { animate: false })
-    } else {
-      const bounds = L.latLngBounds(latlngs)
-      map.fitBounds(bounds, {
-        padding: [36, 36],
-        maxZoom: 14,
-        animate: !motion,
-      })
-    }
+  }
+  prevHadPins.value = hadPins
+
+  const motion = prefersReducedMotion()
+
+  if (pinsChanged || hadPinsChanged) {
+    applyDefaultOrFitView(true)
   } else if (props.highlightId) {
     const m = markersById.get(props.highlightId)
     if (m) {
       map.panTo(m.getLatLng(), { animate: !motion })
     }
   }
+}
+
+/**
+ * Update “my location” marker and optional accuracy circle (does not re-zoom on every tick).
+ */
+function syncUserOverlay() {
+  if (!map || !userLayer) return
+
+  const u = userFix.value
+  if (!u || !Number.isFinite(u.lat) || !Number.isFinite(u.lng)) {
+    if (userMarker) {
+      userLayer.removeLayer(userMarker)
+      userMarker = null
+    }
+    if (userAccuracyCircle) {
+      userLayer.removeLayer(userAccuracyCircle)
+      userAccuracyCircle = null
+    }
+    return
+  }
+
+  const ll = L.latLng(u.lat, u.lng)
+  const acc =
+    Number.isFinite(u.accuracyM) && u.accuracyM > 0 ? u.accuracyM : 40
+
+  if (!userMarker) {
+    const icon = L.divIcon({
+      className: 'directory-map-user-div-icon',
+      html: userMarkerHtml(),
+      iconSize: [44, 44],
+      iconAnchor: [22, 22],
+    })
+    userMarker = L.marker(ll, {
+      icon,
+      zIndexOffset: 1000,
+    })
+    userMarker.bindTooltip('Your location', { direction: 'top', offset: [0, -18] })
+    userMarker.addTo(userLayer)
+  } else {
+    userMarker.setLatLng(ll)
+  }
+
+  if (userAccuracyCircle) {
+    userAccuracyCircle.setLatLng(ll)
+    userAccuracyCircle.setRadius(acc)
+  } else {
+    userAccuracyCircle = L.circle(ll, {
+      radius: acc,
+      color: '#38bdf8',
+      fillColor: '#38bdf8',
+      fillOpacity: 0.12,
+      weight: 1,
+      opacity: 0.45,
+    }).addTo(userLayer)
+  }
+}
+
+/**
+ * @param {GeolocationPosition} pos
+ * @param {{ fitCamera?: boolean }} [opts]
+ */
+function applyGeolocationPosition(pos, opts = {}) {
+  const fitCamera = opts.fitCamera !== false
+  const lat = pos.coords.latitude
+  const lng = pos.coords.longitude
+  const acc = pos.coords.accuracy
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return
+  userFix.value = {
+    lat,
+    lng,
+    accuracyM: Number.isFinite(acc) ? acc : 40,
+  }
+  geoDenied.value = false
+  geoPending.value = false
+  syncUserOverlay()
+
+  if (!map || !fitCamera) return
+  const motion = prefersReducedMotion()
+  const pinPts = []
+  for (const p of props.pins) {
+    const la = Number(p.lat)
+    const ln = Number(p.lng)
+    if (!Number.isFinite(la) || !Number.isFinite(ln)) continue
+    pinPts.push(L.latLng(la, ln))
+  }
+  const ull = L.latLng(lat, lng)
+  const pts = [...pinPts, ull]
+  if (pts.length === 1) {
+    map.setView(ull, 15, { animate: !motion })
+  } else {
+    const b = L.latLngBounds(pts)
+    map.fitBounds(b, {
+      padding: [48, 48],
+      maxZoom: 15,
+      animate: !motion,
+    })
+  }
+}
+
+function clearGeoWatch() {
+  if (geoWatchId != null && typeof navigator !== 'undefined' && navigator.geolocation) {
+    navigator.geolocation.clearWatch(geoWatchId)
+  }
+  geoWatchId = null
+}
+
+function stopUserTracking() {
+  clearGeoWatch()
+  geoTracking.value = false
+  geoPending.value = false
+  userFix.value = null
+  syncUserOverlay()
+  applyDefaultOrFitView(true)
+}
+
+function toggleMyLocation() {
+  if (typeof navigator === 'undefined' || !navigator.geolocation) {
+    geoDenied.value = true
+    return
+  }
+  if (geoTracking.value) {
+    stopUserTracking()
+    return
+  }
+  geoDenied.value = false
+  geoPending.value = true
+  geoTracking.value = true
+
+  const opts = {
+    enableHighAccuracy: true,
+    maximumAge: 0,
+    timeout: 15_000,
+  }
+
+  navigator.geolocation.getCurrentPosition(
+    (pos) => {
+      applyGeolocationPosition(pos, { fitCamera: true })
+      geoWatchId = navigator.geolocation.watchPosition(
+        (p) => applyGeolocationPosition(p, { fitCamera: false }),
+        () => {
+          /* keep last fix; transient errors are common */
+        },
+        {
+          enableHighAccuracy: true,
+          maximumAge: 2000,
+          timeout: 60_000,
+        },
+      )
+    },
+    () => {
+      geoPending.value = false
+      geoDenied.value = true
+      geoTracking.value = false
+    },
+    opts,
+  )
 }
 
 function initMap() {
@@ -141,6 +369,8 @@ function initMap() {
     scrollWheelZoom: true,
     attributionControl: true,
   })
+
+  map.setView(DEFAULT_CENTER, DEFAULT_ZOOM)
 
   L.tileLayer(
     'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
@@ -153,8 +383,10 @@ function initMap() {
   ).addTo(map)
 
   markerLayer = L.layerGroup().addTo(map)
+  userLayer = L.layerGroup().addTo(map)
 
   syncMarkers()
+  syncUserOverlay()
 
   nextTick(() => {
     map?.invalidateSize()
@@ -162,12 +394,16 @@ function initMap() {
 }
 
 function destroyMap() {
+  clearGeoWatch()
   markersById.clear()
+  userMarker = null
+  userAccuracyCircle = null
   if (map) {
     map.remove()
     map = null
   }
   markerLayer = null
+  userLayer = null
 }
 
 /** @type {ResizeObserver | null} */
@@ -199,6 +435,7 @@ watch(
   () => [props.pins, props.highlightId, props.fillHeight],
   () => {
     syncMarkers()
+    syncUserOverlay()
     nextTick(() => {
       map?.invalidateSize()
     })
@@ -215,11 +452,49 @@ watch(
     aria-label="Map of saved locations"
   >
     <div ref="containerRef" class="directory-map-el" />
+    <div class="directory-map-locate-wrap">
+      <button
+        type="button"
+        class="directory-map-locate-btn tap"
+        :class="{ 'is-active': geoTracking, 'is-denied': geoDenied }"
+        :aria-pressed="geoTracking"
+        :title="
+          geoDenied
+            ? 'Location blocked — enable location in browser settings'
+            : geoTracking
+              ? 'Stop showing my location'
+              : 'Show my live location'
+        "
+        @click="toggleMyLocation"
+      >
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+          <circle cx="12" cy="12" r="3" />
+          <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41" />
+        </svg>
+        <span class="sr-only">
+          {{
+            geoDenied
+              ? 'Location unavailable'
+              : geoTracking
+                ? 'Stop my location'
+                : 'My location'
+          }}
+        </span>
+      </button>
+      <p v-if="geoPending" class="directory-map-locate-hint">Getting location…</p>
+      <p v-else-if="geoDenied" class="directory-map-locate-hint is-warn">
+        Enable location in your browser settings, then try again.
+      </p>
+      <p v-else-if="geoTracking && hasUserFix" class="directory-map-locate-hint">
+        Live updates while this page is open.
+      </p>
+    </div>
   </div>
 </template>
 
 <style scoped>
 .directory-map-root {
+  position: relative;
   width: 100%;
   border-radius: var(--radius-lg, 0.75rem);
   overflow: hidden;
@@ -236,6 +511,87 @@ watch(
   border-top: none;
   border-bottom: none;
   box-shadow: none;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.directory-map-locate-wrap {
+  position: absolute;
+  z-index: 450;
+  right: var(--space-3, 0.75rem);
+  bottom: var(--space-10, 2.75rem);
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: var(--space-2, 0.5rem);
+  max-width: min(14rem, calc(100% - 1.5rem));
+  pointer-events: none;
+}
+
+.directory-map-locate-wrap > * {
+  pointer-events: auto;
+}
+
+.directory-map-locate-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.75rem;
+  height: 2.75rem;
+  border-radius: 999px;
+  border: 1px solid var(--color-border, rgba(255, 255, 255, 0.14));
+  background: rgba(18, 18, 26, 0.92);
+  color: var(--color-text-primary, #f4f4f8);
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.35);
+  cursor: pointer;
+  transition:
+    background 0.15s ease,
+    border-color 0.15s ease,
+    color 0.15s ease;
+}
+
+.directory-map-locate-btn:hover {
+  background: rgba(40, 40, 52, 0.96);
+}
+
+.directory-map-locate-btn.is-active {
+  color: #38bdf8;
+  border-color: rgba(56, 189, 248, 0.45);
+}
+
+.directory-map-locate-btn.is-denied {
+  color: #f87171;
+}
+
+.directory-map-locate-btn svg {
+  width: 1.25rem;
+  height: 1.25rem;
+}
+
+.directory-map-locate-hint {
+  margin: 0;
+  padding: var(--space-2, 0.5rem) var(--space-3, 0.75rem);
+  font-size: var(--text-xs, 0.75rem);
+  line-height: 1.35;
+  color: var(--color-text-tertiary, #6e6e7e);
+  text-align: right;
+  background: rgba(8, 8, 10, 0.82);
+  border-radius: var(--radius-md, 0.5rem);
+  border: 1px solid var(--color-border, rgba(255, 255, 255, 0.08));
+}
+
+.directory-map-locate-hint.is-warn {
+  color: #fca5a5;
 }
 
 .directory-map-el {
@@ -340,6 +696,64 @@ watch(
 }
 
 .leaflet-marker-icon.directory-map-div-icon {
+  margin-left: 0 !important;
+  margin-top: 0 !important;
+}
+
+.directory-map-user-div-icon {
+  background: transparent !important;
+  border: none !important;
+}
+
+.directory-map-user-marker {
+  position: relative;
+  width: 44px;
+  height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.directory-map-user-dot {
+  position: relative;
+  z-index: 2;
+  width: 16px;
+  height: 16px;
+  border-radius: 999px;
+  background: #38bdf8;
+  border: 3px solid #fff;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.45);
+}
+
+.directory-map-user-pulse {
+  position: absolute;
+  z-index: 1;
+  width: 36px;
+  height: 36px;
+  border-radius: 999px;
+  background: rgba(56, 189, 248, 0.25);
+  animation: dir-map-user-pulse 2.4s ease-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .directory-map-user-pulse {
+    animation: none;
+    opacity: 0.5;
+  }
+}
+
+@keyframes dir-map-user-pulse {
+  0% {
+    transform: scale(0.65);
+    opacity: 0.9;
+  }
+  100% {
+    transform: scale(1.15);
+    opacity: 0;
+  }
+}
+
+.leaflet-marker-icon.directory-map-user-div-icon {
   margin-left: 0 !important;
   margin-top: 0 !important;
 }
