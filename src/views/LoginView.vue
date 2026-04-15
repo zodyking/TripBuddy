@@ -108,6 +108,7 @@ async function onSubmit() {
     </div>
 
     <footer class="login-tos" role="contentinfo">
+      <h2 class="login-tos-heading">Terms of use</h2>
       <p class="login-tos-text">
         By accessing or using this site, you agree to our Terms of Service and all applicable laws. Automated access is strictly prohibited, including bots, scrapers, crawlers, monitoring tools, and similar systems. Access or use by operational security firms, intelligence vendors, surveillance companies, investigative service providers, or similar entities is not permitted without our prior written consent. Unauthorized use may result in blocked access, termination, and legal action.
       </p>
@@ -284,24 +285,35 @@ async function onSubmit() {
 
 .login-tos {
   flex-shrink: 0;
-  padding: var(--space-4, 1rem) var(--space-4, 1rem)
+  padding: var(--space-5, 1.25rem) var(--space-4, 1rem)
     max(var(--space-6, 1.5rem), env(safe-area-inset-bottom));
   position: relative;
   z-index: 1;
-  border-top: 1px solid var(--color-border, rgba(255, 255, 255, 0.06));
+  border-top: 1px solid rgba(248, 113, 113, 0.25);
   background: linear-gradient(
     180deg,
     transparent,
-    rgba(8, 8, 10, 0.92) 30%
+    rgba(40, 10, 10, 0.5) 25%,
+    rgba(8, 8, 10, 0.95) 55%
   );
+}
+
+.login-tos-heading {
+  margin: 0 0 var(--space-3, 0.75rem);
+  font-size: var(--text-sm, 0.8125rem);
+  font-weight: var(--weight-semibold, 600);
+  letter-spacing: var(--tracking-wide, 0.025em);
+  text-align: center;
+  color: #fca5a5;
 }
 
 .login-tos-text {
   margin: 0 auto;
   max-width: 42rem;
-  font-size: 0.625rem;
-  line-height: 1.45;
-  color: var(--color-text-tertiary, #6e6e7e);
+  font-size: var(--text-xs, 0.6875rem);
+  line-height: 1.55;
+  color: #fecaca;
   text-align: center;
+  text-wrap: pretty;
 }
 </style>
