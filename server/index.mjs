@@ -13,7 +13,7 @@ import {
   destroySession,
   isValidSession,
 } from './auth-session.mjs'
-import { verifyCredentialsWithDispatchGate } from './auth-probe.mjs'
+import { verifyAppLoginWithBearerCapture } from './auth-probe.mjs'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const DIST_DIR = path.join(__dirname, '..', 'dist')
@@ -127,12 +127,7 @@ app.post('/api/auth/login', async (req, reply) => {
   const body = req.body ?? {}
   const username = typeof body.username === 'string' ? body.username : ''
   const password = typeof body.password === 'string' ? body.password : ''
-  const result = await verifyCredentialsWithDispatchGate(
-    { username, password },
-    {
-      log: () => {},
-    },
-  )
+  const result = await verifyAppLoginWithBearerCapture({ username, password })
   if (!result.ok) {
     return reply
       .code(401)

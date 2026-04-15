@@ -120,7 +120,9 @@ function sleep(ms, signal) {
  *   waitMs?: number
  *   clearSession?: boolean
  *   bypassValidityProbe?: boolean
+ *   credentialOverride?: { username: string, password: string } | null
  * }} [opts]
+ * credentialOverride — use these for automated sign-in instead of saved credentials (e.g. app login form).
  */
 export async function captureAndSaveLinehaulBearer(opts = {}) {
   if (captureBusy) {
@@ -136,6 +138,7 @@ export async function captureAndSaveLinehaulBearer(opts = {}) {
     waitMs = 180_000,
     clearSession = true,
     bypassValidityProbe = false,
+    credentialOverride = null,
   } = opts
 
   const log = (/** @type {string} */ type, /** @type {string} */ message) => {
@@ -267,7 +270,12 @@ export async function captureAndSaveLinehaulBearer(opts = {}) {
         'info',
         '[Linehaul capture] Running dispatch gate (PurpleID / Okta / stable fdxtools home)…',
       )
-      await ensureDispatchAppReady(page, { tryOktaLogin, log, signal })
+      await ensureDispatchAppReady(page, {
+        tryOktaLogin,
+        log,
+        signal,
+        credentialOverride,
+      })
       log(
         'info',
         `[Linehaul capture] Dispatch gate finished — url=${page.url()}`,
@@ -297,6 +305,12 @@ export async function captureAndSaveLinehaulBearer(opts = {}) {
       }
 
       await saveCredentials({
+        ...(credentialOverride?.username && credentialOverride?.password
+          ? {
+              username: credentialOverride.username,
+              password: credentialOverride.password,
+            }
+          : {}),
         fedexLinehaulBearer: capturedLinehaul,
         ...(capturedDriverName ? { driverName: capturedDriverName } : {}),
       })

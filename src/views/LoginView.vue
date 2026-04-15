@@ -1,7 +1,7 @@
 <script setup>
 import { ref, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { getAuthStatus, postAuthLogin, putCredentials } from '../api.js'
+import { getAuthStatus, postAuthLogin } from '../api.js'
 
 const route = useRoute()
 const router = useRouter()
@@ -41,11 +41,6 @@ async function onSubmit() {
   submitting.value = true
   try {
     await postAuthLogin({ username: u, password: p })
-    try {
-      await putCredentials({ username: u, password: p })
-    } catch {
-      /* session is valid; Settings can be updated manually */
-    }
     await router.replace(redirectTarget())
   } catch (e) {
     errorMsg.value =
