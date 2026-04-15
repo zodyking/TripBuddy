@@ -105,7 +105,7 @@ async function onSubmit() {
     </div>
 
     <footer class="login-tos" role="contentinfo">
-      <h2 class="login-tos-heading">Terms of use</h2>
+      <h2 class="login-tos-heading">Terms of Use</h2>
       <p class="login-tos-text">
         By accessing or using this site, you agree to our Terms of Service and all applicable laws. Automated access is strictly prohibited, including bots, scrapers, crawlers, monitoring tools, and similar systems. Access or use by operational security firms, intelligence vendors, surveillance companies, investigative service providers, or similar entities is not permitted without our prior written consent. Unauthorized use may result in blocked access, termination, and legal action.
       </p>
