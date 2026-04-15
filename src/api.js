@@ -564,3 +564,18 @@ export async function saveLocationToDirectory(data) {
   })
   return handleJson(r)
 }
+
+/**
+ * Update shared directory phone for a location (visible to all users).
+ * @param {string} locationId
+ * @param {string} phone
+ */
+export async function patchDirectoryPhone(locationId, phone) {
+  const id = encodeURIComponent(String(locationId))
+  const r = await apiFetch(`/api/directory/${id}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ phone: phone ?? '' }),
+  })
+  return handleJson(r)
+}

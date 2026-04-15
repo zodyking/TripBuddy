@@ -1,6 +1,8 @@
 import crypto from 'node:crypto'
 
-/** @type {Map<string, number>} sessionId -> expiry unix ms */
+/** @typedef {{ exp: number, accountKey: string | null }} SessionEntry */
+
+/** @type {Map<string, SessionEntry>} */
 const sessions = new Map()
 
 const SESSION_MS = 7 * 24 * 60 * 60 * 1000
@@ -11,10 +13,16 @@ export function isAuthEnabled() {
   return !/^(0|false|no|off)$/i.test(String(v).trim())
 }
 
-export function createSession() {
+/**
+ * @param {string | null} [accountKey] SHA-256 hex of normalized username; ties session to credential file
+ */
+export function createSession(accountKey = null) {
   pruneSessions()
   const id = crypto.randomBytes(32).toString('hex')
-  sessions.set(id, Date.now() + SESSION_MS)
+  sessions.set(id, {
+    exp: Date.now() + SESSION_MS,
+    accountKey: accountKey && typeof accountKey === 'string' ? accountKey : null,
+  })
   return id
 }
 
@@ -22,11 +30,23 @@ export function destroySession(id) {
   if (id) sessions.delete(id)
 }
 
+/**
+ * @param {string | undefined} id
+ * @returns {string | null}
+ */
+export function getSessionAccountKey(id) {
+  if (!id || typeof id !== 'string') return null
+  pruneSessions()
+  const s = sessions.get(id)
+  if (!s || s.exp < Date.now()) return null
+  return s.accountKey ?? null
+}
+
 export function isValidSession(id) {
   if (!id || typeof id !== 'string') return false
   pruneSessions()
-  const exp = sessions.get(id)
-  if (!exp || exp < Date.now()) {
+  const s = sessions.get(id)
+  if (!s || s.exp < Date.now()) {
     sessions.delete(id)
     return false
   }
@@ -35,8 +55,8 @@ export function isValidSession(id) {
 
 function pruneSessions() {
   const now = Date.now()
-  for (const [k, exp] of sessions) {
-    if (exp < now) sessions.delete(k)
+  for (const [k, s] of sessions) {
+    if (s.exp < now) sessions.delete(k)
   }
 }
 

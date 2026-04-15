@@ -9,6 +9,7 @@ import {
   getLinehaulDriverId,
   getTractorNumber,
   saveCredentials,
+  markAppLoginVerifiedForCurrentScope,
 } from '../credentials-store.mjs'
 import { linehaulGet, isLinehaulApigeeUrl } from '../fedex-linehaul-api.mjs'
 import { ensureDispatchAppReady } from './dispatchAuthGate.mjs'
@@ -318,6 +319,7 @@ export async function captureAndSaveLinehaulBearer(opts = {}) {
         fedexLinehaulBearer: capturedLinehaul,
         ...(capturedDriverName ? { driverName: capturedDriverName } : {}),
       })
+      await markAppLoginVerifiedForCurrentScope()
       log('info', '[Linehaul capture] Linehaul bearer token saved to encrypted credentials.')
       if (capturedDriverName) {
         log('info', `[Linehaul capture] Driver name saved: ${capturedDriverName}`)

@@ -100,3 +100,32 @@ export async function listLocations() {
     (a.locationName || '').localeCompare(b.locationName || ''),
   )
 }
+
+/**
+ * Update only the phone field for a location (shared directory).
+ * @param {string} locationId
+ * @param {string} phone
+ * @returns {Promise<{ updated: boolean, entry: LocationEntry }>}
+ */
+export async function updateLocationPhone(locationId, phone) {
+  if (!locationId) {
+    throw new Error('locationId is required')
+  }
+  const directory = await readDirectory()
+  const existing = directory[locationId]
+  if (!existing) {
+    throw new Error('Location not found')
+  }
+  const nextPhone = String(phone ?? '').trim()
+  const entry = {
+    ...existing,
+    phone: nextPhone,
+    lastUpdated: new Date().toISOString(),
+  }
+  if (existing.phone === entry.phone) {
+    return { updated: false, entry: existing }
+  }
+  directory[locationId] = entry
+  await fs.writeFile(DIRECTORY_FILE, JSON.stringify(directory, null, 2), 'utf8')
+  return { updated: true, entry }
+}

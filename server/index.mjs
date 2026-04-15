@@ -12,8 +12,13 @@ import {
   createSession,
   destroySession,
   isValidSession,
+  getSessionAccountKey,
 } from './auth-session.mjs'
 import { verifyAppLoginWithBearerCapture } from './auth-probe.mjs'
+import {
+  requestAsyncLocalStorage,
+  runWithCredentialAccountKey,
+} from './request-context.mjs'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const DIST_DIR = path.join(__dirname, '..', 'dist')
@@ -65,6 +70,12 @@ import {
   getTractorNumber,
   getLinehaulDriverId,
   getDecryptedLinehaulBearer,
+  accountKeyForUsername,
+  isAppLoginVerifiedForAccountKey,
+  verifyPasswordForAccountKey,
+  getUsernameForAccountKey,
+  setLastActiveAccountKey,
+  writeUserMeta,
 } from './credentials-store.mjs'
 import {
   captureAndSaveLinehaulBearer,
@@ -78,7 +89,11 @@ import {
 } from './fedex-linehaul-api.mjs'
 import { TOOL_SECRET_HINT } from './config.mjs'
 import { maybeUpdateAssignmentFromContext } from './assignment-logic.mjs'
-import { listLocations, upsertLocation } from './locations-directory-store.mjs'
+import {
+  listLocations,
+  upsertLocation,
+  updateLocationPhone,
+} from './locations-directory-store.mjs'
 
 await fs.mkdir(UPLOADS_DIR, { recursive: true })
 
@@ -97,6 +112,25 @@ await app.register(multipart, {
 })
 
 const COOKIE_NAME = 'fedextool_sid'
+
+/** Propagate Fastify request through AsyncLocalStorage for per-user credential files. */
+app.addHook('onRequest', (req, reply, done) => {
+  requestAsyncLocalStorage.run(req, done)
+})
+
+app.addHook('preHandler', async (req) => {
+  const path = req.url.split('?')[0] || ''
+  if (!path.startsWith('/api')) return
+  if (!isAuthEnabled()) return
+  if (path.startsWith('/api/auth/')) return
+  if (path === '/api/health') return
+  const sid = req.cookies?.[COOKIE_NAME]
+  if (isValidSession(sid)) {
+    const ak = getSessionAccountKey(sid)
+    if (ak) req.credentialAccountKey = ak
+    setLastActiveAccountKey(ak)
+  }
+})
 
 app.addHook('preHandler', async (req, reply) => {
   const path = req.url.split('?')[0] || ''
@@ -125,15 +159,74 @@ app.post('/api/auth/login', async (req, reply) => {
     return { ok: true, authDisabled: true }
   }
   const body = req.body ?? {}
-  const username = typeof body.username === 'string' ? body.username : ''
+  const usernameRaw = typeof body.username === 'string' ? body.username : ''
   const password = typeof body.password === 'string' ? body.password : ''
-  const result = await verifyAppLoginWithBearerCapture({ username, password })
+  const username = usernameRaw.trim()
+  if (!username || !password) {
+    return reply.code(400).send({
+      ok: false,
+      error: 'Username and password are required.',
+    })
+  }
+
+  const accountKey = accountKeyForUsername(username)
+  if (!accountKey) {
+    return reply.code(400).send({ ok: false, error: 'Invalid username.' })
+  }
+
+  const alreadyVerified = await isAppLoginVerifiedForAccountKey(accountKey)
+  if (alreadyVerified) {
+    const pwdOk = await verifyPasswordForAccountKey(accountKey, password)
+    const fileUser = (await getUsernameForAccountKey(accountKey)).trim()
+    const userMatch = fileUser && fileUser.toLowerCase() === username.toLowerCase()
+    if (!pwdOk || !userMatch) {
+      return reply.code(401).send({
+        ok: false,
+        error: 'Wrong username or password.',
+      })
+    }
+    const tokenOk = await runWithCredentialAccountKey(accountKey, async () => {
+      const bearer = await getDecryptedLinehaulBearer()
+      if (!bearer) return false
+      const driverId = await getLinehaulDriverId()
+      if (driverId && /^\d+$/.test(driverId)) {
+        const r = await linehaulGet('driver', driverId, bearer)
+        if (r.status === 200 && r.ok) return true
+      }
+      const tractor = await getTractorNumber()
+      if (tractor && /^\d+$/.test(tractor)) {
+        const r = await linehaulGet('tractor', tractor, bearer)
+        if (r.status === 200 && r.ok) return true
+      }
+      return false
+    })
+    if (tokenOk) {
+      await writeUserMeta(accountKey, { appLoginVerified: true })
+      setLastActiveAccountKey(accountKey)
+      const id = createSession(accountKey)
+      reply.setCookie(COOKIE_NAME, id, {
+        path: '/',
+        httpOnly: true,
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: 'lax',
+        maxAge: 7 * 24 * 60 * 60,
+      })
+      return { ok: true, fastLogin: true }
+    }
+    /* Verified user but token expired — refresh via background sign-in below. */
+  }
+
+  const result = await runWithCredentialAccountKey(accountKey, () =>
+    verifyAppLoginWithBearerCapture({ username, password }),
+  )
   if (!result.ok) {
     return reply
       .code(401)
       .send({ ok: false, error: result.error || 'Sign-in failed' })
   }
-  const id = createSession()
+  await writeUserMeta(accountKey, { appLoginVerified: true })
+  setLastActiveAccountKey(accountKey)
+  const id = createSession(accountKey)
   reply.setCookie(COOKIE_NAME, id, {
     path: '/',
     httpOnly: true,
@@ -522,6 +615,29 @@ app.post('/api/directory', async (req, reply) => {
   }
 })
 
+app.patch('/api/directory/:locationId', async (req, reply) => {
+  try {
+    const rawId = req.params?.locationId
+    const locationId =
+      typeof rawId === 'string'
+        ? rawId.trim()
+        : rawId != null
+          ? String(rawId).trim()
+          : ''
+    if (!locationId) {
+      return reply.code(400).send({ error: 'locationId is required' })
+    }
+    const body = req.body ?? {}
+    const phone = typeof body.phone === 'string' ? body.phone : ''
+    const result = await updateLocationPhone(locationId, phone)
+    return { ok: true, ...result }
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e)
+    const code = /not found/i.test(msg) ? 404 : 400
+    return reply.code(code).send({ error: msg })
+  }
+})
+
 app.post('/api/fedex/linehaul/capture-bearer', async (req, reply) => {
   if (isRunnerBusy() || isBlockRunnerBusy() || isLinehaulCaptureBusy()) {
     return reply.code(409).send({
@@ -533,13 +649,19 @@ app.post('/api/fedex/linehaul/capture-bearer', async (req, reply) => {
   const tryOktaLogin = body.tryOktaLogin !== false
   const clearSession = body.clearSession !== false
   const bypassValidityProbe = body.bypassValidityProbe === true
+  const sid = req.cookies?.[COOKIE_NAME]
+  const ak = getSessionAccountKey(sid)
   try {
-    const result = await captureAndSaveLinehaulBearer({
-      headless,
-      tryOktaLogin,
-      clearSession,
-      bypassValidityProbe,
-    })
+    const runCapture = () =>
+      captureAndSaveLinehaulBearer({
+        headless,
+        tryOktaLogin,
+        clearSession,
+        bypassValidityProbe,
+      })
+    const result = ak
+      ? await runWithCredentialAccountKey(ak, runCapture)
+      : await runCapture()
     return result
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e)

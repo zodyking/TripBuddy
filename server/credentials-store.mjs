@@ -2,11 +2,38 @@ import crypto from 'node:crypto'
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import { LOCAL_DIR } from './config.mjs'
+import { requestAsyncLocalStorage } from './request-context.mjs'
 
-const CRED_FILE = path.join(LOCAL_DIR, 'credentials.json')
+const LEGACY_CRED_FILE = path.join(LOCAL_DIR, 'credentials.json')
+const USERS_DIR = path.join(LOCAL_DIR, 'users')
 
 const ALGO = 'aes-256-gcm'
 const SCRYPT_SALT = 'fedextool-cred-v1'
+
+/** @type {string | null} */
+let lastActiveAccountKey = null
+
+/**
+ * Last user account used for API-backed automation (poll, runner).
+ * Updated when a session is active and on successful login.
+ */
+export function setLastActiveAccountKey(key) {
+  lastActiveAccountKey = typeof key === 'string' && key.length > 0 ? key : null
+}
+
+export function getLastActiveAccountKey() {
+  return lastActiveAccountKey
+}
+
+/**
+ * Stable filesystem-safe key from username (no PII in path).
+ * @param {string} username
+ */
+export function accountKeyForUsername(username) {
+  const t = typeof username === 'string' ? username.trim() : ''
+  if (!t) return null
+  return crypto.createHash('sha256').update(t.toLowerCase()).digest('hex')
+}
 
 function deriveKey() {
   const secret =
@@ -41,7 +68,75 @@ function decryptPassword(blob) {
 }
 
 /**
- * @returns {{
+ * @param {string | null} accountKey
+ */
+export function credPathForAccount(accountKey) {
+  if (!accountKey) return LEGACY_CRED_FILE
+  return path.join(USERS_DIR, accountKey, 'credentials.json')
+}
+
+/**
+ * @param {string | null} accountKey
+ */
+function metaPathForAccount(accountKey) {
+  if (!accountKey) return path.join(LOCAL_DIR, 'user-meta.json')
+  return path.join(USERS_DIR, accountKey, 'user-meta.json')
+}
+
+/**
+ * Per-request: session’s account. Background (poll, no HTTP): last active login.
+ */
+function resolveAccountKey() {
+  const req = requestAsyncLocalStorage.getStore()
+  const fromReq =
+    req && typeof req.credentialAccountKey === 'string'
+      ? req.credentialAccountKey
+      : null
+  if (fromReq) return fromReq
+  const last = getLastActiveAccountKey()
+  if (last) return last
+  return null
+}
+
+let legacyMigrated = false
+
+async function maybeMigrateLegacyOnce() {
+  if (legacyMigrated) return
+  legacyMigrated = true
+  try {
+    const raw = await fs.readFile(LEGACY_CRED_FILE, 'utf8')
+    const data = JSON.parse(raw)
+    const u = typeof data.username === 'string' ? data.username.trim() : ''
+    if (!u) return
+    const key = accountKeyForUsername(u)
+    if (!key) return
+    const destDir = path.join(USERS_DIR, key)
+    const destFile = path.join(destDir, 'credentials.json')
+    try {
+      await fs.access(destFile)
+      return
+    } catch {
+      /* no dest — migrate */
+    }
+    await fs.mkdir(destDir, { recursive: true })
+    await fs.writeFile(destFile, raw, 'utf8')
+    const metaDest = path.join(destDir, 'user-meta.json')
+    try {
+      await fs.access(metaDest)
+    } catch {
+      await fs.writeFile(
+        metaDest,
+        JSON.stringify({ appLoginVerified: true }, null, 2),
+        'utf8',
+      )
+    }
+  } catch {
+    /* no legacy file */
+  }
+}
+
+/**
+ * @returns {Promise<{
  *   username: string | null,
  *   passwordEnc: object | null,
  *   tractorNumber: string | null,
@@ -49,15 +144,23 @@ function decryptPassword(blob) {
  *   linehaulBearerEnc: object | null,
  *   driverName: string | null,
  *   linehaulPollMinutes: number | null,
- * }}
+ * }>}
  */
-async function readFileRaw() {
+async function readFileRawForAccount(accountKey) {
+  await maybeMigrateLegacyOnce()
+  const file = credPathForAccount(accountKey)
   try {
-    const raw = await fs.readFile(CRED_FILE, 'utf8')
+    const raw = await fs.readFile(file, 'utf8')
     const data = JSON.parse(raw)
     let pollM = null
-    if (typeof data.linehaulPollMinutes === 'number' && !Number.isNaN(data.linehaulPollMinutes)) {
-      pollM = Math.max(0, Math.min(24 * 60, Math.floor(data.linehaulPollMinutes)))
+    if (
+      typeof data.linehaulPollMinutes === 'number' &&
+      !Number.isNaN(data.linehaulPollMinutes)
+    ) {
+      pollM = Math.max(
+        0,
+        Math.min(24 * 60, Math.floor(data.linehaulPollMinutes)),
+      )
     }
     return {
       username: data.username ?? null,
@@ -84,6 +187,58 @@ async function readFileRaw() {
   }
 }
 
+async function readFileRaw() {
+  return readFileRawForAccount(resolveAccountKey())
+}
+
+/**
+ * @param {string | null} accountKey
+ */
+export async function readUserMeta(accountKey) {
+  await maybeMigrateLegacyOnce()
+  const file = metaPathForAccount(accountKey)
+  try {
+    const raw = await fs.readFile(file, 'utf8')
+    const data = JSON.parse(raw)
+    return {
+      appLoginVerified: data.appLoginVerified === true,
+    }
+  } catch {
+    return { appLoginVerified: false }
+  }
+}
+
+/**
+ * @param {string | null} accountKey
+ * @param {Partial<{ appLoginVerified: boolean }>} patch
+ */
+export async function writeUserMeta(accountKey, patch) {
+  await fs.mkdir(path.dirname(metaPathForAccount(accountKey)), {
+    recursive: true,
+  })
+  const prev = await readUserMeta(accountKey)
+  const next = { ...prev, ...patch }
+  await fs.writeFile(
+    metaPathForAccount(accountKey),
+    JSON.stringify(next, null, 2),
+    'utf8',
+  )
+  return next
+}
+
+export async function isAppLoginVerifiedForAccountKey(accountKey) {
+  if (!accountKey) return false
+  const m = await readUserMeta(accountKey)
+  return m.appLoginVerified === true
+}
+
+/** After successful token capture from Settings while logged in (or scoped run). */
+export async function markAppLoginVerifiedForCurrentScope() {
+  const acc = resolveAccountKey()
+  if (!acc) return
+  await writeUserMeta(acc, { appLoginVerified: true })
+}
+
 export async function getCredentialsMeta() {
   const {
     username,
@@ -98,6 +253,8 @@ export async function getCredentialsMeta() {
   const en = employeeNumber?.trim() || null
   const poll =
     typeof linehaulPollMinutes === 'number' ? linehaulPollMinutes : 0
+  const acc = resolveAccountKey()
+  const verified = acc ? (await readUserMeta(acc)).appLoginVerified : false
   return {
     username: username || null,
     hasPassword: Boolean(passwordEnc?.data && passwordEnc?.iv && passwordEnc?.tag),
@@ -106,10 +263,13 @@ export async function getCredentialsMeta() {
     employeeNumber: en,
     hasEmployeeNumber: Boolean(en),
     hasLinehaulBearer: Boolean(
-      linehaulBearerEnc?.data && linehaulBearerEnc?.iv && linehaulBearerEnc?.tag,
+      linehaulBearerEnc?.data &&
+        linehaulBearerEnc?.iv &&
+        linehaulBearerEnc?.tag,
     ),
     driverName: driverName || null,
     linehaulPollMinutes: poll,
+    appLoginVerified: verified,
   }
 }
 
@@ -150,7 +310,8 @@ export async function getLinehaulDriverId() {
   const raw = await readFileRaw()
   const u = typeof raw.username === 'string' ? raw.username.trim() : ''
   if (u && DIGITS_ONLY.test(u)) return u
-  const emp = typeof raw.employeeNumber === 'string' ? raw.employeeNumber.trim() : ''
+  const emp =
+    typeof raw.employeeNumber === 'string' ? raw.employeeNumber.trim() : ''
   if (emp && DIGITS_ONLY.test(emp)) return emp
   return ''
 }
@@ -185,7 +346,10 @@ export async function getDriverName() {
  * }} body password optional = keep; linehaulPollMinutes 0–1440 (0 = no auto refresh)
  */
 export async function saveCredentials(body) {
-  await fs.mkdir(LOCAL_DIR, { recursive: true })
+  const acc = resolveAccountKey()
+  const credFile = credPathForAccount(acc)
+  await fs.mkdir(path.dirname(credFile), { recursive: true })
+
   const prev = await readFileRaw()
   const username =
     typeof body.username === 'string' ? body.username.trim() : prev.username
@@ -229,8 +393,14 @@ export async function saveCredentials(body) {
   }
 
   let linehaulPollMinutes = prev.linehaulPollMinutes
-  if (typeof body.linehaulPollMinutes === 'number' && !Number.isNaN(body.linehaulPollMinutes)) {
-    linehaulPollMinutes = Math.max(0, Math.min(24 * 60, Math.floor(body.linehaulPollMinutes)))
+  if (
+    typeof body.linehaulPollMinutes === 'number' &&
+    !Number.isNaN(body.linehaulPollMinutes)
+  ) {
+    linehaulPollMinutes = Math.max(
+      0,
+      Math.min(24 * 60, Math.floor(body.linehaulPollMinutes)),
+    )
   }
 
   const next = {
@@ -242,14 +412,16 @@ export async function saveCredentials(body) {
     driverName,
     linehaulPollMinutes,
   }
-  await fs.writeFile(CRED_FILE, JSON.stringify(next, null, 2), 'utf8')
+  await fs.writeFile(credFile, JSON.stringify(next, null, 2), 'utf8')
   return getCredentialsMeta()
 }
 
 export async function clearCredentials() {
-  await fs.mkdir(LOCAL_DIR, { recursive: true })
+  const acc = resolveAccountKey()
+  const credFile = credPathForAccount(acc)
+  await fs.mkdir(path.dirname(credFile), { recursive: true })
   await fs.writeFile(
-    CRED_FILE,
+    credFile,
     JSON.stringify(
       {
         username: null,
@@ -265,4 +437,29 @@ export async function clearCredentials() {
     ),
     'utf8',
   )
+}
+
+/**
+ * Verify password against stored hash for account (no HTTP request context).
+ * @param {string} accountKey
+ * @param {string} password
+ */
+export async function verifyPasswordForAccountKey(accountKey, password) {
+  const raw = await readFileRawForAccount(accountKey)
+  const pe = raw.passwordEnc
+  if (!pe?.data) return false
+  try {
+    return decryptPassword(pe) === password
+  } catch {
+    return false
+  }
+}
+
+/**
+ * Username on file for account (for login fast-path username match).
+ * @param {string} accountKey
+ */
+export async function getUsernameForAccountKey(accountKey) {
+  const raw = await readFileRawForAccount(accountKey)
+  return typeof raw.username === 'string' ? raw.username.trim() : ''
 }

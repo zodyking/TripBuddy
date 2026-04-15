@@ -1,6 +1,6 @@
 <script setup>
 import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue'
-import { fetchDirectory } from '../api.js'
+import { fetchDirectory, patchDirectoryPhone } from '../api.js'
 import DirectoryMap from '../components/DirectoryMap.vue'
 
 /** @type {import('vue').Ref<Array<{
@@ -19,6 +19,10 @@ const loading = ref(false)
 const error = ref('')
 const searchQuery = ref('')
 const expandedId = ref('')
+/** @type {import('vue').Ref<Record<string, string>>} */
+const phoneDraft = ref({})
+const phoneSavingId = ref('')
+const phoneSaveError = ref('')
 
 const filteredLocations = computed(() => {
   const q = searchQuery.value.trim().toLowerCase()
@@ -60,8 +64,20 @@ function prefersReducedMotion() {
   return window.matchMedia('(prefers-reduced-motion: reduce)').matches
 }
 
+function ensurePhoneDraftForId(locationId) {
+  const loc = locations.value.find((l) => l.locationId === locationId)
+  if (phoneDraft.value[locationId] === undefined) {
+    phoneDraft.value = {
+      ...phoneDraft.value,
+      [locationId]: loc?.phone != null ? String(loc.phone) : '',
+    }
+  }
+}
+
 function onMapSelect(locationId) {
   expandedId.value = locationId
+  ensurePhoneDraftForId(locationId)
+  phoneSaveError.value = ''
   nextTick(() => {
     document
       .getElementById(`dir-loc-${locationId}`)
@@ -86,7 +102,33 @@ async function loadDirectory() {
 }
 
 function toggleExpand(id) {
-  expandedId.value = expandedId.value === id ? '' : id
+  if (expandedId.value === id) {
+    expandedId.value = ''
+    return
+  }
+  expandedId.value = id
+  ensurePhoneDraftForId(id)
+  phoneSaveError.value = ''
+}
+
+async function savePhoneForLocation(loc) {
+  const id = loc.locationId
+  phoneSavingId.value = id
+  phoneSaveError.value = ''
+  try {
+    const res = await patchDirectoryPhone(id, phoneDraft.value[id] ?? '')
+    if (res.entry) {
+      const idx = locations.value.findIndex((l) => l.locationId === id)
+      if (idx >= 0) {
+        locations.value[idx] = { ...locations.value[idx], ...res.entry }
+      }
+    }
+    phoneDraft.value = { ...phoneDraft.value, [id]: res.entry?.phone ?? '' }
+  } catch (e) {
+    phoneSaveError.value = e instanceof Error ? e.message : String(e)
+  } finally {
+    phoneSavingId.value = ''
+  }
 }
 
 function formatPhone(phone) {
@@ -335,11 +377,40 @@ onUnmounted(() => {
               <dd>{{ loc.locationId }}</dd>
             </div>
 
-            <div v-if="loc.phone" class="detail-row">
+            <div class="detail-row detail-row--phone">
               <dt>Phone</dt>
-              <dd>
-                <a :href="buildTelHref(loc.phone)" class="detail-link">
-                  {{ formatPhone(loc.phone) }}
+              <dd class="phone-edit-cell">
+                <div class="phone-edit-row">
+                  <input
+                    v-model="phoneDraft[loc.locationId]"
+                    type="tel"
+                    class="phone-input"
+                    inputmode="tel"
+                    autocomplete="tel"
+                    :aria-label="'Phone for ' + (loc.locationName || loc.locationId)"
+                    placeholder="Add or update number"
+                  />
+                  <button
+                    type="button"
+                    class="phone-save-btn tap"
+                    :disabled="phoneSavingId === loc.locationId"
+                    @click="savePhoneForLocation(loc)"
+                  >
+                    {{ phoneSavingId === loc.locationId ? 'Saving…' : 'Save' }}
+                  </button>
+                </div>
+                <p v-if="phoneSaveError && expandedId === loc.locationId" class="phone-save-err">
+                  {{ phoneSaveError }}
+                </p>
+                <p class="phone-hint">
+                  Updates the shared directory for everyone.
+                </p>
+                <a
+                  v-if="buildTelHref(phoneDraft[loc.locationId] || loc.phone)"
+                  :href="buildTelHref(phoneDraft[loc.locationId] || loc.phone)"
+                  class="detail-link phone-call-link"
+                >
+                  Call {{ formatPhone(phoneDraft[loc.locationId] || loc.phone) }}
                 </a>
               </dd>
             </div>
@@ -375,8 +446,8 @@ onUnmounted(() => {
               Open in Maps
             </a>
             <a
-              v-if="loc.phone"
-              :href="buildTelHref(loc.phone)"
+              v-if="buildTelHref(phoneDraft[loc.locationId] || loc.phone)"
+              :href="buildTelHref(phoneDraft[loc.locationId] || loc.phone)"
               class="action-btn tap"
             >
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -815,6 +886,77 @@ onUnmounted(() => {
 
 .detail-link:hover {
   text-decoration: underline;
+}
+
+.detail-row--phone {
+  align-items: flex-start;
+}
+
+.phone-edit-cell {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: var(--space-2, 0.5rem);
+  text-align: right;
+}
+
+.phone-edit-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2, 0.5rem);
+  justify-content: flex-end;
+  align-items: center;
+}
+
+.phone-input {
+  flex: 1 1 10rem;
+  min-width: 0;
+  padding: var(--space-2, 0.5rem) var(--space-3, 0.75rem);
+  font-size: var(--text-sm, 0.875rem);
+  color: var(--color-text-primary, #f4f4f8);
+  background: rgba(0, 0, 0, 0.25);
+  border: 1px solid var(--color-border, rgba(255, 255, 255, 0.12));
+  border-radius: var(--radius-md, 0.5rem);
+}
+
+.phone-input:focus {
+  outline: 2px solid var(--color-accent-purple, #7b4db5);
+  outline-offset: 1px;
+}
+
+.phone-save-btn {
+  flex-shrink: 0;
+  padding: var(--space-2, 0.5rem) var(--space-3, 0.75rem);
+  font-size: var(--text-sm, 0.875rem);
+  font-weight: var(--weight-medium, 500);
+  color: var(--color-text-primary, #f4f4f8);
+  background: var(--color-accent-purple, #7b4db5);
+  border: none;
+  border-radius: var(--radius-md, 0.5rem);
+  cursor: pointer;
+  transition: opacity 0.15s ease;
+}
+
+.phone-save-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.phone-hint {
+  margin: 0;
+  font-size: var(--text-xs, 0.75rem);
+  color: var(--color-text-tertiary, #6e6e7e);
+  line-height: 1.35;
+}
+
+.phone-save-err {
+  margin: 0;
+  font-size: var(--text-xs, 0.75rem);
+  color: #f87171;
+}
+
+.phone-call-link {
+  align-self: flex-end;
 }
 
 .detail-actions {
