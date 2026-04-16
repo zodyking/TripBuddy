@@ -224,8 +224,8 @@ function startWatchForLiveUpdates() {
     },
     {
       enableHighAccuracy: true,
-      maximumAge: 2000,
-      timeout: 60_000,
+      maximumAge: 0,
+      timeout: 10_000,
     },
   )
 }

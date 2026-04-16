@@ -352,10 +352,11 @@ function toggleMyLocation() {
         () => {
           /* keep last fix; transient errors are common */
         },
+        /** Fresh fixes only (no 2s cache); short timeout so updates retry quickly while moving. */
         {
           enableHighAccuracy: true,
-          maximumAge: 2000,
-          timeout: 60_000,
+          maximumAge: 0,
+          timeout: 10_000,
         },
       )
     },
