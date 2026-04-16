@@ -15,7 +15,12 @@ const props = defineProps({
   accuracyM: { type: Number, default: null },
   /** No fix yet — map stays on default NYC */
   pending: { type: Boolean, default: true },
+  /** After first center, pan to new positions (live GPS) instead of resetting zoom each tick */
+  smoothFollow: { type: Boolean, default: false },
 })
+
+/** First fix uses setView; later updates use panTo when smoothFollow is on */
+const userViewInitialized = ref(false)
 
 const rootRef = ref(/** @type {HTMLElement | null} */ (null))
 
@@ -45,6 +50,7 @@ function sync() {
     Number.isFinite(ln)
 
   if (!hasFix || props.pending) {
+    userViewInitialized.value = false
     if (dot) {
       layer.removeLayer(dot)
       dot = null
@@ -92,7 +98,12 @@ function sync() {
   }
 
   const motion = !prefersReducedMotion()
-  map.setView(ll, 14, { animate: motion })
+  if (props.smoothFollow && userViewInitialized.value) {
+    map.panTo(ll, { animate: motion, duration: 0.22 })
+  } else {
+    map.setView(ll, 14, { animate: motion })
+    userViewInitialized.value = true
+  }
 }
 
 function initMap() {
@@ -139,7 +150,7 @@ onBeforeUnmount(() => {
 })
 
 watch(
-  () => [props.lat, props.lng, props.accuracyM, props.pending],
+  () => [props.lat, props.lng, props.accuracyM, props.pending, props.smoothFollow],
   () => {
     sync()
     nextTick(() => map?.invalidateSize())

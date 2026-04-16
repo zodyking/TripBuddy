@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed, onMounted, nextTick } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { getAuthStatus, postAuthLogin, postLoginAccessLog } from '../api.js'
 import LoginAckMap from '../components/LoginAckMap.vue'
@@ -21,6 +21,10 @@ const geoLng = ref(/** @type {number | null} */ (null))
 const geoAccuracyM = ref(/** @type {number | null} */ (null))
 const geoPending = ref(false)
 const geoDenied = ref(false)
+
+/** Live updates on step 2 (same pattern as Directory / trailer maps). */
+/** @type {number | null} */
+let geoWatchId = null
 
 const username = ref('')
 const password = ref('')
@@ -82,6 +86,13 @@ async function sendAccessLog(payload) {
   }
 }
 
+function clearGeoWatch() {
+  if (geoWatchId != null && typeof navigator !== 'undefined' && navigator.geolocation) {
+    navigator.geolocation.clearWatch(geoWatchId)
+  }
+  geoWatchId = null
+}
+
 /** Step 1 Continue: request location (same user gesture), then show map on step 2. */
 function continueFromStepOne() {
   if (!canContinueAck.value) return
@@ -89,6 +100,7 @@ function continueFromStepOne() {
     geoDenied.value = true
     return
   }
+  clearGeoWatch()
   geoPending.value = true
   geoDenied.value = false
   geoLat.value = null
@@ -111,6 +123,24 @@ function continueFromStepOne() {
         locationDenied: false,
       })
       accessStep.value = 2
+      geoWatchId = navigator.geolocation.watchPosition(
+        (p) => {
+          geoLat.value = p.coords.latitude
+          geoLng.value = p.coords.longitude
+          geoAccuracyM.value =
+            p.coords.accuracy != null && Number.isFinite(p.coords.accuracy)
+              ? p.coords.accuracy
+              : null
+        },
+        () => {
+          /* keep last fix */
+        },
+        {
+          enableHighAccuracy: true,
+          maximumAge: 0,
+          timeout: 10_000,
+        },
+      )
       nextTick(() => {
         window.dispatchEvent(new Event('resize'))
       })
@@ -130,6 +160,7 @@ function continueFromStepOne() {
 
 function confirmAccessAcknowledgment() {
   if (!locationReceived.value) return
+  clearGeoWatch()
   try {
     sessionStorage.setItem(ACCESS_ACK_KEY, '1')
   } catch {
@@ -137,6 +168,10 @@ function confirmAccessAcknowledgment() {
   }
   accessAcknowledged.value = true
 }
+
+onBeforeUnmount(() => {
+  clearGeoWatch()
+})
 
 async function onSubmit() {
   errorMsg.value = ''
@@ -232,6 +267,7 @@ async function onSubmit() {
               :lng="mapLng"
               :accuracy-m="mapAcc"
               :pending="mapPending"
+              smooth-follow
             />
 
             <div class="login-access-loc-actions">
