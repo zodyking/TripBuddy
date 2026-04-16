@@ -13,7 +13,6 @@ import {
   fetchFedexLinehaulDriver,
   fetchFedexLinehaulTripStatus,
   fetchFedexLinehaulTrips,
-  postAuthLogout,
   getSettingsAccessLog,
 } from '../api.js'
 import {
@@ -31,6 +30,7 @@ import {
 } from '../stores/liveLogStore.js'
 import SettingsSection from '../components/settings/SettingsSection.vue'
 import AccessRowMap from '../components/AccessRowMap.vue'
+import ApiStatusBadge from '../components/ApiStatusBadge.vue'
 import AutomationList from '../components/automation/AutomationList.vue'
 import AutomationEditor from '../components/automation/AutomationEditor.vue'
 import {
@@ -564,14 +564,6 @@ onUnmounted(() => {
   unregisterRecover()
 })
 
-async function logoutApp() {
-  try {
-    await postAuthLogout()
-  } catch {
-    /* still navigate */
-  }
-  await router.push({ name: 'login' })
-}
 </script>
 
 <template>
@@ -622,14 +614,6 @@ async function logoutApp() {
         @click="settingsTab = 'security'"
       >
         Security
-      </button>
-      <button
-        type="button"
-        class="settings-logout tap"
-        aria-label="Sign out of app"
-        @click="logoutApp"
-      >
-        Sign out
       </button>
     </div>
 
@@ -744,11 +728,14 @@ async function logoutApp() {
             </button>
           </div>
         </div>
-        <div class="btn-row">
-          <button type="button" class="btn primary tap" :disabled="credSaving" @click="saveCredentials">
-            {{ credSaving ? 'Saving…' : 'Save' }}
-          </button>
-          <button type="button" class="btn tap" @click="clearCredentials">Clear</button>
+        <div class="cred-actions-row">
+          <div class="btn-row">
+            <button type="button" class="btn primary tap" :disabled="credSaving" @click="saveCredentials">
+              {{ credSaving ? 'Saving…' : 'Save' }}
+            </button>
+            <button type="button" class="btn tap" @click="clearCredentials">Clear</button>
+          </div>
+          <ApiStatusBadge />
         </div>
       </SettingsSection>
 
@@ -997,26 +984,6 @@ async function logoutApp() {
   -webkit-backdrop-filter: blur(var(--blur-md, 12px));
   border: 1px solid var(--color-glass-border, rgba(255, 255, 255, 0.06));
   border-radius: var(--radius-xl, 1rem);
-}
-
-.settings-logout {
-  margin-left: auto;
-  flex: 0 0 auto;
-  padding: var(--space-2, 0.5rem) var(--space-3, 0.75rem);
-  border: 1px solid var(--color-border, rgba(255, 255, 255, 0.12));
-  border-radius: var(--radius-lg, 0.75rem);
-  background: rgba(255, 255, 255, 0.04);
-  color: var(--color-text-secondary, #a8a8b8);
-  font-size: var(--text-xs, 0.6875rem);
-  font-weight: var(--weight-semibold, 600);
-  text-transform: uppercase;
-  letter-spacing: var(--tracking-wide, 0.025em);
-}
-
-.settings-logout:hover {
-  color: var(--color-text-primary, #f4f4f8);
-  background: rgba(239, 68, 68, 0.12);
-  border-color: rgba(239, 68, 68, 0.35);
 }
 
 .tab-btn {
@@ -1370,11 +1337,19 @@ async function logoutApp() {
   align-self: center;
   white-space: nowrap;
 }
+.cred-actions-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3, 0.75rem);
+  margin-top: var(--space-3, 0.75rem);
+}
+
 .btn-row {
   display: flex;
   flex-wrap: wrap;
   gap: var(--space-2, 0.5rem);
-  margin-top: var(--space-3, 0.75rem);
 }
 .linehaul-test-row {
   margin: var(--space-4, 1rem) 0 var(--space-3, 0.75rem);

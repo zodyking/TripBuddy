@@ -1,6 +1,7 @@
 <script setup>
 import { onMounted, onUnmounted } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
+import { postAuthLogout } from '../api.js'
 import { useApiHealth } from '../composables/useApiHealth.js'
 import {
   connectLiveLogStream,
@@ -9,7 +10,17 @@ import {
 } from '../stores/liveLogStore.js'
 
 const route = useRoute()
+const router = useRouter()
 const { apiOk, refreshHealth } = useApiHealth()
+
+async function logoutApp() {
+  try {
+    await postAuthLogout()
+  } catch {
+    /* still navigate */
+  }
+  await router.push({ name: 'login' })
+}
 
 const headerAriaLabel = 'FedExTool — Linehaul'
 
@@ -44,10 +55,14 @@ onUnmounted(() => {
         </div>
 
         <div class="header-right">
-          <div class="api-status" :class="{ 'is-ok': apiOk === true, 'is-offline': apiOk === false }">
-            <span class="api-dot" :class="{ 'animate-pulse-glow': apiOk === null }"></span>
-            <span class="api-label">{{ apiOk === null ? 'Connecting' : apiOk ? 'Online' : 'Offline' }}</span>
-          </div>
+          <button
+            type="button"
+            class="header-sign-out tap"
+            aria-label="Sign out of app"
+            @click="logoutApp"
+          >
+            Sign out
+          </button>
         </div>
       </div>
     </header>
@@ -193,51 +208,27 @@ onUnmounted(() => {
   justify-content: center;
 }
 
-/* Header Right — API Status */
+/* Header Right — Sign out */
 .header-right {
   justify-self: end;
 }
 
-.api-status {
-  display: flex;
-  align-items: center;
-  gap: var(--space-1-5, 0.375rem);
-  padding: var(--space-1, 0.25rem) var(--space-2-5, 0.625rem);
-  border-radius: var(--radius-full, 9999px);
+.header-sign-out {
+  padding: var(--space-2, 0.5rem) var(--space-3, 0.75rem);
+  border: 1px solid var(--color-border, rgba(255, 255, 255, 0.12));
+  border-radius: var(--radius-lg, 0.75rem);
   background: rgba(255, 255, 255, 0.04);
-  border: 1px solid var(--color-border, rgba(255, 255, 255, 0.08));
-}
-
-.api-dot {
-  width: 0.5rem;
-  height: 0.5rem;
-  border-radius: var(--radius-full, 9999px);
-  background: var(--color-text-tertiary, #6e6e7e);
-  flex-shrink: 0;
-}
-
-.api-status.is-ok .api-dot {
-  background: var(--color-success, #22c55e);
-}
-
-.api-status.is-offline .api-dot {
-  background: var(--color-error, #ef4444);
-}
-
-.api-label {
+  color: var(--color-text-secondary, #a8a8b8);
   font-size: var(--text-xs, 0.6875rem);
-  font-weight: var(--weight-medium, 500);
-  color: var(--color-text-tertiary, #6e6e7e);
+  font-weight: var(--weight-semibold, 600);
   text-transform: uppercase;
-  letter-spacing: var(--tracking-wider, 0.05em);
+  letter-spacing: var(--tracking-wide, 0.025em);
 }
 
-.api-status.is-ok .api-label {
-  color: var(--color-success, #22c55e);
-}
-
-.api-status.is-offline .api-label {
-  color: var(--color-error, #ef4444);
+.header-sign-out:hover {
+  color: var(--color-text-primary, #f4f4f8);
+  background: rgba(239, 68, 68, 0.12);
+  border-color: rgba(239, 68, 68, 0.35);
 }
 
 /* Offline Banner */

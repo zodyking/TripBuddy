@@ -1,9 +1,16 @@
 import fs from 'node:fs/promises'
 import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 import crypto from 'node:crypto'
 import { LOCAL_DIR } from './config.mjs'
 
 const LOG_FILE = path.join(LOCAL_DIR, 'access-log.json')
+/** When `FEDEX_TOOL_DATA_DIR` points elsewhere, dev logs may still live under `server/.local`. */
+const LEGACY_DEV_LOG_FILE = path.join(
+  path.dirname(fileURLToPath(import.meta.url)),
+  '.local',
+  'access-log.json',
+)
 const MAX_ENTRIES = 500
 
 /**
@@ -20,15 +27,40 @@ const MAX_ENTRIES = 500
  * @property {string} source e.g. login_ack
  */
 
-async function readRaw() {
+/**
+ * @param {string} file
+ * @returns {Promise<AccessLogEntry[]>}
+ */
+async function readEntriesFromFile(file) {
   try {
-    const raw = await fs.readFile(LOG_FILE, 'utf8')
+    const raw = await fs.readFile(file, 'utf8')
     const data = JSON.parse(raw)
     if (data && Array.isArray(data.entries)) return data.entries
   } catch {
     /* empty */
   }
   return []
+}
+
+async function readRaw() {
+  /** Merge primary store with legacy dev file when paths differ (fixes empty Security log in dev). */
+  const paths = new Set([LOG_FILE])
+  if (LEGACY_DEV_LOG_FILE !== LOG_FILE) {
+    paths.add(LEGACY_DEV_LOG_FILE)
+  }
+  /** @type {Map<string, AccessLogEntry>} */
+  const byId = new Map()
+  for (const p of paths) {
+    const chunk = await readEntriesFromFile(p)
+    for (const e of chunk) {
+      if (e && typeof e.id === 'string' && !byId.has(e.id)) {
+        byId.set(e.id, e)
+      }
+    }
+  }
+  return Array.from(byId.values()).sort(
+    (a, b) => new Date(b.at).getTime() - new Date(a.at).getTime(),
+  )
 }
 
 /**
