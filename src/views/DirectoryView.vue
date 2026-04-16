@@ -169,6 +169,78 @@ function buildTelHref(phone) {
   return ''
 }
 
+/** E.164-style for vCard TEL (digits only, US 10 → +1). */
+function phoneToVcardTel(phone) {
+  const d = String(phone).replace(/\D/g, '')
+  if (d.length === 10) return `+1${d}`
+  if (d.length === 11 && d.startsWith('1')) return `+${d}`
+  if (d.length >= 8) return `+${d}`
+  return ''
+}
+
+function escapeVcardText(s) {
+  return String(s)
+    .replace(/\\/g, '\\\\')
+    .replace(/\n/g, '\\n')
+    .replace(/;/g, '\\;')
+    .replace(/,/g, '\\,')
+}
+
+/**
+ * Single vCard 3.0 with FN FedEx and one TEL per location (label = location display name).
+ */
+function buildDirectoryVcardString() {
+  const lines = ['BEGIN:VCARD', 'VERSION:3.0', 'N:FedEx;;;', 'FN:FedEx']
+  let item = 1
+  const sorted = [...locations.value].sort((a, b) =>
+    (a.locationName || '').localeCompare(b.locationName || '', undefined, {
+      sensitivity: 'base',
+    }),
+  )
+  for (const loc of sorted) {
+    const raw =
+      phoneDraft.value[loc.locationId] !== undefined
+        ? phoneDraft.value[loc.locationId]
+        : loc.phone ?? ''
+    const tel = phoneToVcardTel(raw)
+    if (!tel) continue
+    const label =
+      (loc.locationName && String(loc.locationName).trim()) ||
+      loc.abbreviation ||
+      `Location ${loc.locationId}`
+    lines.push(`item${item}.TEL;type=CELL:${tel}`)
+    lines.push(`item${item}.X-ABLabel:${escapeVcardText(label)}`)
+    item += 1
+  }
+  lines.push('END:VCARD')
+  return lines.join('\r\n')
+}
+
+const hasVcardPhones = computed(() => {
+  for (const loc of locations.value) {
+    const raw =
+      phoneDraft.value[loc.locationId] !== undefined
+        ? phoneDraft.value[loc.locationId]
+        : loc.phone ?? ''
+    if (phoneToVcardTel(raw)) return true
+  }
+  return false
+})
+
+function downloadDirectoryVcard() {
+  if (typeof window === 'undefined') return
+  const body = buildDirectoryVcardString()
+  if (!body.includes('item1.TEL')) return
+  const blob = new Blob([body], { type: 'text/vcard;charset=utf-8' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = 'FedEx-directory-contacts.vcf'
+  a.rel = 'noopener'
+  a.click()
+  URL.revokeObjectURL(url)
+}
+
 /**
  * Landscape + minimum width: map fixed left, list scrolls right (max map area).
  * Portrait / narrow: stacked column with normal page scroll.
@@ -260,8 +332,20 @@ onUnmounted(() => {
         :class="{ 'is-scroll-pane': isLandscapeSplit }"
       >
         <header class="directory-list-heading">
-          <h1 class="directory-title">Directory</h1>
-          <p class="directory-subtitle">Updates automatically</p>
+          <div class="directory-heading-text">
+            <h1 class="directory-title">Directory</h1>
+            <p class="directory-subtitle">Updates automatically</p>
+          </div>
+          <button
+            v-if="locations.length"
+            type="button"
+            class="directory-vcard-btn tap"
+            :disabled="!hasVcardPhones || loading"
+            title="Download one .vcf with all location numbers"
+            @click="downloadDirectoryVcard"
+          >
+            Download contacts
+          </button>
         </header>
     <div class="search-bar">
       <svg
@@ -546,8 +630,42 @@ onUnmounted(() => {
 }
 
 .directory-list-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-3, 0.75rem);
   margin-bottom: var(--space-4, 1rem);
   flex-shrink: 0;
+}
+
+.directory-heading-text {
+  min-width: 0;
+}
+
+.directory-vcard-btn {
+  flex-shrink: 0;
+  align-self: flex-start;
+  padding: var(--space-2, 0.5rem) var(--space-3, 0.75rem);
+  font-size: var(--text-xs, 0.6875rem);
+  font-weight: var(--weight-semibold, 600);
+  text-transform: uppercase;
+  letter-spacing: var(--tracking-wide, 0.03em);
+  color: var(--color-text-primary, #f4f4f8);
+  background: rgba(123, 77, 181, 0.35);
+  border: 1px solid rgba(123, 77, 181, 0.55);
+  border-radius: var(--radius-md, 0.5rem);
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.directory-vcard-btn:hover:not(:disabled) {
+  background: rgba(123, 77, 181, 0.5);
+  border-color: rgba(167, 139, 250, 0.65);
+}
+
+.directory-vcard-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
 }
 
 .directory-title {
