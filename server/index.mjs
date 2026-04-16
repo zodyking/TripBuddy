@@ -95,6 +95,10 @@ import {
   updateLocationPhone,
 } from './locations-directory-store.mjs'
 import { appendAccessEntry, listAccessEntries } from './access-log-store.mjs'
+import { getClientIp, isPrivateOrLocalIp } from './client-ip.mjs'
+import { readGeoFence, writeGeoFence } from './geo-fence-store.mjs'
+import { getGeoFenceRedirectUrl, pointInPolygon } from './geo-fence-check.mjs'
+import { lookupIpLatLng, reverseGeocodeNominatim } from './ip-geolocation.mjs'
 
 await fs.mkdir(UPLOADS_DIR, { recursive: true })
 
@@ -119,6 +123,37 @@ app.addHook('onRequest', (req, reply, done) => {
   requestAsyncLocalStorage.run(req, done)
 })
 
+function shouldSkipGeoFenceForPath(path) {
+  const p = path.split('?')[0] || ''
+  if (p === '/' || p === '/index.html' || p === '/login') return true
+  if (p.startsWith('/assets/')) return true
+  const last = p.split('/').pop() || ''
+  if (/\.[a-z0-9]{1,10}$/i.test(last)) return true
+  return false
+}
+
+/**
+ * Optional geo-fence: visitors without a session hitting non-login HTML routes are redirected
+ * if their IP geolocation falls outside the drawn polygon. `/` and `/login` stay reachable so the SPA can load.
+ */
+app.addHook('onRequest', async (req, reply) => {
+  if (req.method === 'OPTIONS') return
+  const path = req.url.split('?')[0] || ''
+  if (path.startsWith('/api')) return
+  if (shouldSkipGeoFenceForPath(path)) return
+  if (!isAuthEnabled()) return
+  const sid = req.cookies?.[COOKIE_NAME]
+  if (isValidSession(sid)) return
+  try {
+    const redirectTo = await getGeoFenceRedirectUrl(getClientIp(req))
+    if (redirectTo) {
+      return reply.redirect(302, redirectTo)
+    }
+  } catch {
+    /* fail open */
+  }
+})
+
 app.addHook('preHandler', async (req) => {
   const path = req.url.split('?')[0] || ''
   if (!path.startsWith('/api')) return
@@ -132,13 +167,6 @@ app.addHook('preHandler', async (req) => {
     setLastActiveAccountKey(ak)
   }
 })
-
-function clientIp(req) {
-  const xf = req.headers['x-forwarded-for']
-  const raw = typeof xf === 'string' ? xf.split(',')[0].trim() : ''
-  if (raw) return raw
-  return req.ip || req.socket?.remoteAddress || ''
-}
 
 app.addHook('preHandler', async (req, reply) => {
   const path = req.url.split('?')[0] || ''
@@ -265,7 +293,7 @@ app.post('/api/login/access-log', async (req, reply) => {
     const forwardedFor = typeof xf === 'string' ? xf.slice(0, 512) : null
     const ua = req.headers['user-agent']
     const entry = await appendAccessEntry({
-      ip: clientIp(req),
+      ip: getClientIp(req),
       forwardedFor,
       latitude: body.latitude,
       longitude: body.longitude,
@@ -287,7 +315,7 @@ app.post('/api/visit', async (req) => {
   const forwardedFor = typeof xf === 'string' ? xf.slice(0, 512) : null
   const ua = req.headers['user-agent']
   const entry = await appendAccessEntry({
-    ip: clientIp(req),
+    ip: getClientIp(req),
     forwardedFor,
     latitude: null,
     longitude: null,
@@ -389,6 +417,107 @@ app.delete('/api/settings/credentials', async () => {
 app.get('/api/settings/access-log', async () => {
   const entries = await listAccessEntries()
   return { ok: true, entries }
+})
+
+app.get('/api/settings/geo-fence', async () => {
+  const cfg = await readGeoFence()
+  return { ok: true, ...cfg }
+})
+
+function isValidHttpUrl(url) {
+  if (!url || typeof url !== 'string') return false
+  try {
+    const u = new URL(url.trim())
+    return u.protocol === 'https:' || u.protocol === 'http:'
+  } catch {
+    return false
+  }
+}
+
+app.put('/api/settings/geo-fence', async (req, reply) => {
+  try {
+    const body = req.body ?? {}
+    const enabled = body.enabled === true
+    const redirectUrl =
+      typeof body.redirectUrl === 'string' ? body.redirectUrl.trim() : ''
+    if (enabled && (!isValidHttpUrl(redirectUrl) || !Array.isArray(body.polygon))) {
+      return reply.code(400).send({
+        error:
+          'When enabled, provide a valid http(s) redirect URL and a polygon array.',
+      })
+    }
+    if (enabled && body.polygon.filter((p) => p && Number.isFinite(Number(p.lat)) && Number.isFinite(Number(p.lng))).length < 3) {
+      return reply.code(400).send({
+        error: 'Polygon must have at least three points.',
+      })
+    }
+    const next = await writeGeoFence({
+      enabled: body.enabled,
+      redirectUrl: body.redirectUrl,
+      polygon: body.polygon,
+    })
+    return { ok: true, ...next }
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e)
+    return reply.code(400).send({ error: msg })
+  }
+})
+
+/**
+ * Preview how the server classifies an IP against the saved polygon (no redirect).
+ */
+app.post('/api/settings/geo-fence/preview', async (req, reply) => {
+  const body = req.body ?? {}
+  const ipRaw =
+    typeof body.ip === 'string' && body.ip.trim()
+      ? body.ip.trim()
+      : getClientIp(req)
+  const cfg = await readGeoFence()
+  if (cfg.polygon.length < 3) {
+    return {
+      ok: true,
+      ip: ipRaw,
+      inside: null,
+      reason: 'no_polygon',
+      address: null,
+      lat: null,
+      lng: null,
+    }
+  }
+  if (isPrivateOrLocalIp(ipRaw)) {
+    return {
+      ok: true,
+      ip: ipRaw,
+      inside: null,
+      reason: 'private_ip',
+      address: null,
+      lat: null,
+      lng: null,
+    }
+  }
+  const pos = await lookupIpLatLng(ipRaw)
+  if (!pos) {
+    return {
+      ok: true,
+      ip: ipRaw,
+      inside: null,
+      reason: 'lookup_failed',
+      address: null,
+      lat: null,
+      lng: null,
+    }
+  }
+  const inside = pointInPolygon(pos.lat, pos.lng, cfg.polygon)
+  const address = await reverseGeocodeNominatim(pos.lat, pos.lng)
+  return {
+    ok: true,
+    ip: ipRaw,
+    inside,
+    reason: 'ok',
+    address,
+    lat: pos.lat,
+    lng: pos.lng,
+  }
 })
 
 const DIGITS_RE = /^\d+$/

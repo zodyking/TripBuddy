@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
 import {
   getAssignment,
@@ -14,6 +14,9 @@ import {
   fetchFedexLinehaulTripStatus,
   fetchFedexLinehaulTrips,
   getSettingsAccessLog,
+  getSettingsGeoFence,
+  putSettingsGeoFence,
+  postSettingsGeoFencePreview,
 } from '../api.js'
 import {
   refreshLinehaulApis,
@@ -30,6 +33,7 @@ import {
 } from '../stores/liveLogStore.js'
 import SettingsSection from '../components/settings/SettingsSection.vue'
 import AccessRowMap from '../components/AccessRowMap.vue'
+import GeoFenceEditor from '../components/GeoFenceEditor.vue'
 import ApiStatusBadge from '../components/ApiStatusBadge.vue'
 import AutomationList from '../components/automation/AutomationList.vue'
 import AutomationEditor from '../components/automation/AutomationEditor.vue'
@@ -86,6 +90,87 @@ async function loadSecurityAccessLog() {
     accessLogEntries.value = []
   } finally {
     accessLogLoading.value = false
+  }
+}
+
+const geoFenceEnabled = ref(false)
+const geoFenceRedirectUrl = ref('')
+/** @type {import('vue').Ref<Array<{ lat: number, lng: number }>>} */
+const geoFencePolygon = ref([])
+const geoFenceLoading = ref(false)
+const geoFenceSaving = ref(false)
+const geoFenceError = ref('')
+const geoFenceMsg = ref('')
+/** @type {import('vue').Ref<{ inside: boolean | null, address: string | null, lat: number | null, lng: number | null, reason?: string } | null>} */
+const geoFencePreview = ref(null)
+
+/** @type {import('vue').Ref<InstanceType<typeof GeoFenceEditor> | null>} */
+const geoFenceEditorRef = ref(null)
+
+async function loadGeoFenceSettings() {
+  geoFenceLoading.value = true
+  geoFenceError.value = ''
+  try {
+    const res = await getSettingsGeoFence()
+    geoFenceEnabled.value = res.enabled === true
+    geoFenceRedirectUrl.value =
+      typeof res.redirectUrl === 'string' ? res.redirectUrl : ''
+    geoFencePolygon.value = Array.isArray(res.polygon)
+      ? res.polygon.map((p) => ({
+          lat: Number(p.lat),
+          lng: Number(p.lng),
+        }))
+      : []
+    await refreshGeoFencePreview()
+  } catch (e) {
+    geoFenceError.value = e instanceof Error ? e.message : String(e)
+  } finally {
+    geoFenceLoading.value = false
+  }
+}
+
+async function saveGeoFenceSettings() {
+  geoFenceSaving.value = true
+  geoFenceMsg.value = ''
+  geoFenceError.value = ''
+  try {
+    await putSettingsGeoFence({
+      enabled: geoFenceEnabled.value,
+      redirectUrl: geoFenceRedirectUrl.value.trim(),
+      polygon: geoFencePolygon.value,
+    })
+    geoFenceMsg.value = 'Saved'
+    await refreshGeoFencePreview()
+  } catch (e) {
+    geoFenceError.value = e instanceof Error ? e.message : String(e)
+  } finally {
+    geoFenceSaving.value = false
+  }
+}
+
+function clearGeoFencePolygon() {
+  geoFencePolygon.value = []
+  void refreshGeoFencePreview()
+}
+
+function undoGeoFenceLastPoint() {
+  if (!geoFencePolygon.value.length) return
+  geoFencePolygon.value = geoFencePolygon.value.slice(0, -1)
+  void refreshGeoFencePreview()
+}
+
+async function refreshGeoFencePreview() {
+  try {
+    const res = await postSettingsGeoFencePreview({})
+    geoFencePreview.value = {
+      inside: res.inside ?? null,
+      address: res.address ?? null,
+      lat: res.lat ?? null,
+      lng: res.lng ?? null,
+      reason: res.reason,
+    }
+  } catch {
+    geoFencePreview.value = null
   }
 }
 
@@ -556,6 +641,8 @@ watch(settingsTab, (tab) => {
   }
   if (tab === 'security') {
     void loadSecurityAccessLog()
+    void loadGeoFenceSettings()
+    nextTick(() => geoFenceEditorRef.value?.invalidateSize?.())
   }
 })
 
@@ -912,6 +999,77 @@ onUnmounted(() => {
     </main>
 
     <main v-show="settingsTab === 'security'" class="stack security-panel">
+      <SettingsSection title="Auto redirect" :collapsible="false">
+        <p class="security-lead">
+          Draw an allowed region on the map. When enabled, visitors without a session whose IP-based
+          location (OpenStreetMap reverse geocode from coordinates) falls outside the region are
+          redirected to the URL you set. Signed-in users are not affected.
+        </p>
+        <p v-if="geoFenceLoading" class="cred-msg">Loading…</p>
+        <p v-else-if="geoFenceError" class="cred-msg cred-msg--error">{{ geoFenceError }}</p>
+        <template v-else>
+          <label class="toggle-row">
+            <input
+              v-model="geoFenceEnabled"
+              type="checkbox"
+              class="tap"
+            />
+            <span>Enable auto redirect for visitors outside the drawn area</span>
+          </label>
+          <label class="lbl" for="geo-fence-redirect">Redirect URL</label>
+          <input
+            id="geo-fence-redirect"
+            v-model="geoFenceRedirectUrl"
+            class="inp tap"
+            type="url"
+            autocomplete="off"
+            placeholder="https://example.com"
+          />
+          <div class="geo-fence-toolbar">
+            <button type="button" class="btn tap" @click="undoGeoFenceLastPoint" :disabled="!geoFencePolygon.length">
+              Undo last point
+            </button>
+            <button type="button" class="btn tap" @click="clearGeoFencePolygon">Clear polygon</button>
+            <button type="button" class="btn ghost tap" @click="refreshGeoFencePreview">Preview my IP</button>
+          </div>
+          <GeoFenceEditor
+            ref="geoFenceEditorRef"
+            v-model="geoFencePolygon"
+          />
+          <div v-if="geoFencePreview" class="geo-fence-preview" role="status">
+            <template v-if="geoFencePreview.reason === 'no_polygon'">
+              <p class="geo-fence-preview-line">Add at least three points to test.</p>
+            </template>
+            <template v-else-if="geoFencePreview.reason === 'private_ip'">
+              <p class="geo-fence-preview-line">Your IP looks private or local — geo-fence applies to public visitor IPs only.</p>
+            </template>
+            <template v-else-if="geoFencePreview.reason === 'lookup_failed'">
+              <p class="geo-fence-preview-line">Could not resolve IP location (rate limit or network).</p>
+            </template>
+            <template v-else>
+              <p class="geo-fence-preview-line">
+                <strong>Inside allowed area:</strong>
+                {{ geoFencePreview.inside === true ? 'Yes' : geoFencePreview.inside === false ? 'No (would redirect if enabled)' : '—' }}
+              </p>
+              <p v-if="geoFencePreview.address" class="geo-fence-preview-line geo-fence-address">
+                {{ geoFencePreview.address }}
+              </p>
+            </template>
+          </div>
+          <p v-if="geoFenceMsg" class="cred-msg">{{ geoFenceMsg }}</p>
+          <div class="btn-row">
+            <button
+              type="button"
+              class="btn primary tap"
+              :disabled="geoFenceSaving"
+              @click="saveGeoFenceSettings"
+            >
+              {{ geoFenceSaving ? 'Saving…' : 'Save auto redirect' }}
+            </button>
+          </div>
+        </template>
+      </SettingsSection>
+
       <SettingsSection title="Access log" :collapsible="false">
         <p class="security-lead">
           Page visits (IP on load), login gate events, and optional browser-reported coordinates. Each row with coordinates includes its own map.
@@ -1024,6 +1182,52 @@ onUnmounted(() => {
   font-size: var(--text-sm, 0.8125rem);
   line-height: 1.5;
   color: var(--color-text-secondary, #a8a8b8);
+}
+
+.toggle-row {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3, 0.75rem);
+  margin-bottom: var(--space-4, 1rem);
+  font-size: var(--text-sm, 0.8125rem);
+  line-height: 1.45;
+  color: var(--color-text, #e4e4eb);
+}
+
+.toggle-row input {
+  margin-top: 0.2rem;
+  flex-shrink: 0;
+}
+
+.geo-fence-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2, 0.5rem);
+  margin-bottom: var(--space-3, 0.75rem);
+}
+
+.geo-fence-preview {
+  margin: var(--space-4, 1rem) 0;
+  padding: var(--space-3, 0.75rem) var(--space-4, 1rem);
+  border-radius: var(--radius-lg, 0.75rem);
+  background: var(--color-glass, rgba(22, 22, 29, 0.5));
+  border: 1px solid var(--color-glass-border, rgba(255, 255, 255, 0.06));
+}
+
+.geo-fence-preview-line {
+  margin: 0;
+  font-size: var(--text-sm, 0.8125rem);
+  line-height: 1.5;
+  color: var(--color-text-secondary, #a8a8b8);
+}
+
+.geo-fence-preview-line + .geo-fence-preview-line {
+  margin-top: var(--space-2, 0.5rem);
+}
+
+.geo-fence-address {
+  color: var(--color-text-tertiary, #8b8b9a);
+  word-break: break-word;
 }
 
 .access-source {
