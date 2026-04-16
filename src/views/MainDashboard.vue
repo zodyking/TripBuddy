@@ -819,10 +819,35 @@ const linehaulDriverIdDisplay = computed(() =>
   linehaulDriverIdFromCredMeta(linehaulCredMeta.value ?? {}),
 )
 
+/**
+ * If first or last segment is long, show two initials (avoids multiline layout breaks).
+ * @param {string} raw
+ */
+function formatDriverNameForCard(raw) {
+  const s = String(raw).trim()
+  if (!s) return ''
+  const parts = s.split(/\s+/).filter(Boolean)
+  if (parts.length === 0) return ''
+  const MAX = 10
+  if (parts.length === 1) {
+    const w = parts[0]
+    return w.length > MAX ? `${w.slice(0, 1).toUpperCase()}.` : w
+  }
+  const first = parts[0]
+  const last = parts[parts.length - 1]
+  if (first.length > MAX || last.length > MAX) {
+    const a = first[0] || ''
+    const b = last[0] || ''
+    return `${a}${b}`.toUpperCase()
+  }
+  return s
+}
+
 /** Driver name scraped from Okta userinfo during Linehaul capture. */
 const driverDisplayName = computed(() => {
   const name = linehaulCredMeta.value?.driverName
-  return typeof name === 'string' ? name : ''
+  if (typeof name !== 'string' || !name.trim()) return ''
+  return formatDriverNameForCard(name)
 })
 
 async function refreshLinehaulCredMeta() {
@@ -1320,9 +1345,9 @@ onUnmounted(() => {
                 <dt>Driver ID</dt>
                 <dd>{{ linehaulDriverIdDisplay }}</dd>
               </div>
-              <div v-if="driverDisplayName" class="linehaul-dl-row">
+              <div v-if="driverDisplayName" class="linehaul-dl-row linehaul-dl-row--driver-name">
                 <dt>NAME</dt>
-                <dd>{{ driverDisplayName }}</dd>
+                <dd class="linehaul-dd-name">{{ driverDisplayName }}</dd>
               </div>
               <div v-if="linehaulDriverBody.driverActvStat" class="linehaul-dl-row">
                 <dt>Active</dt>
@@ -1854,6 +1879,12 @@ onUnmounted(() => {
 }
 .driver-status-cards .linehaul-dl-row dt {
   font-size: clamp(0.58rem, 1.2vw + 0.42rem, 0.68rem);
+}
+.driver-status-cards .linehaul-dl-row--driver-name .linehaul-dd-name {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
 }
 .driver-status-cards .linehaul-h3 {
   font-size: clamp(0.65rem, 1vw + 0.5rem, 0.78rem);
