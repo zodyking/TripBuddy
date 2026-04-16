@@ -183,11 +183,11 @@ async function onSubmit() {
       >
         <div class="login-access-card glass" @click.stop>
           <template v-if="accessStep === 1">
-            <h2 id="login-access-title" class="login-access-title login-access-title--warm">
+            <h2 id="login-access-title" class="login-access-title">
               Access Acknowledgment
             </h2>
-            <p id="login-access-desc" class="login-access-lead login-access-lead--warm">
-              Quick check — then we’ll ask your browser for location once. By continuing, you agree we may store your network address and approximate location for security.
+            <p id="login-access-desc" class="login-access-lead">
+              IP and approximate location may be recorded. Continue requests browser location.
             </p>
             <ul class="login-access-list" role="list">
               <li class="login-access-item">
@@ -197,7 +197,7 @@ async function onSubmit() {
                     type="checkbox"
                     class="login-access-cb"
                   />
-                  <span>I’m a real person using this site myself.</span>
+                  <span>I am not a bot or automated tool.</span>
                 </label>
               </li>
               <li class="login-access-item">
@@ -207,7 +207,7 @@ async function onSubmit() {
                     type="checkbox"
                     class="login-access-cb"
                   />
-                  <span>I’m not a crawler or ad scraper.</span>
+                  <span>I am not crawling or harvesting site data for ads or analytics.</span>
                 </label>
               </li>
               <li class="login-access-item">
@@ -217,29 +217,26 @@ async function onSubmit() {
                     type="checkbox"
                     class="login-access-cb"
                   />
-                  <span>I’m not here on behalf of a security or surveillance vendor.</span>
+                  <span>I am not acting for a security, surveillance, or investigative vendor.</span>
                 </label>
               </li>
             </ul>
             <button
               type="button"
-              class="login-access-btn tap login-access-btn--primary"
+              class="login-access-btn tap"
               :disabled="!canContinueAck || geoPending"
               @click="continueFromStepOne"
             >
-              <template v-if="geoPending">Asking for location…</template>
+              <template v-if="geoPending">Requesting location…</template>
               <template v-else>Continue</template>
             </button>
-            <p v-if="geoDenied && !geoPending" class="login-access-loc-note login-access-loc-note--soft" role="status">
-              We couldn’t get your location. Allow it in the browser prompt, then tap Continue again.
+            <p v-if="geoDenied && !geoPending" class="login-access-loc-note" role="status">
+              Allow location in the browser prompt, then Continue again.
             </p>
           </template>
 
           <template v-else>
-            <h2 class="login-access-title login-access-title--warm">Your Location</h2>
-            <p class="login-access-subtle">
-              Here’s a quick map of where you are. When you’re ready, continue to the sign-in form.
-            </p>
+            <h2 class="login-access-title">Your Location</h2>
 
             <LoginAckMap
               :lat="mapLat"
@@ -251,7 +248,7 @@ async function onSubmit() {
             <div class="login-access-loc-actions">
               <button
                 type="button"
-                class="login-access-btn tap login-access-btn--primary"
+                class="login-access-btn tap"
                 :disabled="!locationReceived"
                 @click="confirmAccessAcknowledgment"
               >
@@ -363,15 +360,13 @@ async function onSubmit() {
 
 .login-access-card {
   width: 100%;
-  max-width: 26rem;
+  max-width: 24rem;
   max-height: min(92vh, 44rem);
   overflow-y: auto;
-  padding: var(--space-6, 1.5rem);
+  padding: var(--space-5, 1.25rem) var(--space-5, 1.25rem);
   border-radius: var(--radius-2xl, 1.25rem);
-  border: 1px solid rgba(167, 139, 250, 0.22);
-  box-shadow:
-    0 16px 48px rgba(0, 0, 0, 0.4),
-    0 0 0 1px rgba(167, 139, 250, 0.08);
+  border: 1px solid rgba(123, 77, 181, 0.35);
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.45), 0 0 0 1px rgba(123, 77, 181, 0.12);
 }
 
 .login-access-title {
@@ -383,39 +378,21 @@ async function onSubmit() {
   letter-spacing: var(--tracking-tight, -0.02em);
 }
 
-.login-access-title--warm {
-  font-weight: var(--weight-semibold, 600);
-  color: #f0eef8;
-}
-
 .login-access-lead {
-  margin: 0 0 var(--space-5, 1.25rem);
+  margin: 0 0 var(--space-4, 1rem);
   font-size: var(--text-sm, 0.8125rem);
-  line-height: 1.5;
+  line-height: 1.45;
   color: var(--color-text-secondary, #a8a8b8);
   text-align: center;
 }
 
-.login-access-lead--warm {
-  color: #c4c2d4;
-  line-height: 1.55;
-}
-
-.login-access-subtle {
-  margin: 0 0 var(--space-4, 1rem);
-  font-size: var(--text-sm, 0.8125rem);
-  line-height: 1.5;
-  color: #b4b0c8;
-  text-align: center;
-}
-
 .login-access-list {
-  margin: 0 0 var(--space-5, 1.25rem);
+  margin: 0 0 var(--space-4, 1rem);
   padding: 0;
   list-style: none;
   display: flex;
   flex-direction: column;
-  gap: var(--space-3, 0.75rem);
+  gap: var(--space-2, 0.5rem);
 }
 
 .login-access-item {
@@ -425,10 +402,10 @@ async function onSubmit() {
 .login-access-label {
   display: flex;
   align-items: flex-start;
-  gap: var(--space-3, 0.75rem);
+  gap: var(--space-2-5, 0.625rem);
   font-size: var(--text-sm, 0.8125rem);
-  line-height: 1.45;
-  color: #ddd9eb;
+  line-height: 1.4;
+  color: var(--color-text-primary, #e8e8ee);
   cursor: pointer;
   text-align: left;
 }
@@ -469,7 +446,7 @@ async function onSubmit() {
   display: flex;
   flex-direction: column;
   gap: var(--space-2, 0.5rem);
-  margin: var(--space-4, 1rem) 0;
+  margin: var(--space-3, 0.75rem) 0 0;
 }
 
 .login-access-loc-note {
@@ -478,19 +455,6 @@ async function onSubmit() {
   line-height: 1.4;
   color: var(--color-text-tertiary, #6e6e7e);
   text-align: center;
-}
-
-.login-access-loc-note--soft {
-  color: #a8a4bc;
-}
-
-.login-access-btn--primary {
-  background: linear-gradient(180deg, #8b6bc4 0%, #6d4aa8 100%);
-  box-shadow: 0 2px 8px rgba(109, 74, 168, 0.35);
-}
-
-.login-access-btn--primary:hover:not(:disabled) {
-  box-shadow: 0 4px 14px rgba(139, 107, 196, 0.4);
 }
 
 .login-main {
