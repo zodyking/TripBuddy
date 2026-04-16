@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed, onMounted, watch, nextTick } from 'vue'
+import { ref, computed, onMounted, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { getAuthStatus, postAuthLogin, postLoginAccessLog } from '../api.js'
 import LoginAckMap from '../components/LoginAckMap.vue'
@@ -75,14 +75,6 @@ onMounted(async () => {
   }
 })
 
-function goToAccessStep2() {
-  if (!canContinueAck.value) return
-  accessStep.value = 2
-  nextTick(() => {
-    /* Leaflet in step 2 needs layout */
-  })
-}
-
 async function sendAccessLog(payload) {
   try {
     await postLoginAccessLog(payload)
@@ -91,7 +83,9 @@ async function sendAccessLog(payload) {
   }
 }
 
-function shareLocationForSecurity() {
+/** Step 1 Continue: request location (same user gesture), then show map on step 2. */
+function continueFromStepOne() {
+  if (!canContinueAck.value) return
   if (typeof navigator === 'undefined' || !navigator.geolocation) {
     geoDenied.value = true
     return
@@ -117,6 +111,10 @@ function shareLocationForSecurity() {
         accuracyM: geoAccuracyM.value,
         locationDenied: false,
       })
+      accessStep.value = 2
+      nextTick(() => {
+        window.dispatchEvent(new Event('resize'))
+      })
     },
     async () => {
       geoPending.value = false
@@ -140,22 +138,6 @@ function confirmAccessAcknowledgment() {
   }
   accessAcknowledged.value = true
 }
-
-function onStep2PrimaryClick() {
-  if (locationReceived.value) {
-    confirmAccessAcknowledgment()
-  } else {
-    shareLocationForSecurity()
-  }
-}
-
-watch(accessStep, (s) => {
-  if (s === 2) {
-    nextTick(() => {
-      window.dispatchEvent(new Event('resize'))
-    })
-  }
-})
 
 async function onSubmit() {
   errorMsg.value = ''
@@ -201,11 +183,11 @@ async function onSubmit() {
       >
         <div class="login-access-card glass" @click.stop>
           <template v-if="accessStep === 1">
-            <h2 id="login-access-title" class="login-access-title">
-              Access acknowledgment
+            <h2 id="login-access-title" class="login-access-title login-access-title--warm">
+              Access Acknowledgment
             </h2>
-            <p id="login-access-desc" class="login-access-lead">
-              This application is for authorized individuals only. Automated systems, bulk data collection, and third-party monitoring are not permitted. Please confirm each statement below to continue.
+            <p id="login-access-desc" class="login-access-lead login-access-lead--warm">
+              Quick check — then we’ll ask your browser for location once. By continuing, you agree we may store your network address and approximate location for security.
             </p>
             <ul class="login-access-list" role="list">
               <li class="login-access-item">
@@ -215,7 +197,7 @@ async function onSubmit() {
                     type="checkbox"
                     class="login-access-cb"
                   />
-                  <span>I am not a bot or automated tool; I am personally operating this session.</span>
+                  <span>I’m a real person using this site myself.</span>
                 </label>
               </li>
               <li class="login-access-item">
@@ -225,7 +207,7 @@ async function onSubmit() {
                     type="checkbox"
                     class="login-access-cb"
                   />
-                  <span>I am not an advertising or marketing crawler, nor am I collecting site data for ad or analytics harvesting.</span>
+                  <span>I’m not a crawler or ad scraper.</span>
                 </label>
               </li>
               <li class="login-access-item">
@@ -235,27 +217,28 @@ async function onSubmit() {
                     type="checkbox"
                     class="login-access-cb"
                   />
-                  <span>I am not acting on behalf of a security, intelligence, surveillance, or investigative vendor or similar organization.</span>
+                  <span>I’m not here on behalf of a security or surveillance vendor.</span>
                 </label>
               </li>
             </ul>
             <button
               type="button"
-              class="login-access-btn tap"
-              :disabled="!canContinueAck"
-              @click="goToAccessStep2"
+              class="login-access-btn tap login-access-btn--primary"
+              :disabled="!canContinueAck || geoPending"
+              @click="continueFromStepOne"
             >
-              Continue
+              <template v-if="geoPending">Asking for location…</template>
+              <template v-else>Continue</template>
             </button>
+            <p v-if="geoDenied && !geoPending" class="login-access-loc-note login-access-loc-note--soft" role="status">
+              We couldn’t get your location. Allow it in the browser prompt, then tap Continue again.
+            </p>
           </template>
 
           <template v-else>
-            <h2 class="login-access-title">Location verification</h2>
-            <p class="login-access-lead">
-              For security, we record your network address and approximate location when you sign in. Use the button below to share your location and show it on the map.
-            </p>
-            <p class="login-access-disclosure">
-              Disclosure: Your IP address and location data you share are sent to this site and stored for security auditing. Location is approximate and depends on your device and browser.
+            <h2 class="login-access-title login-access-title--warm">Your Location</h2>
+            <p class="login-access-subtle">
+              Here’s a quick map of where you are. When you’re ready, continue to the sign-in form.
             </p>
 
             <LoginAckMap
@@ -269,17 +252,12 @@ async function onSubmit() {
               <button
                 type="button"
                 class="login-access-btn tap login-access-btn--primary"
-                :disabled="geoPending"
-                @click="onStep2PrimaryClick"
+                :disabled="!locationReceived"
+                @click="confirmAccessAcknowledgment"
               >
-                <template v-if="geoPending">Requesting location…</template>
-                <template v-else-if="locationReceived">Continue to sign in</template>
-                <template v-else>Share my location</template>
+                Continue
               </button>
             </div>
-            <p v-if="geoDenied && !geoPending && !locationReceived" class="login-access-loc-note">
-              Location is required. Allow access in your browser prompt, then tap Share my location again.
-            </p>
           </template>
         </div>
       </div>
@@ -390,8 +368,10 @@ async function onSubmit() {
   overflow-y: auto;
   padding: var(--space-6, 1.5rem);
   border-radius: var(--radius-2xl, 1.25rem);
-  border: 1px solid rgba(123, 77, 181, 0.35);
-  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.45), 0 0 0 1px rgba(123, 77, 181, 0.12);
+  border: 1px solid rgba(167, 139, 250, 0.22);
+  box-shadow:
+    0 16px 48px rgba(0, 0, 0, 0.4),
+    0 0 0 1px rgba(167, 139, 250, 0.08);
 }
 
 .login-access-title {
@@ -403,11 +383,29 @@ async function onSubmit() {
   letter-spacing: var(--tracking-tight, -0.02em);
 }
 
+.login-access-title--warm {
+  font-weight: var(--weight-semibold, 600);
+  color: #f0eef8;
+}
+
 .login-access-lead {
   margin: 0 0 var(--space-5, 1.25rem);
   font-size: var(--text-sm, 0.8125rem);
   line-height: 1.5;
   color: var(--color-text-secondary, #a8a8b8);
+  text-align: center;
+}
+
+.login-access-lead--warm {
+  color: #c4c2d4;
+  line-height: 1.55;
+}
+
+.login-access-subtle {
+  margin: 0 0 var(--space-4, 1rem);
+  font-size: var(--text-sm, 0.8125rem);
+  line-height: 1.5;
+  color: #b4b0c8;
   text-align: center;
 }
 
@@ -430,7 +428,7 @@ async function onSubmit() {
   gap: var(--space-3, 0.75rem);
   font-size: var(--text-sm, 0.8125rem);
   line-height: 1.45;
-  color: var(--color-text-primary, #e8e8ee);
+  color: #ddd9eb;
   cursor: pointer;
   text-align: left;
 }
@@ -467,18 +465,6 @@ async function onSubmit() {
   cursor: not-allowed;
 }
 
-.login-access-disclosure {
-  margin: 0 0 var(--space-4, 1rem);
-  padding: var(--space-3, 0.75rem);
-  font-size: var(--text-xs, 0.6875rem);
-  line-height: 1.45;
-  color: #c4b5fd;
-  text-align: left;
-  background: rgba(45, 27, 72, 0.45);
-  border-radius: var(--radius-md, 0.5rem);
-  border: 1px solid rgba(123, 77, 181, 0.35);
-}
-
 .login-access-loc-actions {
   display: flex;
   flex-direction: column;
@@ -487,11 +473,24 @@ async function onSubmit() {
 }
 
 .login-access-loc-note {
-  margin: 0 0 var(--space-4, 1rem);
+  margin: var(--space-4, 1rem) 0 0;
   font-size: var(--text-xs, 0.6875rem);
   line-height: 1.4;
   color: var(--color-text-tertiary, #6e6e7e);
   text-align: center;
+}
+
+.login-access-loc-note--soft {
+  color: #a8a4bc;
+}
+
+.login-access-btn--primary {
+  background: linear-gradient(180deg, #8b6bc4 0%, #6d4aa8 100%);
+  box-shadow: 0 2px 8px rgba(109, 74, 168, 0.35);
+}
+
+.login-access-btn--primary:hover:not(:disabled) {
+  box-shadow: 0 4px 14px rgba(139, 107, 196, 0.4);
 }
 
 .login-main {
