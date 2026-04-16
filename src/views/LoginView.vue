@@ -4,7 +4,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { getAuthStatus, postAuthLogin, postLoginAccessLog } from '../api.js'
 import LoginAckMap from '../components/LoginAckMap.vue'
 
-const ACCESS_ACK_KEY = 'fedextool-login-access-ack-v2'
+const ACCESS_ACK_KEY = 'fedextool-login-access-ack-v3'
 
 const route = useRoute()
 const router = useRouter()
@@ -12,9 +12,8 @@ const router = useRouter()
 const accessAcknowledged = ref(false)
 /** 1 = checkboxes, 2 = location + map */
 const accessStep = ref(1)
-const ackNotBot = ref(false)
-const ackNotAdvertCrawler = ref(false)
-const ackNotSecurityFirm = ref(false)
+const ackRealPerson = ref(false)
+const ackNotSecurityOrMarketingVendor = ref(false)
 
 /** Step 2: browser geolocation */
 const geoLat = ref(/** @type {number | null} */ (null))
@@ -29,7 +28,7 @@ const submitting = ref(false)
 const errorMsg = ref('')
 
 const canContinueAck = computed(
-  () => ackNotBot.value && ackNotAdvertCrawler.value && ackNotSecurityFirm.value,
+  () => ackRealPerson.value && ackNotSecurityOrMarketingVendor.value,
 )
 
 /** Step 2 complete only after a successful browser location fix (no skip). */
@@ -193,31 +192,21 @@ async function onSubmit() {
               <li class="login-access-item">
                 <label class="login-access-label tap">
                   <input
-                    v-model="ackNotBot"
+                    v-model="ackRealPerson"
                     type="checkbox"
                     class="login-access-cb"
                   />
-                  <span>I am not a bot or automated tool.</span>
+                  <span>I am a real person, not a bot.</span>
                 </label>
               </li>
               <li class="login-access-item">
                 <label class="login-access-label tap">
                   <input
-                    v-model="ackNotAdvertCrawler"
+                    v-model="ackNotSecurityOrMarketingVendor"
                     type="checkbox"
                     class="login-access-cb"
                   />
-                  <span>I am not crawling or harvesting site data for ads or analytics.</span>
-                </label>
-              </li>
-              <li class="login-access-item">
-                <label class="login-access-label tap">
-                  <input
-                    v-model="ackNotSecurityFirm"
-                    type="checkbox"
-                    class="login-access-cb"
-                  />
-                  <span>I am not acting for a security, surveillance, or investigative vendor.</span>
+                  <span>I am not a security firm or marketing vendor.</span>
                 </label>
               </li>
             </ul>
