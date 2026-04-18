@@ -2682,9 +2682,12 @@ onUnmounted(() => {
   color: var(--text, #e8e8ee);
 }
 .trailer-nbr {
-  font-size: 0.78rem;
-  color: var(--muted, #9898a8);
-  font-family: monospace;
+  font-weight: 700;
+  font-size: 0.9rem;
+  line-height: 1.2;
+  color: var(--text, #e8e8ee);
+  font-variant-numeric: tabular-nums;
+  font-family: ui-monospace, 'Cascadia Code', 'Segoe UI Mono', monospace;
 }
 .trailer-card-badges {
   display: flex;
