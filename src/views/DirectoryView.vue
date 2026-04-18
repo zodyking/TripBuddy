@@ -1,7 +1,8 @@
 <script setup>
 import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue'
 import { fetchDirectory, patchDirectoryPhone } from '../api.js'
-import DirectoryMap from '../components/DirectoryMap.vue'
+import LeafletPinModal from '../components/LeafletPinModal.vue'
+import { copyTextToClipboard } from '../utils/copyToClipboard.js'
 
 /** @type {import('vue').Ref<Array<{
  *   locationId: string,
@@ -23,6 +24,10 @@ const expandedId = ref('')
 const phoneDraft = ref({})
 const phoneSavingId = ref('')
 const phoneSaveError = ref('')
+const directoryMapModalOpen = ref(false)
+/** When set, modal zooms to this location; empty = show all pins. */
+const mapModalFocusLocationId = ref('')
+const dirCopyToast = ref('')
 
 const filteredLocations = computed(() => {
   const q = searchQuery.value.trim().toLowerCase()
@@ -52,17 +57,69 @@ const mapPins = computed(() => {
   return out
 })
 
+/** Pins with labels for the overview map modal. */
+const mapModalPins = computed(() => {
+  const out = []
+  for (const loc of filteredLocations.value) {
+    const lat = loc.latitude != null ? Number(loc.latitude) : NaN
+    const lng = loc.longitude != null ? Number(loc.longitude) : NaN
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) continue
+    const label =
+      (loc.locationName && String(loc.locationName).trim()) ||
+      loc.abbreviation ||
+      `Location ${loc.locationId}`
+    out.push({ lat, lng, label })
+  }
+  return out
+})
+
+const mapModalSingle = computed(() => {
+  const id = mapModalFocusLocationId.value
+  if (!id) return null
+  const loc = filteredLocations.value.find((l) => l.locationId === id)
+  if (!loc) return null
+  const lat = loc.latitude != null ? Number(loc.latitude) : NaN
+  const lng = loc.longitude != null ? Number(loc.longitude) : NaN
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null
+  const title =
+    (loc.locationName && String(loc.locationName).trim()) ||
+    loc.abbreviation ||
+    'Location'
+  return { lat, lng, title }
+})
+
+function openDirectoryMapOverview() {
+  mapModalFocusLocationId.value = ''
+  directoryMapModalOpen.value = true
+}
+
+function openDirectoryMapForLocation(locationId) {
+  mapModalFocusLocationId.value = locationId
+  directoryMapModalOpen.value = true
+}
+
+function closeDirectoryMapModal() {
+  directoryMapModalOpen.value = false
+}
+
+const mapModalTitle = computed(() => {
+  if (mapModalSingle.value) return mapModalSingle.value.title
+  return 'Directory map'
+})
+
+const mapModalSubtitle = computed(() => {
+  if (mapModalSingle.value) return ''
+  const n = mapPins.value.length
+  if (!n) return 'No saved coordinates in the current list'
+  return `${n} location${n === 1 ? '' : 's'} (current search)`
+})
+
 const showMapNoCoordsNotice = computed(
   () =>
     !loading.value &&
     filteredLocations.value.length > 0 &&
     mapPins.value.length === 0,
 )
-
-function prefersReducedMotion() {
-  if (typeof window === 'undefined') return false
-  return window.matchMedia('(prefers-reduced-motion: reduce)').matches
-}
 
 function ensurePhoneDraftForId(locationId) {
   const loc = locations.value.find((l) => l.locationId === locationId)
@@ -74,18 +131,14 @@ function ensurePhoneDraftForId(locationId) {
   }
 }
 
-function onMapSelect(locationId) {
-  expandedId.value = locationId
-  ensurePhoneDraftForId(locationId)
-  phoneSaveError.value = ''
-  nextTick(() => {
-    document
-      .getElementById(`dir-loc-${locationId}`)
-      ?.scrollIntoView({
-        behavior: prefersReducedMotion() ? 'auto' : 'smooth',
-        block: 'nearest',
-      })
-  })
+async function copyDirectoryValue(text, label) {
+  const v = String(text ?? '').trim()
+  if (!v) return
+  const ok = await copyTextToClipboard(v)
+  dirCopyToast.value = ok ? `Copied ${label}` : 'Could not copy'
+  window.setTimeout(() => {
+    dirCopyToast.value = ''
+  }, 2200)
 }
 
 async function loadDirectory() {
@@ -291,13 +344,25 @@ onUnmounted(() => {
 <template>
   <div class="directory-view" :class="{ 'is-split': isLandscapeSplit }">
     <div class="directory-map-column">
-      <div class="directory-map-shell">
-        <DirectoryMap
-          :pins="mapPins"
-          :highlight-id="expandedId"
-          :fill-height="isLandscapeSplit"
-          @select="onMapSelect"
-        />
+      <div class="directory-map-cta">
+        <p class="directory-map-cta-title">Map</p>
+        <p class="directory-map-cta-desc">
+          Open a full-screen map. Showing
+          {{ mapPins.length }} pin{{ mapPins.length === 1 ? '' : 's' }} from your
+          current list.
+        </p>
+        <button
+          type="button"
+          class="directory-map-open-btn tap"
+          :disabled="!mapPins.length"
+          @click="openDirectoryMapOverview"
+        >
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+            <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z" />
+            <circle cx="12" cy="10" r="3" />
+          </svg>
+          View on map
+        </button>
       </div>
 
       <div
@@ -331,6 +396,8 @@ onUnmounted(() => {
         class="directory-list-inner"
         :class="{ 'is-scroll-pane': isLandscapeSplit }"
       >
+        <p v-if="dirCopyToast" class="dir-copy-toast" role="status" aria-live="polite">{{ dirCopyToast }}</p>
+
         <header class="directory-list-heading">
           <div class="directory-heading-text">
             <h1 class="directory-title">Directory</h1>
@@ -442,7 +509,15 @@ onUnmounted(() => {
             <span class="location-name">{{ loc.locationName || 'Unknown' }}</span>
             <span v-if="loc.abbreviation" class="location-abbr">{{ loc.abbreviation }}</span>
           </div>
-          <p v-if="loc.address" class="location-address">{{ loc.address }}</p>
+          <button
+            v-if="loc.address"
+            type="button"
+            class="location-address tap"
+            title="Tap to copy address"
+            @click.stop="copyDirectoryValue(loc.address, 'address')"
+          >
+            {{ loc.address }}
+          </button>
           <svg
             class="expand-chevron"
             viewBox="0 0 24 24"
@@ -458,7 +533,16 @@ onUnmounted(() => {
           <dl class="details-list">
             <div class="detail-row">
               <dt>Location ID</dt>
-              <dd>{{ loc.locationId }}</dd>
+              <dd>
+                <button
+                  type="button"
+                  class="copyable-detail tap"
+                  title="Tap to copy"
+                  @click="copyDirectoryValue(loc.locationId, 'location ID')"
+                >
+                  {{ loc.locationId }}
+                </button>
+              </dd>
             </div>
 
             <div class="detail-row detail-row--phone">
@@ -487,26 +571,59 @@ onUnmounted(() => {
                   {{ phoneSaveError }}
                 </p>
                 <p class="phone-hint">
-                  Updates the shared directory for everyone.
+                  Shared for everyone — save when you change the number.
                 </p>
-                <a
-                  v-if="buildTelHref(phoneDraft[loc.locationId] || loc.phone)"
-                  :href="buildTelHref(phoneDraft[loc.locationId] || loc.phone)"
-                  class="detail-link phone-call-link"
-                >
-                  Call {{ formatPhone(phoneDraft[loc.locationId] || loc.phone) }}
-                </a>
+                <div class="phone-actions">
+                  <a
+                    v-if="buildTelHref(phoneDraft[loc.locationId] || loc.phone)"
+                    :href="buildTelHref(phoneDraft[loc.locationId] || loc.phone)"
+                    class="detail-link phone-call-link"
+                  >
+                    Call {{ formatPhone(phoneDraft[loc.locationId] || loc.phone) }}
+                  </a>
+                  <button
+                    v-if="String(phoneDraft[loc.locationId] ?? loc.phone ?? '').trim()"
+                    type="button"
+                    class="phone-copy-btn tap"
+                    @click="copyDirectoryValue(phoneDraft[loc.locationId] || loc.phone, 'phone')"
+                  >
+                    Copy
+                  </button>
+                </div>
               </dd>
             </div>
 
             <div v-if="loc.latitude != null && loc.longitude != null" class="detail-row">
               <dt>Coordinates</dt>
-              <dd>{{ formatCoordinates(loc.latitude, loc.longitude) }}</dd>
+              <dd>
+                <button
+                  type="button"
+                  class="copyable-detail tap"
+                  title="Tap to copy"
+                  @click="
+                    copyDirectoryValue(
+                      formatCoordinates(loc.latitude, loc.longitude),
+                      'coordinates',
+                    )
+                  "
+                >
+                  {{ formatCoordinates(loc.latitude, loc.longitude) }}
+                </button>
+              </dd>
             </div>
 
             <div v-if="loc.timeZone" class="detail-row">
               <dt>Time zone</dt>
-              <dd>{{ loc.timeZone }}</dd>
+              <dd>
+                <button
+                  type="button"
+                  class="copyable-detail tap"
+                  title="Tap to copy"
+                  @click="copyDirectoryValue(loc.timeZone, 'time zone')"
+                >
+                  {{ loc.timeZone }}
+                </button>
+              </dd>
             </div>
 
             <div v-if="loc.lastUpdated" class="detail-row">
@@ -516,6 +633,18 @@ onUnmounted(() => {
           </dl>
 
           <div class="detail-actions">
+            <button
+              v-if="loc.latitude != null && loc.longitude != null"
+              type="button"
+              class="action-btn tap"
+              @click="openDirectoryMapForLocation(loc.locationId)"
+            >
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z" />
+                <circle cx="12" cy="10" r="3" />
+              </svg>
+              View on map
+            </button>
             <a
               v-if="buildMapsUrl(loc)"
               :href="buildMapsUrl(loc)"
@@ -524,8 +653,9 @@ onUnmounted(() => {
               class="action-btn tap"
             >
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z" />
-                <circle cx="12" cy="10" r="3" />
+                <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
+                <polyline points="15 3 21 3 21 9" />
+                <line x1="10" y1="14" x2="21" y2="3" />
               </svg>
               Open in Maps
             </a>
@@ -549,6 +679,17 @@ onUnmounted(() => {
     </p>
       </div>
     </div>
+
+    <LeafletPinModal
+      :open="directoryMapModalOpen"
+      :title="mapModalTitle"
+      :subtitle="mapModalSubtitle"
+      :lat="mapModalSingle ? mapModalSingle.lat : null"
+      :lng="mapModalSingle ? mapModalSingle.lng : null"
+      :zoom="mapModalSingle ? 16 : 12"
+      :pins="mapModalSingle ? [] : mapModalPins"
+      @close="closeDirectoryMapModal"
+    />
   </div>
 </template>
 
@@ -586,20 +727,95 @@ onUnmounted(() => {
 }
 
 .directory-view.is-split .directory-map-column {
-  flex: 1.35 1 0;
+  flex: 0 0 min(38%, 22rem);
+  max-width: min(38vw, 24rem);
   min-width: 0;
   border-right: 1px solid var(--color-border, rgba(255, 255, 255, 0.08));
 }
 
-.directory-map-shell {
-  flex: 1 1 auto;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
+.directory-map-cta {
+  padding: var(--space-4, 1rem);
+  border-radius: var(--radius-lg, 0.75rem);
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--color-border, rgba(255, 255, 255, 0.08));
 }
 
-.directory-view:not(.is-split) .directory-map-shell {
-  flex: none;
+.directory-view.is-split .directory-map-cta {
+  margin: var(--space-3, 0.75rem);
+  margin-bottom: var(--space-2, 0.5rem);
+}
+
+.directory-view:not(.is-split) .directory-map-cta {
+  margin-bottom: var(--space-4, 1rem);
+}
+
+.directory-map-cta-title {
+  margin: 0 0 var(--space-1, 0.25rem);
+  font-size: var(--text-xs, 0.6875rem);
+  font-weight: var(--weight-semibold, 600);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--color-text-tertiary, #6e6e7e);
+}
+
+.directory-map-cta-desc {
+  margin: 0 0 var(--space-3, 0.75rem);
+  font-size: var(--text-sm, 0.875rem);
+  line-height: 1.45;
+  color: var(--color-text-secondary, #a0a0b0);
+}
+
+.directory-map-open-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2, 0.5rem);
+  width: 100%;
+  padding: var(--space-3, 0.75rem) var(--space-4, 1rem);
+  border: none;
+  border-radius: var(--radius-lg, 0.75rem);
+  font-size: var(--text-sm, 0.875rem);
+  font-weight: var(--weight-semibold, 600);
+  color: var(--color-text-primary, #f4f4f8);
+  background: linear-gradient(
+    135deg,
+    rgba(123, 77, 181, 0.45),
+    rgba(123, 77, 181, 0.25)
+  );
+  border: 1px solid rgba(123, 77, 181, 0.5);
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.directory-map-open-btn svg {
+  width: 1.125rem;
+  height: 1.125rem;
+  flex-shrink: 0;
+}
+
+.directory-map-open-btn:hover:not(:disabled) {
+  background: linear-gradient(
+    135deg,
+    rgba(123, 77, 181, 0.55),
+    rgba(123, 77, 181, 0.35)
+  );
+  border-color: rgba(167, 139, 250, 0.55);
+}
+
+.directory-map-open-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.dir-copy-toast {
+  margin: 0 0 var(--space-3, 0.75rem);
+  padding: 0.5rem 0.85rem;
+  border-radius: var(--radius-md, 0.5rem);
+  font-size: var(--text-sm, 0.8125rem);
+  font-weight: 600;
+  color: var(--color-text-primary, #f4f4f8);
+  background: rgba(30, 30, 38, 0.92);
+  border: 1px solid rgba(123, 77, 181, 0.4);
 }
 
 .directory-list-column {
@@ -935,11 +1151,25 @@ onUnmounted(() => {
 }
 
 .location-address {
+  display: block;
+  width: calc(100% - var(--space-6, 1.5rem));
   font-size: var(--text-sm, 0.875rem);
   color: var(--color-text-secondary, #a0a0b0);
   margin: var(--space-1, 0.25rem) 0 0;
+  padding: 0;
   padding-right: var(--space-6, 1.5rem);
   line-height: var(--leading-snug, 1.375);
+  text-align: left;
+  background: none;
+  border: none;
+  cursor: pointer;
+  border-radius: var(--radius-sm, 0.375rem);
+  transition: color 0.12s ease, background 0.12s ease;
+}
+
+.location-address:hover {
+  color: var(--color-text-primary, #f4f4f8);
+  background: rgba(255, 255, 255, 0.04);
 }
 
 .expand-chevron {
@@ -995,6 +1225,26 @@ onUnmounted(() => {
   margin: 0;
   text-align: right;
   word-break: break-word;
+  min-width: 0;
+}
+
+.copyable-detail {
+  display: inline;
+  margin: 0;
+  padding: 0;
+  max-width: 100%;
+  font: inherit;
+  color: inherit;
+  text-align: right;
+  background: none;
+  border: none;
+  cursor: pointer;
+  border-radius: var(--radius-sm, 0.375rem);
+  transition: background 0.12s ease;
+}
+
+.copyable-detail:hover {
+  background: rgba(255, 255, 255, 0.06);
 }
 
 .detail-link {
@@ -1065,6 +1315,32 @@ onUnmounted(() => {
   font-size: var(--text-xs, 0.75rem);
   color: var(--color-text-tertiary, #6e6e7e);
   line-height: 1.35;
+}
+
+.phone-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-2, 0.5rem);
+}
+
+.phone-copy-btn {
+  padding: var(--space-1, 0.25rem) var(--space-2, 0.5rem);
+  font-size: var(--text-xs, 0.6875rem);
+  font-weight: var(--weight-semibold, 600);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--color-text-secondary, #a0a0b0);
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid var(--color-border, rgba(255, 255, 255, 0.1));
+  border-radius: var(--radius-sm, 0.375rem);
+  cursor: pointer;
+}
+
+.phone-copy-btn:hover {
+  color: var(--color-text-primary, #f4f4f8);
+  border-color: rgba(123, 77, 181, 0.45);
 }
 
 .phone-save-err {

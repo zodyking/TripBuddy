@@ -107,6 +107,36 @@ export async function getSettingsAccessLog() {
   return handleJson(r)
 }
 
+/** @returns {Promise<{ ok: boolean, enabled: boolean, redirectUrl: string, polygon: Array<{ lat: number, lng: number }> }>} */
+export async function getSettingsGeoFence() {
+  const r = await apiFetch('/api/settings/geo-fence')
+  return handleJson(r)
+}
+
+/**
+ * @param {{ enabled?: boolean, redirectUrl?: string, polygon?: Array<{ lat: number, lng: number }> }} body
+ */
+export async function putSettingsGeoFence(body) {
+  const r = await apiFetch('/api/settings/geo-fence', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body ?? {}),
+  })
+  return handleJson(r)
+}
+
+/**
+ * @param {{ ip?: string }} [body]
+ */
+export async function postSettingsGeoFencePreview(body = {}) {
+  const r = await apiFetch('/api/settings/geo-fence/preview', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body ?? {}),
+  })
+  return handleJson(r)
+}
+
 export async function getHealth() {
   const r = await apiFetch('/api/health')
   return handleJson(r)

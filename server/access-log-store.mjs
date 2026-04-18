@@ -11,7 +11,8 @@ const LEGACY_DEV_LOG_FILE = path.join(
   '.local',
   'access-log.json',
 )
-const MAX_ENTRIES = 500
+/** Keep a long history; oldest rows drop only when over cap. */
+const MAX_ENTRIES = 5000
 
 /**
  * @typedef {Object} AccessLogEntry
@@ -93,7 +94,13 @@ export async function appendAccessEntry(row) {
   }
   entries.unshift(entry)
   const trimmed = entries.slice(0, MAX_ENTRIES)
-  await fs.writeFile(LOG_FILE, JSON.stringify({ entries: trimmed }, null, 2), 'utf8')
+  const payload = JSON.stringify({ entries: trimmed }, null, 2)
+  await fs.writeFile(LOG_FILE, payload, 'utf8')
+  /** Mirror to legacy dev path so reads from either file stay in sync (no “disappearing” rows). */
+  if (LEGACY_DEV_LOG_FILE !== LOG_FILE) {
+    await fs.mkdir(path.dirname(LEGACY_DEV_LOG_FILE), { recursive: true })
+    await fs.writeFile(LEGACY_DEV_LOG_FILE, payload, 'utf8')
+  }
   return entry
 }
 

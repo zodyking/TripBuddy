@@ -65,6 +65,7 @@ import {
   extractLocationForDirectory,
 } from '../utils/linehaulLocationDisplay.js'
 import TrailerLocationMap from '../components/TrailerLocationMap.vue'
+import { copyTextToClipboard } from '../utils/copyToClipboard.js'
 import {
   maybeAnnounceNewTrip,
   maybeAnnouncePrePlanTrip,
@@ -198,6 +199,18 @@ const expandedTrailers = ref({})
 const tripDollySection = computed(() =>
   buildDollySection(linehaulTripsBody.value),
 )
+
+const copyToast = ref('')
+
+async function copyTripDetailValue(value, label) {
+  const v = String(value ?? '').trim()
+  if (!v || v === '—') return
+  const ok = await copyTextToClipboard(v)
+  copyToast.value = ok ? `Copied ${label}` : 'Could not copy'
+  window.setTimeout(() => {
+    copyToast.value = ''
+  }, 2200)
+}
 
 /** Trip destination location number for v2 transportation-network API (path param). */
 const tripDestLocationId = computed(() => {
@@ -953,6 +966,7 @@ onUnmounted(() => {
 
 <template>
   <div class="main">
+    <p v-if="copyToast" class="copy-toast" role="status" aria-live="polite">{{ copyToast }}</p>
     <Teleport to="body">
       <div
         v-if="checkInFailureText"
@@ -1484,7 +1498,17 @@ onUnmounted(() => {
             <dl class="trip-details-dl">
               <template v-for="row in tripDollySection.rows" :key="row.label">
                 <dt>{{ row.label }}</dt>
-                <dd>{{ row.value }}</dd>
+                <dd>
+                  <button
+                    type="button"
+                    class="copyable-dd tap"
+                    :disabled="row.value === '—' || !String(row.value).trim()"
+                    :title="row.value === '—' ? '' : 'Tap to copy'"
+                    @click="copyTripDetailValue(row.value, row.label)"
+                  >
+                    {{ row.value }}
+                  </button>
+                </dd>
               </template>
             </dl>
           </details>
@@ -1543,7 +1567,17 @@ onUnmounted(() => {
               <dl class="trailer-summary-dl">
                 <template v-for="row in card.summaryRows" :key="row.label">
                   <dt>{{ row.label }}</dt>
-                  <dd>{{ row.value }}</dd>
+                  <dd>
+                    <button
+                      type="button"
+                      class="copyable-dd tap"
+                      :disabled="row.value === '—' || !String(row.value).trim()"
+                      :title="row.value === '—' ? '' : 'Tap to copy'"
+                      @click.stop="copyTripDetailValue(row.value, row.label)"
+                    >
+                      {{ row.value }}
+                    </button>
+                  </dd>
                 </template>
               </dl>
             </div>
@@ -1594,6 +1628,54 @@ onUnmounted(() => {
   display: flex;
   flex-direction: column;
   gap: var(--space-4, 1rem);
+  position: relative;
+}
+
+.copy-toast {
+  position: fixed;
+  bottom: calc(var(--nav-height, 4rem) + 1rem + env(safe-area-inset-bottom, 0px));
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 10050;
+  margin: 0;
+  padding: 0.5rem 1rem;
+  border-radius: 999px;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: #f4f4f8;
+  background: rgba(30, 30, 38, 0.95);
+  border: 1px solid rgba(123, 77, 181, 0.45);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.45);
+  pointer-events: none;
+}
+
+.copyable-dd {
+  display: block;
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  border: none;
+  background: none;
+  text-align: inherit;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  border-radius: 4px;
+  transition: background 0.12s ease;
+}
+
+.copyable-dd:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.copyable-dd:focus-visible {
+  outline: 2px solid var(--color-accent-purple, #7b4db5);
+  outline-offset: 2px;
+}
+
+.copyable-dd:disabled {
+  cursor: default;
+  opacity: 0.85;
 }
 .portal-checkin-banner {
   position: fixed;
@@ -2460,6 +2542,7 @@ onUnmounted(() => {
   margin: 0;
   font-weight: 600;
   word-break: break-word;
+  min-width: 0;
 }
 .linehaul-kv li {
   padding: 0.35rem 0;
@@ -2813,6 +2896,7 @@ onUnmounted(() => {
   color: var(--text, #e8e8ee);
   font-weight: 600;
   word-break: break-word;
+  min-width: 0;
 }
 .trailer-card-details {
   padding: 0.5rem 0.75rem 0.65rem;

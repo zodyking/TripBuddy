@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
 import {
   getAssignment,
@@ -14,6 +14,9 @@ import {
   fetchFedexLinehaulTripStatus,
   fetchFedexLinehaulTrips,
   getSettingsAccessLog,
+  getSettingsGeoFence,
+  putSettingsGeoFence,
+  postSettingsGeoFencePreview,
 } from '../api.js'
 import {
   refreshLinehaulApis,
@@ -29,7 +32,8 @@ import {
   reconnectLiveLogStream,
 } from '../stores/liveLogStore.js'
 import SettingsSection from '../components/settings/SettingsSection.vue'
-import AccessRowMap from '../components/AccessRowMap.vue'
+import LeafletPinModal from '../components/LeafletPinModal.vue'
+import GeoFenceEditor from '../components/GeoFenceEditor.vue'
 import ApiStatusBadge from '../components/ApiStatusBadge.vue'
 import AutomationList from '../components/automation/AutomationList.vue'
 import AutomationEditor from '../components/automation/AutomationEditor.vue'
@@ -87,6 +91,109 @@ async function loadSecurityAccessLog() {
   } finally {
     accessLogLoading.value = false
   }
+}
+
+const geoFenceEnabled = ref(false)
+const geoFenceRedirectUrl = ref('')
+/** @type {import('vue').Ref<Array<{ lat: number, lng: number }>>} */
+const geoFencePolygon = ref([])
+const geoFenceLoading = ref(false)
+const geoFenceSaving = ref(false)
+const geoFenceError = ref('')
+const geoFenceMsg = ref('')
+/** @type {import('vue').Ref<{ inside: boolean | null, address: string | null, lat: number | null, lng: number | null, reason?: string } | null>} */
+const geoFencePreview = ref(null)
+
+/** @type {import('vue').Ref<InstanceType<typeof GeoFenceEditor> | null>} */
+const geoFenceEditorRef = ref(null)
+
+async function loadGeoFenceSettings() {
+  geoFenceLoading.value = true
+  geoFenceError.value = ''
+  try {
+    const res = await getSettingsGeoFence()
+    geoFenceEnabled.value = res.enabled === true
+    geoFenceRedirectUrl.value =
+      typeof res.redirectUrl === 'string' ? res.redirectUrl : ''
+    geoFencePolygon.value = Array.isArray(res.polygon)
+      ? res.polygon.map((p) => ({
+          lat: Number(p.lat),
+          lng: Number(p.lng),
+        }))
+      : []
+    await refreshGeoFencePreview()
+  } catch (e) {
+    geoFenceError.value = e instanceof Error ? e.message : String(e)
+  } finally {
+    geoFenceLoading.value = false
+  }
+}
+
+async function saveGeoFenceSettings() {
+  geoFenceSaving.value = true
+  geoFenceMsg.value = ''
+  geoFenceError.value = ''
+  try {
+    await putSettingsGeoFence({
+      enabled: geoFenceEnabled.value,
+      redirectUrl: geoFenceRedirectUrl.value.trim(),
+      polygon: geoFencePolygon.value,
+    })
+    geoFenceMsg.value = 'Saved'
+    await refreshGeoFencePreview()
+  } catch (e) {
+    geoFenceError.value = e instanceof Error ? e.message : String(e)
+  } finally {
+    geoFenceSaving.value = false
+  }
+}
+
+function clearGeoFencePolygon() {
+  geoFencePolygon.value = []
+  void refreshGeoFencePreview()
+}
+
+function undoGeoFenceLastPoint() {
+  if (!geoFencePolygon.value.length) return
+  geoFencePolygon.value = geoFencePolygon.value.slice(0, -1)
+  void refreshGeoFencePreview()
+}
+
+async function refreshGeoFencePreview() {
+  try {
+    const res = await postSettingsGeoFencePreview({})
+    geoFencePreview.value = {
+      inside: res.inside ?? null,
+      address: res.address ?? null,
+      lat: res.lat ?? null,
+      lng: res.lng ?? null,
+      reason: res.reason,
+    }
+  } catch {
+    geoFencePreview.value = null
+  }
+}
+
+const accessMapModalOpen = ref(false)
+/** @type {import('vue').Ref<{ lat: number, lng: number, title: string, subtitle: string } | null>} */
+const accessMapModalTarget = ref(null)
+
+function openAccessLogMap(row) {
+  const lat = row.latitude != null ? Number(row.latitude) : NaN
+  const lng = row.longitude != null ? Number(row.longitude) : NaN
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return
+  accessMapModalTarget.value = {
+    lat,
+    lng,
+    title: 'Access location',
+    subtitle: String(row.ip || ''),
+  }
+  accessMapModalOpen.value = true
+}
+
+function closeAccessMapModal() {
+  accessMapModalOpen.value = false
+  accessMapModalTarget.value = null
 }
 
 /** @type {import('vue').Ref<'off' | 'tts' | 'both'>} */
@@ -556,6 +663,8 @@ watch(settingsTab, (tab) => {
   }
   if (tab === 'security') {
     void loadSecurityAccessLog()
+    void loadGeoFenceSettings()
+    nextTick(() => geoFenceEditorRef.value?.invalidateSize?.())
   }
 })
 
@@ -912,9 +1021,89 @@ onUnmounted(() => {
     </main>
 
     <main v-show="settingsTab === 'security'" class="stack security-panel">
+      <SettingsSection title="Auto redirect" :collapsible="false">
+        <p class="security-lead">
+          Draw an allowed region. When enabled, visitors without a session whose IP location falls
+          outside the area are redirected to your URL. Signed-in users are not affected. Uses IP
+          geolocation and OpenStreetMap for address preview.
+        </p>
+        <p v-if="geoFenceLoading" class="cred-msg">Loading…</p>
+        <p v-else-if="geoFenceError" class="cred-msg cred-msg--error">{{ geoFenceError }}</p>
+        <template v-else>
+          <label class="toggle-row">
+            <input v-model="geoFenceEnabled" type="checkbox" class="tap" />
+            <span>Enable auto redirect for visitors outside the drawn area</span>
+          </label>
+          <label class="lbl" for="geo-fence-redirect">Redirect URL</label>
+          <input
+            id="geo-fence-redirect"
+            v-model="geoFenceRedirectUrl"
+            class="inp tap"
+            type="url"
+            autocomplete="off"
+            placeholder="https://example.com"
+          />
+          <div class="geo-fence-toolbar">
+            <button
+              type="button"
+              class="btn tap"
+              :disabled="!geoFencePolygon.length"
+              @click="undoGeoFenceLastPoint"
+            >
+              Undo last point
+            </button>
+            <button type="button" class="btn tap" @click="clearGeoFencePolygon">Clear polygon</button>
+            <button type="button" class="btn ghost tap" @click="refreshGeoFencePreview">
+              Preview my IP
+            </button>
+          </div>
+          <GeoFenceEditor ref="geoFenceEditorRef" v-model="geoFencePolygon" />
+          <div v-if="geoFencePreview" class="geo-fence-preview" role="status">
+            <template v-if="geoFencePreview.reason === 'no_polygon'">
+              <p class="geo-fence-preview-line">Add at least three points to test.</p>
+            </template>
+            <template v-else-if="geoFencePreview.reason === 'private_ip'">
+              <p class="geo-fence-preview-line">
+                Your IP looks private or local — the fence applies to public visitor IPs.
+              </p>
+            </template>
+            <template v-else-if="geoFencePreview.reason === 'lookup_failed'">
+              <p class="geo-fence-preview-line">Could not resolve IP location (network or rate limit).</p>
+            </template>
+            <template v-else>
+              <p class="geo-fence-preview-line">
+                <strong>Inside allowed area:</strong>
+                {{
+                  geoFencePreview.inside === true
+                    ? 'Yes'
+                    : geoFencePreview.inside === false
+                      ? 'No (would redirect if enabled)'
+                      : '—'
+                }}
+              </p>
+              <p v-if="geoFencePreview.address" class="geo-fence-preview-line geo-fence-address">
+                {{ geoFencePreview.address }}
+              </p>
+            </template>
+          </div>
+          <p v-if="geoFenceMsg" class="cred-msg">{{ geoFenceMsg }}</p>
+          <div class="btn-row">
+            <button
+              type="button"
+              class="btn primary tap"
+              :disabled="geoFenceSaving"
+              @click="saveGeoFenceSettings"
+            >
+              {{ geoFenceSaving ? 'Saving…' : 'Save auto redirect' }}
+            </button>
+          </div>
+        </template>
+      </SettingsSection>
+
       <SettingsSection title="Access log" :collapsible="false">
         <p class="security-lead">
-          Page visits (IP on load), login gate events, and optional browser-reported coordinates. Each row with coordinates includes its own map.
+          Page visits (IP on load), login gate events, and optional browser-reported coordinates.
+          Up to 5,000 entries are kept on disk. Use View on map for a full map when coordinates exist.
         </p>
         <p v-if="accessLogLoading" class="cred-msg">Loading…</p>
         <p v-else-if="accessLogError" class="cred-msg cred-msg--error">{{ accessLogError }}</p>
@@ -933,7 +1122,15 @@ onUnmounted(() => {
               <tr v-for="row in accessLogEntries" :key="row.id">
                 <td>{{ new Date(row.at).toLocaleString() }}</td>
                 <td><code class="access-ip">{{ row.ip }}</code></td>
-                <td class="access-source">{{ row.source === 'page_visit' ? 'Visit' : row.source === 'login_ack' ? 'Login gate' : (row.source || '—') }}</td>
+                <td class="access-source">
+                  {{
+                    row.source === 'page_visit'
+                      ? 'Visit'
+                      : row.source === 'login_ack'
+                        ? 'Login gate'
+                        : row.source || '—'
+                  }}
+                </td>
                 <td>
                   <template v-if="row.locationDenied">Not shared</template>
                   <template v-else-if="row.latitude != null && row.longitude != null">
@@ -942,11 +1139,19 @@ onUnmounted(() => {
                   <template v-else>—</template>
                 </td>
                 <td class="access-map-cell">
-                  <AccessRowMap
-                    v-if="row.latitude != null && row.longitude != null && Number.isFinite(Number(row.latitude)) && Number.isFinite(Number(row.longitude))"
-                    :lat="Number(row.latitude)"
-                    :lng="Number(row.longitude)"
-                  />
+                  <button
+                    v-if="
+                      row.latitude != null &&
+                      row.longitude != null &&
+                      Number.isFinite(Number(row.latitude)) &&
+                      Number.isFinite(Number(row.longitude))
+                    "
+                    type="button"
+                    class="access-map-btn tap"
+                    @click="openAccessLogMap(row)"
+                  >
+                    View on map
+                  </button>
                   <span v-else class="access-map-empty">—</span>
                 </td>
               </tr>
@@ -959,6 +1164,16 @@ onUnmounted(() => {
         <button type="button" class="btn ghost tap" @click="loadSecurityAccessLog">Refresh</button>
       </SettingsSection>
     </main>
+
+    <LeafletPinModal
+      :open="accessMapModalOpen"
+      :title="accessMapModalTarget?.title || 'Location'"
+      :subtitle="accessMapModalTarget?.subtitle || ''"
+      :lat="accessMapModalTarget?.lat ?? null"
+      :lng="accessMapModalTarget?.lng ?? null"
+      :zoom="15"
+      @close="closeAccessMapModal"
+    />
   </div>
 </template>
 
@@ -1026,6 +1241,52 @@ onUnmounted(() => {
   color: var(--color-text-secondary, #a8a8b8);
 }
 
+.toggle-row {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3, 0.75rem);
+  margin-bottom: var(--space-4, 1rem);
+  font-size: var(--text-sm, 0.8125rem);
+  line-height: 1.45;
+  color: var(--color-text, #e4e4eb);
+}
+
+.toggle-row input {
+  margin-top: 0.2rem;
+  flex-shrink: 0;
+}
+
+.geo-fence-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2, 0.5rem);
+  margin-bottom: var(--space-3, 0.75rem);
+}
+
+.geo-fence-preview {
+  margin: var(--space-4, 1rem) 0;
+  padding: var(--space-3, 0.75rem) var(--space-4, 1rem);
+  border-radius: var(--radius-lg, 0.75rem);
+  background: var(--color-glass, rgba(22, 22, 29, 0.5));
+  border: 1px solid var(--color-glass-border, rgba(255, 255, 255, 0.06));
+}
+
+.geo-fence-preview-line {
+  margin: 0;
+  font-size: var(--text-sm, 0.8125rem);
+  line-height: 1.5;
+  color: var(--color-text-secondary, #a8a8b8);
+}
+
+.geo-fence-preview-line + .geo-fence-preview-line {
+  margin-top: var(--space-2, 0.5rem);
+}
+
+.geo-fence-address {
+  color: var(--color-text-tertiary, #8b8b9a);
+  word-break: break-word;
+}
+
 .access-source {
   font-size: var(--text-xs, 0.6875rem);
   color: var(--color-text-tertiary, #6e6e7e);
@@ -1033,14 +1294,32 @@ onUnmounted(() => {
 }
 
 .access-map-cell {
-  vertical-align: top;
-  width: 9rem;
-  min-width: 8rem;
+  vertical-align: middle;
+  width: auto;
+  white-space: nowrap;
+}
+
+.access-map-btn {
+  padding: var(--space-2, 0.5rem) var(--space-3, 0.75rem);
+  font-size: var(--text-xs, 0.6875rem);
+  font-weight: var(--weight-semibold, 600);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--color-text-primary, #f4f4f8);
+  background: rgba(123, 77, 181, 0.35);
+  border: 1px solid rgba(123, 77, 181, 0.5);
+  border-radius: var(--radius-md, 0.5rem);
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.access-map-btn:hover {
+  background: rgba(123, 77, 181, 0.5);
+  border-color: rgba(167, 139, 250, 0.55);
 }
 
 .access-map-empty {
   display: inline-block;
-  padding: var(--space-4, 1rem) 0;
   color: var(--color-text-tertiary, #6e6e7e);
   font-size: var(--text-sm, 0.8125rem);
 }
