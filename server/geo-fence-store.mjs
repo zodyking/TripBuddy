@@ -1,6 +1,7 @@
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import { LOCAL_DIR } from './config.mjs'
+import { clearFenceDecisionCache } from './geo-fence-ip-cache.mjs'
 
 const FILE = path.join(LOCAL_DIR, 'geo-fence.json')
 
@@ -26,6 +27,7 @@ const CACHE_MS = 5000
 export function invalidateGeoFenceCache() {
   cachedConfig = null
   cachedAt = 0
+  clearFenceDecisionCache()
 }
 
 /**

@@ -14,6 +14,7 @@ import {
   isValidSession,
   getSessionAccountKey,
 } from './auth-session.mjs'
+import { registerSseConnection } from './session-sse.mjs'
 import { verifyAppLoginWithBearerCapture } from './auth-probe.mjs'
 import {
   requestAsyncLocalStorage,
@@ -128,14 +129,16 @@ app.addHook('onRequest', (req, reply, done) => {
 
 function shouldSkipGeoFenceForPath(urlPath) {
   const p = urlPath.split('?')[0] || ''
-  if (p === '/' || p === '/index.html' || p === '/login') return true
   if (p.startsWith('/assets/')) return true
   const last = p.split('/').pop() || ''
   if (/\.[a-z0-9]{1,10}$/i.test(last)) return true
   return false
 }
 
-/** Guests only: redirect if IP geolocation is outside drawn polygon. */
+/**
+ * Guests only: redirect on first HTML request for any app route (including `/`, `/login`)
+ * if IP is outside the allowed polygon. Skips static assets only.
+ */
 app.addHook('onRequest', async (req, reply) => {
   if (req.method === 'OPTIONS') return
   const path = req.url.split('?')[0] || ''
@@ -341,6 +344,13 @@ app.get('/api/status', async () => ({
 }))
 
 app.get('/api/events', async (req, reply) => {
+  if (!isAuthEnabled()) {
+    return reply.code(503).send({ error: 'Auth disabled' })
+  }
+  const sid = req.cookies?.[COOKIE_NAME]
+  if (!isValidSession(sid)) {
+    return reply.code(401).send({ error: 'Unauthorized', code: 'AUTH_REQUIRED' })
+  }
   reply.hijack()
   // Hijacked responses skip @fastify/cors hooks — EventSource from Vite (another origin/port) needs these.
   const origin = req.headers.origin
@@ -368,7 +378,14 @@ app.get('/api/events', async (req, reply) => {
   send({ type: 'connected', message: 'stream ready', ts: Date.now() })
   const onEntry = (payload) => send(payload)
   logBus.on('entry', onEntry)
-  req.raw.on('close', () => logBus.off('entry', onEntry))
+  let unregisterSse = () => {}
+  if (sid) {
+    unregisterSse = registerSseConnection(sid, send)
+  }
+  req.raw.on('close', () => {
+    logBus.off('entry', onEntry)
+    unregisterSse()
+  })
 })
 
 app.get('/api/assignment', async () => {
@@ -379,6 +396,7 @@ app.get('/api/assignment', async () => {
 app.put('/api/assignment', async (req, reply) => {
   try {
     const next = await writeAssignment(req.body ?? {})
+    emitLog('assignment', 'Dispatch instructions updated', { source: 'save' })
     return next
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e)

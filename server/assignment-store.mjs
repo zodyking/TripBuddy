@@ -1,8 +1,31 @@
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import { LOCAL_DIR } from './config.mjs'
+import { requestAsyncLocalStorage } from './request-context.mjs'
+import { getLastActiveAccountKey } from './credentials-store.mjs'
 
+/** Legacy global assignment (before per-account files). */
 const ASSIGNMENT_FILE = path.join(LOCAL_DIR, 'assignment.json')
+
+/**
+ * @param {string | null | undefined} accountKey
+ */
+function assignmentFileForAccount(accountKey) {
+  if (accountKey && typeof accountKey === 'string') {
+    return path.join(LOCAL_DIR, 'users', accountKey, 'assignment.json')
+  }
+  return ASSIGNMENT_FILE
+}
+
+function currentAssignmentScopeKey() {
+  const req = requestAsyncLocalStorage.getStore()
+  const fromReq =
+    req && typeof req === 'object' && 'credentialAccountKey' in req
+      ? /** @type {{ credentialAccountKey?: string }} */ (req).credentialAccountKey
+      : null
+  if (fromReq) return fromReq
+  return getLastActiveAccountKey()
+}
 
 const MAX_SLOTS = 5
 const ID_RE = /^[a-z][a-z0-9_]{0,31}$/
@@ -84,12 +107,12 @@ function validateSlots(slots) {
   return null
 }
 
-export async function readAssignment() {
+async function readAssignmentFromFile(file) {
   try {
-    const raw = await fs.readFile(ASSIGNMENT_FILE, 'utf8')
+    const raw = await fs.readFile(file, 'utf8')
     const data = JSON.parse(raw)
     const err = validateSlots(data.photoSlots || [])
-    if (err) return cloneDefault()
+    if (err) return null
     return {
       instructions: typeof data.instructions === 'string' ? data.instructions : '',
       driverPhone: typeof data.driverPhone === 'string' ? data.driverPhone : '',
@@ -101,12 +124,30 @@ export async function readAssignment() {
           : {},
     }
   } catch {
-    return cloneDefault()
+    return null
   }
 }
 
+export async function readAssignment() {
+  const ak = currentAssignmentScopeKey()
+  const scoped = assignmentFileForAccount(ak)
+  if (scoped !== ASSIGNMENT_FILE) {
+    const fromScoped = await readAssignmentFromFile(scoped)
+    if (fromScoped) return fromScoped
+    const legacy = await readAssignmentFromFile(ASSIGNMENT_FILE)
+    if (legacy) return legacy
+    return cloneDefault()
+  }
+  const global = await readAssignmentFromFile(ASSIGNMENT_FILE)
+  return global ?? cloneDefault()
+}
+
 export async function writeAssignment(body) {
-  await fs.mkdir(LOCAL_DIR, { recursive: true })
+  const ak = currentAssignmentScopeKey()
+  const targetFile = assignmentFileForAccount(ak)
+  const dir = path.dirname(targetFile)
+  await fs.mkdir(dir, { recursive: true })
+
   const prev = await readAssignment()
 
   let photoSlots = body.photoSlots ?? prev.photoSlots
@@ -143,6 +184,6 @@ export async function writeAssignment(body) {
     fieldValues,
   }
 
-  await fs.writeFile(ASSIGNMENT_FILE, JSON.stringify(next, null, 2), 'utf8')
+  await fs.writeFile(targetFile, JSON.stringify(next, null, 2), 'utf8')
   return next
 }

@@ -8,6 +8,7 @@ import {
   onActivated,
   nextTick,
 } from 'vue'
+import { useRouter } from 'vue-router'
 import {
   getAssignment,
   getCredentials,
@@ -49,6 +50,7 @@ import {
 import {
   liveLogEntries,
   registerAssignmentListener,
+  registerSessionListener,
   reconnectLiveLogStream,
 } from '../stores/liveLogStore.js'
 import { formatRunErrorForUser } from '../utils/runErrorFormat.js'
@@ -90,6 +92,8 @@ import {
   announceInspectCheckoutCancelled,
   cancelAllAlerts,
 } from '../utils/alertAudioQueue.js'
+
+const router = useRouter()
 
 const PORTAL_Z_BANNER = 2_147_483_000
 const PORTAL_Z_MODAL = 2_147_483_001
@@ -921,6 +925,7 @@ async function pollAutomationPreview() {
 
 let unregisterRecover = () => {}
 let unregisterAssignment = () => {}
+let unregisterSession = () => {}
 
 onMounted(async () => {
   unregisterAssignment = registerAssignmentListener((data) => {
@@ -929,6 +934,19 @@ onMounted(async () => {
       message: data.message || 'Assignment change detected',
       detail: data.current ?? data,
     }
+    if (data.source === 'save') {
+      void loadAssignment()
+    }
+  })
+  unregisterSession = registerSessionListener((data) => {
+    if (data?.code !== 'SESSION_REVOKED') return
+    const base = import.meta.env.BASE_URL || '/'
+    const loginPath = `${base.replace(/\/$/, '')}/login`
+    window.location.assign(
+      `${loginPath}?reason=signed_in_elsewhere&redirect=${encodeURIComponent(
+        router.currentRoute.value.fullPath,
+      )}`,
+    )
   })
   unregisterRecover = registerApiRecover(reconnectLiveLogStream)
   await loadAssignment()
@@ -952,6 +970,7 @@ onUnmounted(() => {
   clearTrailerStatusTracking()
   clearTripPhaseTracking()
   unregisterAssignment()
+  unregisterSession()
   unregisterRecover()
   if (previewPollTimer) {
     clearInterval(previewPollTimer)

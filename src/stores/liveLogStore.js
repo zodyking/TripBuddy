@@ -70,6 +70,9 @@ export const liveLogEntries = ref(loadPersistedEntries())
 /** @type {Set<(data: object) => void>} */
 const assignmentListeners = new Set()
 
+/** @type {Set<(data: object) => void>} */
+const sessionListeners = new Set()
+
 /** @type {EventSource | null} */
 let eventSource = null
 
@@ -121,6 +124,25 @@ export function registerAssignmentListener(fn) {
   return () => assignmentListeners.delete(fn)
 }
 
+/**
+ * @param {(data: object) => void} fn
+ * @returns {() => void}
+ */
+export function registerSessionListener(fn) {
+  sessionListeners.add(fn)
+  return () => sessionListeners.delete(fn)
+}
+
+function notifySessionListeners(data) {
+  for (const fn of sessionListeners) {
+    try {
+      fn(data)
+    } catch {
+      /* ignore */
+    }
+  }
+}
+
 function notifyAssignment(data) {
   for (const fn of assignmentListeners) {
     try {
@@ -143,6 +165,9 @@ export function connectLiveLogStream() {
   eventSource.onmessage = (ev) => {
     try {
       const data = JSON.parse(ev.data)
+      if (data.type === 'session') {
+        notifySessionListeners(data)
+      }
       if (data.type === 'assignment') {
         notifyAssignment(data)
       }

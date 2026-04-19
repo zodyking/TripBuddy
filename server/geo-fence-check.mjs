@@ -1,6 +1,10 @@
 import { readGeoFence } from './geo-fence-store.mjs'
 import { lookupIpLatLng } from './ip-geolocation.mjs'
 import { isPrivateOrLocalIp } from './client-ip.mjs'
+import {
+  fenceDecisionByIp,
+  FENCE_DECISION_TTL_MS,
+} from './geo-fence-ip-cache.mjs'
 
 /**
  * Ray casting: point inside polygon (lng = x, lat = y).
@@ -37,20 +41,43 @@ function isValidRedirectUrl(url) {
 
 /**
  * If visitor should be redirected outside allowed area, return redirect URL string.
+ * Cached briefly per IP for fast repeated checks on same navigation.
  * @param {string} ip
  * @returns {Promise<string | null>}
  */
 export async function getGeoFenceRedirectUrl(ip) {
+  const key = String(ip || '').trim() || '_'
+  const now = Date.now()
+  const hit = fenceDecisionByIp.get(key)
+  if (hit && now - hit.at < FENCE_DECISION_TTL_MS) {
+    return hit.url
+  }
+
   const cfg = await readGeoFence()
-  if (!cfg.enabled || !isValidRedirectUrl(cfg.redirectUrl)) return null
-  if (cfg.polygon.length < 3) return null
-  if (isPrivateOrLocalIp(ip)) return null
-
-  const pos = await lookupIpLatLng(ip)
-  if (!pos) return null
-
-  if (pointInPolygon(pos.lat, pos.lng, cfg.polygon)) {
+  if (!cfg.enabled || !isValidRedirectUrl(cfg.redirectUrl)) {
+    fenceDecisionByIp.set(key, { url: null, at: now })
     return null
   }
-  return cfg.redirectUrl
+  if (cfg.polygon.length < 3) {
+    fenceDecisionByIp.set(key, { url: null, at: now })
+    return null
+  }
+  if (isPrivateOrLocalIp(ip)) {
+    fenceDecisionByIp.set(key, { url: null, at: now })
+    return null
+  }
+
+  const pos = await lookupIpLatLng(ip)
+  if (!pos) {
+    fenceDecisionByIp.set(key, { url: null, at: now })
+    return null
+  }
+
+  if (pointInPolygon(pos.lat, pos.lng, cfg.polygon)) {
+    fenceDecisionByIp.set(key, { url: null, at: now })
+    return null
+  }
+  const url = cfg.redirectUrl
+  fenceDecisionByIp.set(key, { url, at: now })
+  return url
 }
