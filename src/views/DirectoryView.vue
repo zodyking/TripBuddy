@@ -187,13 +187,46 @@ function escapeVcardText(s) {
 }
 
 /**
- * Single vCard 3.0 with FN FedEx and one TEL per location (label = location display name).
+ * "Bethpage - HD" → "Bethpage"; then remove any remaining dashes / normalize spaces.
+ * @param {string} rawName
+ */
+function sanitizeLocationNameForLabel(rawName) {
+  const s = String(rawName ?? '').trim()
+  if (!s) return ''
+  const beforeDash = s.includes('-') ? s.split('-')[0].trim() : s
+  return beforeDash.replace(/-/g, '').replace(/\s+/g, ' ').trim()
+}
+
+/**
+ * vCard X-ABLabel: `locationId - cleanedName` (e.g. 89 - Woodbridge).
+ * @param {{ locationId: string, locationName?: string, abbreviation?: string }} loc
+ */
+function vcardContactLabel(loc) {
+  const id = String(loc.locationId ?? '').trim()
+  const namePart = sanitizeLocationNameForLabel(loc.locationName || '')
+  if (!id && !namePart) {
+    return String(loc.abbreviation || '').trim() || 'Location'
+  }
+  if (!namePart) return id
+  if (!id) return namePart
+  return `${id} - ${namePart}`
+}
+
+/** Card title: short name only (before first dash, dashes stripped). */
+function cardLocationTitle(loc) {
+  const n = sanitizeLocationNameForLabel(loc.locationName || '')
+  return n || loc.abbreviation || 'Unknown'
+}
+
+/**
+ * Single vCard 3.0 with FN FedEx and one TEL per location (label = id + cleaned name).
  */
 function buildDirectoryVcardString() {
   const lines = ['BEGIN:VCARD', 'VERSION:3.0', 'N:FedEx;;;', 'FN:FedEx']
   let item = 1
   const sorted = [...locations.value].sort((a, b) =>
-    (a.locationName || '').localeCompare(b.locationName || '', undefined, {
+    String(a.locationId).localeCompare(String(b.locationId), undefined, {
+      numeric: true,
       sensitivity: 'base',
     }),
   )
@@ -204,10 +237,7 @@ function buildDirectoryVcardString() {
         : loc.phone ?? ''
     const tel = phoneToVcardTel(raw)
     if (!tel) continue
-    const label =
-      (loc.locationName && String(loc.locationName).trim()) ||
-      loc.abbreviation ||
-      `Location ${loc.locationId}`
+    const label = vcardContactLabel(loc)
     lines.push(`item${item}.TEL;type=CELL:${tel}`)
     lines.push(`item${item}.X-ABLabel:${escapeVcardText(label)}`)
     item += 1
@@ -439,8 +469,11 @@ onUnmounted(() => {
           :aria-expanded="expandedId === loc.locationId"
         >
           <div class="location-main">
-            <span class="location-name">{{ loc.locationName || 'Unknown' }}</span>
-            <span v-if="loc.abbreviation" class="location-abbr">{{ loc.abbreviation }}</span>
+            <span class="location-id-chip" aria-hidden="true">{{ loc.locationId }}</span>
+            <div class="location-title-block">
+              <span class="location-name">{{ cardLocationTitle(loc) }}</span>
+              <span v-if="loc.abbreviation" class="location-abbr">{{ loc.abbreviation }}</span>
+            </div>
           </div>
           <p v-if="loc.address" class="location-address">{{ loc.address }}</p>
           <svg
@@ -882,21 +915,37 @@ onUnmounted(() => {
 }
 
 .location-card {
-  background: rgba(255, 255, 255, 0.03);
-  border: 1px solid var(--color-border, rgba(255, 255, 255, 0.08));
-  border-radius: var(--radius-lg, 0.75rem);
+  background: linear-gradient(
+    165deg,
+    rgba(255, 255, 255, 0.045) 0%,
+    rgba(255, 255, 255, 0.02) 100%
+  );
+  border: 1px solid var(--color-border, rgba(255, 255, 255, 0.1));
+  border-radius: var(--radius-xl, 1rem);
   overflow: hidden;
-  transition: var(--transition-colors);
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.22);
+  transition:
+    border-color 0.18s ease,
+    box-shadow 0.18s ease,
+    background 0.18s ease;
+}
+
+.location-card:hover {
+  border-color: rgba(255, 255, 255, 0.12);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.28);
 }
 
 .location-card.is-expanded {
-  border-color: var(--color-accent-purple-muted, rgba(123, 77, 181, 0.4));
+  border-color: rgba(123, 77, 181, 0.45);
+  box-shadow:
+    0 4px 24px rgba(0, 0, 0, 0.3),
+    0 0 0 1px rgba(123, 77, 181, 0.12);
 }
 
 .location-card-header {
   width: 100%;
   display: block;
-  padding: var(--space-3, 0.75rem) var(--space-4, 1rem);
+  padding: var(--space-4, 1rem) var(--space-4, 1rem) var(--space-3, 0.75rem);
   background: transparent;
   border: none;
   text-align: left;
@@ -911,15 +960,43 @@ onUnmounted(() => {
 
 .location-main {
   display: flex;
+  align-items: flex-start;
+  gap: var(--space-3, 0.75rem);
+  flex-wrap: nowrap;
+  padding-right: var(--space-6, 1.5rem);
+}
+
+.location-id-chip {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 2.25rem;
+  padding: var(--space-1, 0.25rem) var(--space-2, 0.5rem);
+  font-size: var(--text-xs, 0.6875rem);
+  font-weight: var(--weight-bold, 700);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
+  color: var(--color-text-secondary, #c4c4d4);
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: var(--radius-md, 0.5rem);
+}
+
+.location-title-block {
+  display: flex;
   align-items: center;
   gap: var(--space-2, 0.5rem);
   flex-wrap: wrap;
+  min-width: 0;
+  flex: 1;
 }
 
 .location-name {
   font-size: var(--text-md, 1rem);
   font-weight: var(--weight-semibold, 600);
   color: var(--color-text-primary, #f4f4f8);
+  line-height: 1.3;
 }
 
 .location-abbr {
@@ -958,8 +1035,9 @@ onUnmounted(() => {
 }
 
 .location-details {
-  padding: 0 var(--space-4, 1rem) var(--space-4, 1rem);
-  border-top: 1px solid var(--color-border, rgba(255, 255, 255, 0.08));
+  padding: var(--space-2, 0.5rem) var(--space-4, 1rem) var(--space-4, 1rem);
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  background: rgba(0, 0, 0, 0.15);
 }
 
 .details-list {

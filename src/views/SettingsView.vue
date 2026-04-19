@@ -805,6 +805,9 @@ onUnmounted(() => {
           <datalist id="linehaul-poll-tickmarks">
             <option v-for="v in linehaulPollTickValues" :key="v" :value="v" />
           </datalist>
+          <p class="linehaul-poll-hint">
+            Sign in sets this to 1 min (when no session it stays at 0). Adjust anytime — your choice is saved.
+          </p>
         </div>
         <div class="linehaul-test-row">
           <label class="lbl linehaul-test-lbl" for="linehaul-test-select">APIs</label>
@@ -1593,6 +1596,13 @@ onUnmounted(() => {
 }
 .linehaul-poll-scale-num {
   font-variant-numeric: tabular-nums;
+}
+
+.linehaul-poll-hint {
+  margin: var(--space-3, 0.75rem) 0 0;
+  font-size: var(--text-xs, 0.6875rem);
+  line-height: 1.45;
+  color: var(--color-text-tertiary, #6e6e7e);
 }
 .inp.token-field {
   font-family: ui-monospace, 'Cascadia Code', 'Consolas', monospace;

@@ -890,7 +890,7 @@ async function setupLinehaulPolling() {
     const c = await getCredentials()
     const raw =
       typeof c.linehaulPollMinutes === 'number' ? c.linehaulPollMinutes : 0
-    const m = Math.max(0, Math.min(60, Math.floor(raw)))
+    const m = Math.max(0, Math.min(24 * 60, Math.floor(raw)))
     if (m > 0) {
       linehaulPollTimer = setInterval(() => {
         void refreshLinehaulApis()

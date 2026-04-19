@@ -242,6 +242,13 @@ app.post('/api/auth/login', async (req, reply) => {
     if (tokenOk) {
       await writeUserMeta(accountKey, { appLoginVerified: true })
       setLastActiveAccountKey(accountKey)
+      try {
+        await runWithCredentialAccountKey(accountKey, () =>
+          saveCredentials({ linehaulPollMinutes: 1 }),
+        )
+      } catch {
+        /* non-fatal */
+      }
       const id = createSession(accountKey)
       reply.setCookie(COOKIE_NAME, id, {
         path: '/',
@@ -265,6 +272,13 @@ app.post('/api/auth/login', async (req, reply) => {
   }
   await writeUserMeta(accountKey, { appLoginVerified: true })
   setLastActiveAccountKey(accountKey)
+  try {
+    await runWithCredentialAccountKey(accountKey, () =>
+      saveCredentials({ linehaulPollMinutes: 1 }),
+    )
+  } catch {
+    /* non-fatal */
+  }
   const id = createSession(accountKey)
   reply.setCookie(COOKIE_NAME, id, {
     path: '/',
@@ -278,8 +292,18 @@ app.post('/api/auth/login', async (req, reply) => {
 
 app.post('/api/auth/logout', async (req, reply) => {
   const sid = req.cookies?.[COOKIE_NAME]
+  const ak = getSessionAccountKey(sid)
   destroySession(sid)
   reply.clearCookie(COOKIE_NAME, { path: '/' })
+  if (ak) {
+    try {
+      await runWithCredentialAccountKey(ak, () =>
+        saveCredentials({ linehaulPollMinutes: 0 }),
+      )
+    } catch {
+      /* non-fatal */
+    }
+  }
   return { ok: true }
 })
 
