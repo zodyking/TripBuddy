@@ -6,7 +6,7 @@ import cors from '@fastify/cors'
 import cookie from '@fastify/cookie'
 import multipart from '@fastify/multipart'
 import fastifyStatic from '@fastify/static'
-import { API_PORT, UPLOADS_DIR } from './config.mjs'
+import { API_PORT, UPLOADS_DIR, PERSISTENCE_DATA_ROOT, LOCAL_DIR } from './config.mjs'
 import {
   isAuthEnabled,
   createSession,
@@ -329,6 +329,9 @@ app.get('/api/health', async () => ({
   ok: true,
   busy:
     isRunnerBusy() || isBlockRunnerBusy() || isLinehaulCaptureBusy(),
+  /** When null, API uses ephemeral `server/.local` — set FEDEX_TOOL_DATA_DIR for durable shared storage. */
+  dataDir: PERSISTENCE_DATA_ROOT,
+  localDataPath: LOCAL_DIR,
 }))
 
 app.get('/api/status', async () => ({

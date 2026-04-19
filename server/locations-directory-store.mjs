@@ -1,8 +1,15 @@
 import fs from 'node:fs/promises'
 import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { LOCAL_DIR } from './config.mjs'
 
 const DIRECTORY_FILE = path.join(LOCAL_DIR, 'locations-directory.json')
+/** Same pattern as access-log: dev may have old data only under `server/.local`. */
+const LEGACY_DEV_DIRECTORY_FILE = path.join(
+  path.dirname(fileURLToPath(import.meta.url)),
+  '.local',
+  'locations-directory.json',
+)
 
 /**
  * @typedef {Object} LocationEntry
@@ -18,19 +25,62 @@ const DIRECTORY_FILE = path.join(LOCAL_DIR, 'locations-directory.json')
  */
 
 /**
- * Read the entire directory from disk.
+ * @param {string} file
+ * @returns {Promise<Record<string, LocationEntry>>}
+ */
+async function readDirectoryFile(file) {
+  try {
+    const raw = await fs.readFile(file, 'utf8')
+    const data = JSON.parse(raw)
+    if (data && typeof data === 'object' && !Array.isArray(data)) {
+      return /** @type {Record<string, LocationEntry>} */ (data)
+    }
+  } catch {
+    /* empty */
+  }
+  return {}
+}
+
+function newerEntry(a, b) {
+  const ta = Date.parse(a.lastUpdated || '') || 0
+  const tb = Date.parse(b.lastUpdated || '') || 0
+  return ta >= tb ? a : b
+}
+
+/**
+ * Read the entire directory from disk (merges primary + legacy dev file when paths differ).
  * @returns {Promise<Record<string, LocationEntry>>}
  */
 export async function readDirectory() {
-  try {
-    const raw = await fs.readFile(DIRECTORY_FILE, 'utf8')
-    const data = JSON.parse(raw)
-    if (data && typeof data === 'object' && !Array.isArray(data)) {
-      return data
+  const primary = await readDirectoryFile(DIRECTORY_FILE)
+  if (LEGACY_DEV_DIRECTORY_FILE === DIRECTORY_FILE) {
+    return primary
+  }
+  const legacy = await readDirectoryFile(LEGACY_DEV_DIRECTORY_FILE)
+  /** @type {Record<string, LocationEntry>} */
+  const merged = { ...primary }
+  for (const [id, leg] of Object.entries(legacy)) {
+    const cur = merged[id]
+    if (!cur) {
+      merged[id] = leg
+    } else {
+      merged[id] = newerEntry(cur, leg)
     }
-    return {}
-  } catch {
-    return {}
+  }
+  return merged
+}
+
+/**
+ * Persist full directory object to the canonical file (and mirror legacy dev path when needed).
+ * @param {Record<string, LocationEntry>} directory
+ */
+async function writeDirectoryFile(directory) {
+  const payload = JSON.stringify(directory, null, 2)
+  await fs.mkdir(path.dirname(DIRECTORY_FILE), { recursive: true })
+  await fs.writeFile(DIRECTORY_FILE, payload, 'utf8')
+  if (LEGACY_DEV_DIRECTORY_FILE !== DIRECTORY_FILE) {
+    await fs.mkdir(path.dirname(LEGACY_DEV_DIRECTORY_FILE), { recursive: true })
+    await fs.writeFile(LEGACY_DEV_DIRECTORY_FILE, payload, 'utf8')
   }
 }
 
@@ -85,7 +135,7 @@ export async function upsertLocation(data) {
   }
 
   directory[data.locationId] = entry
-  await fs.writeFile(DIRECTORY_FILE, JSON.stringify(directory, null, 2), 'utf8')
+  await writeDirectoryFile(directory)
 
   return { updated: true, entry }
 }
@@ -126,6 +176,6 @@ export async function updateLocationPhone(locationId, phone) {
     return { updated: false, entry: existing }
   }
   directory[locationId] = entry
-  await fs.writeFile(DIRECTORY_FILE, JSON.stringify(directory, null, 2), 'utf8')
+  await writeDirectoryFile(directory)
   return { updated: true, entry }
 }

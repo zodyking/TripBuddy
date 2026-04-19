@@ -27,23 +27,23 @@ export const API_PORT = Number(process.env.FEDEX_TOOL_API_PORT ?? 3847)
 
 /**
  * Root directory for all persistent data (credentials, automations, user data, uploads).
- * When set (e.g. `/data`), subfolders `local/`, `pw-user-data/`, `uploads-tmp/` live here.
- * When unset, local dev defaults (server/.local, server/.pw-user-data, server/.uploads-tmp).
+ * Set `FEDEX_TOOL_DATA_DIR` (e.g. `/data`) so JSON stores survive deploys and are shared across devices hitting the same API.
+ * Subfolders: `local/`, `pw-user-data/`, `uploads-tmp/`. When unset, dev defaults under `server/` (`.local`, etc.).
  */
-const DATA_ROOT = process.env.FEDEX_TOOL_DATA_DIR
+export const PERSISTENCE_DATA_ROOT = process.env.FEDEX_TOOL_DATA_DIR
   ? path.resolve(process.env.FEDEX_TOOL_DATA_DIR)
   : null
 
-export const LOCAL_DIR = DATA_ROOT
-  ? path.join(DATA_ROOT, 'local')
+export const LOCAL_DIR = PERSISTENCE_DATA_ROOT
+  ? path.join(PERSISTENCE_DATA_ROOT, 'local')
   : path.join(__dirname, '.local')
 
-export const USER_DATA_DIR = DATA_ROOT
-  ? path.join(DATA_ROOT, 'pw-user-data')
+export const USER_DATA_DIR = PERSISTENCE_DATA_ROOT
+  ? path.join(PERSISTENCE_DATA_ROOT, 'pw-user-data')
   : path.join(__dirname, '.pw-user-data')
 
-export const UPLOADS_DIR = DATA_ROOT
-  ? path.join(DATA_ROOT, 'uploads-tmp')
+export const UPLOADS_DIR = PERSISTENCE_DATA_ROOT
+  ? path.join(PERSISTENCE_DATA_ROOT, 'uploads-tmp')
   : path.join(__dirname, '.uploads-tmp')
 
 /** Default poll interval (ms) when checking for assignment changes */
