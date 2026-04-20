@@ -224,7 +224,7 @@ function isInteractiveEventTarget(target) {
   const el = /** @type {Node} */ (target)
   if (el.nodeType !== 1) return false
   return !!(/** @type {HTMLElement} */ (el).closest(
-    'button, a, input, textarea, select, [role="button"], details, summary, label',
+    'button, a, input, textarea, select, [role="button"], details, summary, label, .copyable-dd, .copyable-inline, .copyable-block',
   ))
 }
 
@@ -268,6 +268,12 @@ async function copyTripDetailValue(value, label) {
   window.setTimeout(() => {
     copyToast.value = ''
   }, 2200)
+}
+
+function displayOrDash(value) {
+  if (value == null) return '—'
+  const s = String(value).trim()
+  return s || '—'
 }
 
 function clearDispatchLongPressTimer() {
@@ -1543,23 +1549,73 @@ onUnmounted(() => {
             <dl class="linehaul-dl">
               <div v-if="linehaulTractorBody.locationId != null" class="linehaul-dl-row">
                 <dt>Location</dt>
-                <dd>{{ linehaulTractorBody.locationId }}</dd>
+                <dd>
+                  <button
+                    type="button"
+                    class="copyable-dd tap"
+                    :disabled="displayOrDash(linehaulTractorBody.locationId) === '—'"
+                    title="Tap to copy"
+                    @click.stop="copyTripDetailValue(linehaulTractorBody.locationId, 'Location')"
+                  >
+                    {{ linehaulTractorBody.locationId }}
+                  </button>
+                </dd>
               </div>
               <div v-if="linehaulTractorBody.tractorNbr != null" class="linehaul-dl-row">
                 <dt>Tractor</dt>
-                <dd>{{ linehaulTractorBody.tractorNbr }}</dd>
+                <dd>
+                  <button
+                    type="button"
+                    class="copyable-dd tap"
+                    :disabled="displayOrDash(linehaulTractorBody.tractorNbr) === '—'"
+                    title="Tap to copy"
+                    @click.stop="copyTripDetailValue(linehaulTractorBody.tractorNbr, 'Tractor')"
+                  >
+                    {{ linehaulTractorBody.tractorNbr }}
+                  </button>
+                </dd>
               </div>
               <div v-if="linehaulTractorBody.tractorDomicileAbbrv" class="linehaul-dl-row">
                 <dt>Domicile</dt>
-                <dd>{{ linehaulTractorBody.tractorDomicileAbbrv }}</dd>
+                <dd>
+                  <button
+                    type="button"
+                    class="copyable-dd tap"
+                    :disabled="displayOrDash(linehaulTractorBody.tractorDomicileAbbrv) === '—'"
+                    title="Tap to copy"
+                    @click.stop="copyTripDetailValue(linehaulTractorBody.tractorDomicileAbbrv, 'Domicile')"
+                  >
+                    {{ linehaulTractorBody.tractorDomicileAbbrv }}
+                  </button>
+                </dd>
               </div>
               <div v-if="linehaulTractorBody.detlCodeActvStat" class="linehaul-dl-row">
                 <dt>Active</dt>
-                <dd>{{ linehaulTractorBody.detlCodeActvStat }}</dd>
+                <dd>
+                  <button
+                    type="button"
+                    class="copyable-dd tap"
+                    :disabled="displayOrDash(linehaulTractorBody.detlCodeActvStat) === '—'"
+                    title="Tap to copy"
+                    @click.stop="copyTripDetailValue(linehaulTractorBody.detlCodeActvStat, 'Active')"
+                  >
+                    {{ linehaulTractorBody.detlCodeActvStat }}
+                  </button>
+                </dd>
               </div>
               <div v-if="linehaulTractorBody.detlCodeAvailStat" class="linehaul-dl-row">
                 <dt>Status</dt>
-                <dd>{{ linehaulTractorBody.detlCodeAvailStat }}</dd>
+                <dd>
+                  <button
+                    type="button"
+                    class="copyable-dd tap"
+                    :disabled="displayOrDash(linehaulTractorBody.detlCodeAvailStat) === '—'"
+                    title="Tap to copy"
+                    @click.stop="copyTripDetailValue(linehaulTractorBody.detlCodeAvailStat, 'Status')"
+                  >
+                    {{ linehaulTractorBody.detlCodeAvailStat }}
+                  </button>
+                </dd>
               </div>
             </dl>
           </div>
@@ -1572,23 +1628,73 @@ onUnmounted(() => {
                 class="linehaul-dl-row"
               >
                 <dt>Location</dt>
-                <dd>{{ linehaulDriverBody.driverLocation }}</dd>
+                <dd>
+                  <button
+                    type="button"
+                    class="copyable-dd tap"
+                    :disabled="displayOrDash(linehaulDriverBody.driverLocation) === '—'"
+                    title="Tap to copy"
+                    @click.stop="copyTripDetailValue(linehaulDriverBody.driverLocation, 'Location')"
+                  >
+                    {{ linehaulDriverBody.driverLocation }}
+                  </button>
+                </dd>
               </div>
               <div v-if="linehaulDriverIdDisplay" class="linehaul-dl-row">
                 <dt>Driver ID</dt>
-                <dd>{{ linehaulDriverIdDisplay }}</dd>
+                <dd>
+                  <button
+                    type="button"
+                    class="copyable-dd tap"
+                    :disabled="displayOrDash(linehaulDriverIdDisplay) === '—'"
+                    title="Tap to copy"
+                    @click.stop="copyTripDetailValue(linehaulDriverIdDisplay, 'Driver ID')"
+                  >
+                    {{ linehaulDriverIdDisplay }}
+                  </button>
+                </dd>
               </div>
               <div v-if="driverDisplayName" class="linehaul-dl-row linehaul-dl-row--driver-name">
                 <dt>NAME</dt>
-                <dd class="linehaul-dd-name">{{ driverDisplayName }}</dd>
+                <dd class="linehaul-dd-name">
+                  <button
+                    type="button"
+                    class="copyable-dd tap linehaul-dd-name-btn"
+                    :disabled="displayOrDash(driverDisplayName) === '—'"
+                    title="Tap to copy"
+                    @click.stop="copyTripDetailValue(driverDisplayName, 'Name')"
+                  >
+                    {{ driverDisplayName }}
+                  </button>
+                </dd>
               </div>
               <div v-if="linehaulDriverBody.driverActvStat" class="linehaul-dl-row">
                 <dt>Active</dt>
-                <dd>{{ linehaulDriverBody.driverActvStat }}</dd>
+                <dd>
+                  <button
+                    type="button"
+                    class="copyable-dd tap"
+                    :disabled="displayOrDash(linehaulDriverBody.driverActvStat) === '—'"
+                    title="Tap to copy"
+                    @click.stop="copyTripDetailValue(linehaulDriverBody.driverActvStat, 'Active')"
+                  >
+                    {{ linehaulDriverBody.driverActvStat }}
+                  </button>
+                </dd>
               </div>
               <div v-if="linehaulDriverBody.driverAvlStat" class="linehaul-dl-row">
                 <dt>Status</dt>
-                <dd>{{ linehaulDriverBody.driverAvlStat }}</dd>
+                <dd>
+                  <button
+                    type="button"
+                    class="copyable-dd tap"
+                    :disabled="displayOrDash(linehaulDriverBody.driverAvlStat) === '—'"
+                    title="Tap to copy"
+                    @click.stop="copyTripDetailValue(linehaulDriverBody.driverAvlStat, 'Status')"
+                  >
+                    {{ linehaulDriverBody.driverAvlStat }}
+                  </button>
+                </dd>
               </div>
             </dl>
           </div>
@@ -1627,7 +1733,14 @@ onUnmounted(() => {
         >
           <span class="trip-status-dot" :class="tripStatusDotClass" aria-hidden="true" />
           <span class="trip-status-heading">Trip Status</span>
-          <span class="trip-status-state">{{ tripStatusUi.text }}</span>
+          <button
+            type="button"
+            class="trip-status-state copyable-inline tap"
+            title="Tap to copy"
+            @click.stop="copyTripDetailValue(tripStatusUi.text, 'Trip status')"
+          >
+            {{ tripStatusUi.text }}
+          </button>
         </div>
       </div>
       <div
@@ -1654,23 +1767,38 @@ onUnmounted(() => {
           <div class="dispatch-od-row" aria-label="Trip origin and destination">
             <div class="dispatch-od-pair dispatch-od-pair--origin">
               <span class="dispatch-od-label">Origin</span>
-              <span class="dispatch-od-val">{{ tripOriginDest.origin }}</span>
+              <button
+                type="button"
+                class="dispatch-od-val copyable-inline tap"
+                title="Tap to copy"
+                @click.stop="copyTripDetailValue(tripOriginDest.origin, 'Origin')"
+              >
+                {{ tripOriginDest.origin }}
+              </button>
             </div>
             <span class="dispatch-od-arrow" aria-hidden="true">→</span>
-            <button
-              type="button"
-              class="dispatch-od-pair dispatch-od-pair--dest dispatch-od-dest-btn tap"
-              :disabled="!tripDestLocationId || !!linehaulTripsError"
-              :title="
-                tripDestLocationId
-                  ? 'View destination details from FedEx'
-                  : 'No destination location id on trip'
-              "
-              @click="openDestLocationModal"
-            >
+            <div class="dispatch-od-pair dispatch-od-pair--dest dispatch-od-pair--dest-split">
               <span class="dispatch-od-label">Destination</span>
-              <span class="dispatch-od-val">{{ tripOriginDest.destination }}</span>
-            </button>
+              <div class="dispatch-od-dest-row">
+                <button
+                  type="button"
+                  class="dispatch-od-val copyable-inline tap"
+                  title="Tap to copy"
+                  @click.stop="copyTripDetailValue(tripOriginDest.destination, 'Destination')"
+                >
+                  {{ tripOriginDest.destination }}
+                </button>
+                <button
+                  v-if="tripDestLocationId && !linehaulTripsError"
+                  type="button"
+                  class="dispatch-od-detail-btn tap"
+                  title="View destination details from FedEx"
+                  @click.stop="openDestLocationModal"
+                >
+                  Details
+                </button>
+              </div>
+            </div>
           </div>
         </div>
 
@@ -1679,18 +1807,40 @@ onUnmounted(() => {
           <div class="dispatch-od-row" aria-label="Pre-plan trip origin and destination">
             <div class="dispatch-od-pair dispatch-od-pair--origin">
               <span class="dispatch-od-label">Origin</span>
-              <span class="dispatch-od-val">{{ prePlanOriginDest.origin }}</span>
+              <button
+                type="button"
+                class="dispatch-od-val copyable-inline tap"
+                title="Tap to copy"
+                @click.stop="copyTripDetailValue(prePlanOriginDest.origin, 'Origin')"
+              >
+                {{ prePlanOriginDest.origin }}
+              </button>
             </div>
             <span class="dispatch-od-arrow" aria-hidden="true">→</span>
             <div class="dispatch-od-pair dispatch-od-pair--dest">
               <span class="dispatch-od-label">Destination</span>
-              <span class="dispatch-od-val">{{ prePlanOriginDest.destination }}</span>
+              <button
+                type="button"
+                class="dispatch-od-val copyable-inline tap"
+                title="Tap to copy"
+                @click.stop="copyTripDetailValue(prePlanOriginDest.destination, 'Destination')"
+              >
+                {{ prePlanOriginDest.destination }}
+              </button>
             </div>
           </div>
         </div>
       </div>
       <p v-if="!instructions.trim()" class="empty">No instructions yet.</p>
-      <p v-else class="read dispatch-instructions-body">{{ instructions }}</p>
+      <button
+        v-else
+        type="button"
+        class="read dispatch-instructions-body copyable-block tap"
+        title="Tap to copy"
+        @click.stop="copyTripDetailValue(instructions, 'Instructions')"
+      >
+        {{ instructions }}
+      </button>
     </section>
 
     <section
@@ -1752,19 +1902,52 @@ onUnmounted(() => {
             >
               <div class="trailer-card-main">
                 <div class="trailer-card-title-row">
-                  <span class="trailer-order">Trailer {{ card.order }}</span>
-                  <span v-if="card.trlrNbr" class="trailer-nbr">#{{ card.trlrNbr }}</span>
+                  <button
+                    type="button"
+                    class="trailer-order copyable-inline tap"
+                    title="Tap to copy"
+                    @click.stop="copyTripDetailValue(card.order, 'Trailer order')"
+                  >
+                    Trailer {{ card.order }}
+                  </button>
+                  <button
+                    v-if="card.trlrNbr"
+                    type="button"
+                    class="trailer-nbr copyable-inline tap"
+                    title="Tap to copy"
+                    @click.stop="copyTripDetailValue(card.trlrNbr, 'Trailer number')"
+                  >
+                    #{{ card.trlrNbr }}
+                  </button>
                 </div>
                 <div class="trailer-card-badges">
-                  <span class="trailer-size-badge" :class="card.size === '20ft' ? 'size-20' : 'size-53'">
+                  <button
+                    type="button"
+                    class="trailer-size-badge copyable-inline tap"
+                    :class="card.size === '20ft' ? 'size-20' : 'size-53'"
+                    title="Tap to copy"
+                    @click.stop="copyTripDetailValue(card.size, 'Trailer size')"
+                  >
                     {{ card.size }}
-                  </span>
-                  <span class="trailer-status-badge" :class="card.statusClass">
+                  </button>
+                  <button
+                    type="button"
+                    class="trailer-status-badge copyable-inline tap"
+                    :class="card.statusClass"
+                    title="Tap to copy"
+                    @click.stop="copyTripDetailValue(card.statusLabel, 'Trailer status')"
+                  >
                     {{ card.statusLabel }}
-                  </span>
-                  <span class="trailer-load-badge" :class="card.loadTypeClass">
+                  </button>
+                  <button
+                    type="button"
+                    class="trailer-load-badge copyable-inline tap"
+                    :class="card.loadTypeClass"
+                    title="Tap to copy"
+                    @click.stop="copyTripDetailValue(card.loadType, 'Load type')"
+                  >
                     {{ card.loadType }}
-                  </span>
+                  </button>
                 </div>
               </div>
               <div class="trailer-card-actions">
@@ -1900,6 +2083,100 @@ onUnmounted(() => {
 .copyable-dd:disabled {
   cursor: default;
   opacity: 0.85;
+}
+
+/* Tap-to-copy text that stays visually inline (not full-width block buttons) */
+.copyable-inline {
+  -webkit-tap-highlight-color: transparent;
+}
+
+.trip-status-state.copyable-inline {
+  background: transparent;
+  border: none;
+  padding: 0;
+  margin: 0;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  text-align: left;
+}
+
+.dispatch-od-val.copyable-inline {
+  background: transparent;
+  border: none;
+  padding: 0;
+  margin: 0;
+  font: inherit;
+  font-weight: 600;
+  color: inherit;
+  cursor: pointer;
+  text-align: inherit;
+  word-break: break-word;
+  line-height: 1.3;
+}
+
+.dispatch-od-pair--dest-split {
+  align-items: flex-end;
+}
+
+.dispatch-od-dest-row {
+  display: flex;
+  align-items: flex-end;
+  justify-content: flex-end;
+  gap: 0.35rem;
+  flex-wrap: wrap;
+  width: 100%;
+  min-width: 0;
+}
+
+.dispatch-od-detail-btn {
+  flex-shrink: 0;
+  font-size: 0.65rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 0.25rem 0.5rem;
+  border-radius: 6px;
+  border: 1px solid rgba(100, 181, 246, 0.45);
+  background: rgba(100, 181, 246, 0.1);
+  color: #93c5fd;
+  cursor: pointer;
+}
+
+.dispatch-od-detail-btn:hover {
+  background: rgba(100, 181, 246, 0.18);
+}
+
+.copyable-block.dispatch-instructions-body {
+  display: block;
+  width: 100%;
+  margin: 0;
+  background: transparent;
+  border: none;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  border-radius: 6px;
+  line-height: 1.45;
+}
+
+button.trailer-order.copyable-inline,
+button.trailer-nbr.copyable-inline {
+  background: transparent;
+  border: none;
+  padding: 0;
+  margin: 0;
+  cursor: pointer;
+  text-align: left;
+}
+
+.trailer-card-badges button.trailer-size-badge,
+.trailer-card-badges button.trailer-status-badge,
+.trailer-card-badges button.trailer-load-badge {
+  cursor: pointer;
+  font: inherit;
+  font-family: inherit;
 }
 .portal-checkin-banner {
   position: fixed;
@@ -2191,6 +2468,12 @@ onUnmounted(() => {
   overflow: hidden;
   text-overflow: ellipsis;
   min-width: 0;
+}
+.driver-status-cards .linehaul-dd-name-btn {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .driver-status-cards .linehaul-h3 {
   font-size: clamp(0.65rem, 1vw + 0.5rem, 0.78rem);
