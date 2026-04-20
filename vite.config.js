@@ -26,13 +26,6 @@ export default defineConfig({
         timeout: 1_800_000,
         proxyTimeout: 1_800_000,
       },
-      /** Same-origin FedEx reverse proxy for Trip Buddy iframe (see server/trip-buddy-proxy.mjs) */
-      '/embed': {
-        target: 'http://127.0.0.1:3847',
-        changeOrigin: true,
-        timeout: 1_800_000,
-        proxyTimeout: 1_800_000,
-      },
     },
   },
 })
