@@ -1437,18 +1437,32 @@ onUnmounted(() => {
             <dl v-if="destLocationFormatted.rows.length" class="dest-loc-dl">
               <template v-for="row in destLocationFormatted.rows" :key="row.label + row.value + (row.href || '')">
                 <dt>{{ row.label }}</dt>
-                <dd>
-                  <a
-                    v-if="row.href"
-                    :href="row.href"
-                    class="dest-loc-link"
-                    :target="row.href.startsWith('tel:') ? undefined : '_blank'"
-                    :rel="row.href.startsWith('http') ? 'noopener noreferrer' : undefined"
-                    @click.stop
+                <dd class="dest-loc-dd">
+                  <template v-if="row.href">
+                    <a
+                      :href="row.href"
+                      class="dest-loc-link"
+                      :target="row.href.startsWith('tel:') ? undefined : '_blank'"
+                      :rel="row.href.startsWith('http') ? 'noopener noreferrer' : undefined"
+                    >
+                      {{ row.value }}
+                    </a>
+                    <button
+                      type="button"
+                      class="dest-loc-copy-chip tap"
+                      @click.stop="copyTripDetailValue(row.value, row.label)"
+                    >
+                      Copy
+                    </button>
+                  </template>
+                  <button
+                    v-else
+                    type="button"
+                    class="dest-loc-val-copy tap"
+                    @click="copyTripDetailValue(row.value, row.label)"
                   >
                     {{ row.value }}
-                  </a>
-                  <template v-else>{{ row.value }}</template>
+                  </button>
                 </dd>
               </template>
             </dl>
@@ -1835,37 +1849,21 @@ onUnmounted(() => {
           <div class="dispatch-od-row" aria-label="Trip origin and destination">
             <div class="dispatch-od-pair dispatch-od-pair--origin">
               <span class="dispatch-od-label">Origin</span>
-              <button
-                type="button"
-                class="dispatch-od-val copyable-inline tap"
-                title="Tap to copy"
-                @click.stop="copyTripDetailValue(tripOriginDest.origin, 'Origin')"
-              >
-                {{ tripOriginDest.origin }}
-              </button>
+              <span class="dispatch-od-val dispatch-od-val--text">{{ tripOriginDest.origin }}</span>
             </div>
             <span class="dispatch-od-arrow" aria-hidden="true">→</span>
-            <div class="dispatch-od-pair dispatch-od-pair--dest dispatch-od-pair--dest-split">
+            <div class="dispatch-od-pair dispatch-od-pair--dest">
               <span class="dispatch-od-label">Destination</span>
-              <div class="dispatch-od-dest-row">
-                <button
-                  type="button"
-                  class="dispatch-od-val copyable-inline tap"
-                  title="Tap to copy"
-                  @click.stop="copyTripDetailValue(tripOriginDest.destination, 'Destination')"
-                >
-                  {{ tripOriginDest.destination }}
-                </button>
-                <button
-                  v-if="tripDestLocationId && !linehaulTripsError"
-                  type="button"
-                  class="dispatch-od-detail-btn tap"
-                  title="View destination details from FedEx"
-                  @click.stop="openDestLocationModal"
-                >
-                  Details
-                </button>
-              </div>
+              <button
+                v-if="tripDestLocationId && !linehaulTripsError"
+                type="button"
+                class="dispatch-od-val dispatch-od-dest-open tap"
+                title="View destination details"
+                @click.stop="openDestLocationModal"
+              >
+                {{ tripOriginDest.destination }}
+              </button>
+              <span v-else class="dispatch-od-val dispatch-od-val--text">{{ tripOriginDest.destination }}</span>
             </div>
           </div>
         </div>
@@ -1875,26 +1873,12 @@ onUnmounted(() => {
           <div class="dispatch-od-row" aria-label="Pre-plan trip origin and destination">
             <div class="dispatch-od-pair dispatch-od-pair--origin">
               <span class="dispatch-od-label">Origin</span>
-              <button
-                type="button"
-                class="dispatch-od-val copyable-inline tap"
-                title="Tap to copy"
-                @click.stop="copyTripDetailValue(prePlanOriginDest.origin, 'Origin')"
-              >
-                {{ prePlanOriginDest.origin }}
-              </button>
+              <span class="dispatch-od-val dispatch-od-val--text">{{ prePlanOriginDest.origin }}</span>
             </div>
             <span class="dispatch-od-arrow" aria-hidden="true">→</span>
             <div class="dispatch-od-pair dispatch-od-pair--dest">
               <span class="dispatch-od-label">Destination</span>
-              <button
-                type="button"
-                class="dispatch-od-val copyable-inline tap"
-                title="Tap to copy"
-                @click.stop="copyTripDetailValue(prePlanOriginDest.destination, 'Destination')"
-              >
-                {{ prePlanOriginDest.destination }}
-              </button>
+              <span class="dispatch-od-val dispatch-od-val--text">{{ prePlanOriginDest.destination }}</span>
             </div>
           </div>
         </div>
@@ -2166,7 +2150,16 @@ onUnmounted(() => {
   text-align: left;
 }
 
-.dispatch-od-val.copyable-inline {
+.dispatch-od-val--text {
+  font-weight: 600;
+  word-break: break-word;
+  line-height: 1.3;
+}
+
+.dispatch-od-dest-open {
+  display: block;
+  width: 100%;
+  text-align: right;
   background: transparent;
   border: none;
   padding: 0;
@@ -2175,41 +2168,18 @@ onUnmounted(() => {
   font-weight: 600;
   color: inherit;
   cursor: pointer;
-  text-align: inherit;
   word-break: break-word;
   line-height: 1.3;
+  border-radius: 4px;
 }
 
-.dispatch-od-pair--dest-split {
-  align-items: flex-end;
-}
-
-.dispatch-od-dest-row {
-  display: flex;
-  align-items: flex-end;
-  justify-content: flex-end;
-  gap: 0.35rem;
-  flex-wrap: wrap;
-  width: 100%;
-  min-width: 0;
-}
-
-.dispatch-od-detail-btn {
-  flex-shrink: 0;
-  font-size: 0.65rem;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  padding: 0.25rem 0.5rem;
-  border-radius: 6px;
-  border: 1px solid rgba(100, 181, 246, 0.45);
-  background: rgba(100, 181, 246, 0.1);
+.dispatch-od-dest-open:hover {
   color: #93c5fd;
-  cursor: pointer;
 }
 
-.dispatch-od-detail-btn:hover {
-  background: rgba(100, 181, 246, 0.18);
+.dispatch-od-dest-open:focus-visible {
+  outline: 2px solid var(--color-accent-purple, #7b4db5);
+  outline-offset: 2px;
 }
 
 .copyable-block.dispatch-instructions-body {
@@ -2409,10 +2379,57 @@ button.trailer-nbr.copyable-inline {
   color: var(--text, #e8e8ee);
   font-size: 0.92rem;
 }
+.dest-loc-dd {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem 0.5rem;
+}
+.dest-loc-val-copy {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border: none;
+  padding: 0.15rem 0;
+  margin: 0;
+  font: inherit;
+  font-weight: 600;
+  font-size: 0.92rem;
+  color: var(--text, #e8e8ee);
+  cursor: pointer;
+  word-break: break-word;
+  border-radius: 4px;
+}
+.dest-loc-val-copy:hover {
+  color: #c4b5fd;
+}
+.dest-loc-val-copy:focus-visible {
+  outline: 2px solid var(--color-accent-purple, #7b4db5);
+  outline-offset: 2px;
+}
+.dest-loc-copy-chip {
+  flex-shrink: 0;
+  font-size: 0.62rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 0.2rem 0.45rem;
+  border-radius: 6px;
+  border: 1px solid rgba(123, 77, 181, 0.45);
+  background: rgba(123, 77, 181, 0.12);
+  color: #c4b5fd;
+  cursor: pointer;
+}
+.dest-loc-copy-chip:hover {
+  background: rgba(123, 77, 181, 0.22);
+}
 .dest-loc-link {
   color: #90caf9;
   text-decoration: underline;
   text-underline-offset: 2px;
+  flex: 1;
+  min-width: 0;
 }
 .dest-loc-link:hover {
   color: #b3e5fc;
@@ -3382,15 +3399,15 @@ button.trailer-nbr.copyable-inline {
 }
 .trailer-order {
   font-weight: 700;
-  font-size: 0.85rem;
-  line-height: 1.25;
+  font-size: 0.8rem;
+  line-height: 1.15;
   color: var(--text, #e8e8ee);
   flex-shrink: 0;
 }
 .trailer-nbr {
   font-weight: 700;
-  font-size: 0.85rem;
-  line-height: 1.25;
+  font-size: 0.8rem;
+  line-height: 1.15;
   color: var(--text, #e8e8ee);
   font-variant-numeric: tabular-nums;
   font-family: ui-monospace, 'Cascadia Code', 'Segoe UI Mono', monospace;
@@ -3402,15 +3419,16 @@ button.trailer-nbr.copyable-inline {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  padding: 0.2rem 0.42rem;
-  border-radius: 4px;
-  font-size: 0.68rem;
-  line-height: 1.15;
+  padding: 0.1rem 0.32rem;
+  border-radius: 3px;
+  font-size: 0.58rem;
+  line-height: 1.1;
   font-weight: 700;
   text-transform: uppercase;
-  letter-spacing: 0.03em;
+  letter-spacing: 0.02em;
   flex-shrink: 0;
-  min-height: 1.35rem;
+  min-height: 1.05rem;
+  max-height: 1.15rem;
   box-sizing: border-box;
 }
 .trailer-size-badge {
