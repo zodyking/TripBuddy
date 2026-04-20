@@ -3,7 +3,6 @@ import AppShell from '../components/AppShell.vue'
 import MainDashboard from '../views/MainDashboard.vue'
 import SettingsView from '../views/SettingsView.vue'
 import DirectoryView from '../views/DirectoryView.vue'
-import TripBuddyView from '../views/TripBuddyView.vue'
 import LoginView from '../views/LoginView.vue'
 import { getAuthStatus } from '../api.js'
 
@@ -25,12 +24,6 @@ export const router = createRouter({
           name: 'home',
           component: MainDashboard,
           meta: { title: 'Dispatch' },
-        },
-        {
-          path: 'trip-buddy',
-          name: 'trip-buddy',
-          component: TripBuddyView,
-          meta: { title: 'Trip Buddy' },
         },
         {
           path: 'directory',

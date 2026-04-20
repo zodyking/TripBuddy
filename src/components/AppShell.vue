@@ -81,7 +81,6 @@ onUnmounted(() => {
           class="app-main"
           :class="{
             'app-main--directory': route.name === 'directory',
-            'app-main--trip-buddy': route.name === 'trip-buddy',
           }"
         >
           <RouterView />
@@ -100,17 +99,6 @@ onUnmounted(() => {
           <polyline points="9 22 9 12 15 12 15 22"/>
         </svg>
         <span class="nav-label">Home</span>
-      </RouterLink>
-      <RouterLink
-        class="nav-item"
-        :class="{ 'is-active': route.name === 'trip-buddy' }"
-        to="/trip-buddy"
-      >
-        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/>
-          <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>
-        </svg>
-        <span class="nav-label">Trip Buddy</span>
       </RouterLink>
       <RouterLink
         class="nav-item"
@@ -334,18 +322,6 @@ onUnmounted(() => {
   padding-bottom: 0;
   overflow-x: hidden;
   overflow-y: auto;
-  display: flex;
-  flex-direction: column;
-}
-
-/* Trip Buddy: full-width panel between header and nav (iframe blocked by FedEx; in-app launcher) */
-.app-main.app-main--trip-buddy {
-  flex: 1;
-  min-height: 0;
-  max-width: none;
-  margin-inline: 0;
-  padding-inline: 0;
-  padding-bottom: 0;
   display: flex;
   flex-direction: column;
 }
