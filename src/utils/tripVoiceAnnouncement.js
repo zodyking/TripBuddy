@@ -14,6 +14,11 @@ const TRAILER_STATUS_CHANGE_KEY = 'fedexTrailerStatusChangeEnabled'
 const ARRIVAL_ALERTS_KEY = 'fedexArrivalAlertsEnabled'
 /** Relocation + near-trailer TTS (default on). */
 const TRAILER_GPS_TTS_KEY = 'fedexTrailerGpsTtsEnabled'
+/** Near-trailer proximity radius for TTS (feet). Default ≈ former 95 m. */
+const NEAR_TRAILER_RADIUS_FEET_KEY = 'fedexNearTrailerRadiusFeet'
+const DEFAULT_NEAR_TRAILER_RADIUS_FEET = 312
+const MIN_NEAR_TRAILER_RADIUS_FEET = 15
+const MAX_NEAR_TRAILER_RADIUS_FEET = 3000
 
 /** 
  * Audio mode: off = no alerts, tts = speech only, both = bell chime before speech
@@ -108,6 +113,38 @@ export function isTrailerGpsTtsEnabled() {
 export function setTrailerGpsTtsEnabled(enabled) {
   if (typeof window === 'undefined' || !window.localStorage) return
   window.localStorage.setItem(TRAILER_GPS_TTS_KEY, enabled ? 'true' : 'false')
+}
+
+/**
+ * @param {number} feet
+ * @returns {number} Clamped feet
+ */
+function clampNearTrailerRadiusFeet(feet) {
+  const n = Number(feet)
+  if (!Number.isFinite(n)) return DEFAULT_NEAR_TRAILER_RADIUS_FEET
+  return Math.round(Math.min(MAX_NEAR_TRAILER_RADIUS_FEET, Math.max(MIN_NEAR_TRAILER_RADIUS_FEET, n)))
+}
+
+/** @returns {number} Radius in feet (default ~312 ≈ 95 m). */
+export function getNearTrailerRadiusFeet() {
+  if (typeof window === 'undefined' || !window.localStorage) return DEFAULT_NEAR_TRAILER_RADIUS_FEET
+  const raw = window.localStorage.getItem(NEAR_TRAILER_RADIUS_FEET_KEY)
+  if (raw == null || raw === '') return DEFAULT_NEAR_TRAILER_RADIUS_FEET
+  const parsed = Number.parseFloat(raw)
+  if (!Number.isFinite(parsed)) return DEFAULT_NEAR_TRAILER_RADIUS_FEET
+  return clampNearTrailerRadiusFeet(parsed)
+}
+
+/** @param {number} feet */
+export function setNearTrailerRadiusFeet(feet) {
+  if (typeof window === 'undefined' || !window.localStorage) return
+  const v = clampNearTrailerRadiusFeet(feet)
+  window.localStorage.setItem(NEAR_TRAILER_RADIUS_FEET_KEY, String(v))
+}
+
+/** @returns {number} Same radius in meters (for haversine compare). */
+export function getNearTrailerRadiusMeters() {
+  return getNearTrailerRadiusFeet() * 0.3048
 }
 
 export function getTripBellSoundUrl() {
@@ -464,7 +501,6 @@ const prevTrailerGps = new Map()
 const nearTrailerCooldown = new Map()
 
 const RELOC_MIN_MOVE_M = 12
-const NEAR_RADIUS_M = 95
 const NEAR_COOLDOWN_MS = 110_000
 
 function haversineM(lat1, lng1, lat2, lng2) {
@@ -547,7 +583,7 @@ export function maybeAnnounceNearTrailer(userLat, userLng, trailers) {
     if (isNaN(lat) || isNaN(lng)) continue
 
     const d = haversineM(userLat, userLng, lat, lng)
-    if (d > NEAR_RADIUS_M) continue
+    if (d > getNearTrailerRadiusMeters()) continue
 
     const last = nearTrailerCooldown.get(order) ?? 0
     if (now - last < NEAR_COOLDOWN_MS) continue

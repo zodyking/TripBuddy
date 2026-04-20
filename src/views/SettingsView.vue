@@ -49,6 +49,8 @@ import {
   isArrivalAlertsEnabled,
   setArrivalAlertsEnabled,
   previewTripAlertSample,
+  getNearTrailerRadiusFeet,
+  setNearTrailerRadiusFeet,
 } from '../utils/tripVoiceAnnouncement.js'
 import {
   getAlertPrefs,
@@ -202,6 +204,12 @@ const tripAlertMode = ref(getTripAlertMode())
 const tripStatusChangeOn = ref(isTripStatusChangeEnabled())
 const trailerStatusChangeOn = ref(isTrailerStatusChangeEnabled())
 const arrivalAlertsOn = ref(isArrivalAlertsEnabled())
+const nearTrailerRadiusFeet = ref(getNearTrailerRadiusFeet())
+
+function saveNearTrailerRadius() {
+  setNearTrailerRadiusFeet(nearTrailerRadiusFeet.value)
+  nearTrailerRadiusFeet.value = getNearTrailerRadiusFeet()
+}
 
 const alertPrefs = ref(getAlertPrefs())
 
@@ -660,6 +668,7 @@ watch(settingsTab, (tab) => {
     trailerStatusChangeOn.value = isTrailerStatusChangeEnabled()
     arrivalAlertsOn.value = isArrivalAlertsEnabled()
     alertPrefs.value = getAlertPrefs()
+    nearTrailerRadiusFeet.value = getNearTrailerRadiusFeet()
   }
   if (tab === 'security') {
     void loadSecurityAccessLog()
@@ -967,7 +976,7 @@ onUnmounted(() => {
               <input type="checkbox" :checked="trailerStatusChangeOn" @change="toggleTrailerStatusChange($event.target.checked)" />
               <span class="toggle-slider"></span>
             </label>
-            <span class="audio-row-label">Trailer loading finished</span>
+            <span class="audio-row-label">Trailer load status changes</span>
             <button
               type="button"
               class="audio-test-btn tap"
@@ -990,6 +999,29 @@ onUnmounted(() => {
             >
               Test
             </button>
+          </div>
+
+          <div v-if="ttsEnabled" class="audio-near-trailer">
+            <label class="lbl audio-near-trailer-label" for="near-trailer-ft">Near-trailer alert distance</label>
+            <div class="audio-near-trailer-row">
+              <input
+                id="near-trailer-ft"
+                v-model.number="nearTrailerRadiusFeet"
+                class="inp tap audio-near-trailer-input"
+                type="number"
+                min="15"
+                max="3000"
+                step="5"
+                inputmode="numeric"
+                autocomplete="off"
+                @change="saveNearTrailerRadius"
+              />
+              <span class="audio-near-trailer-unit" aria-hidden="true">feet</span>
+            </div>
+            <p class="audio-near-trailer-hint">
+              “You are near trailer …” plays when your GPS is within this radius of a trailer location. Default 312 ft
+              (~95 m).
+            </p>
           </div>
 
           <div class="audio-row">
@@ -1373,6 +1405,35 @@ onUnmounted(() => {
 
 .audio-panel {
   padding-top: 0.15rem;
+}
+.audio-near-trailer {
+  padding: 0.65rem 0 0.85rem;
+  border-bottom: 1px solid var(--color-border, rgba(255, 255, 255, 0.08));
+}
+.audio-near-trailer-label {
+  display: block;
+  margin-bottom: 0.45rem;
+}
+.audio-near-trailer-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+.audio-near-trailer-input {
+  max-width: 7rem;
+  min-height: 2.5rem;
+}
+.audio-near-trailer-unit {
+  font-size: 0.9rem;
+  color: var(--color-text-tertiary, #a8a8b8);
+  font-weight: 600;
+}
+.audio-near-trailer-hint {
+  margin: 0.45rem 0 0;
+  font-size: 0.78rem;
+  line-height: 1.4;
+  color: var(--color-text-tertiary, #8e8e9e);
 }
 .audio-row {
   display: flex;
