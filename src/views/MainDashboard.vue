@@ -44,6 +44,7 @@ import {
   hasPrePlanTrip,
   markTripLegSequenceCompleted,
   tripBodyDailySeq,
+  lastDailyTripLegSequence,
 } from '../stores/linehaulSnapshotStore.js'
 import {
   apiOk,
@@ -238,7 +239,13 @@ const activeDispatchTripSeq = computed(() => {
   if (dispatchSlideIndex.value === 1 && prePlanTripLegSeq.value) {
     return prePlanTripLegSeq.value
   }
-  return currentTripLegSeq.value ?? ''
+  const cur = currentTripLegSeq.value
+  if (cur) return cur
+  const cachedSeq = tripBodyDailySeq(cachedTripSnapshot.value)
+  if (cachedSeq) return cachedSeq
+  const lp = lastDailyTripLegSequence.value
+  if (typeof lp === 'string' && /^\d+$/.test(lp.trim())) return lp.trim()
+  return ''
 })
 
 const tripTrailerCards = computed(() =>
@@ -323,7 +330,12 @@ function onTripPanelPointerDown(e) {
   tripPointerStartX = e.clientX
   tripPointerMoved = false
   clearTripLongPressTimer()
-  const seq = currentTripLegSeq.value
+  const seq =
+    currentTripLegSeq.value ||
+    tripBodyDailySeq(cachedTripSnapshot.value) ||
+    (typeof lastDailyTripLegSequence.value === 'string' && /^\d+$/.test(lastDailyTripLegSequence.value.trim())
+      ? lastDailyTripLegSequence.value.trim()
+      : '')
   if (!seq) return
   tripLongPressTimer = setTimeout(() => {
     tripLongPressTimer = null

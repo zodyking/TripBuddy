@@ -67,19 +67,30 @@ onUnmounted(() => {
       </div>
     </header>
 
-    <div v-if="apiOk === false" class="offline-banner">
-      <div class="offline-banner-inner">
-        <span class="offline-icon">!</span>
-        <span class="offline-text">API offline — run <code>npm run dev</code> from project root</span>
+    <div class="app-body">
+      <div v-if="apiOk === false" class="offline-banner">
+        <div class="offline-banner-inner">
+          <span class="offline-icon">!</span>
+          <span class="offline-text">API offline — run <code>npm run dev</code> from project root</span>
+        </div>
+      </div>
+
+      <!-- Full-width scroll area so side gutters scroll with page content (not only the centered column). -->
+      <div
+        class="app-scroll"
+        :class="{ 'app-scroll--embed': route.name === 'trip-buddy' }"
+      >
+        <main
+          class="app-main"
+          :class="{
+            'app-main--directory': route.name === 'directory',
+            'app-main--embed': route.name === 'trip-buddy',
+          }"
+        >
+          <RouterView />
+        </main>
       </div>
     </div>
-
-    <main
-      class="app-main"
-      :class="{ 'app-main--directory': route.name === 'directory' }"
-    >
-      <RouterView />
-    </main>
 
     <nav class="bottom-nav" aria-label="Main navigation">
       <RouterLink
@@ -92,6 +103,17 @@ onUnmounted(() => {
           <polyline points="9 22 9 12 15 12 15 22"/>
         </svg>
         <span class="nav-label">Home</span>
+      </RouterLink>
+      <RouterLink
+        class="nav-item"
+        :class="{ 'is-active': route.name === 'trip-buddy' }"
+        to="/trip-buddy"
+      >
+        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/>
+          <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>
+        </svg>
+        <span class="nav-label">Trip Buddy</span>
       </RouterLink>
       <RouterLink
         class="nav-item"
@@ -273,14 +295,34 @@ onUnmounted(() => {
   background: rgba(0, 0, 0, 0.3);
 }
 
+/* Middle column: header → scrollable region → footer (fixed). Gutters are inside the scroller. */
+.app-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.app-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior-y: contain;
+  display: flex;
+  flex-direction: column;
+}
+
+.app-scroll.app-scroll--embed {
+  overflow: hidden;
+}
+
 /* ═══════════════════════════════════════════════════════════════════════════
    MAIN CONTENT
    ═══════════════════════════════════════════════════════════════════════════ */
 .app-main {
-  flex: 1;
-  overflow-y: auto;
-  -webkit-overflow-scrolling: touch;
-  overscroll-behavior-y: contain;
+  flex: 1 0 auto;
+  box-sizing: border-box;
   max-width: var(--app-content-max, 40rem);
   width: 100%;
   margin-inline: auto;
@@ -291,12 +333,27 @@ onUnmounted(() => {
 
 /* Directory: edge-to-edge horizontal, no centered column — inner view owns scroll regions */
 .app-main.app-main--directory {
+  flex: 1;
+  min-height: 0;
   max-width: none;
   margin-inline: 0;
   padding-inline: 0;
   padding-bottom: 0;
   overflow-x: hidden;
   overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Trip Buddy: full-width embed fills space between header and nav */
+.app-main.app-main--embed {
+  flex: 1;
+  min-height: 0;
+  max-width: none;
+  margin-inline: 0;
+  padding-inline: 0;
+  padding-bottom: 0;
+  overflow: hidden;
   display: flex;
   flex-direction: column;
 }
