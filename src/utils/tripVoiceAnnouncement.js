@@ -12,6 +12,8 @@ const MODE_KEY = 'fedexTripAlertMode'
 const TRIP_STATUS_CHANGE_KEY = 'fedexTripStatusChangeEnabled'
 const TRAILER_STATUS_CHANGE_KEY = 'fedexTrailerStatusChangeEnabled'
 const ARRIVAL_ALERTS_KEY = 'fedexArrivalAlertsEnabled'
+/** Relocation + near-trailer TTS (default on). */
+const TRAILER_GPS_TTS_KEY = 'fedexTrailerGpsTtsEnabled'
 
 /** 
  * Audio mode: off = no alerts, tts = speech only, both = bell chime before speech
@@ -96,6 +98,18 @@ export function setArrivalAlertsEnabled(enabled) {
   window.localStorage.setItem(ARRIVAL_ALERTS_KEY, enabled ? 'true' : 'false')
 }
 
+/** @returns {boolean} TTS for trailer GPS move + proximity (default true). */
+export function isTrailerGpsTtsEnabled() {
+  if (typeof window === 'undefined' || !window.localStorage) return true
+  return window.localStorage.getItem(TRAILER_GPS_TTS_KEY) !== 'false'
+}
+
+/** @param {boolean} enabled */
+export function setTrailerGpsTtsEnabled(enabled) {
+  if (typeof window === 'undefined' || !window.localStorage) return
+  window.localStorage.setItem(TRAILER_GPS_TTS_KEY, enabled ? 'true' : 'false')
+}
+
 export function getTripBellSoundUrl() {
   const base = import.meta.env.BASE_URL || '/'
   const normalized = base.endsWith('/') ? base : `${base}/`
@@ -158,11 +172,28 @@ function flushPendingTripAlert() {
 export function unlockTripVoiceFromUserGesture() {
   if (typeof window === 'undefined') return
   gestureUnlocked = true
-  
+
   const mode = getTripAlertMode()
-  speakDirect('Text to speech alerts active.', { bell: mode === 'both' })
-  
-  flushPendingTripAlert()
+  const bell = mode === 'both'
+
+  const geo = typeof navigator !== 'undefined' ? navigator.geolocation : null
+  if (!geo || typeof geo.getCurrentPosition !== 'function') {
+    speakDirect('TTS alerts active.', { bell })
+    flushPendingTripAlert()
+    return
+  }
+
+  geo.getCurrentPosition(
+    () => {
+      speakDirect('TTS alerts and GPS active.', { bell })
+      flushPendingTripAlert()
+    },
+    () => {
+      speakDirect('TTS alerts active.', { bell })
+      flushPendingTripAlert()
+    },
+    { enableHighAccuracy: true, maximumAge: 0, timeout: 12_000 },
+  )
 }
 
 /** Whether to show "tap to enable" UI (touch-primary and not yet unlocked). */
@@ -269,7 +300,7 @@ export function cancelTripVoiceAnnouncement() {
 /** Settings: test speech (same voice as trip alert). */
 export function speakTripTtsTest() {
   if (typeof window === 'undefined' || !window.speechSynthesis) return
-  const text = 'Text to speech alerts active.'
+  const text = 'TTS alerts active.'
   pushLiveLog({ type: 'info', message: `[TripVoice] test triggered: ${text}`, ts: Date.now() })
   speakDirect(text)
 }
@@ -385,6 +416,114 @@ export function maybeAnnounceTrailerStatusChange(trailers) {
  */
 export function clearTrailerStatusTracking() {
   prevTrailerStatuses.clear()
+}
+
+/** @type {Map<string, string>} key: trlrOrder → "lat,lng" rounded */
+const prevTrailerGps = new Map()
+
+/** @type {Map<string, number>} trlrOrder → last near-announce timestamp */
+const nearTrailerCooldown = new Map()
+
+const RELOC_MIN_MOVE_M = 12
+const NEAR_RADIUS_M = 95
+const NEAR_COOLDOWN_MS = 110_000
+
+function haversineM(lat1, lng1, lat2, lng2) {
+  const R = 6371000
+  const toRad = (d) => (d * Math.PI) / 180
+  const dLat = toRad(lat2 - lat1)
+  const dLng = toRad(lng2 - lng1)
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) * Math.sin(dLng / 2)
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
+  return R * c
+}
+
+function gpsKey(lat, lng) {
+  return `${lat.toFixed(5)},${lng.toFixed(5)}`
+}
+
+/**
+ * After trailers finish loading, announce when a trailer's lat/lng changes meaningfully.
+ * @param {unknown[]} trailers
+ */
+export function maybeAnnounceTrailerRelocated(trailers) {
+  if (typeof window === 'undefined') return
+  if (!Array.isArray(trailers)) return
+  const mode = getTripAlertMode()
+  if (mode === 'off' || !isTrailerGpsTtsEnabled()) return
+  evaluateGestureGate()
+  if (!gestureUnlocked) return
+
+  for (const t of trailers) {
+    if (!t || typeof t !== 'object') continue
+    const tr = /** @type {Record<string, unknown>} */ (t)
+    const order = String(tr.trlrOrder ?? '').trim()
+    if (!order) continue
+    const lat = tr.latitude != null ? Number(tr.latitude) : NaN
+    const lng = tr.longitude != null ? Number(tr.longitude) : NaN
+    if (isNaN(lat) || isNaN(lng)) continue
+
+    const key = gpsKey(lat, lng)
+    const prev = prevTrailerGps.get(order)
+    prevTrailerGps.set(order, key)
+
+    if (prev == null) continue
+    if (prev === key) continue
+    const [plat, plng] = prev.split(',').map(Number)
+    if (isNaN(plat) || isNaN(plng)) continue
+    if (haversineM(plat, plng, lat, lng) < RELOC_MIN_MOVE_M) continue
+
+    const nbr = String(tr.trlrNbr ?? '').trim() || order
+    const text = `Trailer ${nbr} has been relocated.`
+    pushLiveLog({ type: 'info', message: `[TripVoice] ${text}`, ts: Date.now() })
+    enqueueAnnouncement(text, { bell: mode === 'both', category: `trailerReloc:${order}` })
+  }
+}
+
+/**
+ * When user position is known, announce proximity to trailers with GPS.
+ * @param {number} userLat
+ * @param {number} userLng
+ * @param {unknown[]} trailers
+ */
+export function maybeAnnounceNearTrailer(userLat, userLng, trailers) {
+  if (typeof window === 'undefined') return
+  if (!Array.isArray(trailers)) return
+  if (isNaN(userLat) || isNaN(userLng)) return
+  const mode = getTripAlertMode()
+  if (mode === 'off' || !isTrailerGpsTtsEnabled()) return
+  evaluateGestureGate()
+  if (!gestureUnlocked) return
+
+  const now = Date.now()
+  for (const t of trailers) {
+    if (!t || typeof t !== 'object') continue
+    const tr = /** @type {Record<string, unknown>} */ (t)
+    const order = String(tr.trlrOrder ?? '').trim()
+    if (!order) continue
+    const lat = tr.latitude != null ? Number(tr.latitude) : NaN
+    const lng = tr.longitude != null ? Number(tr.longitude) : NaN
+    if (isNaN(lat) || isNaN(lng)) continue
+
+    const d = haversineM(userLat, userLng, lat, lng)
+    if (d > NEAR_RADIUS_M) continue
+
+    const last = nearTrailerCooldown.get(order) ?? 0
+    if (now - last < NEAR_COOLDOWN_MS) continue
+    nearTrailerCooldown.set(order, now)
+
+    const nbr = String(tr.trlrNbr ?? '').trim() || order
+    const text = `You are near trailer ${nbr}.`
+    pushLiveLog({ type: 'info', message: `[TripVoice] ${text}`, ts: Date.now() })
+    enqueueAnnouncement(text, { bell: mode === 'both', category: `nearTrailer:${order}` })
+  }
+}
+
+export function clearTrailerGpsTracking() {
+  prevTrailerGps.clear()
+  nearTrailerCooldown.clear()
 }
 
 /**

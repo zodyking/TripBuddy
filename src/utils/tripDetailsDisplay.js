@@ -52,6 +52,56 @@ export function hasTripOriginAndDestination(body) {
 }
 
 /**
+ * Best-effort: pull dispatch / special instruction text from trip payload keys that vary by API version.
+ * @param {unknown} body
+ * @returns {string}
+ */
+export function extractTripDispatchInstructions(body) {
+  if (body == null || typeof body !== 'object' || Array.isArray(body)) return ''
+  const o = /** @type {Record<string, unknown>} */ (body)
+  const preferredKeys = [
+    'dispatchInstructions',
+    'tripInstructions',
+    'specialInstructions',
+    'splInstr',
+    'splInstruction',
+    'tripComment',
+    'dispatchComment',
+    'tripRemarks',
+    'dispatchRemarks',
+    'specialMessage',
+    'tripNotes',
+    'dispatchNotes',
+    'tmsComments',
+    'comments',
+  ]
+  const parts = []
+  const seen = new Set()
+  const push = (s) => {
+    const t = String(s).trim()
+    if (!t || t === '—') return
+    const low = t.toLowerCase()
+    if (seen.has(low)) return
+    seen.add(low)
+    parts.push(t)
+  }
+  for (const key of preferredKeys) {
+    if (!(key in o)) continue
+    const v = o[key]
+    if (typeof v === 'string') push(v)
+    else if (v != null && typeof v !== 'object') push(String(v))
+  }
+  for (const key of Object.keys(o)) {
+    if (preferredKeys.includes(key)) continue
+    if (!/(instruction|remark|comment|splinstr|splmessage|notes)$/i.test(key)) continue
+    const v = o[key]
+    if (typeof v === 'string') push(v)
+    else if (v != null && typeof v !== 'object') push(String(v))
+  }
+  return parts.join('\n\n')
+}
+
+/**
  * @param {Record<string, unknown>} obj
  * @returns {{ label: string, value: string }[]}
  */

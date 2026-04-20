@@ -62,6 +62,7 @@ import { isCheckInLocationMismatchMessage } from '../utils/checkInLocationMismat
 import { parseTripReadyBoolean } from '../utils/tripReadyParse.js'
 import {
   extractOriginDest,
+  extractTripDispatchInstructions,
   hasTripOriginAndDestination,
   buildEnhancedTrailerCards,
   buildDollySection,
@@ -81,7 +82,10 @@ import {
   isTripAlertEnabled,
   maybeAnnounceStatusChange,
   maybeAnnounceTrailerStatusChange,
+  maybeAnnounceTrailerRelocated,
+  maybeAnnounceNearTrailer,
   clearTrailerStatusTracking,
+  clearTrailerGpsTracking,
   clearTripPhaseTracking,
   announceGeofenceArrival,
   announceArrivalSuccess,
@@ -146,6 +150,14 @@ const trailerGpsModalOpen = ref(false)
 const trailerGpsData = ref(null)
 
 const instructions = ref('')
+
+/** Merged: Settings assignment text + any instruction-like fields from Linehaul trip body */
+const mergedDispatchInstructions = computed(() => {
+  const fromApi = extractTripDispatchInstructions(linehaulTripsBody.value)
+  const fromAssignment = String(instructions.value ?? '').trim()
+  if (fromApi && fromAssignment) return `${fromAssignment}\n\n${fromApi}`
+  return fromApi || fromAssignment
+})
 
 const automationPreview = ref(null)
 const automationPreviewHidden = ref(false)
@@ -407,7 +419,7 @@ function buildTripHistoryDispatchHeader() {
     tripStatusKind: tripStatusUi.value.kind,
     origin: od.origin,
     destination: od.destination,
-    instructions: String(instructions.value ?? '').trim(),
+    instructions: String(mergedDispatchInstructions.value ?? '').trim(),
   }
 }
 
@@ -507,9 +519,50 @@ function syncTripVoiceUnlockHint() {
   tripVoiceUnlockHint.value = tripVoiceShowUnlockHint()
 }
 
+/** @type {number | null} */
+let tripProximityWatchId = null
+
+function stopTripProximityWatch() {
+  if (
+    tripProximityWatchId != null &&
+    typeof navigator !== 'undefined' &&
+    navigator.geolocation &&
+    typeof navigator.geolocation.clearWatch === 'function'
+  ) {
+    navigator.geolocation.clearWatch(tripProximityWatchId)
+  }
+  tripProximityWatchId = null
+}
+
+function tryStartTripProximityWatch() {
+  syncTripVoiceUnlockHint()
+  if (!isTripAlertEnabled()) {
+    stopTripProximityWatch()
+    return
+  }
+  if (tripVoiceUnlockHint.value) {
+    stopTripProximityWatch()
+    return
+  }
+  if (typeof navigator === 'undefined' || !navigator.geolocation?.watchPosition) return
+  stopTripProximityWatch()
+  tripProximityWatchId = navigator.geolocation.watchPosition(
+    (pos) => {
+      const body = linehaulTripsBody.value
+      if (!body || typeof body !== 'object') return
+      const tr = /** @type {Record<string, unknown>} */ (body).trailers
+      if (!Array.isArray(tr)) return
+      maybeAnnounceNearTrailer(pos.coords.latitude, pos.coords.longitude, tr)
+    },
+    () => {},
+    { enableHighAccuracy: true, maximumAge: 5000, timeout: 20000 },
+  )
+}
+
 function onUnlockTripVoiceTap() {
   unlockTripVoiceFromUserGesture()
   syncTripVoiceUnlockHint()
+  tryStartTripProximityWatch()
 }
 
 async function loadQuickActions() {
@@ -822,6 +875,7 @@ watch(
     }
     if (newPhase === 'none' && oldPhase !== 'none') {
       clearTrailerStatusTracking()
+      clearTrailerGpsTracking()
     }
   },
 )
@@ -836,9 +890,17 @@ watch(
   (trailers) => {
     if (trailers) {
       maybeAnnounceTrailerStatusChange(trailers)
+      maybeAnnounceTrailerRelocated(trailers)
     }
   },
   { deep: true },
+)
+
+watch(
+  [tripVoiceUnlockHint, tripAlertOn, linehaulTripsBody],
+  () => {
+    tryStartTripProximityWatch()
+  },
 )
 
 let prevTractorFingerprint = ''
@@ -1199,6 +1261,8 @@ onMounted(async () => {
   void pollAutomationPreview()
   previewPollTimer = setInterval(pollAutomationPreview, 1600)
   void setupLinehaulPolling()
+  syncTripVoiceUnlockHint()
+  tryStartTripProximityWatch()
 })
 
 onActivated(() => {
@@ -1206,12 +1270,16 @@ onActivated(() => {
   void refreshLinehaulCredMeta()
   void loadQuickActions()
   void setupLinehaulPolling()
+  syncTripVoiceUnlockHint()
+  tryStartTripProximityWatch()
 })
 
 onUnmounted(() => {
+  stopTripProximityWatch()
   cancelTripVoiceAnnouncement()
   cancelAllAlerts()
   clearTrailerStatusTracking()
+  clearTrailerGpsTracking()
   clearTripPhaseTracking()
   unregisterAssignment()
   unregisterSession()
@@ -1831,9 +1899,11 @@ onUnmounted(() => {
         role="status"
       >
         <button type="button" class="tap trip-voice-unlock-btn" @click="onUnlockTripVoiceTap">
-          Tap to activate audio alerts
+          Tap to enable TTS and GPS monitoring
         </button>
-        <span class="trip-voice-unlock-sub">Some phones and tablets require a tap before alerts can play.</span>
+        <span class="trip-voice-unlock-sub"
+          >Starts location for trailer proximity alerts. Some devices require a tap before audio can play.</span
+        >
       </div>
       <div
         v-if="(linehaulTripsBody || prePlanTripSnapshot) && !linehaulTripsError"
@@ -1883,22 +1953,22 @@ onUnmounted(() => {
           </div>
         </div>
       </div>
-      <p v-if="!instructions.trim()" class="empty">No instructions yet.</p>
+      <p v-if="!mergedDispatchInstructions.trim()" class="empty">No instructions yet.</p>
       <button
         v-else
         type="button"
         class="read dispatch-instructions-body copyable-block tap"
         title="Tap to copy"
-        @click.stop="copyTripDetailValue(instructions, 'Instructions')"
+        @click.stop="copyTripDetailValue(mergedDispatchInstructions, 'Instructions')"
       >
-        {{ instructions }}
+        {{ mergedDispatchInstructions }}
       </button>
     </section>
 
     <section
       v-if="showSealOrTripPanel"
       ref="tripDetailsPanelRef"
-      class="panel trip-details-panel"
+      class="panel trip-details-panel trip-details-panel--ruled"
       @pointerdown="onTripPanelPointerDown"
       @pointermove="onTripPanelPointerMove"
       @pointerup="onTripPanelPointerUp"
@@ -2057,7 +2127,7 @@ onUnmounted(() => {
       </div>
     </section>
 
-    <section class="panel actions">
+    <section class="panel actions actions-panel--ruled">
       <h2>Quick actions</h2>
       <p v-if="!quickActionAutomations.length" class="empty">
         No automations yet. Create one in Settings → Automation with a Manual trigger.
@@ -3048,6 +3118,13 @@ button.trailer-nbr.copyable-inline {
 .trip-details-panel {
   touch-action: pan-y;
 }
+
+.trip-details-panel--ruled > h2:first-of-type,
+.actions-panel--ruled > h2:first-of-type {
+  margin: 0 0 0.65rem;
+  padding-bottom: 0.75rem;
+  border-bottom: 1px solid #2e2e38;
+}
 .dispatch-dot.active {
   background: #7dd3fc;
   border-color: #7dd3fc;
@@ -3384,34 +3461,43 @@ button.trailer-nbr.copyable-inline {
   outline: 2px solid var(--color-accent-purple, #7b4db5);
   outline-offset: -2px;
 }
-/* Single-line header: label, #, and badges share one row / baseline */
+/* Single-line header: compress to one row without horizontal scroll */
 .trailer-card-header-inline {
   display: flex;
   flex-direction: row;
   align-items: center;
   flex-wrap: nowrap;
-  gap: 0.4rem;
+  gap: clamp(0.2rem, 1.2vw, 0.35rem);
   min-width: 0;
   flex: 1;
-  overflow-x: auto;
-  -webkit-overflow-scrolling: touch;
-  scrollbar-width: thin;
+  overflow: hidden;
+  font-size: clamp(0.58rem, 2.65vw, 0.72rem);
+  line-height: 1.05;
+  max-height: 1.35rem;
 }
 .trailer-order {
   font-weight: 700;
-  font-size: 0.8rem;
-  line-height: 1.15;
+  font-size: 1em;
+  line-height: 1.05;
   color: var(--text, #e8e8ee);
-  flex-shrink: 0;
+  flex: 0 1 auto;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .trailer-nbr {
   font-weight: 700;
-  font-size: 0.8rem;
-  line-height: 1.15;
+  font-size: 1em;
+  line-height: 1.05;
   color: var(--text, #e8e8ee);
   font-variant-numeric: tabular-nums;
   font-family: ui-monospace, 'Cascadia Code', 'Segoe UI Mono', monospace;
-  flex-shrink: 0;
+  flex: 0 1 auto;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .trailer-size-badge,
 .trailer-status-badge,
@@ -3419,17 +3505,21 @@ button.trailer-nbr.copyable-inline {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  padding: 0.1rem 0.32rem;
-  border-radius: 3px;
-  font-size: 0.58rem;
-  line-height: 1.1;
+  padding: 0.06rem 0.22rem;
+  border-radius: 2px;
+  font-size: 0.78em;
+  line-height: 1.05;
   font-weight: 700;
   text-transform: uppercase;
-  letter-spacing: 0.02em;
-  flex-shrink: 0;
-  min-height: 1.05rem;
-  max-height: 1.15rem;
+  letter-spacing: 0.01em;
+  flex-shrink: 1;
+  min-width: 0;
+  min-height: 0.95rem;
+  max-height: 1.1rem;
   box-sizing: border-box;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .trailer-size-badge {
   background: #2a3a4a;
