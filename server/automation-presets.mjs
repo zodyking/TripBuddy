@@ -3,7 +3,7 @@
  * These break down common flows into granular, editable actions.
  */
 
-function genId() {
+export function genId() {
   return Math.random().toString(36).slice(2, 10)
 }
 

@@ -2,8 +2,12 @@ import fs from 'node:fs/promises'
 import path from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { LOCAL_DIR } from './config.mjs'
+import { getPreset, genId } from './automation-presets.mjs'
 
 const AUTOMATIONS_FILE = path.join(LOCAL_DIR, 'automations.json')
+
+/** Preset ids to install when automations.json is empty (quick actions on dashboard). */
+const DEFAULT_QUICK_ACTION_PRESET_IDS = ['check_in_full', 'arrive_full', 'inspect_checkout']
 
 /**
  * Block type definitions for the automation builder.
@@ -539,6 +543,56 @@ function defaultStore() {
   }
 }
 
+/**
+ * Clone a preset automation with fresh ids so each default install is independent
+ * (avoids duplicate trigger/action ids if presets were copied from module-static structures).
+ */
+function cloneAutomationWithFreshIds(auto) {
+  const clone = JSON.parse(JSON.stringify(auto))
+  clone.id = generateId()
+  for (const t of clone.triggers ?? []) {
+    t.id = genId()
+  }
+  for (const c of clone.conditions ?? []) {
+    c.id = genId()
+  }
+  function rewriteActions(actions) {
+    if (!Array.isArray(actions)) return
+    for (const a of actions) {
+      a.id = genId()
+      if (a.children && typeof a.children === 'object') {
+        for (const arr of Object.values(a.children)) {
+          if (Array.isArray(arr)) rewriteActions(arr)
+        }
+      }
+    }
+  }
+  rewriteActions(clone.actions)
+  const now = Date.now()
+  clone.createdAt = now
+  clone.updatedAt = now
+  return clone
+}
+
+async function ensureDefaultQuickActionsSeeded(store) {
+  if (store.automations.length > 0) return store
+  for (const presetId of DEFAULT_QUICK_ACTION_PRESET_IDS) {
+    const fromPreset = getPreset(presetId)
+    if (!fromPreset) continue
+    const auto = cloneAutomationWithFreshIds(fromPreset)
+    const v = validateAutomation(auto)
+    if (!v.ok) {
+      console.error(`[automations] skip default preset ${presetId}: ${v.error}`)
+      continue
+    }
+    store.automations.push(auto)
+  }
+  if (store.automations.length > 0) {
+    await writeStore(store)
+  }
+  return store
+}
+
 function validateAction(action, path = 'action') {
   if (!action || typeof action !== 'object') {
     return { ok: false, error: `${path}: must be object` }
@@ -638,11 +692,13 @@ export async function readAutomations() {
     const raw = await fs.readFile(AUTOMATIONS_FILE, 'utf8')
     const parsed = JSON.parse(raw)
     if (!parsed || typeof parsed !== 'object' || !Array.isArray(parsed.automations)) {
-      return defaultStore()
+      const empty = defaultStore()
+      return ensureDefaultQuickActionsSeeded(empty)
     }
-    return parsed
+    return ensureDefaultQuickActionsSeeded(parsed)
   } catch {
-    return defaultStore()
+    const empty = defaultStore()
+    return ensureDefaultQuickActionsSeeded(empty)
   }
 }
 
