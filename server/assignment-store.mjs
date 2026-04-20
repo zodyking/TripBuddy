@@ -70,10 +70,16 @@ const DEFAULT_ASSIGNMENT = {
   preset: 'sealed_dual',
   photoSlots: [...PRESETS.sealed_dual.photoSlots],
   fieldValues: {},
+  /** FedEx `dailyTripLegSequence` values user marked complete (hide until API changes). */
+  hiddenDailyTripLegSequences: [],
 }
 
 function cloneDefault() {
-  return JSON.parse(JSON.stringify(DEFAULT_ASSIGNMENT))
+  const o = JSON.parse(JSON.stringify(DEFAULT_ASSIGNMENT))
+  if (!Array.isArray(o.hiddenDailyTripLegSequences)) {
+    o.hiddenDailyTripLegSequences = []
+  }
+  return o
 }
 
 export function getPreset(presetKey) {
@@ -113,7 +119,13 @@ async function readAssignmentFromFile(file) {
     const data = JSON.parse(raw)
     const err = validateSlots(data.photoSlots || [])
     if (err) return null
-    return {
+    const hiddenRaw = data.hiddenDailyTripLegSequences
+    const hiddenDailyTripLegSequences = Array.isArray(hiddenRaw)
+      ? hiddenRaw
+          .map((s) => String(s).trim())
+          .filter((s) => /^\d+$/.test(s))
+      : []
+    const base = {
       instructions: typeof data.instructions === 'string' ? data.instructions : '',
       driverPhone: typeof data.driverPhone === 'string' ? data.driverPhone : '',
       preset: typeof data.preset === 'string' ? data.preset : 'custom',
@@ -122,7 +134,12 @@ async function readAssignmentFromFile(file) {
         data.fieldValues && typeof data.fieldValues === 'object'
           ? data.fieldValues
           : {},
+      hiddenDailyTripLegSequences,
     }
+    if (!Array.isArray(base.hiddenDailyTripLegSequences)) {
+      base.hiddenDailyTripLegSequences = []
+    }
+    return base
   } catch {
     return null
   }
@@ -139,7 +156,11 @@ export async function readAssignment() {
     return cloneDefault()
   }
   const global = await readAssignmentFromFile(ASSIGNMENT_FILE)
-  return global ?? cloneDefault()
+  const g = global ?? cloneDefault()
+  if (!Array.isArray(g.hiddenDailyTripLegSequences)) {
+    g.hiddenDailyTripLegSequences = []
+  }
+  return g
 }
 
 export async function writeAssignment(body) {
@@ -172,6 +193,20 @@ export async function writeAssignment(body) {
       ? { ...prev.fieldValues, ...body.fieldValues }
       : prev.fieldValues
 
+  let hiddenDailyTripLegSequences = prev.hiddenDailyTripLegSequences ?? []
+  if (Array.isArray(body.hiddenDailyTripLegSequences)) {
+    hiddenDailyTripLegSequences = body.hiddenDailyTripLegSequences
+      .map((s) => String(s).trim())
+      .filter((s) => /^\d+$/.test(s))
+  } else if (typeof body.appendHiddenDailyTripLegSequence === 'string') {
+    const one = body.appendHiddenDailyTripLegSequence.trim()
+    if (/^\d+$/.test(one)) {
+      const set = new Set(hiddenDailyTripLegSequences)
+      set.add(one)
+      hiddenDailyTripLegSequences = Array.from(set)
+    }
+  }
+
   const next = {
     instructions:
       typeof body.instructions === 'string'
@@ -182,6 +217,7 @@ export async function writeAssignment(body) {
     preset,
     photoSlots,
     fieldValues,
+    hiddenDailyTripLegSequences,
   }
 
   await fs.writeFile(targetFile, JSON.stringify(next, null, 2), 'utf8')

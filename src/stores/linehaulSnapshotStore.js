@@ -5,6 +5,8 @@ import {
   fetchFedexLinehaulTripStatus,
   fetchFedexLinehaulTrips,
   getCredentials,
+  getAssignment,
+  putAssignment,
   postLinehaulCaptureBearer,
 } from '../api.js'
 import { pushLiveLog } from './liveLogStore.js'
@@ -28,8 +30,47 @@ export const linehaulFetching = ref(false)
 export const cachedTripSnapshot = ref(null)
 /** Pre-plan trip: a second APRVD trip with different dailyTripLegSequence while current trip exists. */
 export const prePlanTripSnapshot = ref(null)
+/** User-marked completed trip leg sequences (persisted server-side; hide matching API data). */
+export const hiddenDailyTripLegSequences = ref(/** @type {string[]} */ ([]))
 /** Previous driver availability status to detect ENRT→ACT transition. */
 let prevDriverAvlStat = null
+
+function applyHiddenTripFilter() {
+  const hidden = new Set(
+    hiddenDailyTripLegSequences.value.map((s) => String(s).trim()).filter(Boolean),
+  )
+  if (!hidden.size) return
+  const cur = linehaulTripsBody.value
+  const seqCur = tripBodyDailySeq(cur)
+  if (seqCur && hidden.has(seqCur)) {
+    linehaulTripsBody.value = null
+    linehaulTripsNoActive.value = true
+  }
+  const pre = prePlanTripSnapshot.value
+  const seqPre = tripBodyDailySeq(pre)
+  if (seqPre && hidden.has(seqPre)) {
+    prePlanTripSnapshot.value = null
+  }
+  const c = cachedTripSnapshot.value
+  const seqC = tripBodyDailySeq(c)
+  if (seqC && hidden.has(seqC)) {
+    cachedTripSnapshot.value = null
+  }
+}
+
+/**
+ * User completed trip — persist hidden seq and clear matching UI state.
+ * @param {string} dailyTripLegSequence
+ */
+export async function markTripLegSequenceCompleted(dailyTripLegSequence) {
+  const seq = String(dailyTripLegSequence ?? '').trim()
+  if (!/^\d+$/.test(seq)) return
+  const a = await putAssignment({ appendHiddenDailyTripLegSequence: seq })
+  hiddenDailyTripLegSequences.value = Array.isArray(a.hiddenDailyTripLegSequences)
+    ? a.hiddenDailyTripLegSequences.map(String)
+    : []
+  applyHiddenTripFilter()
+}
 
 /**
  * Trip lifecycle phase: 'none' | 'assigned' | 'dispatched'.
@@ -140,7 +181,7 @@ function deepMergeNonEmpty(base, ...sources) {
  * @param {unknown} body
  * @returns {string | null}
  */
-function tripBodyDailySeq(body) {
+export function tripBodyDailySeq(body) {
   if (body == null || typeof body !== 'object' || Array.isArray(body)) return null
   const s = /** @type {Record<string, unknown>} */ (body).dailyTripLegSequence
   if (s == null) return null
@@ -203,6 +244,15 @@ export async function refreshLinehaulApis() {
  * @param {0 | 1} attempt
  */
 async function refreshLinehaulApisImpl(attempt) {
+  try {
+    const assign = await getAssignment()
+    hiddenDailyTripLegSequences.value = Array.isArray(assign.hiddenDailyTripLegSequences)
+      ? assign.hiddenDailyTripLegSequences.map(String)
+      : []
+  } catch {
+    hiddenDailyTripLegSequences.value = []
+  }
+
   linehaulTractorError.value = null
   linehaulDriverError.value = null
   linehaulTripReadyError.value = null
@@ -438,4 +488,6 @@ async function refreshLinehaulApisImpl(attempt) {
       })
     }
   }
+
+  applyHiddenTripFilter()
 }

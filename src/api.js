@@ -157,6 +157,22 @@ export async function putAssignment(body) {
 }
 
 /**
+ * Mark a FedEx daily trip leg sequence as user-completed (hide until API changes).
+ * @param {string} dailyTripLegSequence
+ */
+export async function appendHiddenTripSequence(dailyTripLegSequence) {
+  return putAssignment({
+    appendHiddenDailyTripLegSequence: String(dailyTripLegSequence),
+  })
+}
+
+/** SPA geo-fence redirect when dev proxy skips server HTML hook (no auth). */
+export async function getPublicGeoFenceCheck() {
+  const r = await apiFetch('/api/public/geo-fence-check')
+  return handleJson(r)
+}
+
+/**
  * @param {{ includeLinehaulBearer?: boolean }} [opts]
  * When includeLinehaulBearer, response includes decrypted Linehaul JWT for Settings only.
  */

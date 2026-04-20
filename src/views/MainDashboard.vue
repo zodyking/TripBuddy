@@ -40,7 +40,10 @@ import {
   tripPhase,
   linehaulDriverIdFromCredMeta,
   prePlanTripSnapshot,
+  cachedTripSnapshot,
   hasPrePlanTrip,
+  markTripLegSequenceCompleted,
+  tripBodyDailySeq,
 } from '../stores/linehaulSnapshotStore.js'
 import {
   apiOk,
@@ -194,6 +197,50 @@ const prePlanOriginDest = computed(() => extractOriginDest(prePlanTripSnapshot.v
 /** 0 = current trip, 1 = pre-plan trip */
 const dispatchSlideIndex = ref(0)
 
+const dispatchPanelRef = ref(/** @type {HTMLElement | null} */ (null))
+const tripDetailsPanelRef = ref(/** @type {HTMLElement | null} */ (null))
+const tripCompleteDialog = ref(false)
+const tripCompleteBusy = ref(false)
+/** Long-press target: which trip leg seq to mark complete */
+const tripCompleteTargetSeq = ref('')
+
+let dispatchPointerStartX = 0
+let dispatchPointerMoved = false
+let tripPointerStartX = 0
+let tripPointerMoved = false
+
+/** @type {ReturnType<typeof setTimeout> | null} */
+let dispatchLongPressTimer = null
+/** @type {ReturnType<typeof setTimeout> | null} */
+let tripLongPressTimer = null
+
+const LONG_PRESS_MS = 550
+const SWIPE_THRESHOLD_PX = 48
+const MOVE_CANCEL_PX = 14
+
+function isInteractiveEventTarget(target) {
+  if (!target || typeof target !== 'object') return false
+  const el = /** @type {Node} */ (target)
+  if (el.nodeType !== 1) return false
+  return !!(/** @type {HTMLElement} */ (el).closest(
+    'button, a, input, textarea, select, [role="button"], details, summary, label',
+  ))
+}
+
+const currentTripLegSeq = computed(() =>
+  tripBodyDailySeq(linehaulTripsBody.value),
+)
+const prePlanTripLegSeq = computed(() =>
+  tripBodyDailySeq(prePlanTripSnapshot.value),
+)
+
+const activeDispatchTripSeq = computed(() => {
+  if (dispatchSlideIndex.value === 1 && prePlanTripLegSeq.value) {
+    return prePlanTripLegSeq.value
+  }
+  return currentTripLegSeq.value ?? ''
+})
+
 const tripTrailerCards = computed(() =>
   buildEnhancedTrailerCards(linehaulTripsBody.value),
 )
@@ -214,6 +261,116 @@ async function copyTripDetailValue(value, label) {
   window.setTimeout(() => {
     copyToast.value = ''
   }, 2200)
+}
+
+function clearDispatchLongPressTimer() {
+  if (dispatchLongPressTimer) {
+    clearTimeout(dispatchLongPressTimer)
+    dispatchLongPressTimer = null
+  }
+}
+
+function clearTripLongPressTimer() {
+  if (tripLongPressTimer) {
+    clearTimeout(tripLongPressTimer)
+    tripLongPressTimer = null
+  }
+}
+
+function onDispatchPanelPointerDown(e) {
+  if (e.button !== 0) return
+  if (isInteractiveEventTarget(e.target)) return
+  dispatchPointerStartX = e.clientX
+  dispatchPointerMoved = false
+  clearDispatchLongPressTimer()
+  const seq = activeDispatchTripSeq.value
+  if (!seq) return
+  dispatchLongPressTimer = setTimeout(() => {
+    dispatchLongPressTimer = null
+    tripCompleteTargetSeq.value = seq
+    tripCompleteDialog.value = true
+  }, LONG_PRESS_MS)
+}
+
+function onDispatchPanelPointerMove(e) {
+  if (dispatchLongPressTimer && Math.abs(e.clientX - dispatchPointerStartX) > MOVE_CANCEL_PX) {
+    clearDispatchLongPressTimer()
+  }
+  if (Math.abs(e.clientX - dispatchPointerStartX) > MOVE_CANCEL_PX) {
+    dispatchPointerMoved = true
+  }
+}
+
+function onDispatchPanelPointerUp(e) {
+  clearDispatchLongPressTimer()
+  if (!hasPrePlanTrip.value) return
+  const dx = e.clientX - dispatchPointerStartX
+  if (!dispatchPointerMoved || Math.abs(dx) < SWIPE_THRESHOLD_PX) return
+  if (dx < 0 && dispatchSlideIndex.value === 0) {
+    dispatchSlideIndex.value = 1
+  } else if (dx > 0 && dispatchSlideIndex.value === 1) {
+    dispatchSlideIndex.value = 0
+  }
+}
+
+function onDispatchPanelPointerCancel() {
+  clearDispatchLongPressTimer()
+}
+
+function onTripPanelPointerDown(e) {
+  if (e.button !== 0) return
+  if (isInteractiveEventTarget(e.target)) return
+  tripPointerStartX = e.clientX
+  tripPointerMoved = false
+  clearTripLongPressTimer()
+  const seq = currentTripLegSeq.value
+  if (!seq) return
+  tripLongPressTimer = setTimeout(() => {
+    tripLongPressTimer = null
+    tripCompleteTargetSeq.value = seq
+    tripCompleteDialog.value = true
+  }, LONG_PRESS_MS)
+}
+
+function onTripPanelPointerMove(e) {
+  if (tripLongPressTimer && Math.abs(e.clientX - tripPointerStartX) > MOVE_CANCEL_PX) {
+    clearTripLongPressTimer()
+  }
+  if (Math.abs(e.clientX - tripPointerStartX) > MOVE_CANCEL_PX) {
+    tripPointerMoved = true
+  }
+}
+
+function onTripPanelPointerUp(e) {
+  clearTripLongPressTimer()
+  if (!hasPrePlanTrip.value) return
+  const dx = e.clientX - tripPointerStartX
+  if (!tripPointerMoved || Math.abs(dx) < SWIPE_THRESHOLD_PX) return
+  if (dx < 0 && dispatchSlideIndex.value === 0) {
+    dispatchSlideIndex.value = 1
+  } else if (dx > 0 && dispatchSlideIndex.value === 1) {
+    dispatchSlideIndex.value = 0
+  }
+}
+
+function onTripPanelPointerCancel() {
+  clearTripLongPressTimer()
+}
+
+async function confirmTripCompleted() {
+  const seq = tripCompleteTargetSeq.value
+  if (!seq) {
+    tripCompleteDialog.value = false
+    return
+  }
+  tripCompleteBusy.value = true
+  try {
+    await markTripLegSequenceCompleted(seq)
+  } finally {
+    tripCompleteBusy.value = false
+    tripCompleteDialog.value = false
+    tripCompleteTargetSeq.value = ''
+  }
 }
 
 /** Trip destination location number for v2 transportation-network API (path param). */
@@ -244,6 +401,8 @@ const destLocationFormatted = computed(() =>
 const showSealOrTripPanel = computed(
   () =>
     linehaulTripsBody.value != null ||
+    prePlanTripSnapshot.value != null ||
+    cachedTripSnapshot.value != null ||
     linehaulTripsError.value != null ||
     linehaulTripsNoActive.value,
 )
@@ -988,6 +1147,35 @@ onUnmounted(() => {
     <p v-if="copyToast" class="copy-toast" role="status" aria-live="polite">{{ copyToast }}</p>
     <Teleport to="body">
       <div
+        v-if="tripCompleteDialog"
+        class="trip-complete-backdrop"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="trip-complete-title"
+        @click.self="tripCompleteDialog = false"
+      >
+        <div class="trip-complete-card">
+          <h3 id="trip-complete-title" class="trip-complete-title">Mark trip complete?</h3>
+          <p class="trip-complete-body">
+            This hides dispatch and trip details for this trip until FedEx returns a different trip
+            (new daily leg sequence).
+          </p>
+          <div class="trip-complete-actions">
+            <button type="button" class="btn tap" @click="tripCompleteDialog = false">Cancel</button>
+            <button
+              type="button"
+              class="btn primary tap"
+              :disabled="tripCompleteBusy"
+              @click="confirmTripCompleted"
+            >
+              {{ tripCompleteBusy ? 'Saving…' : 'Yes, completed' }}
+            </button>
+          </div>
+        </div>
+      </div>
+    </Teleport>
+    <Teleport to="body">
+      <div
         v-if="checkInFailureText"
         class="portal-checkin-banner"
         :style="{ zIndex: PORTAL_Z_BANNER }"
@@ -1409,7 +1597,14 @@ onUnmounted(() => {
       </div>
     </section>
 
-    <section class="panel dispatch-instructions-panel">
+    <section
+      ref="dispatchPanelRef"
+      class="panel dispatch-instructions-panel"
+      @pointerdown="onDispatchPanelPointerDown"
+      @pointermove="onDispatchPanelPointerMove"
+      @pointerup="onDispatchPanelPointerUp"
+      @pointercancel="onDispatchPanelPointerCancel"
+    >
       <div class="dispatch-card-toolbar">
         <h2 class="dispatch-instructions-title">Dispatch Instructions</h2>
         <div
@@ -1437,22 +1632,11 @@ onUnmounted(() => {
         v-if="(linehaulTripsBody || prePlanTripSnapshot) && !linehaulTripsError"
         class="dispatch-slides-wrap"
       >
-        <div v-if="hasPrePlanTrip" class="dispatch-slide-dots">
-          <button
-            type="button"
-            class="dispatch-dot tap"
-            :class="{ active: dispatchSlideIndex === 0 }"
-            aria-label="Current trip"
-            @click="dispatchSlideIndex = 0"
-          />
-          <button
-            type="button"
-            class="dispatch-dot tap"
-            :class="{ active: dispatchSlideIndex === 1 }"
-            aria-label="Pre-plan trip"
-            @click="dispatchSlideIndex = 1"
-          />
+        <div v-if="hasPrePlanTrip" class="dispatch-slide-dots" aria-hidden="true">
+          <span class="dispatch-dot" :class="{ active: dispatchSlideIndex === 0 }" title="Current" />
+          <span class="dispatch-dot" :class="{ active: dispatchSlideIndex === 1 }" title="Pre-plan" />
         </div>
+        <p v-if="hasPrePlanTrip" class="dispatch-swipe-hint">Swipe this card left or right to switch trips</p>
 
         <div v-if="dispatchSlideIndex === 0 && linehaulTripsBody" class="dispatch-slide">
           <div class="dispatch-od-row" aria-label="Trip origin and destination">
@@ -1497,8 +1681,17 @@ onUnmounted(() => {
       <p v-else class="read dispatch-instructions-body">{{ instructions }}</p>
     </section>
 
-    <section v-if="showSealOrTripPanel" class="panel trip-details-panel">
+    <section
+      v-if="showSealOrTripPanel"
+      ref="tripDetailsPanelRef"
+      class="panel trip-details-panel"
+      @pointerdown="onTripPanelPointerDown"
+      @pointermove="onTripPanelPointerMove"
+      @pointerup="onTripPanelPointerUp"
+      @pointercancel="onTripPanelPointerCancel"
+    >
       <h2>Trip Details</h2>
+      <p v-if="hasPrePlanTrip" class="trip-details-swipe-hint">Swipe left or right to match Dispatch (current vs pre-plan)</p>
       <p
         v-if="
           linehaulTripsBody &&
@@ -2420,14 +2613,63 @@ onUnmounted(() => {
   gap: 0.5rem;
 }
 .dispatch-dot {
+  display: inline-block;
   width: 10px;
   height: 10px;
   border-radius: 50%;
   border: 1px solid #5a5a6a;
   background: transparent;
-  cursor: pointer;
-  padding: 0;
   transition: background 0.15s, border-color 0.15s;
+}
+.dispatch-swipe-hint,
+.trip-details-swipe-hint {
+  margin: 0 0 0.35rem;
+  font-size: 0.72rem;
+  color: var(--muted, #9898a8);
+  text-align: center;
+}
+.trip-details-swipe-hint {
+  text-align: left;
+}
+.trip-complete-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 2147483000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+  background: rgba(0, 0, 0, 0.65);
+  backdrop-filter: blur(4px);
+}
+.trip-complete-card {
+  max-width: 22rem;
+  padding: 1.25rem;
+  border-radius: 12px;
+  background: #1e1e26;
+  border: 1px solid #34343e;
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.5);
+}
+.trip-complete-title {
+  margin: 0 0 0.5rem;
+  font-size: 1.05rem;
+  color: var(--text, #e8e8ee);
+}
+.trip-complete-body {
+  margin: 0 0 1rem;
+  font-size: 0.88rem;
+  line-height: 1.45;
+  color: var(--muted, #a8a8b8);
+}
+.trip-complete-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+.dispatch-instructions-panel,
+.trip-details-panel {
+  touch-action: pan-y;
 }
 .dispatch-dot.active {
   background: #7dd3fc;

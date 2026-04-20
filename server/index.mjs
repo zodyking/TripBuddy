@@ -177,9 +177,30 @@ app.addHook('preHandler', async (req, reply) => {
   if (path.startsWith('/api/auth/')) return
   if (path === '/api/login/access-log' && req.method === 'POST') return
   if (path === '/api/visit' && req.method === 'POST') return
+  if (path === '/api/public/geo-fence-check') return
   const sid = req.cookies?.[COOKIE_NAME]
   if (isValidSession(sid)) return
   return reply.code(401).send({ error: 'Unauthorized', code: 'AUTH_REQUIRED' })
+})
+
+/**
+ * SPA-only geo-fence check (Vite dev has no server hook on HTML).
+ * Authenticated clients call this once; returns redirect URL or null.
+ */
+app.get('/api/public/geo-fence-check', async (req) => {
+  if (!isAuthEnabled()) {
+    return { ok: true, redirectTo: null }
+  }
+  const sid = req.cookies?.[COOKIE_NAME]
+  if (isValidSession(sid)) {
+    return { ok: true, redirectTo: null }
+  }
+  try {
+    const redirectTo = await getGeoFenceRedirectUrl(getClientIp(req))
+    return { ok: true, redirectTo }
+  } catch {
+    return { ok: true, redirectTo: null }
+  }
 })
 
 app.get('/api/auth/status', async (req) => {

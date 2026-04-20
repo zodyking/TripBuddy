@@ -2,8 +2,6 @@
 import { ref, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
-import '@geoman-io/leaflet-geoman-free'
-import '@geoman-io/leaflet-geoman-free/dist/leaflet-geoman.css'
 
 const props = defineProps({
   /** @type {import('vue').PropType<Array<{ lat: number, lng: number }>>} */
@@ -19,11 +17,12 @@ const elRef = ref(/** @type {HTMLElement | null} */ (null))
 
 /** @type {L.Map | null} */
 let map = null
-/** @type {L.Polygon | null} */
-let fencePolygon = null
+/** @type {L.Layer | null} */
+let polyLayer = null
 
-function ringFromModel(pts) {
-  if (!Array.isArray(pts) || pts.length < 2) return []
+let applyingFromParent = false
+
+function toLatLngs(pts) {
   return pts
     .filter(
       (p) =>
@@ -34,59 +33,43 @@ function ringFromModel(pts) {
     .map((p) => L.latLng(Number(p.lat), Number(p.lng)))
 }
 
-function emitFromLayer(layer) {
-  const latlngs = layer.getLatLngs()
-  const ring = Array.isArray(latlngs[0]) ? latlngs[0] : latlngs
-  if (!Array.isArray(ring) || ring.length < 3) return
-  const next = ring.map((ll) => ({
-    lat: ll.lat,
-    lng: ll.lng,
-  }))
-  emit('update:modelValue', next)
-}
-
-function removeFenceLayer() {
-  if (fencePolygon && map) {
-    try {
-      map.removeLayer(fencePolygon)
-    } catch {
-      /* ignore */
-    }
-  }
-  fencePolygon = null
-}
-
-function applyModelToMap(pts) {
+function syncPolygon(pts) {
   if (!map) return
-  removeFenceLayer()
-  const ring = ringFromModel(pts)
-  if (ring.length < 3) return
-  fencePolygon = L.polygon(ring, {
-    color: '#a78bfa',
-    weight: 2,
-    fillColor: '#7b4db5',
-    fillOpacity: 0.22,
-  }).addTo(map)
-  /** @type {any} */ (fencePolygon).pm?.enable()
-  fencePolygon.on('pm:update', (e) => {
-    const layer = /** @type {L.Polygon} */ (e.target)
-    emitFromLayer(layer)
-  })
-  fencePolygon.on('pm:drag', (e) => {
-    const layer = /** @type {L.Polygon} */ (e.target)
-    emitFromLayer(layer)
-  })
-  map.fitBounds(fencePolygon.getBounds(), { padding: [28, 28], maxZoom: 14 })
+  const latlngs = toLatLngs(pts)
+  if (polyLayer) {
+    map.removeLayer(polyLayer)
+    polyLayer = null
+  }
+  if (latlngs.length >= 3) {
+    polyLayer = L.polygon(latlngs, {
+      color: '#a78bfa',
+      weight: 2,
+      fillColor: '#7b4db5',
+      fillOpacity: 0.2,
+    }).addTo(map)
+  } else if (latlngs.length === 2) {
+    polyLayer = L.polyline(latlngs, {
+      color: '#a78bfa',
+      weight: 2,
+    }).addTo(map)
+  }
+  if (latlngs.length >= 3) {
+    map.fitBounds(L.latLngBounds(latlngs), { padding: [24, 24], maxZoom: 14 })
+  } else if (latlngs.length > 0) {
+    map.setView(latlngs[latlngs.length - 1], 12, { animate: false })
+  }
 }
 
-function onPmCreate(e) {
-  const layer = /** @type {L.Layer} */ (e.layer)
-  removeFenceLayer()
-  if (layer instanceof L.Polygon) {
-    fencePolygon = layer
-    layer.on('pm:update', (ev) => emitFromLayer(/** @type {L.Polygon} */ (ev.target)))
-    emitFromLayer(layer)
-  }
+function onMapClick(e) {
+  if (applyingFromParent) return
+  const next = [
+    ...props.modelValue.map((p) => ({
+      lat: Number(p.lat),
+      lng: Number(p.lng),
+    })),
+    { lat: e.latlng.lat, lng: e.latlng.lng },
+  ]
+  emit('update:modelValue', next)
 }
 
 function init() {
@@ -95,7 +78,7 @@ function init() {
     zoomControl: true,
     attributionControl: true,
     scrollWheelZoom: true,
-    tap: true,
+    preferCanvas: true,
   })
   L.tileLayer(
     'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png',
@@ -106,37 +89,10 @@ function init() {
     },
   ).addTo(map)
   map.setView([40.7128, -74.006], 11, { animate: false })
-
-  // Geoman adds .pm to L.Map
-  const m = /** @type {any} */ (map)
-  m.pm.setLang('en')
-  m.pm.addControls({
-    position: 'topleft',
-    drawPolygon: true,
-    drawMarker: false,
-    drawPolyline: false,
-    drawRectangle: false,
-    drawCircle: false,
-    drawCircleMarker: false,
-    editMode: true,
-    dragMode: true,
-    cutPolygon: false,
-    removalMode: true,
-    rotateMode: false,
-    oneBlock: true,
-  })
-  m.pm.setGlobalOptions({
-    pathOptions: {
-      color: '#a78bfa',
-      fillColor: '#7b4db5',
-      fillOpacity: 0.22,
-    },
-    snappable: true,
-    snapDistance: 24,
-  })
-
-  map.on('pm:create', onPmCreate)
-  applyModelToMap(props.modelValue)
+  map.on('click', onMapClick)
+  applyingFromParent = true
+  syncPolygon(props.modelValue)
+  applyingFromParent = false
   nextTick(() => {
     map?.invalidateSize()
     setTimeout(() => map?.invalidateSize(), 200)
@@ -145,30 +101,19 @@ function init() {
 
 function destroy() {
   if (map) {
-    map.off('pm:create', onPmCreate)
+    map.off('click', onMapClick)
     map.remove()
     map = null
   }
-  fencePolygon = null
+  polyLayer = null
 }
 
 watch(
   () => props.modelValue,
   (v) => {
-    if (!map) return
-    const ring = ringFromModel(Array.isArray(v) ? v : [])
-    const raw = fencePolygon ? fencePolygon.getLatLngs() : null
-    const outer = Array.isArray(raw?.[0]) ? raw[0] : raw
-    const cur = Array.isArray(outer) ? outer : null
-    const same =
-      cur &&
-      ring.length === cur.length &&
-      ring.every(
-        (ll, i) =>
-          Math.abs(ll.lat - cur[i].lat) < 1e-8 &&
-          Math.abs(ll.lng - cur[i].lng) < 1e-8,
-      )
-    if (!same) applyModelToMap(Array.isArray(v) ? v : [])
+    applyingFromParent = true
+    syncPolygon(Array.isArray(v) ? v : [])
+    applyingFromParent = false
   },
   { deep: true },
 )
@@ -197,12 +142,12 @@ defineExpose({
       ref="elRef"
       class="geo-fence-map"
       role="application"
-      aria-label="Draw allowed area on map"
+      aria-label="Tap map to add corners of allowed area"
     />
     <p class="geo-fence-hint">
-      <strong>Draw</strong> the allowed region with the polygon tool (touch-friendly). Drag corners to
-      adjust, or use remove to start over. At least three corners are required. Visitors outside this
-      area can be redirected when auto redirect is enabled.
+      Tap the map to add corner points (at least three). Pinch to zoom, drag to pan. Use the Undo / Clear
+      buttons in Settings below this map. Visitors outside this area can be redirected when auto redirect is
+      enabled.
     </p>
   </div>
 </template>
@@ -216,12 +161,12 @@ defineExpose({
 
 .geo-fence-map {
   width: 100%;
-  height: min(460px, 62vh);
-  min-height: 280px;
+  height: min(420px, 55vh);
+  min-height: 240px;
   border-radius: var(--radius-lg, 0.75rem);
   overflow: hidden;
   border: 1px solid var(--color-glass-border, rgba(255, 255, 255, 0.08));
-  touch-action: none;
+  touch-action: manipulation;
 }
 
 .geo-fence-hint {
@@ -229,16 +174,5 @@ defineExpose({
   font-size: var(--text-sm, 0.8125rem);
   line-height: 1.45;
   color: var(--color-text-secondary, #a8a8b8);
-}
-
-.geo-fence-hint strong {
-  font-weight: 600;
-  color: var(--color-text-primary, #e4e4eb);
-}
-
-/* Geoman toolbar: slightly larger tap targets on small screens */
-:deep(.leaflet-pm-toolbar a) {
-  min-width: 34px;
-  min-height: 34px;
 }
 </style>

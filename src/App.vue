@@ -1,9 +1,14 @@
 <script setup>
 import { onMounted } from 'vue'
-import { postVisitPing } from './api.js'
+import { useRoute } from 'vue-router'
+import { postVisitPing, getAuthStatus, getPublicGeoFenceCheck } from './api.js'
 
 /** One IP capture per tab session when the SPA loads (security audit). */
 const VISIT_PING_KEY = 'fedextool-visit-ping-v1'
+/** Dev / SPA: server geo-fence runs on static HTML; this catches Vite dev and edge cases. */
+const GEO_FENCE_SPA_KEY = 'fedextool-geo-fence-spa-v1'
+
+const route = useRoute()
 
 onMounted(() => {
   try {
@@ -13,6 +18,22 @@ onMounted(() => {
     /* private mode — still try ping */
   }
   void postVisitPing().catch(() => {})
+
+  void (async () => {
+    try {
+      if (sessionStorage.getItem(GEO_FENCE_SPA_KEY) === '1') return
+      const st = await getAuthStatus()
+      if (!st.authEnabled || st.authenticated) return
+      if (route.path.endsWith('/login')) return
+      const g = await getPublicGeoFenceCheck()
+      if (g.redirectTo && typeof g.redirectTo === 'string') {
+        sessionStorage.setItem(GEO_FENCE_SPA_KEY, '1')
+        window.location.assign(g.redirectTo)
+      }
+    } catch {
+      /* ignore */
+    }
+  })()
 })
 </script>
 
