@@ -72,6 +72,11 @@ const DEFAULT_ASSIGNMENT = {
   fieldValues: {},
   /** FedEx `dailyTripLegSequence` values user marked complete (hide until API changes). */
   hiddenDailyTripLegSequences: [],
+  /** Last merged trip body (Linehaul) for cross-device continuity. */
+  persistedLinehaulTripSnapshot: null,
+  persistedPrePlanTripSnapshot: null,
+  persistedCachedTripSnapshot: null,
+  lastDailyTripLegSequencePersisted: null,
 }
 
 function cloneDefault() {
@@ -135,6 +140,26 @@ async function readAssignmentFromFile(file) {
           ? data.fieldValues
           : {},
       hiddenDailyTripLegSequences,
+      persistedLinehaulTripSnapshot:
+        data.persistedLinehaulTripSnapshot != null &&
+        typeof data.persistedLinehaulTripSnapshot === 'object'
+          ? data.persistedLinehaulTripSnapshot
+          : null,
+      persistedPrePlanTripSnapshot:
+        data.persistedPrePlanTripSnapshot != null &&
+        typeof data.persistedPrePlanTripSnapshot === 'object'
+          ? data.persistedPrePlanTripSnapshot
+          : null,
+      persistedCachedTripSnapshot:
+        data.persistedCachedTripSnapshot != null &&
+        typeof data.persistedCachedTripSnapshot === 'object'
+          ? data.persistedCachedTripSnapshot
+          : null,
+      lastDailyTripLegSequencePersisted:
+        typeof data.lastDailyTripLegSequencePersisted === 'string' &&
+        /^\d+$/.test(data.lastDailyTripLegSequencePersisted)
+          ? data.lastDailyTripLegSequencePersisted
+          : null,
     }
     if (!Array.isArray(base.hiddenDailyTripLegSequences)) {
       base.hiddenDailyTripLegSequences = []
@@ -160,6 +185,10 @@ export async function readAssignment() {
   if (!Array.isArray(g.hiddenDailyTripLegSequences)) {
     g.hiddenDailyTripLegSequences = []
   }
+  if (!('persistedLinehaulTripSnapshot' in g)) g.persistedLinehaulTripSnapshot = null
+  if (!('persistedPrePlanTripSnapshot' in g)) g.persistedPrePlanTripSnapshot = null
+  if (!('persistedCachedTripSnapshot' in g)) g.persistedCachedTripSnapshot = null
+  if (!('lastDailyTripLegSequencePersisted' in g)) g.lastDailyTripLegSequencePersisted = null
   return g
 }
 
@@ -207,6 +236,33 @@ export async function writeAssignment(body) {
     }
   }
 
+  let persistedLinehaulTripSnapshot = prev.persistedLinehaulTripSnapshot ?? null
+  let persistedPrePlanTripSnapshot = prev.persistedPrePlanTripSnapshot ?? null
+  let persistedCachedTripSnapshot = prev.persistedCachedTripSnapshot ?? null
+  let lastDailyTripLegSequencePersisted =
+    prev.lastDailyTripLegSequencePersisted ?? null
+
+  if ('persistedLinehaulTripSnapshot' in body) {
+    const v = body.persistedLinehaulTripSnapshot
+    persistedLinehaulTripSnapshot =
+      v != null && typeof v === 'object' ? v : null
+  }
+  if ('persistedPrePlanTripSnapshot' in body) {
+    const v = body.persistedPrePlanTripSnapshot
+    persistedPrePlanTripSnapshot =
+      v != null && typeof v === 'object' ? v : null
+  }
+  if ('persistedCachedTripSnapshot' in body) {
+    const v = body.persistedCachedTripSnapshot
+    persistedCachedTripSnapshot =
+      v != null && typeof v === 'object' ? v : null
+  }
+  if ('lastDailyTripLegSequencePersisted' in body) {
+    const s = body.lastDailyTripLegSequencePersisted
+    lastDailyTripLegSequencePersisted =
+      typeof s === 'string' && /^\d+$/.test(s) ? s : null
+  }
+
   const next = {
     instructions:
       typeof body.instructions === 'string'
@@ -218,6 +274,10 @@ export async function writeAssignment(body) {
     photoSlots,
     fieldValues,
     hiddenDailyTripLegSequences,
+    persistedLinehaulTripSnapshot,
+    persistedPrePlanTripSnapshot,
+    persistedCachedTripSnapshot,
+    lastDailyTripLegSequencePersisted,
   }
 
   await fs.writeFile(targetFile, JSON.stringify(next, null, 2), 'utf8')

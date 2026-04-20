@@ -70,6 +70,58 @@ export async function markTripLegSequenceCompleted(dailyTripLegSequence) {
     ? a.hiddenDailyTripLegSequences.map(String)
     : []
   applyHiddenTripFilter()
+  await persistLinehaulTripSnapshotsNow()
+}
+
+/** @type {ReturnType<typeof setTimeout> | null} */
+let persistTripDebounceTimer = null
+const PERSIST_TRIP_DEBOUNCE_MS = 900
+
+/**
+ * Hydrate trip UI from server-stored JSON (another device may have saved it).
+ * @param {Record<string, unknown>} assign
+ */
+function hydrateTripSnapshotsFromAssignment(assign) {
+  if (!assign || typeof assign !== 'object') return
+  const merged = assign.persistedLinehaulTripSnapshot
+  if (merged != null && typeof merged === 'object' && !Array.isArray(merged)) {
+    linehaulTripsBody.value = /** @type {Record<string, unknown>} */ (merged)
+    linehaulTripsNoActive.value = false
+    linehaulTripsError.value = null
+  }
+  const pre = assign.persistedPrePlanTripSnapshot
+  if (pre != null && typeof pre === 'object' && !Array.isArray(pre)) {
+    prePlanTripSnapshot.value = /** @type {Record<string, unknown>} */ (pre)
+  }
+  const c = assign.persistedCachedTripSnapshot
+  if (c != null && typeof c === 'object' && !Array.isArray(c)) {
+    cachedTripSnapshot.value = /** @type {Record<string, unknown>} */ (c)
+  }
+  const lp = assign.lastDailyTripLegSequencePersisted
+  if (typeof lp === 'string' && /^\d+$/.test(lp)) {
+    lastDailyTripLegSequence.value = lp
+  }
+}
+
+function schedulePersistLinehaulTripSnapshots() {
+  if (persistTripDebounceTimer) clearTimeout(persistTripDebounceTimer)
+  persistTripDebounceTimer = setTimeout(() => {
+    persistTripDebounceTimer = null
+    void persistLinehaulTripSnapshotsNow()
+  }, PERSIST_TRIP_DEBOUNCE_MS)
+}
+
+async function persistLinehaulTripSnapshotsNow() {
+  try {
+    await putAssignment({
+      persistedLinehaulTripSnapshot: linehaulTripsBody.value,
+      persistedPrePlanTripSnapshot: prePlanTripSnapshot.value,
+      persistedCachedTripSnapshot: cachedTripSnapshot.value,
+      lastDailyTripLegSequencePersisted: lastDailyTripLegSequence.value,
+    })
+  } catch {
+    /* offline or auth */
+  }
 }
 
 /**
@@ -249,6 +301,10 @@ async function refreshLinehaulApisImpl(attempt) {
     hiddenDailyTripLegSequences.value = Array.isArray(assign.hiddenDailyTripLegSequences)
       ? assign.hiddenDailyTripLegSequences.map(String)
       : []
+    hydrateTripSnapshotsFromAssignment(
+      /** @type {Record<string, unknown>} */ (assign),
+    )
+    applyHiddenTripFilter()
   } catch {
     hiddenDailyTripLegSequences.value = []
   }
@@ -490,4 +546,5 @@ async function refreshLinehaulApisImpl(attempt) {
   }
 
   applyHiddenTripFilter()
+  schedulePersistLinehaulTripSnapshots()
 }
