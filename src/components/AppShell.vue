@@ -76,15 +76,12 @@ onUnmounted(() => {
       </div>
 
       <!-- Full-width scroll area so side gutters scroll with page content (not only the centered column). -->
-      <div
-        class="app-scroll"
-        :class="{ 'app-scroll--embed': route.name === 'trip-buddy' }"
-      >
+      <div class="app-scroll">
         <main
           class="app-main"
           :class="{
             'app-main--directory': route.name === 'directory',
-            'app-main--embed': route.name === 'trip-buddy',
+            'app-main--trip-buddy': route.name === 'trip-buddy',
           }"
         >
           <RouterView />
@@ -313,10 +310,6 @@ onUnmounted(() => {
   flex-direction: column;
 }
 
-.app-scroll.app-scroll--embed {
-  overflow: hidden;
-}
-
 /* ═══════════════════════════════════════════════════════════════════════════
    MAIN CONTENT
    ═══════════════════════════════════════════════════════════════════════════ */
@@ -345,15 +338,14 @@ onUnmounted(() => {
   flex-direction: column;
 }
 
-/* Trip Buddy: full-width embed fills space between header and nav */
-.app-main.app-main--embed {
+/* Trip Buddy: full-width panel between header and nav (iframe blocked by FedEx; in-app launcher) */
+.app-main.app-main--trip-buddy {
   flex: 1;
   min-height: 0;
   max-width: none;
   margin-inline: 0;
   padding-inline: 0;
   padding-bottom: 0;
-  overflow: hidden;
   display: flex;
   flex-direction: column;
 }
