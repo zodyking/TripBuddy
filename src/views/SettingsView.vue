@@ -960,7 +960,8 @@ onUnmounted(() => {
               step="5"
               inputmode="numeric"
               autocomplete="off"
-              @change="saveNearTrailerRadius"
+              @input="saveNearTrailerRadius"
+              @blur="saveNearTrailerRadius"
             />
             <span class="audio-near-trailer-unit" aria-hidden="true">ft</span>
           </div>

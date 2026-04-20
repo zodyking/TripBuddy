@@ -407,6 +407,18 @@ const TRAILER_LOAD_STATUS_SPEECH = {
  * @param {string} code
  * @returns {string}
  */
+/**
+ * Speak trailer IDs digit-by-digit so "821055" is not read as eight hundred thousand.
+ * @param {string | number} raw
+ * @returns {string}
+ */
+export function trailerNumberForSpeech(raw) {
+  const s = String(raw ?? '').trim()
+  if (!s) return ''
+  if (/^\d+$/.test(s)) return s.split('').join(' ')
+  return [...s].join(' ')
+}
+
 function trailerLoadStatusSpeechLabel(code) {
   const u = String(code ?? '')
     .trim()
@@ -453,15 +465,16 @@ export function maybeAnnounceTrailerStatusChange(trailers) {
     const status = String(tr.detlCodeLoadStatus ?? '').toUpperCase()
     const prev = prevTrailerStatuses.get(order)
     const nbr = String(tr.trlrNbr ?? '').trim() || order
+    const idSpeech = trailerNumberForSpeech(nbr)
 
     if (prev !== undefined && prev !== status) {
       const fromL = trailerLoadStatusSpeechLabel(prev)
       const toL = trailerLoadStatusSpeechLabel(status)
       let text = ''
       if (prev === 'LDNG' && status === 'CLSD') {
-        text = `Trailer ${nbr} has finished loading and is now closed.`
+        text = `Trailer ${idSpeech} has finished loading and is now closed.`
       } else {
-        text = `Trailer ${nbr} load status changed from ${fromL} to ${toL}.`
+        text = `Trailer ${idSpeech} load status changed from ${fromL} to ${toL}.`
       }
       pushLiveLog({ type: 'info', message: `[TripVoice] trailer status change: ${text}`, ts: Date.now() })
       enqueueAnnouncement(text, { bell: mode === 'both', category: `trailerStatus:${order}:${status}` })
@@ -535,7 +548,8 @@ export function maybeAnnounceTrailerRelocated(trailers) {
     if (haversineM(plat, plng, lat, lng) < RELOC_MIN_MOVE_M) continue
 
     const nbr = String(tr.trlrNbr ?? '').trim() || order
-    const text = `Trailer ${nbr} has been relocated.`
+    const idSpeech = trailerNumberForSpeech(nbr)
+    const text = `Trailer ${idSpeech} has been relocated.`
     pushLiveLog({ type: 'info', message: `[TripVoice] ${text}`, ts: Date.now() })
     enqueueAnnouncement(text, { bell: mode === 'both', category: `trailerReloc:${order}` })
   }
@@ -577,7 +591,8 @@ export function maybeAnnounceNearTrailer(userLat, userLng, trailers, opts) {
     nearTrailerCooldown.set(order, now)
 
     const nbr = String(tr.trlrNbr ?? '').trim() || order
-    const text = `You are near trailer ${nbr}.`
+    const idSpeech = trailerNumberForSpeech(nbr)
+    const text = `You are near trailer ${idSpeech}.`
     pushLiveLog({ type: 'info', message: `[TripVoice] ${text}`, ts: Date.now() })
     enqueueAnnouncement(text, { bell: mode === 'both', category: `nearTrailer:${order}` })
   }

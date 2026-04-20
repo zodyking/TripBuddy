@@ -228,7 +228,27 @@ export function parseTrailerMeta(trailer) {
 }
 
 /**
+ * Stable order: API `trlrOrder` is not always ordered; prefer `dailyTripLegConfigSeq` when present.
+ * @param {Record<string, unknown>} tr
+ * @param {number} index
+ */
+function trailerCardSortKey(tr, index) {
+  const seq = tr.dailyTripLegConfigSeq
+  if (seq != null && String(seq).trim() !== '') {
+    const n = Number(seq)
+    if (Number.isFinite(n)) return n
+  }
+  const ord = tr.trlrOrder
+  if (ord != null && String(ord).trim() !== '') {
+    const n = Number(ord)
+    if (Number.isFinite(n)) return n
+  }
+  return 1e12 + index
+}
+
+/**
  * Build enhanced trailer cards with header badges and categorized rows.
+ * Trailers are sorted by `dailyTripLegConfigSeq` (then `trlrOrder`) so display order matches trip order.
  * @param {unknown} body
  * @returns {{
  *   id: string,
@@ -252,6 +272,21 @@ export function buildEnhancedTrailerCards(body) {
   const arr = o.trailers
   if (!Array.isArray(arr)) return []
 
+  const indexed = arr
+    .map((t, i) => {
+      const tr =
+        t && typeof t === 'object' && !Array.isArray(t)
+          ? /** @type {Record<string, unknown>} */ (t)
+          : {}
+      return { tr, i }
+    })
+    .sort((a, b) => {
+      const ka = trailerCardSortKey(a.tr, a.i)
+      const kb = trailerCardSortKey(b.tr, b.i)
+      if (ka !== kb) return ka - kb
+      return a.i - b.i
+    })
+
   const summaryKeys = new Set([
     'sealNumber',
     'loadNumber',
@@ -274,13 +309,8 @@ export function buildEnhancedTrailerCards(body) {
     ...summaryKeys,
   ])
 
-  return arr
-    .map((t, i) => {
-      const tr =
-        t && typeof t === 'object' && !Array.isArray(t)
-          ? /** @type {Record<string, unknown>} */ (t)
-          : {}
-
+  return indexed
+    .map(({ tr, i }) => {
       const order = tr.trlrOrder != null ? String(tr.trlrOrder) : String(i + 1)
       const meta = parseTrailerMeta(tr)
 
@@ -298,7 +328,7 @@ export function buildEnhancedTrailerCards(body) {
         .filter((r) => r.value !== '—')
 
       return {
-        id: `trailer-${order}-${i}`,
+        id: `trailer-${i}-${order}`,
         order,
         trlrNbr: meta.trlrNbr,
         size: meta.size,
