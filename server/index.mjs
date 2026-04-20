@@ -103,6 +103,7 @@ import {
   pointInPolygon,
 } from './geo-fence-check.mjs'
 import { lookupIpLatLng, reverseGeocodeNominatim } from './ip-geolocation.mjs'
+import { registerTripBuddyProxy, isTripBuddyProxyPath } from './trip-buddy-proxy.mjs'
 
 await fs.mkdir(UPLOADS_DIR, { recursive: true })
 
@@ -1184,6 +1185,25 @@ app.post('/api/automations/presets/:presetId/install', async (req, reply) => {
     return reply.code(400).send({ error: msg })
   }
 })
+
+// ---------------------------------------------------------------------------
+// Trip Buddy: same-origin reverse proxy (iframe-safe; strips FedEx frame denial)
+// Routes must register on root app (not an encapsulated child).
+// ---------------------------------------------------------------------------
+app.addHook('preHandler', async (req, reply) => {
+  const path = req.url.split('?')[0] || ''
+  if (!isTripBuddyProxyPath(path)) return
+  if (!isAuthEnabled()) return
+  if (req.method === 'OPTIONS') return
+  const sid = req.cookies?.[COOKIE_NAME]
+  if (isValidSession(sid)) {
+    const ak = getSessionAccountKey(sid)
+    if (ak) req.credentialAccountKey = ak
+    return
+  }
+  return reply.code(401).send({ error: 'Unauthorized', code: 'AUTH_REQUIRED' })
+})
+registerTripBuddyProxy(app)
 
 // ---------------------------------------------------------------------------
 // Production static UI serving (after all /api routes)
