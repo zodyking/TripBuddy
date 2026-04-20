@@ -72,7 +72,7 @@ export function setTripStatusChangeEnabled(enabled) {
   window.localStorage.setItem(TRIP_STATUS_CHANGE_KEY, enabled ? 'true' : 'false')
 }
 
-/** @returns {boolean} Trailer load status change alerts enabled (LDNG to CLSD). */
+/** @returns {boolean} Trailer load status change alerts enabled (any detlCodeLoadStatus transition). */
 export function isTrailerStatusChangeEnabled() {
   if (typeof window === 'undefined' || !window.localStorage) return true
   const raw = window.localStorage.getItem(TRAILER_STATUS_CHANGE_KEY)
@@ -370,8 +370,39 @@ export function maybeAnnounceStatusChange(phase) {
 /** @type {Map<string, string>} */
 const prevTrailerStatuses = new Map()
 
+/** Spoken label for `detlCodeLoadStatus` codes (expand as API exposes more). */
+const TRAILER_LOAD_STATUS_SPEECH = {
+  LDNG: 'loading',
+  CLSD: 'closed',
+  TMPCL: 'temporarily closed',
+  OPEN: 'open',
+  AVLB: 'available',
+  RDY: 'ready',
+  HOLD: 'on hold',
+  UNLD: 'unloading',
+}
+
 /**
- * Announce trailer load status changes (LDNG → CLSD).
+ * @param {string} code
+ * @returns {string}
+ */
+function trailerLoadStatusSpeechLabel(code) {
+  const u = String(code ?? '')
+    .trim()
+    .toUpperCase()
+  if (!u) return 'unknown'
+  if (Object.prototype.hasOwnProperty.call(TRAILER_LOAD_STATUS_SPEECH, u)) {
+    return /** @type {string} */ (TRAILER_LOAD_STATUS_SPEECH[u])
+  }
+  if (u.length <= 8 && /^[A-Z0-9]+$/i.test(u)) {
+    return u.split('').join(' ')
+  }
+  return u.toLowerCase()
+}
+
+/**
+ * Announce trailer load status changes for any transition (e.g. LDNG→CLSD, →TMPCL, TMPCL→CLSD).
+ * Skips the first snapshot per trailer (no speech on initial load).
  * @param {unknown[]} trailers
  */
 export function maybeAnnounceTrailerStatusChange(trailers) {
@@ -400,11 +431,19 @@ export function maybeAnnounceTrailerStatusChange(trailers) {
 
     const status = String(tr.detlCodeLoadStatus ?? '').toUpperCase()
     const prev = prevTrailerStatuses.get(order)
+    const nbr = String(tr.trlrNbr ?? '').trim() || order
 
-    if (prev === 'LDNG' && status === 'CLSD') {
-      const text = `Trailer ${order} has finished loading and is now closed.`
+    if (prev !== undefined && prev !== status) {
+      const fromL = trailerLoadStatusSpeechLabel(prev)
+      const toL = trailerLoadStatusSpeechLabel(status)
+      let text = ''
+      if (prev === 'LDNG' && status === 'CLSD') {
+        text = `Trailer ${nbr} has finished loading and is now closed.`
+      } else {
+        text = `Trailer ${nbr} load status changed from ${fromL} to ${toL}.`
+      }
       pushLiveLog({ type: 'info', message: `[TripVoice] trailer status change: ${text}`, ts: Date.now() })
-      enqueueAnnouncement(text, { bell: mode === 'both', category: `trailer:${order}` })
+      enqueueAnnouncement(text, { bell: mode === 'both', category: `trailerStatus:${order}:${status}` })
     }
 
     prevTrailerStatuses.set(order, status)

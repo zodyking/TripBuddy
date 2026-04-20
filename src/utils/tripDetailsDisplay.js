@@ -168,6 +168,9 @@ export function parseTrailerMeta(trailer) {
   } else if (loadStatus === 'CLSD') {
     statusLabel = 'Closed'
     statusClass = 'status-closed'
+  } else if (loadStatus === 'TMPCL') {
+    statusLabel = 'TMPCL'
+    statusClass = 'status-tmpcl'
   } else if (loadStatus) {
     statusLabel = loadStatus
   }

@@ -3546,6 +3546,11 @@ button.trailer-nbr.copyable-inline {
   color: #4ade80;
   border-color: rgba(34, 197, 94, 0.3);
 }
+.trailer-status-badge.status-tmpcl {
+  background: rgba(234, 179, 8, 0.14);
+  color: #facc15;
+  border-color: rgba(234, 179, 8, 0.35);
+}
 .trailer-load-badge {
   background: #2e2e38;
   color: #9898a8;
