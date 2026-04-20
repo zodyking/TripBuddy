@@ -75,18 +75,82 @@ export function upstreamUrlFromProxyPath(proxyPath, searchWithQuestion) {
   return `${TRIP_BUDDY_UPSTREAM}${rest}${searchWithQuestion}`
 }
 
+const FEDEX_TOOL_HOSTS = [
+  'fdxtools.fedex.com',
+  'www.fdxtools.fedex.com',
+]
+
+/**
+ * Root-relative FedEx paths (e.g. `/grdlhldispatch/...`) must go under the proxy prefix
+ * or the browser loads them from our SPA origin and assets 404 / hydrate wrong → blank iframe.
+ * @param {string} text
+ * @param {string} prefix
+ */
+export function rewriteRootRelativeFedExPaths(text, prefix) {
+  const esc = '\uE000TRIPBUDDY\uE001'
+  const already = `${prefix}/grdlhldispatch`
+  let s = text
+  s = s.split(already).join(esc)
+  s = s.replace(/\/grdlhldispatch/g, `${prefix}/grdlhldispatch`)
+  s = s.split(esc).join(already)
+  return s
+}
+
+/**
+ * Inline CSP in HTML can still block scripts/styles inside the iframe.
+ * @param {string} html
+ */
+function stripMetaContentSecurityPolicy(html) {
+  return html.replace(
+    /<meta\b[^>]*\bhttp-equiv\s*=\s*["']?\s*Content-Security-Policy\s*["']?[^>]*>/gi,
+    '',
+  )
+}
+
+/**
+ * FedEx SPA uses `<base href="/grdlhldispatch/">` so relative chunk URLs resolve from site root.
+ * Under our proxy they must be `/embed/trip-buddy/grdlhldispatch/` or assets load from the wrong path → blank page.
+ * @param {string} html
+ * @param {string} prefix
+ */
+export function rewriteHtmlBaseHref(html, prefix) {
+  const baseRe = /<base\s+([^>]*\bhref\s*=\s*)(["'])([^"']*)\2([^>]*)>/gi
+  return html.replace(baseRe, (full, before, q, href, after) => {
+    let h = String(href).trim()
+    if (h.startsWith(prefix)) return full
+    if (h === '/' || h === '') {
+      h = `${prefix}/`
+    } else if (h.startsWith('/')) {
+      h = `${prefix}${h}`
+    } else {
+      h = `${prefix}/${h}`
+    }
+    if (!h.endsWith('/') && !h.includes('?')) h += '/'
+    return `<base ${before}${q}${h}${q}${after}>`
+  })
+}
+
 /**
  * Point same-origin links at our proxy path instead of https://fdxtools.fedex.com/...
  * @param {string} text
+ * @param {string | undefined} contentType
  */
-export function rewriteTripBuddyUrls(text) {
+export function rewriteTripBuddyUrls(text, contentType) {
   const p = TRIP_BUDDY_PROXY_PREFIX
-  const host = 'fdxtools.fedex.com'
   let s = text
-  s = s.split(`https://${host}`).join(p)
-  s = s.split(`http://${host}`).join(p)
-  s = s.split(`//${host}`).join(p)
-  s = s.replace(/https:\\\/\\\/fdxtools\.fedex\.com/g, p.replace(/\//g, '\\/'))
+  for (const host of FEDEX_TOOL_HOSTS) {
+    s = s.split(`https://${host}`).join(p)
+    s = s.split(`http://${host}`).join(p)
+    s = s.split(`//${host}`).join(p)
+    const escHost = host.replace(/\./g, '\\.')
+    s = s.replace(new RegExp(`https:\\\\/\\\\/${escHost}`, 'g'), p.replace(/\//g, '\\/'))
+  }
+  s = rewriteRootRelativeFedExPaths(s, p)
+  const ct = (contentType || '').toLowerCase()
+  if (ct.includes('text/html')) {
+    s = stripMetaContentSecurityPolicy(s)
+    s = rewriteHtmlBaseHref(s, p)
+  }
   return s
 }
 
@@ -292,7 +356,7 @@ async function proxyToUpstream(req, reply, targetUrl) {
   }
 
   const text = await res.text()
-  return reply.send(rewriteTripBuddyUrls(text))
+  return reply.send(rewriteTripBuddyUrls(text, ct))
 }
 
 /**
