@@ -80,6 +80,7 @@ import {
   unlockTripVoiceFromUserGesture,
   tripVoiceShowUnlockHint,
   isTripAlertEnabled,
+  isTrailerGpsTtsEnabled,
   maybeAnnounceStatusChange,
   maybeAnnounceTrailerStatusChange,
   maybeAnnounceTrailerRelocated,
@@ -540,6 +541,14 @@ function tryStartTripProximityWatch() {
     stopTripProximityWatch()
     return
   }
+  if (!isTrailerGpsTtsEnabled()) {
+    stopTripProximityWatch()
+    return
+  }
+  if (!trailerGpsModalOpen.value) {
+    stopTripProximityWatch()
+    return
+  }
   if (tripVoiceUnlockHint.value) {
     stopTripProximityWatch()
     return
@@ -548,11 +557,14 @@ function tryStartTripProximityWatch() {
   stopTripProximityWatch()
   tripProximityWatchId = navigator.geolocation.watchPosition(
     (pos) => {
+      if (!trailerGpsModalOpen.value) return
       const body = linehaulTripsBody.value
       if (!body || typeof body !== 'object') return
       const tr = /** @type {Record<string, unknown>} */ (body).trailers
       if (!Array.isArray(tr)) return
-      maybeAnnounceNearTrailer(pos.coords.latitude, pos.coords.longitude, tr)
+      maybeAnnounceNearTrailer(pos.coords.latitude, pos.coords.longitude, tr, {
+        mapOpen: true,
+      })
     },
     () => {},
     { enableHighAccuracy: true, maximumAge: 5000, timeout: 20000 },
@@ -897,7 +909,7 @@ watch(
 )
 
 watch(
-  [tripVoiceUnlockHint, tripAlertOn, linehaulTripsBody],
+  [tripVoiceUnlockHint, tripAlertOn, trailerGpsModalOpen],
   () => {
     tryStartTripProximityWatch()
   },
@@ -1093,6 +1105,7 @@ function openTrailerGpsModal(card) {
         userGpsPending: false,
         userGeoDenied: false,
       }
+      tryStartTripProximityWatch()
     },
     (err) => {
       if (err && err.code === 1) {
@@ -1114,6 +1127,7 @@ function openTrailerGpsModal(card) {
             userGpsPending: false,
             userGeoDenied: false,
           }
+          tryStartTripProximityWatch()
         },
         () => {
           if (!trailerGpsModalOpen.value || !trailerGpsData.value) return
@@ -1262,7 +1276,6 @@ onMounted(async () => {
   previewPollTimer = setInterval(pollAutomationPreview, 1600)
   void setupLinehaulPolling()
   syncTripVoiceUnlockHint()
-  tryStartTripProximityWatch()
 })
 
 onActivated(() => {
@@ -1271,7 +1284,6 @@ onActivated(() => {
   void loadQuickActions()
   void setupLinehaulPolling()
   syncTripVoiceUnlockHint()
-  tryStartTripProximityWatch()
 })
 
 onUnmounted(() => {
@@ -1899,10 +1911,10 @@ onUnmounted(() => {
         role="status"
       >
         <button type="button" class="tap trip-voice-unlock-btn" @click="onUnlockTripVoiceTap">
-          Tap to enable TTS and GPS monitoring
+          Tap to enable audio alerts
         </button>
         <span class="trip-voice-unlock-sub"
-          >Starts location for trailer proximity alerts. Some devices require a tap before audio can play.</span
+          >Some phones and tablets need a tap before text-to-speech can play.</span
         >
       </div>
       <div

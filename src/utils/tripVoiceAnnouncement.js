@@ -212,25 +212,9 @@ export function unlockTripVoiceFromUserGesture() {
 
   const mode = getTripAlertMode()
   const bell = mode === 'both'
-
-  const geo = typeof navigator !== 'undefined' ? navigator.geolocation : null
-  if (!geo || typeof geo.getCurrentPosition !== 'function') {
-    speakDirect('TTS alerts active.', { bell })
-    flushPendingTripAlert()
-    return
-  }
-
-  geo.getCurrentPosition(
-    () => {
-      speakDirect('TTS alerts and GPS active.', { bell })
-      flushPendingTripAlert()
-    },
-    () => {
-      speakDirect('TTS alerts active.', { bell })
-      flushPendingTripAlert()
-    },
-    { enableHighAccuracy: true, maximumAge: 0, timeout: 12_000 },
-  )
+  /** Must stay synchronous: iOS only unlocks speech in the same gesture tick. */
+  speakDirect('Text to speech alerts active.', { bell })
+  flushPendingTripAlert()
 }
 
 /** Whether to show "tap to enable" UI (touch-primary and not yet unlocked). */
@@ -337,7 +321,7 @@ export function cancelTripVoiceAnnouncement() {
 /** Settings: test speech (same voice as trip alert). */
 export function speakTripTtsTest() {
   if (typeof window === 'undefined' || !window.speechSynthesis) return
-  const text = 'TTS alerts active.'
+  const text = 'Text to speech alerts active.'
   pushLiveLog({ type: 'info', message: `[TripVoice] test triggered: ${text}`, ts: Date.now() })
   speakDirect(text)
 }
@@ -559,13 +543,16 @@ export function maybeAnnounceTrailerRelocated(trailers) {
 
 /**
  * When user position is known, announce proximity to trailers with GPS.
+ * Proximity should only run while the trailer map modal is open (pass mapOpen: true).
  * @param {number} userLat
  * @param {number} userLng
  * @param {unknown[]} trailers
+ * @param {{ mapOpen?: boolean }} [opts]
  */
-export function maybeAnnounceNearTrailer(userLat, userLng, trailers) {
+export function maybeAnnounceNearTrailer(userLat, userLng, trailers, opts) {
   if (typeof window === 'undefined') return
   if (!Array.isArray(trailers)) return
+  if (opts?.mapOpen !== true) return
   if (isNaN(userLat) || isNaN(userLng)) return
   const mode = getTripAlertMode()
   if (mode === 'off' || !isTrailerGpsTtsEnabled()) return
