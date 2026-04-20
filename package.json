@@ -8,7 +8,9 @@
     "dev:ui": "vite",
     "dev:server": "npm run dev --prefix server",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "trip-buddy-desktop": "npm --prefix desktop-trip-buddy run tauri -- dev",
+    "trip-buddy-desktop:build": "npm --prefix desktop-trip-buddy run tauri -- build"
   },
   "dependencies": {
     "leaflet": "^1.9.4",
