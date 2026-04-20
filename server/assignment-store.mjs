@@ -64,6 +64,9 @@ export const PRESETS = {
   },
 }
 
+/** Max ledger entries per user (newest first). */
+const MAX_TRIP_HISTORY = 150
+
 const DEFAULT_ASSIGNMENT = {
   instructions: '',
   driverPhone: '',
@@ -77,6 +80,8 @@ const DEFAULT_ASSIGNMENT = {
   persistedPrePlanTripSnapshot: null,
   persistedCachedTripSnapshot: null,
   lastDailyTripLegSequencePersisted: null,
+  /** Completed trips ledger: { id, completedAt, dailyTripLegSequence, dispatchHeader, tripDetails } */
+  tripHistoryLedger: [],
 }
 
 function cloneDefault() {
@@ -130,6 +135,13 @@ async function readAssignmentFromFile(file) {
           .map((s) => String(s).trim())
           .filter((s) => /^\d+$/.test(s))
       : []
+    const ledgerRaw = data.tripHistoryLedger
+    const tripHistoryLedger = Array.isArray(ledgerRaw)
+      ? ledgerRaw
+          .filter((x) => x && typeof x === 'object' && !Array.isArray(x))
+          .slice(0, MAX_TRIP_HISTORY)
+      : []
+
     const base = {
       instructions: typeof data.instructions === 'string' ? data.instructions : '',
       driverPhone: typeof data.driverPhone === 'string' ? data.driverPhone : '',
@@ -140,6 +152,7 @@ async function readAssignmentFromFile(file) {
           ? data.fieldValues
           : {},
       hiddenDailyTripLegSequences,
+      tripHistoryLedger,
       persistedLinehaulTripSnapshot:
         data.persistedLinehaulTripSnapshot != null &&
         typeof data.persistedLinehaulTripSnapshot === 'object'
@@ -189,6 +202,7 @@ export async function readAssignment() {
   if (!('persistedPrePlanTripSnapshot' in g)) g.persistedPrePlanTripSnapshot = null
   if (!('persistedCachedTripSnapshot' in g)) g.persistedCachedTripSnapshot = null
   if (!('lastDailyTripLegSequencePersisted' in g)) g.lastDailyTripLegSequencePersisted = null
+  if (!Array.isArray(g.tripHistoryLedger)) g.tripHistoryLedger = []
   return g
 }
 
@@ -263,6 +277,37 @@ export async function writeAssignment(body) {
       typeof s === 'string' && /^\d+$/.test(s) ? s : null
   }
 
+  let tripHistoryLedger = Array.isArray(prev.tripHistoryLedger)
+    ? prev.tripHistoryLedger
+    : []
+  if (Array.isArray(body.tripHistoryLedger)) {
+    tripHistoryLedger = body.tripHistoryLedger
+      .filter((x) => x && typeof x === 'object' && !Array.isArray(x))
+      .slice(0, MAX_TRIP_HISTORY)
+  } else if (body.appendTripHistoryEntry && typeof body.appendTripHistoryEntry === 'object') {
+    const e = body.appendTripHistoryEntry
+    const id =
+      typeof e.id === 'string' && e.id.trim()
+        ? e.id.trim()
+        : `h-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
+    const seq = String(e.dailyTripLegSequence ?? '').trim()
+    const entry = {
+      id,
+      completedAt:
+        typeof e.completedAt === 'number' && Number.isFinite(e.completedAt)
+          ? e.completedAt
+          : Date.now(),
+      dailyTripLegSequence: /^\d+$/.test(seq) ? seq : '',
+      dispatchHeader:
+        e.dispatchHeader && typeof e.dispatchHeader === 'object'
+          ? e.dispatchHeader
+          : {},
+      tripDetails:
+        e.tripDetails && typeof e.tripDetails === 'object' ? e.tripDetails : {},
+    }
+    tripHistoryLedger = [entry, ...tripHistoryLedger].slice(0, MAX_TRIP_HISTORY)
+  }
+
   const next = {
     instructions:
       typeof body.instructions === 'string'
@@ -278,6 +323,7 @@ export async function writeAssignment(body) {
     persistedPrePlanTripSnapshot,
     persistedCachedTripSnapshot,
     lastDailyTripLegSequencePersisted,
+    tripHistoryLedger,
   }
 
   await fs.writeFile(targetFile, JSON.stringify(next, null, 2), 'utf8')

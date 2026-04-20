@@ -113,6 +113,17 @@ onUnmounted(() => {
       </RouterLink>
       <RouterLink
         class="nav-item"
+        :class="{ 'is-active': route.name === 'history' }"
+        to="/history"
+      >
+        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="10"/>
+          <path d="M12 6v6l4 2"/>
+        </svg>
+        <span class="nav-label">History</span>
+      </RouterLink>
+      <RouterLink
+        class="nav-item"
         :class="{ 'is-active': route.name === 'settings' }"
         to="/settings"
       >

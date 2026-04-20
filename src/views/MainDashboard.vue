@@ -202,7 +202,7 @@ const dispatchPanelRef = ref(/** @type {HTMLElement | null} */ (null))
 const tripDetailsPanelRef = ref(/** @type {HTMLElement | null} */ (null))
 const tripCompleteDialog = ref(false)
 const tripCompleteBusy = ref(false)
-/** Long-press target: which trip leg seq to mark complete */
+/** Which trip leg seq to mark complete */
 const tripCompleteTargetSeq = ref('')
 
 let dispatchPointerStartX = 0
@@ -210,12 +210,11 @@ let dispatchPointerMoved = false
 let tripPointerStartX = 0
 let tripPointerMoved = false
 
-/** @type {ReturnType<typeof setTimeout> | null} */
-let dispatchLongPressTimer = null
-/** @type {ReturnType<typeof setTimeout> | null} */
-let tripLongPressTimer = null
+/** Double-tap / double-click within this window counts as "complete trip" */
+const DOUBLE_TAP_MS = 380
+let dispatchFirstTapAt = 0
+let tripFirstTapAt = 0
 
-const LONG_PRESS_MS = 550
 const SWIPE_THRESHOLD_PX = 48
 const MOVE_CANCEL_PX = 14
 
@@ -276,17 +275,41 @@ function displayOrDash(value) {
   return s || '—'
 }
 
-function clearDispatchLongPressTimer() {
-  if (dispatchLongPressTimer) {
-    clearTimeout(dispatchLongPressTimer)
-    dispatchLongPressTimer = null
+function tripDetailsCompleteSeq() {
+  return (
+    currentTripLegSeq.value ||
+    tripBodyDailySeq(cachedTripSnapshot.value) ||
+    (typeof lastDailyTripLegSequence.value === 'string' && /^\d+$/.test(lastDailyTripLegSequence.value.trim())
+      ? lastDailyTripLegSequence.value.trim()
+      : '')
+  )
+}
+
+function registerDispatchDoubleComplete() {
+  const seq = activeDispatchTripSeq.value
+  if (!seq) return
+  const now = Date.now()
+  if (dispatchFirstTapAt && now - dispatchFirstTapAt < DOUBLE_TAP_MS) {
+    dispatchFirstTapAt = 0
+    tripFirstTapAt = 0
+    tripCompleteTargetSeq.value = seq
+    tripCompleteDialog.value = true
+  } else {
+    dispatchFirstTapAt = now
   }
 }
 
-function clearTripLongPressTimer() {
-  if (tripLongPressTimer) {
-    clearTimeout(tripLongPressTimer)
-    tripLongPressTimer = null
+function registerTripDoubleComplete() {
+  const seq = tripDetailsCompleteSeq()
+  if (!seq) return
+  const now = Date.now()
+  if (tripFirstTapAt && now - tripFirstTapAt < DOUBLE_TAP_MS) {
+    tripFirstTapAt = 0
+    dispatchFirstTapAt = 0
+    tripCompleteTargetSeq.value = seq
+    tripCompleteDialog.value = true
+  } else {
+    tripFirstTapAt = now
   }
 }
 
@@ -295,39 +318,42 @@ function onDispatchPanelPointerDown(e) {
   if (isInteractiveEventTarget(e.target)) return
   dispatchPointerStartX = e.clientX
   dispatchPointerMoved = false
-  clearDispatchLongPressTimer()
-  const seq = activeDispatchTripSeq.value
-  if (!seq) return
-  dispatchLongPressTimer = setTimeout(() => {
-    dispatchLongPressTimer = null
-    tripCompleteTargetSeq.value = seq
-    tripCompleteDialog.value = true
-  }, LONG_PRESS_MS)
 }
 
 function onDispatchPanelPointerMove(e) {
-  if (dispatchLongPressTimer && Math.abs(e.clientX - dispatchPointerStartX) > MOVE_CANCEL_PX) {
-    clearDispatchLongPressTimer()
-  }
   if (Math.abs(e.clientX - dispatchPointerStartX) > MOVE_CANCEL_PX) {
     dispatchPointerMoved = true
   }
 }
 
 function onDispatchPanelPointerUp(e) {
-  clearDispatchLongPressTimer()
-  if (!hasPrePlanTrip.value) return
+  if (e.button !== 0) return
   const dx = e.clientX - dispatchPointerStartX
-  if (!dispatchPointerMoved || Math.abs(dx) < SWIPE_THRESHOLD_PX) return
-  if (dx < 0 && dispatchSlideIndex.value === 0) {
-    dispatchSlideIndex.value = 1
-  } else if (dx > 0 && dispatchSlideIndex.value === 1) {
-    dispatchSlideIndex.value = 0
+  if (hasPrePlanTrip.value && dispatchPointerMoved && Math.abs(dx) >= SWIPE_THRESHOLD_PX) {
+    dispatchFirstTapAt = 0
+    tripFirstTapAt = 0
+    if (dx < 0 && dispatchSlideIndex.value === 0) {
+      dispatchSlideIndex.value = 1
+    } else if (dx > 0 && dispatchSlideIndex.value === 1) {
+      dispatchSlideIndex.value = 0
+    }
+    dispatchPointerMoved = false
+    return
   }
+  if (!isInteractiveEventTarget(e.target) && !dispatchPointerMoved) {
+    registerDispatchDoubleComplete()
+  }
+  dispatchPointerMoved = false
 }
 
 function onDispatchPanelPointerCancel() {
-  clearDispatchLongPressTimer()
+  dispatchPointerMoved = false
+}
+
+function onDispatchPanelDblClick(e) {
+  if (isInteractiveEventTarget(e.target)) return
+  e.preventDefault()
+  registerDispatchDoubleComplete()
 }
 
 function onTripPanelPointerDown(e) {
@@ -335,44 +361,82 @@ function onTripPanelPointerDown(e) {
   if (isInteractiveEventTarget(e.target)) return
   tripPointerStartX = e.clientX
   tripPointerMoved = false
-  clearTripLongPressTimer()
-  const seq =
-    currentTripLegSeq.value ||
-    tripBodyDailySeq(cachedTripSnapshot.value) ||
-    (typeof lastDailyTripLegSequence.value === 'string' && /^\d+$/.test(lastDailyTripLegSequence.value.trim())
-      ? lastDailyTripLegSequence.value.trim()
-      : '')
-  if (!seq) return
-  tripLongPressTimer = setTimeout(() => {
-    tripLongPressTimer = null
-    tripCompleteTargetSeq.value = seq
-    tripCompleteDialog.value = true
-  }, LONG_PRESS_MS)
 }
 
 function onTripPanelPointerMove(e) {
-  if (tripLongPressTimer && Math.abs(e.clientX - tripPointerStartX) > MOVE_CANCEL_PX) {
-    clearTripLongPressTimer()
-  }
   if (Math.abs(e.clientX - tripPointerStartX) > MOVE_CANCEL_PX) {
     tripPointerMoved = true
   }
 }
 
 function onTripPanelPointerUp(e) {
-  clearTripLongPressTimer()
-  if (!hasPrePlanTrip.value) return
+  if (e.button !== 0) return
   const dx = e.clientX - tripPointerStartX
-  if (!tripPointerMoved || Math.abs(dx) < SWIPE_THRESHOLD_PX) return
-  if (dx < 0 && dispatchSlideIndex.value === 0) {
-    dispatchSlideIndex.value = 1
-  } else if (dx > 0 && dispatchSlideIndex.value === 1) {
-    dispatchSlideIndex.value = 0
+  if (hasPrePlanTrip.value && tripPointerMoved && Math.abs(dx) >= SWIPE_THRESHOLD_PX) {
+    tripFirstTapAt = 0
+    dispatchFirstTapAt = 0
+    if (dx < 0 && dispatchSlideIndex.value === 0) {
+      dispatchSlideIndex.value = 1
+    } else if (dx > 0 && dispatchSlideIndex.value === 1) {
+      dispatchSlideIndex.value = 0
+    }
+    tripPointerMoved = false
+    return
   }
+  if (!isInteractiveEventTarget(e.target) && !tripPointerMoved) {
+    registerTripDoubleComplete()
+  }
+  tripPointerMoved = false
 }
 
 function onTripPanelPointerCancel() {
-  clearTripLongPressTimer()
+  tripPointerMoved = false
+}
+
+function onTripPanelDblClick(e) {
+  if (isInteractiveEventTarget(e.target)) return
+  e.preventDefault()
+  registerTripDoubleComplete()
+}
+
+function buildTripHistoryDispatchHeader() {
+  const od = tripOriginDest.value
+  return {
+    savedAt: Date.now(),
+    tripStatusText: tripStatusUi.value.text,
+    tripStatusKind: tripStatusUi.value.kind,
+    origin: od.origin,
+    destination: od.destination,
+    instructions: String(instructions.value ?? '').trim(),
+  }
+}
+
+function buildTripHistoryDetailsPayload() {
+  const body = linehaulTripsBody.value
+  const trailers = tripTrailerCards.value.map((c) => ({
+    order: c.order,
+    trlrNbr: c.trlrNbr,
+    size: c.size,
+    statusLabel: c.statusLabel,
+    loadType: c.loadType,
+    summaryRows: c.summaryRows,
+  }))
+  const dolly = tripDollySection.value.show
+    ? {
+        rows: tripDollySection.value.rows.map((r) => ({
+          label: r.label,
+          value: r.value,
+        })),
+      }
+    : null
+  let tripStatus = ''
+  let tractorNumber = ''
+  if (body && typeof body === 'object' && !Array.isArray(body)) {
+    const b = /** @type {Record<string, unknown>} */ (body)
+    tripStatus = b.tripStatus != null ? String(b.tripStatus) : ''
+    tractorNumber = b.tractorNumber != null ? String(b.tractorNumber) : ''
+  }
+  return { trailers, dolly, tripStatus, tractorNumber }
 }
 
 async function confirmTripCompleted() {
@@ -383,7 +447,10 @@ async function confirmTripCompleted() {
   }
   tripCompleteBusy.value = true
   try {
-    await markTripLegSequenceCompleted(seq)
+    await markTripLegSequenceCompleted(seq, {
+      dispatchHeader: buildTripHistoryDispatchHeader(),
+      tripDetails: buildTripHistoryDetailsPayload(),
+    })
   } finally {
     tripCompleteBusy.value = false
     tripCompleteDialog.value = false
@@ -1175,8 +1242,8 @@ onUnmounted(() => {
         <div class="trip-complete-card">
           <h3 id="trip-complete-title" class="trip-complete-title">Mark trip complete?</h3>
           <p class="trip-complete-body">
-            This hides dispatch and trip details for this trip until FedEx returns a different trip
-            (new daily leg sequence).
+            Double-tap or double-click the Dispatch or Trip Details card to open this. Completing hides
+            dispatch and trip details until FedEx returns a different trip (new daily leg sequence).
           </p>
           <div class="trip-complete-actions">
             <button type="button" class="btn tap" @click="tripCompleteDialog = false">Cancel</button>
@@ -1722,6 +1789,7 @@ onUnmounted(() => {
       @pointermove="onDispatchPanelPointerMove"
       @pointerup="onDispatchPanelPointerUp"
       @pointercancel="onDispatchPanelPointerCancel"
+      @dblclick="onDispatchPanelDblClick"
     >
       <div class="dispatch-card-toolbar">
         <h2 class="dispatch-instructions-title">Dispatch Instructions</h2>
@@ -1851,6 +1919,7 @@ onUnmounted(() => {
       @pointermove="onTripPanelPointerMove"
       @pointerup="onTripPanelPointerUp"
       @pointercancel="onTripPanelPointerCancel"
+      @dblclick="onTripPanelDblClick"
     >
       <h2>Trip Details</h2>
       <p v-if="hasPrePlanTrip" class="trip-details-swipe-hint">Swipe left or right to match Dispatch (current vs pre-plan)</p>
@@ -1900,55 +1969,51 @@ onUnmounted(() => {
               @click="expandedTrailers[card.id] = !expandedTrailers[card.id]"
               @keydown.enter.space.prevent="expandedTrailers[card.id] = !expandedTrailers[card.id]"
             >
-              <div class="trailer-card-main">
-                <div class="trailer-card-title-row">
-                  <button
-                    type="button"
-                    class="trailer-order copyable-inline tap"
-                    title="Tap to copy"
-                    @click.stop="copyTripDetailValue(card.order, 'Trailer order')"
-                  >
-                    Trailer {{ card.order }}
-                  </button>
-                  <button
-                    v-if="card.trlrNbr"
-                    type="button"
-                    class="trailer-nbr copyable-inline tap"
-                    title="Tap to copy"
-                    @click.stop="copyTripDetailValue(card.trlrNbr, 'Trailer number')"
-                  >
-                    #{{ card.trlrNbr }}
-                  </button>
-                </div>
-                <div class="trailer-card-badges">
-                  <button
-                    type="button"
-                    class="trailer-size-badge copyable-inline tap"
-                    :class="card.size === '20ft' ? 'size-20' : 'size-53'"
-                    title="Tap to copy"
-                    @click.stop="copyTripDetailValue(card.size, 'Trailer size')"
-                  >
-                    {{ card.size }}
-                  </button>
-                  <button
-                    type="button"
-                    class="trailer-status-badge copyable-inline tap"
-                    :class="card.statusClass"
-                    title="Tap to copy"
-                    @click.stop="copyTripDetailValue(card.statusLabel, 'Trailer status')"
-                  >
-                    {{ card.statusLabel }}
-                  </button>
-                  <button
-                    type="button"
-                    class="trailer-load-badge copyable-inline tap"
-                    :class="card.loadTypeClass"
-                    title="Tap to copy"
-                    @click.stop="copyTripDetailValue(card.loadType, 'Load type')"
-                  >
-                    {{ card.loadType }}
-                  </button>
-                </div>
+              <div class="trailer-card-header-inline">
+                <button
+                  type="button"
+                  class="trailer-order copyable-inline tap"
+                  title="Tap to copy"
+                  @click.stop="copyTripDetailValue(card.order, 'Trailer order')"
+                >
+                  Trailer {{ card.order }}
+                </button>
+                <button
+                  v-if="card.trlrNbr"
+                  type="button"
+                  class="trailer-nbr copyable-inline tap"
+                  title="Tap to copy"
+                  @click.stop="copyTripDetailValue(card.trlrNbr, 'Trailer number')"
+                >
+                  #{{ card.trlrNbr }}
+                </button>
+                <button
+                  type="button"
+                  class="trailer-size-badge copyable-inline tap"
+                  :class="card.size === '20ft' ? 'size-20' : 'size-53'"
+                  title="Tap to copy"
+                  @click.stop="copyTripDetailValue(card.size, 'Trailer size')"
+                >
+                  {{ card.size }}
+                </button>
+                <button
+                  type="button"
+                  class="trailer-status-badge copyable-inline tap"
+                  :class="card.statusClass"
+                  title="Tap to copy"
+                  @click.stop="copyTripDetailValue(card.statusLabel, 'Trailer status')"
+                >
+                  {{ card.statusLabel }}
+                </button>
+                <button
+                  type="button"
+                  class="trailer-load-badge copyable-inline tap"
+                  :class="card.loadTypeClass"
+                  title="Tap to copy"
+                  @click.stop="copyTripDetailValue(card.loadType, 'Load type')"
+                >
+                  {{ card.loadType }}
+                </button>
               </div>
               <div class="trailer-card-actions">
                 <button
@@ -2171,9 +2236,9 @@ button.trailer-nbr.copyable-inline {
   text-align: left;
 }
 
-.trailer-card-badges button.trailer-size-badge,
-.trailer-card-badges button.trailer-status-badge,
-.trailer-card-badges button.trailer-load-badge {
+.trailer-card-header-inline button.trailer-size-badge,
+.trailer-card-header-inline button.trailer-status-badge,
+.trailer-card-header-inline button.trailer-load-badge {
   cursor: pointer;
   font: inherit;
   font-family: inherit;
@@ -3293,7 +3358,7 @@ button.trailer-nbr.copyable-inline {
   align-items: center;
   justify-content: space-between;
   gap: 0.5rem;
-  padding: 0.6rem 0.75rem;
+  padding: 0.55rem 0.65rem;
   cursor: pointer;
   user-select: none;
   background: #22222c;
@@ -3302,48 +3367,51 @@ button.trailer-nbr.copyable-inline {
   outline: 2px solid var(--color-accent-purple, #7b4db5);
   outline-offset: -2px;
 }
-.trailer-card-main {
+/* Single-line header: label, #, and badges share one row / baseline */
+.trailer-card-header-inline {
   display: flex;
-  flex-direction: column;
-  gap: 0.35rem;
+  flex-direction: row;
+  align-items: center;
+  flex-wrap: nowrap;
+  gap: 0.4rem;
   min-width: 0;
   flex: 1;
-}
-.trailer-card-title-row {
-  display: flex;
-  align-items: baseline;
-  gap: 0.5rem;
-  flex-wrap: wrap;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: thin;
 }
 .trailer-order {
   font-weight: 700;
-  font-size: 0.9rem;
+  font-size: 0.85rem;
+  line-height: 1.25;
   color: var(--text, #e8e8ee);
+  flex-shrink: 0;
 }
 .trailer-nbr {
   font-weight: 700;
-  font-size: 0.9rem;
-  line-height: 1.2;
+  font-size: 0.85rem;
+  line-height: 1.25;
   color: var(--text, #e8e8ee);
   font-variant-numeric: tabular-nums;
   font-family: ui-monospace, 'Cascadia Code', 'Segoe UI Mono', monospace;
-}
-.trailer-card-badges {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.35rem;
+  flex-shrink: 0;
 }
 .trailer-size-badge,
 .trailer-status-badge,
 .trailer-load-badge {
   display: inline-flex;
   align-items: center;
-  padding: 0.15rem 0.45rem;
+  justify-content: center;
+  padding: 0.2rem 0.42rem;
   border-radius: 4px;
-  font-size: 0.65rem;
+  font-size: 0.68rem;
+  line-height: 1.15;
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.03em;
+  flex-shrink: 0;
+  min-height: 1.35rem;
+  box-sizing: border-box;
 }
 .trailer-size-badge {
   background: #2a3a4a;
