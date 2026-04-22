@@ -81,7 +81,6 @@ onUnmounted(() => {
           class="app-main"
           :class="{
             'app-main--directory': route.name === 'directory',
-            'app-main--ce': route.name === 'carriersEdge',
           }"
         >
           <RouterView />
@@ -122,18 +121,6 @@ onUnmounted(() => {
           <path d="M12 6v6l4 2"/>
         </svg>
         <span class="nav-label">History</span>
-      </RouterLink>
-      <RouterLink
-        class="nav-item"
-        :class="{ 'is-active': route.name === 'carriersEdge' }"
-        to="/carriers-edge"
-        title="Carriers Edge (opens in new tab from page)"
-      >
-        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <rect x="3" y="3" width="18" height="18" rx="2"/>
-          <path d="M3 9h18"/>
-        </svg>
-        <span class="nav-label">C. Edge</span>
       </RouterLink>
       <RouterLink
         class="nav-item"
@@ -361,19 +348,6 @@ onUnmounted(() => {
   flex: 0 1 auto;
   display: flex;
   flex-direction: column;
-}
-
-.app-main.app-main--ce {
-  flex: 1;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-  max-width: none;
-}
-
-.app-main.app-main--ce :deep(.ce-wrap) {
-  flex: 1;
-  min-height: 0;
 }
 
 @media (orientation: landscape) and (min-width: 700px) {

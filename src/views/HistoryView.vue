@@ -1,6 +1,7 @@
 <script setup>
 import { ref, computed, onMounted, watch } from 'vue'
 import { getAssignment } from '../api.js'
+import { weekGroupMeta } from '../utils/historyWeekGroup.js'
 
 /**
  * @typedef {object} LedgerEntry
@@ -19,6 +20,7 @@ const error = ref('')
 const entries = ref([])
 
 const openId = ref('')
+const openWeekKey = ref('')
 
 async function load() {
   loading.value = true
@@ -69,15 +71,56 @@ const sorted = computed(() =>
   [...entries.value].sort((a, b) => b.displayDate - a.displayDate),
 )
 
+/** @typedef {{ key: string, groupLabel: string, sortKey: number, items: LedgerEntry[]}} WeekGroup */
+const weekGroups = computed(() => {
+  const list = sorted.value
+  /** @type {Map<string, { key: string, groupLabel: string, endMs: number, items: LedgerEntry[] }>} */
+  const m = new Map()
+  for (const e of list) {
+    const w = weekGroupMeta(e.displayDate)
+    const key = w ? w.key : 'unknown'
+    const groupLabel = w
+      ? w.groupLabel
+      : 'No date or invalid timestamp'
+    const endMs = w ? w.endMs : 0
+    if (!m.has(key)) {
+      m.set(key, { key, groupLabel, endMs, items: [] })
+    }
+    m.get(key).items.push(e)
+  }
+  const arr = [...m.values()]
+  for (const g of arr) {
+    g.items.sort((a, b) => b.displayDate - a.displayDate)
+  }
+  arr.sort((a, b) => {
+    const aMax = a.items[0]?.displayDate ?? 0
+    const bMax = b.items[0]?.displayDate ?? 0
+    if (aMax !== bMax) return bMax - aMax
+    if (a.endMs !== b.endMs) return b.endMs - a.endMs
+    return b.key.localeCompare(a.key)
+  })
+  return arr.map((g) => ({
+    key: g.key,
+    groupLabel: g.groupLabel,
+    sortKey: g.items[0]?.displayDate ?? 0,
+    items: g.items,
+  }))
+})
+
 watch(
-  sorted,
-  (list) => {
-    if (!list.length) {
+  weekGroups,
+  (groups) => {
+    if (!groups.length) {
       openId.value = ''
+      openWeekKey.value = ''
       return
     }
-    if (!list.some((e) => e.id === openId.value)) {
-      openId.value = list[0].id
+    if (!groups.some((g) => g.key === openWeekKey.value)) {
+      openWeekKey.value = groups[0].key
+    }
+    if (!sorted.value.some((e) => e.id === openId.value)) {
+      const firstG = groups.find((g) => g.key === openWeekKey.value) || groups[0]
+      openId.value = firstG?.items[0]?.id || ''
     }
   },
   { immediate: true },
@@ -121,25 +164,53 @@ onMounted(() => {
     </header>
 
     <p v-if="error" class="history-err">{{ error }}</p>
-    <p v-else-if="!loading && sorted.length === 0" class="history-empty">
+    <p v-else-if="!loading && weekGroups.length === 0" class="history-empty">
       No history yet. History fills when we receive trip data from the API, or when you mark a trip complete.
     </p>
 
-    <ul v-else class="history-list" aria-label="Trip history">
-      <li
-        v-for="e in sorted"
-        :id="`history-card-${e.id}`"
-        :key="e.id"
-        class="history-card"
-      >
+    <ul v-else class="history-weeks" aria-label="Trip history by week">
+      <li v-for="g in weekGroups" :key="g.key" class="history-week">
+        <details
+          :open="openWeekKey === g.key"
+          class="history-week-drop"
+          @toggle="
+            (ev) => {
+              const d = /** @type {HTMLDetailsElement} */ (ev.target)
+              if (d.open) {
+                openWeekKey = g.key
+                if (!g.items.some((x) => x.id === openId)) {
+                  openId = g.items[0]?.id || ''
+                }
+              } else if (openWeekKey === g.key) {
+                openWeekKey = ''
+              }
+            }
+          "
+        >
+          <summary class="history-week-summary">
+            <span class="history-week-title">{{ g.groupLabel }}</span>
+            <span class="history-week-count">{{ g.items.length }} trip(s)</span>
+          </summary>
+          <ul
+            class="history-list history-list--nested"
+            :aria-label="`Trips in ${g.groupLabel}`"
+          >
+            <li
+              v-for="e in g.items"
+              :id="`history-card-${e.id}`"
+              :key="e.id"
+              class="history-card"
+            >
         <details
           :open="openId === e.id"
           class="history-drop"
           @toggle="
             (ev) => {
               const d = /** @type {HTMLDetailsElement} */ (ev.target)
-              if (d.open) openId = e.id
-              else if (openId === e.id) openId = ''
+              if (d.open) {
+                openId = e.id
+                openWeekKey = g.key
+              } else if (openId === e.id) openId = ''
             }
           "
         >
@@ -230,6 +301,9 @@ onMounted(() => {
             </div>
           </div>
         </div>
+            </details>
+            </li>
+          </ul>
         </details>
       </li>
     </ul>
@@ -292,6 +366,75 @@ onMounted(() => {
   line-height: 1.5;
 }
 
+.history-weeks {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3, 0.75rem);
+}
+
+.history-week {
+  list-style: none;
+}
+
+.history-week-drop {
+  list-style: none;
+  border: 1px solid #2e2e36;
+  border-radius: 14px;
+  background: #14141a;
+  overflow: hidden;
+}
+
+.history-week-summary {
+  list-style: none;
+  position: relative;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.5rem 1rem;
+  padding: 0.75rem 2.1rem 0.65rem 0.9rem;
+  cursor: pointer;
+  user-select: none;
+  background: linear-gradient(180deg, #1e1e28 0%, #18181f 100%);
+  border-bottom: 1px solid #2a2a34;
+}
+
+.history-week-summary::-webkit-details-marker {
+  display: none;
+}
+
+.history-week-summary::after {
+  content: '▾';
+  position: absolute;
+  right: 0.85rem;
+  top: 0.8rem;
+  font-size: 0.7rem;
+  color: #8a8a98;
+  pointer-events: none;
+}
+
+.history-week-drop[open] .history-week-summary::after {
+  content: '▴';
+}
+
+.history-week-title {
+  font-size: 0.9rem;
+  font-weight: 700;
+  color: var(--color-text-primary, #f0f0f8);
+  line-height: 1.35;
+  max-width: calc(100% - 5rem);
+  padding-right: 0.5rem;
+}
+
+.history-week-count {
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: #9ca3af;
+}
+
 .history-list {
   list-style: none;
   margin: 0;
@@ -299,6 +442,12 @@ onMounted(() => {
   display: flex;
   flex-direction: column;
   gap: var(--space-4, 1rem);
+}
+
+.history-list--nested {
+  padding: 0.65rem 0.55rem 0.85rem;
+  gap: 0.65rem;
+  background: #0f0f14;
 }
 
 .history-card {
