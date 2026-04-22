@@ -1,13 +1,24 @@
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import { getAssignment } from '../api.js'
 
-/** @typedef {{ id: string, completedAt: number, dailyTripLegSequence: string, dispatchHeader: Record<string, unknown>, tripDetails: Record<string, unknown> }} LedgerEntry */
+/**
+ * @typedef {object} LedgerEntry
+ * @property {string} id
+ * @property {string} [source]
+ * @property {number} displayDate
+ * @property {number} completedAt
+ * @property {string} dailyTripLegSequence
+ * @property {Record<string, unknown>} dispatchHeader
+ * @property {Record<string, unknown>} tripDetails
+ */
 
 const loading = ref(true)
 const error = ref('')
 /** @type {import('vue').Ref<LedgerEntry[]>} */
 const entries = ref([])
+
+const openId = ref('')
 
 async function load() {
   loading.value = true
@@ -18,9 +29,21 @@ async function load() {
     entries.value = Array.isArray(raw)
       ? raw
           .filter((x) => x && typeof x === 'object')
-          .map((x) => ({
+          .map((x) => {
+            const comp =
+              typeof x.completedAt === 'number' && Number.isFinite(x.completedAt)
+                ? x.completedAt
+                : 0
+            const rec =
+              typeof x.recordedAt === 'number' && Number.isFinite(x.recordedAt)
+                ? x.recordedAt
+                : 0
+            const displayDate = comp || rec
+            return {
             id: String(x.id ?? ''),
-            completedAt: typeof x.completedAt === 'number' ? x.completedAt : 0,
+            source: typeof x.source === 'string' ? x.source : 'complete',
+            displayDate,
+            completedAt: comp,
             dailyTripLegSequence: String(x.dailyTripLegSequence ?? ''),
             dispatchHeader:
               x.dispatchHeader && typeof x.dispatchHeader === 'object'
@@ -30,7 +53,8 @@ async function load() {
               x.tripDetails && typeof x.tripDetails === 'object'
                 ? /** @type {Record<string, unknown>} */ (x.tripDetails)
                 : {},
-          }))
+          }
+          })
           .filter((e) => e.id)
       : []
   } catch (e) {
@@ -42,7 +66,21 @@ async function load() {
 }
 
 const sorted = computed(() =>
-  [...entries.value].sort((a, b) => b.completedAt - a.completedAt),
+  [...entries.value].sort((a, b) => b.displayDate - a.displayDate),
+)
+
+watch(
+  sorted,
+  (list) => {
+    if (!list.length) {
+      openId.value = ''
+      return
+    }
+    if (!list.some((e) => e.id === openId.value)) {
+      openId.value = list[0].id
+    }
+  },
+  { immediate: true },
 )
 
 function formatWhen(ts) {
@@ -59,6 +97,12 @@ function str(v) {
   return String(v)
 }
 
+function sourceLabel(src) {
+  if (src === 'linehaul') return 'From Linehaul'
+  if (src === 'complete') return 'Marked complete'
+  return 'Saved'
+}
+
 onMounted(() => {
   void load()
 })
@@ -68,7 +112,9 @@ onMounted(() => {
   <div class="history-view">
     <header class="history-head">
       <h1 class="history-title">History</h1>
-      <p class="history-sub">Completed trips (saved when you confirm “Mark trip complete”).</p>
+      <p class="history-sub">
+        Trip snapshots from the Linehaul API (updated on refresh) and entries when you mark a trip complete.
+      </p>
       <button type="button" class="history-refresh tap" :disabled="loading" @click="load">
         {{ loading ? 'Loading…' : 'Refresh' }}
       </button>
@@ -76,27 +122,50 @@ onMounted(() => {
 
     <p v-if="error" class="history-err">{{ error }}</p>
     <p v-else-if="!loading && sorted.length === 0" class="history-empty">
-      No completed trips yet. Double-tap Dispatch or Trip Details, then confirm completion.
+      No history yet. History fills when we receive trip data from the API, or when you mark a trip complete.
     </p>
 
     <ul v-else class="history-list" aria-label="Trip history">
-      <li v-for="e in sorted" :key="e.id" class="history-card">
-        <div class="history-card-head">
-          <time class="history-date" :datetime="new Date(e.completedAt).toISOString()">{{
-            formatWhen(e.completedAt)
-          }}</time>
-          <span v-if="e.dailyTripLegSequence" class="history-seq"
-            >Leg #{{ e.dailyTripLegSequence }}</span
-          >
-        </div>
+      <li
+        v-for="e in sorted"
+        :id="`history-card-${e.id}`"
+        :key="e.id"
+        class="history-card"
+      >
+        <details
+          :open="openId === e.id"
+          class="history-drop"
+          @toggle="
+            (ev) => {
+              const d = /** @type {HTMLDetailsElement} */ (ev.target)
+              if (d.open) openId = e.id
+              else if (openId === e.id) openId = ''
+            }
+          "
+        >
+          <summary class="history-card-summary">
+            <span class="history-od-lane">
+              <span class="history-od-compact" :title="str(e.dispatchHeader?.origin) || '—'">
+                <span class="summary-tag">O</span>
+                {{ str(e.dispatchHeader?.origin) || '—' }}
+              </span>
+              <span class="history-od-mid" aria-hidden="true">→</span>
+              <span class="history-od-compact" :title="str(e.dispatchHeader?.destination) || '—'">
+                <span class="summary-tag">D</span>
+                {{ str(e.dispatchHeader?.destination) || '—' }}
+              </span>
+            </span>
+            <time
+              class="history-date"
+              :datetime="new Date(e.displayDate).toISOString()"
+              >{{ formatWhen(e.displayDate) }}</time
+            >
+            <span class="history-seq" v-if="e.dailyTripLegSequence"
+              >Leg #{{ e.dailyTripLegSequence }} ·
+              {{ sourceLabel((str(e.dispatchHeader?.source) || e.source) || '') }}</span
+            >
+          </summary>
         <div class="history-dispatch">
-          <p class="history-od">
-            <span class="history-od-label">Origin</span>
-            <span class="history-od-val">{{ str(e.dispatchHeader?.origin) || '—' }}</span>
-            <span class="history-od-arrow" aria-hidden="true">→</span>
-            <span class="history-od-label">Destination</span>
-            <span class="history-od-val">{{ str(e.dispatchHeader?.destination) || '—' }}</span>
-          </p>
           <p v-if="str(e.dispatchHeader?.tripStatusText)" class="history-meta">
             Status: {{ str(e.dispatchHeader.tripStatusText) }}
           </p>
@@ -161,6 +230,7 @@ onMounted(() => {
             </div>
           </div>
         </div>
+        </details>
       </li>
     </ul>
   </div>
@@ -238,26 +308,100 @@ onMounted(() => {
   overflow: hidden;
 }
 
-.history-card-head {
+.history-drop {
+  list-style: none;
+}
+
+.history-card-summary {
+  list-style: none;
+  position: relative;
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.75rem;
-  padding: 0.65rem 0.85rem;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.4rem;
+  padding: 0.65rem 0.75rem 0.55rem;
   background: #22222c;
   border-bottom: 1px solid #2e2e38;
+  cursor: pointer;
+  user-select: none;
+}
+
+.history-card-summary::-webkit-details-marker {
+  display: none;
+}
+
+.history-card-summary::after {
+  content: '▾';
+  position: absolute;
+  right: 0.9rem;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: 0.7rem;
+  color: #8a8a98;
+  pointer-events: none;
+}
+
+.history-drop[open] .history-card-summary::after {
+  content: '▴';
+}
+
+.history-drop {
+  position: relative;
+}
+
+.history-od-lane {
+  display: flex;
+  flex-direction: row;
+  align-items: flex-start;
+  gap: 0.25rem 0.35rem;
+  width: 100%;
+  min-width: 0;
+  padding-right: 1.1rem;
+}
+
+.history-od-compact {
+  flex: 1 1 0;
+  min-width: 0;
+  font-size: 0.8rem;
+  font-weight: 600;
+  line-height: 1.25;
+  color: var(--color-text-primary, #f0f0f6);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.history-od-mid {
+  flex: 0 0 auto;
+  color: #6b6b78;
+  font-size: 0.9rem;
+  line-height: 1.2;
+  padding: 0 0.1rem;
+}
+
+.summary-tag {
+  display: inline-block;
+  font-size: 0.55rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  color: #9ca3af;
+  margin-right: 0.2rem;
+  vertical-align: 0.1em;
 }
 
 .history-date {
-  font-size: 0.78rem;
+  font-size: 0.75rem;
   font-weight: 600;
-  color: var(--color-text-primary, #f4f4f8);
+  color: var(--color-text-secondary, #b8b8c8);
   font-variant-numeric: tabular-nums;
+  align-self: flex-start;
 }
 
 .history-seq {
-  font-size: 0.68rem;
+  font-size: 0.65rem;
   color: var(--color-text-tertiary, #6e6e7e);
+  line-height: 1.3;
 }
 
 .history-dispatch {

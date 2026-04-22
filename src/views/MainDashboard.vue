@@ -416,6 +416,7 @@ function buildTripHistoryDispatchHeader() {
   const od = tripOriginDest.value
   return {
     savedAt: Date.now(),
+    source: 'complete',
     tripStatusText: tripStatusUi.value.text,
     tripStatusKind: tripStatusUi.value.kind,
     origin: od.origin,

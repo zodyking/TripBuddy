@@ -7,6 +7,7 @@ import cookie from '@fastify/cookie'
 import multipart from '@fastify/multipart'
 import fastifyStatic from '@fastify/static'
 import { API_PORT, UPLOADS_DIR, PERSISTENCE_DATA_ROOT, LOCAL_DIR } from './config.mjs'
+import { runDataMigrationOnStartup } from './data-migration.mjs'
 import {
   isAuthEnabled,
   createSession,
@@ -1215,6 +1216,12 @@ if (distExists) {
 }
 
 const host = process.env.FEDEX_TOOL_API_HOST ?? '127.0.0.1'
+
+try {
+  await runDataMigrationOnStartup()
+} catch (e) {
+  console.error('[data-migration]', e)
+}
 
 try {
   await app.listen({ port: API_PORT, host })

@@ -291,21 +291,55 @@ export async function writeAssignment(body) {
         ? e.id.trim()
         : `h-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
     const seq = String(e.dailyTripLegSequence ?? '').trim()
+    const source =
+      typeof e.source === 'string' && e.source.trim() ? e.source.trim() : 'complete'
     const entry = {
       id,
+      source,
       completedAt:
         typeof e.completedAt === 'number' && Number.isFinite(e.completedAt)
           ? e.completedAt
           : Date.now(),
       dailyTripLegSequence: /^\d+$/.test(seq) ? seq : '',
-      dispatchHeader:
-        e.dispatchHeader && typeof e.dispatchHeader === 'object'
-          ? e.dispatchHeader
-          : {},
+      dispatchHeader: {
+        ...(e.dispatchHeader && typeof e.dispatchHeader === 'object' ? e.dispatchHeader : {}),
+        source,
+      },
       tripDetails:
         e.tripDetails && typeof e.tripDetails === 'object' ? e.tripDetails : {},
     }
     tripHistoryLedger = [entry, ...tripHistoryLedger].slice(0, MAX_TRIP_HISTORY)
+  } else if (body.upsertTripHistoryEntry && typeof body.upsertTripHistoryEntry === 'object') {
+    const e = body.upsertTripHistoryEntry
+    const seq = String(e.dailyTripLegSequence ?? '').trim()
+    if (!/^\d+$/.test(seq)) {
+      /* invalid */
+    } else {
+      const id =
+        typeof e.id === 'string' && e.id.trim() ? e.id.trim() : `h-${seq}`
+      const at =
+        typeof e.recordedAt === 'number' && Number.isFinite(e.recordedAt)
+          ? e.recordedAt
+          : typeof e.completedAt === 'number' && Number.isFinite(e.completedAt)
+            ? e.completedAt
+            : Date.now()
+      const nextEntry = {
+        id,
+        source: typeof e.source === 'string' && e.source.trim() ? e.source.trim() : 'linehaul',
+        /** API snapshots use recordedAt; completion entries keep completedAt */
+        recordedAt: at,
+        completedAt: at,
+        dailyTripLegSequence: seq,
+        dispatchHeader:
+          e.dispatchHeader && typeof e.dispatchHeader === 'object' ? e.dispatchHeader : {},
+        tripDetails:
+          e.tripDetails && typeof e.tripDetails === 'object' ? e.tripDetails : {},
+      }
+      const rest = tripHistoryLedger.filter(
+        (x) => x && String(x.dailyTripLegSequence) !== seq && x.id !== id,
+      )
+      tripHistoryLedger = [nextEntry, ...rest].slice(0, MAX_TRIP_HISTORY)
+    }
   }
 
   const next = {

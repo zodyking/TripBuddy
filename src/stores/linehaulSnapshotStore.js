@@ -10,6 +10,10 @@ import {
   postLinehaulCaptureBearer,
 } from '../api.js'
 import { pushLiveLog } from './liveLogStore.js'
+import {
+  buildHistoryDispatchHeaderFromBody,
+  buildHistoryTripDetailsFromBody,
+} from '../utils/tripHistorySnapshot.js'
 
 export const linehaulTractorBody = ref(null)
 export const linehaulDriverBody = ref(null)
@@ -77,9 +81,13 @@ export async function markTripLegSequenceCompleted(dailyTripLegSequence, history
   ) {
     body.appendTripHistoryEntry = {
       id: `trip-${seq}-${Date.now()}`,
+      source: 'complete',
       completedAt: Date.now(),
       dailyTripLegSequence: seq,
-      dispatchHeader: history.dispatchHeader,
+      dispatchHeader: {
+        ...history.dispatchHeader,
+        source: 'complete',
+      },
       tripDetails: history.tripDetails,
     }
   }
@@ -314,8 +322,11 @@ export async function refreshLinehaulApis() {
  * @param {0 | 1} attempt
  */
 async function refreshLinehaulApisImpl(attempt) {
+  let assignmentInstructions = ''
   try {
     const assign = await getAssignment()
+    assignmentInstructions =
+      typeof assign.instructions === 'string' ? assign.instructions : ''
     hiddenDailyTripLegSequences.value = Array.isArray(assign.hiddenDailyTripLegSequences)
       ? assign.hiddenDailyTripLegSequences.map(String)
       : []
@@ -523,6 +534,33 @@ async function refreshLinehaulApisImpl(attempt) {
           : null
       linehaulTripsError.value =
         aprErr || legErr || 'Trip details request failed'
+    }
+  }
+
+  if (linehaulTripsBody.value && typeof linehaulTripsBody.value === 'object') {
+    const seqU = tripBodyDailySeq(linehaulTripsBody.value)
+    if (seqU) {
+      const fromAssign = String(assignmentInstructions ?? '').trim()
+      const fromApi = extractTripDispatchInstructions(linehaulTripsBody.value)
+      const mergedInstr =
+        fromAssign && fromApi
+          ? `${fromAssign}\n\n${fromApi}`
+          : fromAssign || fromApi
+      const snapBody = linehaulTripsBody.value
+      void putAssignment({
+        upsertTripHistoryEntry: {
+          id: `h-${seqU}`,
+          source: 'linehaul',
+          dailyTripLegSequence: seqU,
+          recordedAt: Date.now(),
+          dispatchHeader: buildHistoryDispatchHeaderFromBody(snapBody, {
+            source: 'linehaul',
+            instructions: mergedInstr,
+            instructionsFinal: true,
+          }),
+          tripDetails: buildHistoryTripDetailsFromBody(snapBody),
+        },
+      }).catch(() => {})
     }
   }
 
