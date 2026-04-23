@@ -1,4 +1,5 @@
 import pg from 'pg'
+import { DATABASE_URL } from './config.mjs'
 
 const { Pool } = pg
 
@@ -9,27 +10,28 @@ let pool = null
 let schemaReady = false
 let canUse = false
 
+/**
+ * @returns {string} Required for all persistence. No in-repo default without explicit opt-in to local dev.
+ */
 function connectionString() {
   const s = (process.env.DATABASE_URL || '').trim()
   if (s) return s
-  const host = (process.env.PGHOST || 'localhost').trim()
-  const port = Number(process.env.PGPORT || 5432)
-  const user = (process.env.PGUSER || 'postgres').trim()
-  const pass = process.env.PGPASSWORD || ''
-  const db = (process.env.PGDATABASE || 'fedextool').trim()
-  if (process.env.USE_LOCAL_POSTGRES === '1') {
+  if (process.env.NODE_ENV === 'test' && process.env.FEDEX_TOOL_TEST_PG_URL) {
+    return process.env.FEDEX_TOOL_TEST_PG_URL
+  }
+  if ((process.env.USE_LOCAL_POSTGRES || '') === '1') {
+    const host = (process.env.PGHOST || 'localhost').trim()
+    const port = Number(process.env.PGPORT || 5432)
+    const user = (process.env.PGUSER || 'postgres').trim()
+    const pass = process.env.PGPASSWORD || ''
+    const db = (process.env.PGDATABASE || 'fedextool').trim()
     return `postgresql://${encodeURIComponent(user)}:${encodeURIComponent(pass)}@${host}:${port}/${db}`
   }
   return null
 }
 
-/**
- * @returns {boolean} True if DATABASE_URL (or local postgres env) is configured
- */
 export function isPostgresConfigured() {
-  if ((process.env.DATABASE_URL || '').trim()) return true
-  if ((process.env.USE_LOCAL_POSTGRES || '') === '1') return true
-  return false
+  return !!connectionString()
 }
 
 /**
@@ -70,19 +72,30 @@ export async function getPostgresPool() {
   return canUse ? pool : null
 }
 
+/** Boot-time: fail fast if app cannot connect when DATABASE is required */
+export async function requirePostgresOrThrow() {
+  if (!isPostgresConfigured()) {
+    throw new Error(
+      'DATABASE_URL is required. Set it to a PostgreSQL connection string (Dokploy service or managed DB).',
+    )
+  }
+  const p = await getPostgresPool()
+  if (!p || !canUse) {
+    throw new Error('PostgreSQL connection failed. Check DATABASE_URL and network access.')
+  }
+}
+
 /**
  * @param {string} key
  * @returns {Promise<unknown | null>} Parsed JSON, or null if missing
  */
 export async function pgGetJson(key) {
   const p = await getPostgresPool()
-  if (!p) return null
-  try {
-    const { rows } = await p.query(`SELECT v FROM ${TABLE} WHERE k = $1`, [key])
-    if (rows[0] && rows[0].v !== undefined) return rows[0].v
-  } catch (e) {
-    console.error(`[kv-pg] get ${key}:`, e.message || e)
+  if (!p) {
+    throw new Error('Database not available')
   }
+  const { rows } = await p.query(`SELECT v FROM ${TABLE} WHERE k = $1`, [key])
+  if (rows[0] && rows[0].v !== undefined) return rows[0].v
   return null
 }
 
@@ -93,7 +106,7 @@ export async function pgGetJson(key) {
 export async function pgSetJson(key, value) {
   const p = await getPostgresPool()
   if (!p) {
-    throw new Error('PostgreSQL is not available')
+    throw new Error('Database not available')
   }
   const s = JSON.stringify(value)
   await p.query(
@@ -115,3 +128,5 @@ export async function closePostgresPool() {
 export function postgresReady() {
   return canUse && schemaReady
 }
+
+export { DATABASE_URL }

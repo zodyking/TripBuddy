@@ -1,40 +1,11 @@
-import path from 'node:path'
-import { LOCAL_DIR } from './config.mjs'
-import { readKVJson, writeKVJson } from './kv-store.mjs'
-import { requestAsyncLocalStorage } from './request-context.mjs'
-import { getLastActiveAccountKey } from './credentials-store.mjs'
-
-/** Legacy global assignment (before per-account files). */
-const ASSIGNMENT_FILE = path.join(LOCAL_DIR, 'assignment.json')
+import { readKeyJson, writeKeyJson } from './kv-store.mjs'
+import { userScopeKey } from './scope-kv.mjs'
 
 /**
- * @param {string | null | undefined} accountKey
+ * @returns {string}
  */
-function assignmentFileForAccount(accountKey) {
-  if (accountKey && typeof accountKey === 'string') {
-    return path.join(LOCAL_DIR, 'users', accountKey, 'assignment.json')
-  }
-  return ASSIGNMENT_FILE
-}
-
-/**
- * @param {string | null} accountKey
- */
-function assignmentKvKey(accountKey) {
-  if (accountKey && typeof accountKey === 'string') {
-    return `assignment:${accountKey}`
-  }
-  return 'assignment:global'
-}
-
-function currentAssignmentScopeKey() {
-  const req = requestAsyncLocalStorage.getStore()
-  const fromReq =
-    req && typeof req === 'object' && 'credentialAccountKey' in req
-      ? /** @type {{ credentialAccountKey?: string }} */ (req).credentialAccountKey
-      : null
-  if (fromReq) return fromReq
-  return getLastActiveAccountKey()
+function assignmentKvKey() {
+  return userScopeKey('assignment')
 }
 
 const MAX_SLOTS = 5
@@ -187,13 +158,8 @@ function normalizeAssignmentData(data) {
 }
 
 export async function readAssignment() {
-  const ak = currentAssignmentScopeKey()
-  const file = assignmentFileForAccount(ak)
-  const key = assignmentKvKey(ak)
-  let raw = await readKVJson(key, file, () => null)
-  if (raw == null && ak) {
-    raw = await readKVJson(assignmentKvKey(null), ASSIGNMENT_FILE, () => null)
-  }
+  const key = assignmentKvKey()
+  let raw = await readKeyJson(key, () => null)
   if (raw == null) raw = {}
   const n = normalizeAssignmentData(raw)
   if (!n) return cloneDefault()
@@ -207,9 +173,7 @@ export async function readAssignment() {
 }
 
 export async function writeAssignment(body) {
-  const ak = currentAssignmentScopeKey()
-  const targetFile = assignmentFileForAccount(ak)
-  const kvKey = assignmentKvKey(ak)
+  const key = assignmentKvKey()
 
   const prev = await readAssignment()
 
@@ -359,6 +323,6 @@ export async function writeAssignment(body) {
     tripHistoryLedger,
   }
 
-  await writeKVJson(kvKey, targetFile, next)
+  await writeKeyJson(key, next)
   return next
 }

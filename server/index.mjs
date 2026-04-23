@@ -8,7 +8,7 @@ import multipart from '@fastify/multipart'
 import fastifyStatic from '@fastify/static'
 import { API_PORT, UPLOADS_DIR, PERSISTENCE_DATA_ROOT, LOCAL_DIR } from './config.mjs'
 import { runDataMigrationOnStartup } from './data-migration.mjs'
-import { getPostgresPool } from './kv-pg.mjs'
+import { requirePostgresOrThrow } from './kv-pg.mjs'
 import {
   isAuthEnabled,
   createSession,
@@ -97,7 +97,12 @@ import {
   upsertLocation,
   updateLocationPhone,
 } from './locations-directory-store.mjs'
-import { appendAccessEntry, listAccessEntries } from './access-log-store.mjs'
+import {
+  appendLoginAccessFromBody,
+  appendPageVisitLog,
+  listAccessEntries,
+  mergePreLoginAccessToUser,
+} from './access-log-store.mjs'
 import { getClientIp, isPrivateOrLocalIp } from './client-ip.mjs'
 import { readGeoFence, writeGeoFence } from './geo-fence-store.mjs'
 import {
@@ -272,6 +277,11 @@ app.post('/api/auth/login', async (req, reply) => {
       } catch {
         /* non-fatal */
       }
+      try {
+        await mergePreLoginAccessToUser(username, accountKey)
+      } catch {
+        /* non-fatal */
+      }
       const id = createSession(accountKey)
       reply.setCookie(COOKIE_NAME, id, {
         path: '/',
@@ -299,6 +309,11 @@ app.post('/api/auth/login', async (req, reply) => {
     await runWithCredentialAccountKey(accountKey, () =>
       saveCredentials({ linehaulPollMinutes: 1 }),
     )
+  } catch {
+    /* non-fatal */
+  }
+  try {
+    await mergePreLoginAccessToUser(username, accountKey)
   } catch {
     /* non-fatal */
   }
@@ -340,15 +355,11 @@ app.post('/api/login/access-log', async (req, reply) => {
     const xf = req.headers['x-forwarded-for']
     const forwardedFor = typeof xf === 'string' ? xf.slice(0, 512) : null
     const ua = req.headers['user-agent']
-    const entry = await appendAccessEntry({
+    const entry = await appendLoginAccessFromBody({
+      ...body,
       ip: getClientIp(req),
       forwardedFor,
-      latitude: body.latitude,
-      longitude: body.longitude,
-      accuracyM: body.accuracyM,
-      locationDenied: body.locationDenied === true,
       userAgent: typeof ua === 'string' ? ua : null,
-      source: 'login_ack',
     })
     return { ok: true, id: entry.id }
   } catch (e) {
@@ -362,15 +373,10 @@ app.post('/api/visit', async (req) => {
   const xf = req.headers['x-forwarded-for']
   const forwardedFor = typeof xf === 'string' ? xf.slice(0, 512) : null
   const ua = req.headers['user-agent']
-  const entry = await appendAccessEntry({
+  const entry = await appendPageVisitLog({
     ip: getClientIp(req),
     forwardedFor,
-    latitude: null,
-    longitude: null,
-    accuracyM: null,
-    locationDenied: false,
     userAgent: typeof ua === 'string' ? ua : null,
-    source: 'page_visit',
   })
   return { ok: true, id: entry.id }
 })
@@ -1221,12 +1227,14 @@ const host = process.env.FEDEX_TOOL_API_HOST ?? '127.0.0.1'
 try {
   await runDataMigrationOnStartup()
 } catch (e) {
-  console.error('[data-migration]', e)
+  console.error('[data-migration]', (e && e.message) || e)
+  process.exit(1)
 }
 try {
-  await getPostgresPool()
+  await requirePostgresOrThrow()
 } catch (e) {
-  console.error('[postgres]', e)
+  console.error('[postgres]', (e && e.message) || e)
+  process.exit(1)
 }
 
 try {

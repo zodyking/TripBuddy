@@ -26,14 +26,11 @@ Set on your **API** / Node service (not in the git repo):
 | -------- | ------- | ------- |
 | `DATABASE_URL` | `postgresql://fedextool:SECRET@db.internal:5432/fedextool` | Primary: all JSON-backed app data |
 | `FEDEX_TOOL_SECRET` | long random string | Encrypts stored passwords / tokens (unchanged) |
+| `FEDEX_TOOL_DATA_ACCOUNT_KEY` | 64-char hex (same as account id) | Only when `FEDEX_TOOL_AUTH_ENABLED=0`: which user’s row in `fedextool_kv` to use (`u:<key>:…`); set to the same id you use for that machine’s data |
 
-When `DATABASE_URL` is set, the server stores **credentials, assignment (incl. history), directory, geo-fence, access log, automations, flow scripts, and check-in flow** in table `fedextool_kv` (key/value JSONB). The first read after deploy can **migrate** existing JSON from `FEDEX_TOOL_DATA_DIR` / `local/` into PostgreSQL.
+The server **requires** a working `DATABASE_URL`. It does **not** use JSON on disk for runtime reads/writes. On startup, it runs a **one-time import** of legacy `FEDEX_TOOL_DATA_DIR` JSON (and some older flat `fedextool_kv` key names) into the new key layout: global keys are prefixed with `g:`; per-user data uses `u:<account_sha256>:` and matches the account id derived from the username.
 
-Optional:
-
-- `FEDEX_TOOL_KV_FILE_MIRROR=1` — also write JSON files alongside Postgres (debug / backup only; not required).
-
-**Not in Postgres:** Playwright browser profile under `FEDEX_TOOL_DATA_DIR/.../pw-user-data` (Chromium user data) stays on disk; only metadata goes to the database.
+**Not in Postgres:** Playwright browser profile under `FEDEX_TOOL_DATA_DIR/.../pw-user-data` (Chromium user data) stays on disk; only metadata lives in the database.
 
 ## 3. Persistence across deploys
 
@@ -49,4 +46,4 @@ docker run -d --name pg -e POSTGRES_PASSWORD=dev -e POSTGRES_DB=fedextool -p 543
 export DATABASE_URL=postgresql://postgres:dev@127.0.0.1:5432/fedextool
 ```
 
-Or omit `DATABASE_URL` to keep using JSON files under `server/.local` as before.
+A local `DATABASE_URL` (container or `USE_LOCAL_POSTGRES=1` with `PG*`) is required; there is no file-based fallback.

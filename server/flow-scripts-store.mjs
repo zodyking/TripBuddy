@@ -1,10 +1,10 @@
-import path from 'node:path'
 import { MENU } from './playwright/selectors.mjs'
-import { LOCAL_DIR } from './config.mjs'
-import { readKVJson, writeKVJson } from './kv-store.mjs'
+import { readKeyJson, writeKeyJson } from './kv-store.mjs'
+import { userScopeKey } from './scope-kv.mjs'
 
-const FLOW_SCRIPTS_FILE = path.join(LOCAL_DIR, 'flow-scripts.json')
-const FLOW_KV = 'flow:scripts'
+function flowKey() {
+  return userScopeKey('flow:scripts')
+}
 
 /** @typedef {{ useCustom: boolean, notes: string, steps: object[] }} ScenarioFlowConfig */
 
@@ -152,11 +152,7 @@ export function validateFlowScriptsPayload(raw) {
 }
 
 export async function readFlowScripts() {
-  const parsed = await readKVJson(
-    FLOW_KV,
-    FLOW_SCRIPTS_FILE,
-    () => null,
-  )
+  const parsed = await readKeyJson(flowKey(), () => null)
   if (parsed == null) {
     return defaultScenarios()
   }
@@ -175,7 +171,7 @@ export async function writeFlowScripts(body) {
   if (!v.ok) {
     throw new Error(v.error)
   }
-  await writeKVJson(FLOW_KV, FLOW_SCRIPTS_FILE, v.data)
+  await writeKeyJson(flowKey(), v.data)
   return v.data
 }
 

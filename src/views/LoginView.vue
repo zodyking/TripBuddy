@@ -117,6 +117,7 @@ function continueFromStepOne() {
           ? pos.coords.accuracy
           : null
       await sendAccessLog({
+        username: username.value,
         latitude: geoLat.value,
         longitude: geoLng.value,
         accuracyM: geoAccuracyM.value,
@@ -148,7 +149,7 @@ function continueFromStepOne() {
     async () => {
       geoPending.value = false
       geoDenied.value = true
-      await sendAccessLog({ locationDenied: true })
+      await sendAccessLog({ username: username.value, locationDenied: true })
     },
     {
       enableHighAccuracy: true,

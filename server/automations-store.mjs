@@ -1,10 +1,10 @@
-import path from 'node:path'
 import { randomUUID } from 'node:crypto'
-import { LOCAL_DIR } from './config.mjs'
-import { readKVJson, writeKVJson } from './kv-store.mjs'
+import { readKeyJson, writeKeyJson } from './kv-store.mjs'
+import { userScopeKey } from './scope-kv.mjs'
 
-const AUTOMATIONS_FILE = path.join(LOCAL_DIR, 'automations.json')
-const AUTOMATIONS_KV = 'automations:store'
+function automationsKey() {
+  return userScopeKey('automations')
+}
 
 /**
  * Block type definitions for the automation builder.
@@ -634,11 +634,7 @@ export function validateAutomation(auto) {
 }
 
 export async function readAutomations() {
-  const parsed = await readKVJson(
-    AUTOMATIONS_KV,
-    AUTOMATIONS_FILE,
-    defaultStore,
-  )
+  const parsed = await readKeyJson(automationsKey(), defaultStore)
   if (
     !parsed ||
     typeof parsed !== 'object' ||
@@ -650,7 +646,7 @@ export async function readAutomations() {
 }
 
 async function writeStore(store) {
-  await writeKVJson(AUTOMATIONS_KV, AUTOMATIONS_FILE, store)
+  await writeKeyJson(automationsKey(), store)
 }
 
 export async function getAutomation(id) {

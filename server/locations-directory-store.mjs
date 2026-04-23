@@ -1,17 +1,7 @@
-import fs from 'node:fs/promises'
-import path from 'node:path'
-import { fileURLToPath } from 'node:url'
-import { LOCAL_DIR } from './config.mjs'
-import { readKVJson, writeKVJson } from './kv-store.mjs'
+import { readKeyJson, writeKeyJson } from './kv-store.mjs'
+import { G } from './scope-kv.mjs'
 
-const DIRECTORY_KV = 'directory:locations'
-const DIRECTORY_FILE = path.join(LOCAL_DIR, 'locations-directory.json')
-/** Same pattern as access-log: dev may have old data only under `server/.local`. */
-const LEGACY_DEV_DIRECTORY_FILE = path.join(
-  path.dirname(fileURLToPath(import.meta.url)),
-  '.local',
-  'locations-directory.json',
-)
+const DIRECTORY_KV = G('directory:locations')
 
 /**
  * @typedef {Object} LocationEntry
@@ -27,74 +17,24 @@ const LEGACY_DEV_DIRECTORY_FILE = path.join(
  */
 
 /**
- * @param {string} file
  * @returns {Promise<Record<string, LocationEntry>>}
  */
-async function readDirectoryFile(file) {
-  try {
-    const raw = await fs.readFile(file, 'utf8')
-    const data = JSON.parse(raw)
-    if (data && typeof data === 'object' && !Array.isArray(data)) {
-      return /** @type {Record<string, LocationEntry>} */ (data)
-    }
-  } catch {
-    /* empty */
+export async function readDirectory() {
+  const fromKv = await readKeyJson(DIRECTORY_KV, () => ({}))
+  if (fromKv && typeof fromKv === 'object' && !Array.isArray(fromKv)) {
+    return /** @type {Record<string, LocationEntry>} */ (fromKv)
   }
   return {}
 }
 
-function newerEntry(a, b) {
-  const ta = Date.parse(a.lastUpdated || '') || 0
-  const tb = Date.parse(b.lastUpdated || '') || 0
-  return ta >= tb ? a : b
-}
-
 /**
- * Read the entire directory from disk (merges primary + legacy dev file when paths differ).
- * @returns {Promise<Record<string, LocationEntry>>}
- */
-export async function readDirectory() {
-  const fromKv = await readKVJson(
-    DIRECTORY_KV,
-    DIRECTORY_FILE,
-    () => ({}),
-  )
-  const primary =
-    fromKv && typeof fromKv === 'object' && !Array.isArray(fromKv)
-      ? /** @type {Record<string, LocationEntry>} */ (fromKv)
-      : await readDirectoryFile(DIRECTORY_FILE)
-  if (LEGACY_DEV_DIRECTORY_FILE === DIRECTORY_FILE) {
-    return primary
-  }
-  const legacy = await readDirectoryFile(LEGACY_DEV_DIRECTORY_FILE)
-  /** @type {Record<string, LocationEntry>} */
-  const merged = { ...primary }
-  for (const [id, leg] of Object.entries(legacy)) {
-    const cur = merged[id]
-    if (!cur) {
-      merged[id] = leg
-    } else {
-      merged[id] = newerEntry(cur, leg)
-    }
-  }
-  return merged
-}
-
-/**
- * Persist full directory object to the canonical file (and mirror legacy dev path when needed).
  * @param {Record<string, LocationEntry>} directory
  */
-async function writeDirectoryFile(directory) {
-  await writeKVJson(DIRECTORY_KV, DIRECTORY_FILE, directory)
-  const payload = JSON.stringify(directory, null, 2)
-  if (LEGACY_DEV_DIRECTORY_FILE !== DIRECTORY_FILE) {
-    await fs.mkdir(path.dirname(LEGACY_DEV_DIRECTORY_FILE), { recursive: true })
-    await fs.writeFile(LEGACY_DEV_DIRECTORY_FILE, payload, 'utf8')
-  }
+async function writeDirectory(directory) {
+  await writeKeyJson(DIRECTORY_KV, directory)
 }
 
 /**
- * Compare two location entries (ignoring lastUpdated).
  * @param {LocationEntry} a
  * @param {LocationEntry} b
  * @returns {boolean}
@@ -113,7 +53,6 @@ function entriesEqual(a, b) {
 }
 
 /**
- * Insert or update a location entry. Only writes if data actually changed.
  * @param {Omit<LocationEntry, 'lastUpdated'>} data
  * @returns {Promise<{ updated: boolean, entry: LocationEntry }>}
  */
@@ -121,9 +60,6 @@ export async function upsertLocation(data) {
   if (!data || !data.locationId) {
     throw new Error('locationId is required')
   }
-
-  await fs.mkdir(LOCAL_DIR, { recursive: true })
-
   const directory = await readDirectory()
   const existing = directory[data.locationId]
 
@@ -144,13 +80,11 @@ export async function upsertLocation(data) {
   }
 
   directory[data.locationId] = entry
-  await writeDirectoryFile(directory)
-
+  await writeDirectory(directory)
   return { updated: true, entry }
 }
 
 /**
- * Get all locations as an array sorted by locationName.
  * @returns {Promise<LocationEntry[]>}
  */
 export async function listLocations() {
@@ -161,7 +95,6 @@ export async function listLocations() {
 }
 
 /**
- * Update only the phone field for a location (shared directory).
  * @param {string} locationId
  * @param {string} phone
  * @returns {Promise<{ updated: boolean, entry: LocationEntry }>}
@@ -185,6 +118,6 @@ export async function updateLocationPhone(locationId, phone) {
     return { updated: false, entry: existing }
   }
   directory[locationId] = entry
-  await writeDirectoryFile(directory)
+  await writeDirectory(directory)
   return { updated: true, entry }
 }

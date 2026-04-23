@@ -1,10 +1,8 @@
-import path from 'node:path'
-import { LOCAL_DIR } from './config.mjs'
-import { readKVJson, writeKVJson } from './kv-store.mjs'
+import { readKeyJson, writeKeyJson } from './kv-store.mjs'
 import { clearFenceDecisionCache } from './geo-fence-ip-cache.mjs'
+import { G } from './scope-kv.mjs'
 
-const FILE = path.join(LOCAL_DIR, 'geo-fence.json')
-const KV_KEY = 'geofence:config'
+const KV_KEY = G('geofence:config')
 
 /**
  * @typedef {{ lat: number, lng: number }} LatLngPoint
@@ -54,9 +52,8 @@ export async function readGeoFence() {
       polygon: cachedConfig.polygon.map((p) => ({ ...p })),
     }
   }
-  const data = await readKVJson(
+  const data = await readKeyJson(
     KV_KEY,
-    FILE,
     () => ({ enabled: false, redirectUrl: '', polygon: [] }),
   )
   if (!data || typeof data !== 'object') {
@@ -108,7 +105,7 @@ export async function writeGeoFence(patch) {
         }))
       : prev.polygon,
   }
-  await writeKVJson(KV_KEY, FILE, next)
+  await writeKeyJson(KV_KEY, next)
   invalidateGeoFenceCache()
   return next
 }

@@ -1,13 +1,13 @@
-import path from 'node:path'
 import {
   CHECKIN_XPATH,
   CHECKIN_XPATH_KEYS,
 } from './playwright/checkInXpathDefaults.mjs'
-import { LOCAL_DIR } from './config.mjs'
-import { readKVJson, writeKVJson } from './kv-store.mjs'
+import { readKeyJson, writeKeyJson } from './kv-store.mjs'
+import { userScopeKey } from './scope-kv.mjs'
 
-const CHECK_IN_FLOW_FILE = path.join(LOCAL_DIR, 'check-in-flow.json')
-const CHECKIN_KV = 'checkin:flow'
+function checkinKey() {
+  return userScopeKey('checkin:flow')
+}
 
 /** @typedef {{ instructions: string, xpaths: Partial<Record<string, string>> }} CheckInFlowDoc */
 
@@ -56,11 +56,7 @@ export function mergeCheckInXpaths(overrides = {}) {
 }
 
 export async function readCheckInFlow() {
-  const parsed = await readKVJson(
-    CHECKIN_KV,
-    CHECK_IN_FLOW_FILE,
-    () => defaultDoc(),
-  )
+  const parsed = await readKeyJson(checkinKey(), () => defaultDoc())
   const v = validateCheckInFlowBody(parsed)
   if (!v.ok) return defaultDoc()
   return v.data
@@ -92,7 +88,7 @@ export async function writeCheckInFlow(body) {
   if (!v.ok) {
     throw new Error(v.error)
   }
-  await writeKVJson(CHECKIN_KV, CHECK_IN_FLOW_FILE, v.data)
+  await writeKeyJson(checkinKey(), v.data)
   return v.data
 }
 
