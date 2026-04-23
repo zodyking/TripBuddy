@@ -106,7 +106,15 @@ function validateSlots(slots) {
 
 function normalizeAssignmentData(data) {
   if (!data) return null
-  const err = validateSlots(data.photoSlots || [])
+  let photoSlots
+  if (data.photoSlots == null) {
+    photoSlots = []
+  } else if (Array.isArray(data.photoSlots)) {
+    photoSlots = data.photoSlots
+  } else {
+    return null
+  }
+  const err = validateSlots(photoSlots)
   if (err) return null
   const hiddenRaw = data.hiddenDailyTripLegSequences
   const hiddenDailyTripLegSequences = Array.isArray(hiddenRaw)
@@ -125,7 +133,7 @@ function normalizeAssignmentData(data) {
     instructions: typeof data.instructions === 'string' ? data.instructions : '',
     driverPhone: typeof data.driverPhone === 'string' ? data.driverPhone : '',
     preset: typeof data.preset === 'string' ? data.preset : 'custom',
-    photoSlots: data.photoSlots,
+    photoSlots,
     fieldValues:
       data.fieldValues && typeof data.fieldValues === 'object' ? data.fieldValues : {},
     hiddenDailyTripLegSequences,
@@ -177,7 +185,13 @@ export async function writeAssignment(body) {
 
   const prev = await readAssignment()
 
-  let photoSlots = body.photoSlots ?? prev.photoSlots
+  let photoSlots = Array.isArray(body?.photoSlots)
+    ? body.photoSlots
+    : prev.photoSlots
+  if (!Array.isArray(photoSlots)) {
+    const sealed = getPreset('sealed_dual')
+    photoSlots = sealed ? sealed.photoSlots.map((s) => ({ ...s })) : []
+  }
   let preset = body.preset ?? prev.preset
 
   if (body.applyPreset && PRESETS[body.applyPreset]) {
