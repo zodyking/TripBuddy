@@ -2,10 +2,15 @@ import crypto from 'node:crypto'
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import { LOCAL_DIR } from './config.mjs'
+import { readKVJson, writeKVJson } from './kv-store.mjs'
 import { requestAsyncLocalStorage } from './request-context.mjs'
 
 const LEGACY_CRED_FILE = path.join(LOCAL_DIR, 'credentials.json')
 const USERS_DIR = path.join(LOCAL_DIR, 'users')
+
+const KV_USER_META = (accountKey) => `usermeta:${accountKey || 'legacy'}`
+const KV_CREDS = (accountKey) =>
+  `creds:${accountKey || 'legacy'}`
 
 const ALGO = 'aes-256-gcm'
 const SCRYPT_SALT = 'fedextool-cred-v1'
@@ -146,44 +151,43 @@ async function maybeMigrateLegacyOnce() {
  *   linehaulPollMinutes: number | null,
  * }>}
  */
+function parseCredData(data) {
+  let pollM = null
+  if (
+    typeof data.linehaulPollMinutes === 'number' &&
+    !Number.isNaN(data.linehaulPollMinutes)
+  ) {
+    pollM = Math.max(0, Math.min(24 * 60, Math.floor(data.linehaulPollMinutes)))
+  }
+  return {
+    username: data.username ?? null,
+    passwordEnc: data.passwordEnc ?? null,
+    tractorNumber:
+      typeof data.tractorNumber === 'string' ? data.tractorNumber : null,
+    employeeNumber:
+      typeof data.employeeNumber === 'string' ? data.employeeNumber : null,
+    linehaulBearerEnc: data.linehaulBearerEnc ?? null,
+    driverName: typeof data.driverName === 'string' ? data.driverName : null,
+    linehaulPollMinutes: pollM,
+  }
+}
+
 async function readFileRawForAccount(accountKey) {
   await maybeMigrateLegacyOnce()
   const file = credPathForAccount(accountKey)
-  try {
-    const raw = await fs.readFile(file, 'utf8')
-    const data = JSON.parse(raw)
-    let pollM = null
-    if (
-      typeof data.linehaulPollMinutes === 'number' &&
-      !Number.isNaN(data.linehaulPollMinutes)
-    ) {
-      pollM = Math.max(
-        0,
-        Math.min(24 * 60, Math.floor(data.linehaulPollMinutes)),
-      )
-    }
-    return {
-      username: data.username ?? null,
-      passwordEnc: data.passwordEnc ?? null,
-      tractorNumber:
-        typeof data.tractorNumber === 'string' ? data.tractorNumber : null,
-      employeeNumber:
-        typeof data.employeeNumber === 'string' ? data.employeeNumber : null,
-      linehaulBearerEnc: data.linehaulBearerEnc ?? null,
-      driverName:
-        typeof data.driverName === 'string' ? data.driverName : null,
-      linehaulPollMinutes: pollM,
-    }
-  } catch {
-    return {
-      username: null,
-      passwordEnc: null,
-      tractorNumber: null,
-      employeeNumber: null,
-      linehaulBearerEnc: null,
-      driverName: null,
-      linehaulPollMinutes: null,
-    }
+  const kvKey = KV_CREDS(accountKey)
+  const j = await readKVJson(kvKey, file, () => ({}))
+  if (j && typeof j === 'object' && j !== null) {
+    return parseCredData(/** @type {Record<string, unknown>} */ (j))
+  }
+  return {
+    username: null,
+    passwordEnc: null,
+    tractorNumber: null,
+    employeeNumber: null,
+    linehaulBearerEnc: null,
+    driverName: null,
+    linehaulPollMinutes: null,
   }
 }
 
@@ -197,15 +201,15 @@ async function readFileRaw() {
 export async function readUserMeta(accountKey) {
   await maybeMigrateLegacyOnce()
   const file = metaPathForAccount(accountKey)
-  try {
-    const raw = await fs.readFile(file, 'utf8')
-    const data = JSON.parse(raw)
-    return {
-      appLoginVerified: data.appLoginVerified === true,
-    }
-  } catch {
-    return { appLoginVerified: false }
+  const d = await readKVJson(
+    KV_USER_META(accountKey),
+    file,
+    () => ({}),
+  )
+  if (d && typeof d === 'object') {
+    return { appLoginVerified: /** @type {Record<string, unknown>} */ (d).appLoginVerified === true }
   }
+  return { appLoginVerified: false }
 }
 
 /**
@@ -213,15 +217,12 @@ export async function readUserMeta(accountKey) {
  * @param {Partial<{ appLoginVerified: boolean }>} patch
  */
 export async function writeUserMeta(accountKey, patch) {
-  await fs.mkdir(path.dirname(metaPathForAccount(accountKey)), {
-    recursive: true,
-  })
   const prev = await readUserMeta(accountKey)
   const next = { ...prev, ...patch }
-  await fs.writeFile(
+  await writeKVJson(
+    KV_USER_META(accountKey),
     metaPathForAccount(accountKey),
-    JSON.stringify(next, null, 2),
-    'utf8',
+    next,
   )
   return next
 }
@@ -412,31 +413,23 @@ export async function saveCredentials(body) {
     driverName,
     linehaulPollMinutes,
   }
-  await fs.writeFile(credFile, JSON.stringify(next, null, 2), 'utf8')
+  await writeKVJson(KV_CREDS(acc), credFile, next)
   return getCredentialsMeta()
 }
 
 export async function clearCredentials() {
   const acc = resolveAccountKey()
   const credFile = credPathForAccount(acc)
-  await fs.mkdir(path.dirname(credFile), { recursive: true })
-  await fs.writeFile(
-    credFile,
-    JSON.stringify(
-      {
-        username: null,
-        passwordEnc: null,
-        tractorNumber: null,
-        employeeNumber: null,
-        linehaulBearerEnc: null,
-        driverName: null,
-        linehaulPollMinutes: null,
-      },
-      null,
-      2,
-    ),
-    'utf8',
-  )
+  const empty = {
+    username: null,
+    passwordEnc: null,
+    tractorNumber: null,
+    employeeNumber: null,
+    linehaulBearerEnc: null,
+    driverName: null,
+    linehaulPollMinutes: null,
+  }
+  await writeKVJson(KV_CREDS(acc), credFile, empty)
 }
 
 /**

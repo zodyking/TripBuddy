@@ -8,6 +8,7 @@ import multipart from '@fastify/multipart'
 import fastifyStatic from '@fastify/static'
 import { API_PORT, UPLOADS_DIR, PERSISTENCE_DATA_ROOT, LOCAL_DIR } from './config.mjs'
 import { runDataMigrationOnStartup } from './data-migration.mjs'
+import { getPostgresPool } from './kv-pg.mjs'
 import {
   isAuthEnabled,
   createSession,
@@ -1221,6 +1222,11 @@ try {
   await runDataMigrationOnStartup()
 } catch (e) {
   console.error('[data-migration]', e)
+}
+try {
+  await getPostgresPool()
+} catch (e) {
+  console.error('[postgres]', e)
 }
 
 try {

@@ -1,6 +1,6 @@
-import fs from 'node:fs/promises'
 import path from 'node:path'
 import { LOCAL_DIR } from './config.mjs'
+import { readKVJson, writeKVJson } from './kv-store.mjs'
 import { requestAsyncLocalStorage } from './request-context.mjs'
 import { getLastActiveAccountKey } from './credentials-store.mjs'
 
@@ -15,6 +15,16 @@ function assignmentFileForAccount(accountKey) {
     return path.join(LOCAL_DIR, 'users', accountKey, 'assignment.json')
   }
   return ASSIGNMENT_FILE
+}
+
+/**
+ * @param {string | null} accountKey
+ */
+function assignmentKvKey(accountKey) {
+  if (accountKey && typeof accountKey === 'string') {
+    return `assignment:${accountKey}`
+  }
+  return 'assignment:global'
 }
 
 function currentAssignmentScopeKey() {
@@ -123,94 +133,83 @@ function validateSlots(slots) {
   return null
 }
 
-async function readAssignmentFromFile(file) {
-  try {
-    const raw = await fs.readFile(file, 'utf8')
-    const data = JSON.parse(raw)
-    const err = validateSlots(data.photoSlots || [])
-    if (err) return null
-    const hiddenRaw = data.hiddenDailyTripLegSequences
-    const hiddenDailyTripLegSequences = Array.isArray(hiddenRaw)
-      ? hiddenRaw
-          .map((s) => String(s).trim())
-          .filter((s) => /^\d+$/.test(s))
-      : []
-    const ledgerRaw = data.tripHistoryLedger
-    const tripHistoryLedger = Array.isArray(ledgerRaw)
-      ? ledgerRaw
-          .filter((x) => x && typeof x === 'object' && !Array.isArray(x))
-          .slice(0, MAX_TRIP_HISTORY)
-      : []
+function normalizeAssignmentData(data) {
+  if (!data) return null
+  const err = validateSlots(data.photoSlots || [])
+  if (err) return null
+  const hiddenRaw = data.hiddenDailyTripLegSequences
+  const hiddenDailyTripLegSequences = Array.isArray(hiddenRaw)
+    ? hiddenRaw
+        .map((s) => String(s).trim())
+        .filter((s) => /^\d+$/.test(s))
+    : []
+  const ledgerRaw = data.tripHistoryLedger
+  const tripHistoryLedger = Array.isArray(ledgerRaw)
+    ? ledgerRaw
+        .filter((x) => x && typeof x === 'object' && !Array.isArray(x))
+        .slice(0, MAX_TRIP_HISTORY)
+    : []
 
-    const base = {
-      instructions: typeof data.instructions === 'string' ? data.instructions : '',
-      driverPhone: typeof data.driverPhone === 'string' ? data.driverPhone : '',
-      preset: typeof data.preset === 'string' ? data.preset : 'custom',
-      photoSlots: data.photoSlots,
-      fieldValues:
-        data.fieldValues && typeof data.fieldValues === 'object'
-          ? data.fieldValues
-          : {},
-      hiddenDailyTripLegSequences,
-      tripHistoryLedger,
-      persistedLinehaulTripSnapshot:
-        data.persistedLinehaulTripSnapshot != null &&
-        typeof data.persistedLinehaulTripSnapshot === 'object'
-          ? data.persistedLinehaulTripSnapshot
-          : null,
-      persistedPrePlanTripSnapshot:
-        data.persistedPrePlanTripSnapshot != null &&
-        typeof data.persistedPrePlanTripSnapshot === 'object'
-          ? data.persistedPrePlanTripSnapshot
-          : null,
-      persistedCachedTripSnapshot:
-        data.persistedCachedTripSnapshot != null &&
-        typeof data.persistedCachedTripSnapshot === 'object'
-          ? data.persistedCachedTripSnapshot
-          : null,
-      lastDailyTripLegSequencePersisted:
-        typeof data.lastDailyTripLegSequencePersisted === 'string' &&
-        /^\d+$/.test(data.lastDailyTripLegSequencePersisted)
-          ? data.lastDailyTripLegSequencePersisted
-          : null,
-    }
-    if (!Array.isArray(base.hiddenDailyTripLegSequences)) {
-      base.hiddenDailyTripLegSequences = []
-    }
-    return base
-  } catch {
-    return null
+  const base = {
+    instructions: typeof data.instructions === 'string' ? data.instructions : '',
+    driverPhone: typeof data.driverPhone === 'string' ? data.driverPhone : '',
+    preset: typeof data.preset === 'string' ? data.preset : 'custom',
+    photoSlots: data.photoSlots,
+    fieldValues:
+      data.fieldValues && typeof data.fieldValues === 'object' ? data.fieldValues : {},
+    hiddenDailyTripLegSequences,
+    tripHistoryLedger,
+    persistedLinehaulTripSnapshot:
+      data.persistedLinehaulTripSnapshot != null &&
+      typeof data.persistedLinehaulTripSnapshot === 'object'
+        ? data.persistedLinehaulTripSnapshot
+        : null,
+    persistedPrePlanTripSnapshot:
+      data.persistedPrePlanTripSnapshot != null &&
+      typeof data.persistedPrePlanTripSnapshot === 'object'
+        ? data.persistedPrePlanTripSnapshot
+        : null,
+    persistedCachedTripSnapshot:
+      data.persistedCachedTripSnapshot != null &&
+      typeof data.persistedCachedTripSnapshot === 'object'
+        ? data.persistedCachedTripSnapshot
+        : null,
+    lastDailyTripLegSequencePersisted:
+      typeof data.lastDailyTripLegSequencePersisted === 'string' &&
+      /^\d+$/.test(data.lastDailyTripLegSequencePersisted)
+        ? data.lastDailyTripLegSequencePersisted
+        : null,
   }
+  if (!Array.isArray(base.hiddenDailyTripLegSequences)) {
+    base.hiddenDailyTripLegSequences = []
+  }
+  return base
 }
 
 export async function readAssignment() {
   const ak = currentAssignmentScopeKey()
-  const scoped = assignmentFileForAccount(ak)
-  if (scoped !== ASSIGNMENT_FILE) {
-    const fromScoped = await readAssignmentFromFile(scoped)
-    if (fromScoped) return fromScoped
-    const legacy = await readAssignmentFromFile(ASSIGNMENT_FILE)
-    if (legacy) return legacy
-    return cloneDefault()
+  const file = assignmentFileForAccount(ak)
+  const key = assignmentKvKey(ak)
+  let raw = await readKVJson(key, file, () => null)
+  if (raw == null && ak) {
+    raw = await readKVJson(assignmentKvKey(null), ASSIGNMENT_FILE, () => null)
   }
-  const global = await readAssignmentFromFile(ASSIGNMENT_FILE)
-  const g = global ?? cloneDefault()
-  if (!Array.isArray(g.hiddenDailyTripLegSequences)) {
-    g.hiddenDailyTripLegSequences = []
-  }
-  if (!('persistedLinehaulTripSnapshot' in g)) g.persistedLinehaulTripSnapshot = null
-  if (!('persistedPrePlanTripSnapshot' in g)) g.persistedPrePlanTripSnapshot = null
-  if (!('persistedCachedTripSnapshot' in g)) g.persistedCachedTripSnapshot = null
-  if (!('lastDailyTripLegSequencePersisted' in g)) g.lastDailyTripLegSequencePersisted = null
-  if (!Array.isArray(g.tripHistoryLedger)) g.tripHistoryLedger = []
-  return g
+  if (raw == null) raw = {}
+  const n = normalizeAssignmentData(raw)
+  if (!n) return cloneDefault()
+  if (!Array.isArray(n.hiddenDailyTripLegSequences)) n.hiddenDailyTripLegSequences = []
+  if (!('persistedLinehaulTripSnapshot' in n)) n.persistedLinehaulTripSnapshot = null
+  if (!('persistedPrePlanTripSnapshot' in n)) n.persistedPrePlanTripSnapshot = null
+  if (!('persistedCachedTripSnapshot' in n)) n.persistedCachedTripSnapshot = null
+  if (!('lastDailyTripLegSequencePersisted' in n)) n.lastDailyTripLegSequencePersisted = null
+  if (!Array.isArray(n.tripHistoryLedger)) n.tripHistoryLedger = []
+  return n
 }
 
 export async function writeAssignment(body) {
   const ak = currentAssignmentScopeKey()
   const targetFile = assignmentFileForAccount(ak)
-  const dir = path.dirname(targetFile)
-  await fs.mkdir(dir, { recursive: true })
+  const kvKey = assignmentKvKey(ak)
 
   const prev = await readAssignment()
 
@@ -360,6 +359,6 @@ export async function writeAssignment(body) {
     tripHistoryLedger,
   }
 
-  await fs.writeFile(targetFile, JSON.stringify(next, null, 2), 'utf8')
+  await writeKVJson(kvKey, targetFile, next)
   return next
 }

@@ -2,7 +2,9 @@ import fs from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { LOCAL_DIR } from './config.mjs'
+import { readKVJson, writeKVJson } from './kv-store.mjs'
 
+const DIRECTORY_KV = 'directory:locations'
 const DIRECTORY_FILE = path.join(LOCAL_DIR, 'locations-directory.json')
 /** Same pattern as access-log: dev may have old data only under `server/.local`. */
 const LEGACY_DEV_DIRECTORY_FILE = path.join(
@@ -52,7 +54,15 @@ function newerEntry(a, b) {
  * @returns {Promise<Record<string, LocationEntry>>}
  */
 export async function readDirectory() {
-  const primary = await readDirectoryFile(DIRECTORY_FILE)
+  const fromKv = await readKVJson(
+    DIRECTORY_KV,
+    DIRECTORY_FILE,
+    () => ({}),
+  )
+  const primary =
+    fromKv && typeof fromKv === 'object' && !Array.isArray(fromKv)
+      ? /** @type {Record<string, LocationEntry>} */ (fromKv)
+      : await readDirectoryFile(DIRECTORY_FILE)
   if (LEGACY_DEV_DIRECTORY_FILE === DIRECTORY_FILE) {
     return primary
   }
@@ -75,9 +85,8 @@ export async function readDirectory() {
  * @param {Record<string, LocationEntry>} directory
  */
 async function writeDirectoryFile(directory) {
+  await writeKVJson(DIRECTORY_KV, DIRECTORY_FILE, directory)
   const payload = JSON.stringify(directory, null, 2)
-  await fs.mkdir(path.dirname(DIRECTORY_FILE), { recursive: true })
-  await fs.writeFile(DIRECTORY_FILE, payload, 'utf8')
   if (LEGACY_DEV_DIRECTORY_FILE !== DIRECTORY_FILE) {
     await fs.mkdir(path.dirname(LEGACY_DEV_DIRECTORY_FILE), { recursive: true })
     await fs.writeFile(LEGACY_DEV_DIRECTORY_FILE, payload, 'utf8')

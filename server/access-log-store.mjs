@@ -1,17 +1,16 @@
-import fs from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import crypto from 'node:crypto'
 import { LOCAL_DIR } from './config.mjs'
+import { readKVJson, writeKVJson } from './kv-store.mjs'
 
 const LOG_FILE = path.join(LOCAL_DIR, 'access-log.json')
-/** When `FEDEX_TOOL_DATA_DIR` points elsewhere, dev logs may still live under `server/.local`. */
+const ACCESS_KV = 'access:log'
 const LEGACY_DEV_LOG_FILE = path.join(
   path.dirname(fileURLToPath(import.meta.url)),
   '.local',
   'access-log.json',
 )
-/** Keep a long history; oldest rows drop only when over cap. */
 const MAX_ENTRIES = 5000
 
 /**
@@ -19,13 +18,13 @@ const MAX_ENTRIES = 5000
  * @property {string} id
  * @property {string} at ISO timestamp
  * @property {string} ip
- * @property {string|null} forwardedFor raw X-Forwarded-For if present
+ * @property {string|null} forwardedFor
  * @property {number|null} latitude
  * @property {number|null} longitude
  * @property {number|null} accuracyM
- * @property {boolean} locationDenied client reported geolocation unavailable
+ * @property {boolean} locationDenied
  * @property {string|null} userAgent
- * @property {string} source e.g. login_ack
+ * @property {string} source
  */
 
 /**
@@ -33,8 +32,9 @@ const MAX_ENTRIES = 5000
  * @returns {Promise<AccessLogEntry[]>}
  */
 async function readEntriesFromFile(file) {
+  const { readFile } = await import('node:fs/promises')
   try {
-    const raw = await fs.readFile(file, 'utf8')
+    const raw = await readFile(file, 'utf8')
     const data = JSON.parse(raw)
     if (data && Array.isArray(data.entries)) return data.entries
   } catch {
@@ -43,14 +43,29 @@ async function readEntriesFromFile(file) {
   return []
 }
 
+/**
+ * @returns {Promise<AccessLogEntry[]>}
+ */
 async function readRaw() {
-  /** Merge primary store with legacy dev file when paths differ (fixes empty Security log in dev). */
+  const doc = await readKVJson(
+    ACCESS_KV,
+    LOG_FILE,
+    () => ({ entries: [] }),
+  )
+  const fromDoc =
+    doc && typeof doc === 'object' && Array.isArray(/** @type {any} */ (doc).entries)
+      ? /** @type {AccessLogEntry[]} */ (/** @type {any} */ (doc).entries)
+      : []
   const paths = new Set([LOG_FILE])
   if (LEGACY_DEV_LOG_FILE !== LOG_FILE) {
     paths.add(LEGACY_DEV_LOG_FILE)
   }
-  /** @type {Map<string, AccessLogEntry>} */
   const byId = new Map()
+  for (const e of fromDoc) {
+    if (e && typeof e.id === 'string' && !byId.has(e.id)) {
+      byId.set(e.id, e)
+    }
+  }
   for (const p of paths) {
     const chunk = await readEntriesFromFile(p)
     for (const e of chunk) {
@@ -69,7 +84,6 @@ async function readRaw() {
  * @returns {Promise<AccessLogEntry>}
  */
 export async function appendAccessEntry(row) {
-  await fs.mkdir(LOCAL_DIR, { recursive: true })
   const entries = await readRaw()
   const entry = {
     id: row.id || crypto.randomBytes(8).toString('hex'),
@@ -94,12 +108,13 @@ export async function appendAccessEntry(row) {
   }
   entries.unshift(entry)
   const trimmed = entries.slice(0, MAX_ENTRIES)
-  const payload = JSON.stringify({ entries: trimmed }, null, 2)
-  await fs.writeFile(LOG_FILE, payload, 'utf8')
-  /** Mirror to legacy dev path so reads from either file stay in sync (no “disappearing” rows). */
+  const payload = { entries: trimmed }
+  await writeKVJson(ACCESS_KV, LOG_FILE, payload)
   if (LEGACY_DEV_LOG_FILE !== LOG_FILE) {
-    await fs.mkdir(path.dirname(LEGACY_DEV_LOG_FILE), { recursive: true })
-    await fs.writeFile(LEGACY_DEV_LOG_FILE, payload, 'utf8')
+    const { writeFile, mkdir } = await import('node:fs/promises')
+    const s = JSON.stringify(payload, null, 2)
+    await mkdir(path.dirname(LEGACY_DEV_LOG_FILE), { recursive: true })
+    await writeFile(LEGACY_DEV_LOG_FILE, s, 'utf8')
   }
   return entry
 }

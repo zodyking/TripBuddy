@@ -1,9 +1,10 @@
-import fs from 'node:fs/promises'
 import path from 'node:path'
 import { MENU } from './playwright/selectors.mjs'
 import { LOCAL_DIR } from './config.mjs'
+import { readKVJson, writeKVJson } from './kv-store.mjs'
 
 const FLOW_SCRIPTS_FILE = path.join(LOCAL_DIR, 'flow-scripts.json')
+const FLOW_KV = 'flow:scripts'
 
 /** @typedef {{ useCustom: boolean, notes: string, steps: object[] }} ScenarioFlowConfig */
 
@@ -151,18 +152,19 @@ export function validateFlowScriptsPayload(raw) {
 }
 
 export async function readFlowScripts() {
-  await fs.mkdir(LOCAL_DIR, { recursive: true })
-  try {
-    const raw = await fs.readFile(FLOW_SCRIPTS_FILE, 'utf8')
-    const parsed = JSON.parse(raw)
-    const v = validateFlowScriptsPayload(parsed)
-    if (!v.ok) {
-      return defaultScenarios()
-    }
-    return v.data
-  } catch {
+  const parsed = await readKVJson(
+    FLOW_KV,
+    FLOW_SCRIPTS_FILE,
+    () => null,
+  )
+  if (parsed == null) {
     return defaultScenarios()
   }
+  const v = validateFlowScriptsPayload(parsed)
+  if (!v.ok) {
+    return defaultScenarios()
+  }
+  return v.data
 }
 
 /**
@@ -173,12 +175,7 @@ export async function writeFlowScripts(body) {
   if (!v.ok) {
     throw new Error(v.error)
   }
-  await fs.mkdir(LOCAL_DIR, { recursive: true })
-  await fs.writeFile(
-    FLOW_SCRIPTS_FILE,
-    `${JSON.stringify(v.data, null, 2)}\n`,
-    'utf8',
-  )
+  await writeKVJson(FLOW_KV, FLOW_SCRIPTS_FILE, v.data)
   return v.data
 }
 

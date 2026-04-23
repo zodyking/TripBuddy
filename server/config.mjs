@@ -26,6 +26,14 @@ export const SESSION_START_URL =
 export const API_PORT = Number(process.env.FEDEX_TOOL_API_PORT ?? 3847)
 
 /**
+ * Set `DATABASE_URL=postgresql://user:pass@host:5432/dbname` to persist app data in PostgreSQL
+ * (credentials, directory, history, automations, etc.) instead of JSON under LOCAL_DIR.
+ * The database lives **outside** the app repo; only the connection string is configured in Dokploy/ENV.
+ * Playwright user-data (`USER_DATA_DIR`) stays on disk for the browser profile.
+ */
+export const DATABASE_URL = (process.env.DATABASE_URL || '').trim()
+
+/**
  * Root directory for all persistent data (credentials, automations, user data, uploads).
  * Set `FEDEX_TOOL_DATA_DIR` (e.g. `/data`) so JSON stores survive deploys and are shared across devices hitting the same API.
  * Subfolders: `local/`, `pw-user-data/`, `uploads-tmp/`. When unset, dev defaults under `server/` (`.local`, etc.).
