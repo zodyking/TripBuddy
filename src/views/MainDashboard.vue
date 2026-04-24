@@ -108,7 +108,6 @@ const PORTAL_Z_BANNER = 2_147_483_000
 const PORTAL_Z_MODAL = 2_147_483_001
 const PORTAL_Z_LOCATION_MODAL = 2_147_483_002
 
-const assignmentAlert = ref(null)
 const loadError = ref(null)
 const runMsg = ref(null)
 const runErrorBanner = ref(null)
@@ -937,10 +936,6 @@ async function loadAssignment() {
   }
 }
 
-function dismissAlert() {
-  assignmentAlert.value = null
-}
-
 /** Dedupe directory writes for the same trip destination + origin pair. */
 let lastAutoSavedDestKey = ''
 /** Cancels stale async saves when destination or origin changes mid-flight. */
@@ -1206,11 +1201,6 @@ let unregisterSession = () => {}
 
 onMounted(async () => {
   unregisterAssignment = registerAssignmentListener((data) => {
-    assignmentAlert.value = {
-      ts: data.ts,
-      message: data.message || 'Assignment change detected',
-      detail: data.current ?? data,
-    }
     if (data.source === 'save') {
       void loadAssignment()
     }
@@ -1582,11 +1572,6 @@ onUnmounted(() => {
       <button type="button" class="tap icon-close" aria-label="Dismiss" @click="dismissRunErrorBanner">
         ×
       </button>
-    </div>
-
-    <div v-if="assignmentAlert" class="banner" role="status">
-      <span>{{ assignmentAlert.message }}</span>
-      <button type="button" class="tap dismiss" @click="dismissAlert">Dismiss</button>
     </div>
 
     <p v-if="loadError" class="err">{{ loadError }}</p>
@@ -2805,33 +2790,6 @@ button.trailer-nbr.copyable-inline {
   line-height: 1;
   cursor: pointer;
 }
-.banner {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-3, 0.75rem);
-  padding: var(--space-3, 0.75rem) var(--space-4, 1rem);
-  background: var(--color-warning-muted, rgba(245, 158, 11, 0.15));
-  border: 1px solid var(--color-warning-border, rgba(245, 158, 11, 0.3));
-  border-radius: var(--radius-lg, 0.75rem);
-  font-size: var(--text-sm, 0.8125rem);
-  animation: slide-up var(--duration-normal, 200ms) var(--ease-out);
-}
-.dismiss {
-  flex-shrink: 0;
-  padding: var(--space-1-5, 0.375rem) var(--space-3, 0.75rem);
-  border-radius: var(--radius-md, 0.5rem);
-  border: 1px solid var(--color-border, rgba(255, 255, 255, 0.08));
-  background: var(--color-bg-surface, #16161d);
-  color: var(--color-text-primary, #f4f4f8);
-  font-size: var(--text-sm, 0.8125rem);
-  font-weight: var(--weight-medium, 500);
-  cursor: pointer;
-  transition: var(--transition-colors);
-}
-.dismiss:hover {
-  background: var(--color-hover, rgba(255, 255, 255, 0.04));
-}
 .err {
   color: #ff8a80;
 }
@@ -3393,8 +3351,7 @@ button.trailer-nbr.copyable-inline {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .panel,
-  .banner {
+  .panel {
     animation: none;
   }
 

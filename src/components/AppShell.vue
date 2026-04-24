@@ -1,5 +1,5 @@
 <script setup>
-import { onMounted, onUnmounted } from 'vue'
+import { onMounted, onUnmounted, watch, nextTick, Teleport } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { postAuthLogout } from '../api.js'
 import { resetLinehaulSession } from '../stores/linehaulSnapshotStore.js'
@@ -9,10 +9,63 @@ import {
   disconnectLiveLogStream,
   reconnectLiveLogStream,
 } from '../stores/liveLogStore.js'
+import {
+  items,
+  toasts,
+  menuOpen,
+  unreadCount,
+  fetchInAppInbox,
+  markInAppItemRead,
+  markInAppAllRead,
+} from '../stores/inAppNotificationsStore.js'
 
 const route = useRoute()
 const router = useRouter()
 const { apiOk, refreshHealth } = useApiHealth()
+
+function fmtNotifTime(ts) {
+  if (typeof ts !== 'number') return '—'
+  try {
+    return new Date(ts).toLocaleString(undefined, {
+      month: 'short',
+      day: 'numeric',
+      hour: 'numeric',
+      minute: '2-digit',
+    })
+  } catch {
+    return '—'
+  }
+}
+
+const bellBadge = (n) => (n > 99 ? '99+' : String(n))
+
+function toggleNotifMenu() {
+  menuOpen.value = !menuOpen.value
+  if (menuOpen.value) {
+    void fetchInAppInbox()
+  }
+}
+
+/** @type {((e: Event) => void) | null} */
+let docClickClose = null
+watch(menuOpen, (o) => {
+  if (docClickClose) {
+    document.removeEventListener('click', docClickClose)
+    docClickClose = null
+  }
+  if (o) {
+    nextTick(() => {
+      docClickClose = (e) => {
+        const t = e.target
+        if (t && typeof t === 'object' && 'closest' in t) {
+          if (/** @type {Element} */(t).closest('.notif-wrap')) return
+        }
+        menuOpen.value = false
+      }
+      setTimeout(() => document.addEventListener('click', docClickClose), 0)
+    })
+  }
+})
 
 async function logoutApp() {
   try {
@@ -28,6 +81,7 @@ const headerAriaLabel = 'FedExTool — Linehaul'
 
 onMounted(() => {
   connectLiveLogStream()
+  void fetchInAppInbox()
   for (const ms of [500, 1500, 3500]) {
     setTimeout(() => {
       void refreshHealth().then(() => {
@@ -38,6 +92,10 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
+  if (docClickClose) {
+    document.removeEventListener('click', docClickClose)
+    docClickClose = null
+  }
   disconnectLiveLogStream()
 })
 </script>
@@ -57,6 +115,48 @@ onUnmounted(() => {
         </div>
 
         <div class="header-right">
+          <div v-if="route.name !== 'login'" class="notif-wrap">
+            <button
+              type="button"
+              class="header-bell tap"
+              :class="{ 'header-bell--open': menuOpen }"
+              aria-label="Notifications"
+              :aria-expanded="menuOpen"
+              @click.stop="toggleNotifMenu"
+            >
+              <span class="header-bell-ico" aria-hidden="true">&#128276;</span>
+              <span v-if="unreadCount > 0" class="header-bell-n">{{ bellBadge(unreadCount) }}</span>
+            </button>
+            <div
+              v-if="menuOpen"
+              class="notif-popover"
+              role="menu"
+              @click.stop
+            >
+              <div class="notif-pop-head">
+                <span class="notif-pop-title">Notifications</span>
+                <button
+                  v-if="unreadCount > 0"
+                  type="button"
+                  class="notif-markall tap"
+                  @click="markInAppAllRead"
+                >Mark all read</button
+                >
+              </div>
+              <ul v-if="items.length" class="notif-list" aria-label="Notification history">
+                <li
+                  v-for="it in items"
+                  :key="it.id"
+                  class="notif-li"
+                  :class="{ 'notif-li--unread': !it.read }"
+                >
+                  <p class="notif-msg">{{ it.message }}</p>
+                  <p class="notif-meta">{{ fmtNotifTime(it.ts) }}{{ it.source ? ` · ${it.source}` : '' }}</p>
+                </li>
+              </ul>
+              <p v-else class="notif-empty">No notifications yet</p>
+            </div>
+          </div>
           <button
             type="button"
             class="header-sign-out tap"
@@ -68,6 +168,26 @@ onUnmounted(() => {
         </div>
       </div>
     </header>
+
+    <Teleport to="body">
+      <div
+        v-if="route.name !== 'login' && toasts.length"
+        class="inapp-toast-host"
+        role="status"
+        aria-live="polite"
+      >
+        <button
+          v-for="t in toasts"
+          :key="t.id"
+          type="button"
+          class="inapp-toast tap"
+          @click="markInAppItemRead(t.id)"
+        >
+          <span class="inapp-toast-txt">{{ t.message }}</span>
+        </button>
+        <p class="inapp-toast-hint">Tap to dismiss</p>
+      </div>
+    </Teleport>
 
     <div class="app-body">
       <div v-if="apiOk === false" class="offline-banner">
@@ -228,9 +348,217 @@ onUnmounted(() => {
   justify-content: center;
 }
 
-/* Header Right — Sign out */
+/* Header Right — Sign out + bell */
 .header-right {
   justify-self: end;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2, 0.5rem);
+}
+
+.notif-wrap {
+  position: relative;
+}
+
+.header-bell {
+  position: relative;
+  min-width: 2.4rem;
+  min-height: 2.4rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--color-border, rgba(255, 255, 255, 0.12));
+  border-radius: var(--radius-lg, 0.75rem);
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--color-text-secondary, #a8a8b8);
+  line-height: 1;
+  cursor: pointer;
+  padding: 0;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+.header-bell:hover,
+.header-bell--open {
+  background: rgba(123, 77, 181, 0.2);
+  border-color: rgba(123, 77, 181, 0.45);
+  color: #e8e0ff;
+}
+.header-bell-ico {
+  font-size: 1.1rem;
+  line-height: 1;
+  filter: drop-shadow(0 1px 0 rgba(0, 0, 0, 0.3));
+}
+.header-bell-n {
+  position: absolute;
+  right: 0;
+  top: 0;
+  min-width: 0.9rem;
+  min-height: 0.9rem;
+  padding: 0.05rem 0.2rem;
+  font-size: 0.5rem;
+  font-weight: 800;
+  line-height: 1.1;
+  text-align: center;
+  border-radius: 9999px;
+  background: #ef4444;
+  color: #fff;
+  transform: translate(35%, -30%);
+  border: 1px solid #7f1d1d;
+}
+
+.notif-popover {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 6px);
+  width: min(20rem, calc(100vw - 2.5rem));
+  max-height: 70dvh;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 12px;
+  background: linear-gradient(165deg, #1a1a24 0%, #12121a 100%);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
+  z-index: calc(var(--z-header, 30) + 2);
+  overflow: hidden;
+}
+
+.notif-pop-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.5rem 0.65rem;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  background: rgba(0, 0, 0, 0.25);
+}
+.notif-pop-title {
+  font-size: 0.7rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #9a9ab0;
+}
+.notif-markall {
+  font-size: 0.58rem;
+  text-transform: uppercase;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  padding: 0.2rem 0.45rem;
+  border-radius: 6px;
+  border: 1px solid #3a3a48;
+  background: #1e1e25;
+  color: #a8a8b8;
+  cursor: pointer;
+}
+.notif-markall:hover {
+  color: #e0e0f0;
+  border-color: #5a5a68;
+}
+.notif-list {
+  list-style: none;
+  margin: 0;
+  padding: 0.35rem 0;
+  overflow: auto;
+  max-height: min(56dvh, 22rem);
+}
+.notif-li {
+  padding: 0.4rem 0.65rem 0.5rem;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+  cursor: default;
+}
+.notif-li--unread {
+  background: rgba(123, 77, 181, 0.12);
+}
+.notif-li:last-child {
+  border-bottom: 0;
+}
+.notif-msg {
+  margin: 0;
+  font-size: 0.8rem;
+  line-height: 1.3;
+  color: #e8e8f0;
+  text-align: left;
+  word-break: break-word;
+}
+.notif-meta {
+  margin: 0.2rem 0 0;
+  font-size: 0.6rem;
+  color: #6a6a78;
+  text-align: left;
+}
+.notif-empty {
+  margin: 0;
+  padding: 0.9rem 0.65rem;
+  font-size: 0.75rem;
+  color: #6a6a78;
+  text-align: center;
+}
+
+/* Teleported — fixed; tap-to-dismiss, no X */
+:global(.inapp-toast-host) {
+  position: fixed;
+  z-index: 2200;
+  left: 0;
+  right: 0;
+  top: calc(3.1rem + env(safe-area-inset-top, 0px));
+  max-width: var(--app-content-max, 40rem);
+  width: 100%;
+  margin-inline: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.35rem;
+  padding: 0 0.9rem;
+  pointer-events: none;
+}
+:global(.inapp-toast-hint) {
+  margin: 0;
+  font-size: 0.55rem;
+  text-align: right;
+  color: rgba(200, 200, 220, 0.45);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-weight: 600;
+  pointer-events: none;
+  padding: 0 0.1rem 0.15rem 0;
+}
+:global(.inapp-toast) {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 0.55rem 0.7rem 0.6rem;
+  border: 1px solid rgba(99, 102, 241, 0.45);
+  border-radius: 10px;
+  background: linear-gradient(135deg, #262636 0%, #1a1a28 100%);
+  color: #e4e4f0;
+  font-size: 0.78rem;
+  line-height: 1.35;
+  font-weight: 500;
+  cursor: pointer;
+  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.4);
+  pointer-events: auto;
+  animation: inapp-in 0.2s ease-out;
+}
+:global(.inapp-toast:hover) {
+  border-color: rgba(167, 139, 250, 0.6);
+  background: linear-gradient(135deg, #2e2e3e 0%, #202030 100%);
+}
+:global(.inapp-toast-txt) {
+  display: block;
+}
+@keyframes inapp-in {
+  from {
+    opacity: 0;
+    transform: translateY(-6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  :global(.inapp-toast) {
+    animation: none;
+  }
 }
 
 .header-sign-out {

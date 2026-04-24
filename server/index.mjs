@@ -106,6 +106,11 @@ import {
 import { getClientIp, isPrivateOrLocalIp } from './client-ip.mjs'
 import { readGeoFence, writeGeoFence } from './geo-fence-store.mjs'
 import {
+  readInAppInbox,
+  markInAppRead,
+  markInAppAllRead,
+} from './in-app-notifications-store.mjs'
+import {
   getGeoFenceRedirectUrl,
   pointInPolygon,
 } from './geo-fence-check.mjs'
@@ -449,12 +454,42 @@ app.get('/api/assignment', async () => {
 app.put('/api/assignment', async (req, reply) => {
   try {
     const next = await writeAssignment(req.body ?? {})
-    emitLog('assignment', 'Dispatch instructions updated', { source: 'save' })
     return next
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e)
     return reply.code(400).send({ error: msg })
   }
+})
+
+app.get('/api/notifications', async (req) => {
+  const ak = /** @type {any} */(req).credentialAccountKey
+  if (!ak) {
+    return { ok: true, items: [], unreadCount: 0 }
+  }
+  const d = await readInAppInbox(ak)
+  const list = Array.isArray(d.items) ? d.items : []
+  const unreadCount = list.filter((x) => x && !x.read).length
+  return { ok: true, items: list, unreadCount }
+})
+
+app.post('/api/notifications/read', async (req) => {
+  const ak = /** @type {any} */(req).credentialAccountKey
+  if (!ak) {
+    return reply.code(400).send({ error: 'Not signed in' })
+  }
+  const b = req.body ?? {}
+  const id = b.id
+  if (id && typeof id === 'string' && id.trim()) {
+    const next = await markInAppRead(ak, [id.trim()])
+    const list = next.items || []
+    const unreadCount = list.filter((x) => x && !x.read).length
+    return { ok: true, items: list, unreadCount }
+  }
+  if (b.all === true) {
+    const next = await markInAppAllRead(ak)
+    return { ok: true, items: next.items, unreadCount: 0 }
+  }
+  return reply.code(400).send({ error: 'Provide { id: string } or { all: true }' })
 })
 
 app.get('/api/settings/credentials', async (req) => {

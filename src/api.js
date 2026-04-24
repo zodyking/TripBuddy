@@ -169,6 +169,23 @@ export async function patchTripHistoryOutcome(p) {
   })
 }
 
+export async function getInAppNotifications() {
+  const r = await apiFetch('/api/notifications')
+  return handleJson(r)
+}
+
+/**
+ * @param {{ id?: string, all?: boolean }} body
+ */
+export async function postInAppMarkRead(body) {
+  const r = await apiFetch('/api/notifications/read', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+  return handleJson(r)
+}
+
 /**
  * Mark a FedEx daily trip leg sequence as user-completed (hide until API changes).
  * @param {string} dailyTripLegSequence

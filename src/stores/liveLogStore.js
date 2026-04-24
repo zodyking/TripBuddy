@@ -1,4 +1,5 @@
 import { ref } from 'vue'
+import { pushInAppFromStream, fetchInAppInbox } from './inAppNotificationsStore.js'
 
 const MAX_ENTRIES = 400
 /** Persist at most this many lines to localStorage (quota safety). */
@@ -168,7 +169,12 @@ export function connectLiveLogStream() {
       if (data.type === 'session') {
         notifySessionListeners(data)
       }
-      if (data.type === 'assignment') {
+      if (data.type === 'inapp' && data.id) {
+        pushInAppFromStream(/** @type {any} */(data))
+        if (data.source === 'dispatch') {
+          notifyAssignment({ ...data, type: 'assignment', source: 'save' })
+        }
+      } else if (data.type === 'assignment') {
         notifyAssignment(data)
       }
       pushLiveLog(data)

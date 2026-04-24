@@ -28,7 +28,6 @@ import {
   liveLogEntries,
   pushLiveLog,
   clearLiveLog,
-  registerAssignmentListener,
   reconnectLiveLogStream,
 } from '../stores/liveLogStore.js'
 import SettingsSection from '../components/settings/SettingsSection.vue'
@@ -270,9 +269,7 @@ function closeAutomationEditor() {
   editingAutomationId.value = null
 }
 
-const assignmentAlert = ref(null)
 let unregisterRecover = () => {}
-let unregisterAssignment = () => {}
 
 const credUser = ref('')
 const credTractor = ref('')
@@ -676,19 +673,8 @@ async function runLinehaulTest() {
   }
 }
 
-function clearAssignmentAlert() {
-  assignmentAlert.value = null
-}
-
 onMounted(() => {
   tripAlertMode.value = getTripAlertMode()
-  unregisterAssignment = registerAssignmentListener((data) => {
-    assignmentAlert.value = {
-      ts: data.ts,
-      message: data.message || 'Assignment change detected',
-      detail: data.current ?? data,
-    }
-  })
   unregisterRecover = registerApiRecover(reconnectLiveLogStream)
   loadCredentials()
   loadAssignmentState()
@@ -712,7 +698,6 @@ watch(settingsTab, (tab) => {
 })
 
 onUnmounted(() => {
-  unregisterAssignment()
   unregisterRecover()
 })
 
@@ -720,12 +705,6 @@ onUnmounted(() => {
 
 <template>
   <div class="shell">
-    <div v-if="assignmentAlert" class="alert" role="status">
-      <strong>New activity</strong>
-      <p>{{ assignmentAlert.message }}</p>
-      <button type="button" class="btn ghost tap" @click="clearAssignmentAlert">Dismiss</button>
-    </div>
-
     <div class="settings-tabs" role="tablist" aria-label="Settings sections">
       <button
         type="button"
@@ -1661,14 +1640,6 @@ onUnmounted(() => {
 .cred-msg--error {
   color: var(--color-error, #ef4444);
 }
-.alert {
-  background: var(--color-warning-muted, rgba(245, 158, 11, 0.15));
-  border: 1px solid var(--color-warning-border, rgba(245, 158, 11, 0.3));
-  padding: var(--space-4, 1rem);
-  border-radius: var(--radius-lg, 0.75rem);
-  margin-bottom: var(--space-4, 1rem);
-  animation: slide-up var(--duration-normal, 200ms) var(--ease-out);
-}
 .stack {
   display: flex;
   flex-direction: column;
@@ -2061,7 +2032,6 @@ code {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .alert,
   .btn.primary:hover {
     animation: none;
     transform: none;

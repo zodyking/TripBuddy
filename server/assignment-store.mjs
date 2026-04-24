@@ -1,5 +1,7 @@
 import { readKeyJson, writeKeyJson } from './kv-store.mjs'
-import { userScopeKey } from './scope-kv.mjs'
+import { getDataAccountKey, userScopeKey } from './scope-kv.mjs'
+import { emitLog } from './log-bus.mjs'
+import { appendInAppNotification } from './in-app-notifications-store.mjs'
 
 /**
  * @returns {string}
@@ -356,11 +358,14 @@ export async function writeAssignment(body) {
     }
   }
 
+  const instructionsTouched = 'instructions' in body
+  const nextInstructions =
+    typeof body.instructions === 'string' ? body.instructions : prev.instructions
+  const instructionsChanged =
+    instructionsTouched && String(nextInstructions ?? '') !== String(prev.instructions ?? '')
+
   const next = {
-    instructions:
-      typeof body.instructions === 'string'
-        ? body.instructions
-        : prev.instructions,
+    instructions: nextInstructions,
     driverPhone:
       typeof body.driverPhone === 'string' ? body.driverPhone : prev.driverPhone,
     preset,
@@ -375,5 +380,36 @@ export async function writeAssignment(body) {
   }
 
   await writeKeyJson(key, next)
+
+  if (instructionsChanged) {
+    const ak = getDataAccountKey()
+    if (ak) {
+      try {
+        const n = String(nextInstructions ?? '').trim()
+        const r = await appendInAppNotification(ak, {
+          type: 'assignment',
+          message: n
+            ? 'Dispatch instructions were updated'
+            : 'Dispatch instructions were cleared',
+          source: 'dispatch',
+          extra: { hint: n ? n.slice(0, 200) : '' },
+        })
+        if (r?.item) {
+          emitLog('inapp', r.item.message, {
+            id: r.item.id,
+            ntype: r.item.type,
+            source: r.item.source,
+            read: r.item.read,
+            ts: r.item.ts,
+            extra: r.item.extra,
+          })
+        }
+      } catch {
+        /* still emit legacy assignment log for refresh */
+      }
+    }
+    emitLog('assignment', 'Dispatch instructions updated', { source: 'save' })
+  }
+
   return next
 }
