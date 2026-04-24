@@ -2,6 +2,7 @@
 import { onMounted, onUnmounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { postAuthLogout } from '../api.js'
+import { resetLinehaulSession } from '../stores/linehaulSnapshotStore.js'
 import { useApiHealth } from '../composables/useApiHealth.js'
 import {
   connectLiveLogStream,
@@ -19,6 +20,7 @@ async function logoutApp() {
   } catch {
     /* still navigate */
   }
+  resetLinehaulSession()
   await router.push({ name: 'login' })
 }
 

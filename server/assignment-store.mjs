@@ -285,10 +285,17 @@ export async function writeAssignment(body) {
       tripDetails:
         e.tripDetails && typeof e.tripDetails === 'object' ? e.tripDetails : {},
     }
-    if (/^\d+$/.test(seq)) {
-      tripHistoryLedger = tripHistoryLedger.filter(
-        (x) => String(x?.dailyTripLegSequence) !== seq,
-      )
+    if (source === 'linehaul' || source === 'complete') {
+      if (/^\d+$/.test(seq)) {
+        tripHistoryLedger = tripHistoryLedger.filter(
+          (x) =>
+            String(x?.dailyTripLegSequence) !== seq && !(x && x.id && String(x.id) === id),
+        )
+      } else if (id) {
+        tripHistoryLedger = tripHistoryLedger.filter(
+          (x) => !(x && x.id && String(x.id) === id),
+        )
+      }
     }
     tripHistoryLedger = [entry, ...tripHistoryLedger].slice(0, MAX_TRIP_HISTORY)
   } else if (body.upsertTripHistoryEntry && typeof body.upsertTripHistoryEntry === 'object') {

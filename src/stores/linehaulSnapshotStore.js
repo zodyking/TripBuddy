@@ -42,6 +42,30 @@ let prevDriverAvlStat = null
 /** Avoids spamming the server: same leg sequence only one upsert per app session. */
 let lastLinehaulHistoryWriteSeq = null
 
+/** Clear in-memory trip state (call on sign-out; hidden seq comes from getAssignment on next sign-in). */
+export function resetLinehaulSession() {
+  linehaulTractorBody.value = null
+  linehaulDriverBody.value = null
+  linehaulTractorError.value = null
+  linehaulDriverError.value = null
+  linehaulTripReadyBody.value = null
+  linehaulTripReadyError.value = null
+  linehaulTripsBody.value = null
+  linehaulTripsError.value = null
+  linehaulTripsNoActive.value = false
+  lastDailyTripLegSequence.value = null
+  linehaulLastFetchAt.value = null
+  cachedTripSnapshot.value = null
+  prePlanTripSnapshot.value = null
+  hiddenDailyTripLegSequences.value = []
+  lastLinehaulHistoryWriteSeq = null
+  prevDriverAvlStat = null
+  if (persistTripDebounceTimer) {
+    clearTimeout(persistTripDebounceTimer)
+    persistTripDebounceTimer = null
+  }
+}
+
 function applyHiddenTripFilter() {
   const hidden = new Set(
     hiddenDailyTripLegSequences.value.map((s) => String(s).trim()).filter(Boolean),
@@ -345,7 +369,7 @@ async function refreshLinehaulApisImpl(attempt) {
     )
     applyHiddenTripFilter()
   } catch {
-    hiddenDailyTripLegSequences.value = []
+    /* getAssignment failed — do not clear hidden list or trip UI (stale is safer than empty). */
   }
 
   linehaulTractorError.value = null
