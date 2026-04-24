@@ -412,47 +412,6 @@ function onTripPanelDblClick(e) {
   registerTripDoubleComplete()
 }
 
-function buildTripHistoryDispatchHeader() {
-  const od = tripOriginDest.value
-  return {
-    savedAt: Date.now(),
-    source: 'complete',
-    tripStatusText: tripStatusUi.value.text,
-    tripStatusKind: tripStatusUi.value.kind,
-    origin: od.origin,
-    destination: od.destination,
-    instructions: String(mergedDispatchInstructions.value ?? '').trim(),
-  }
-}
-
-function buildTripHistoryDetailsPayload() {
-  const body = linehaulTripsBody.value
-  const trailers = tripTrailerCards.value.map((c) => ({
-    order: c.order,
-    trlrNbr: c.trlrNbr,
-    size: c.size,
-    statusLabel: c.statusLabel,
-    loadType: c.loadType,
-    summaryRows: c.summaryRows,
-  }))
-  const dolly = tripDollySection.value.show
-    ? {
-        rows: tripDollySection.value.rows.map((r) => ({
-          label: r.label,
-          value: r.value,
-        })),
-      }
-    : null
-  let tripStatus = ''
-  let tractorNumber = ''
-  if (body && typeof body === 'object' && !Array.isArray(body)) {
-    const b = /** @type {Record<string, unknown>} */ (body)
-    tripStatus = b.tripStatus != null ? String(b.tripStatus) : ''
-    tractorNumber = b.tractorNumber != null ? String(b.tractorNumber) : ''
-  }
-  return { trailers, dolly, tripStatus, tractorNumber }
-}
-
 async function confirmTripCompleted() {
   const seq = tripCompleteTargetSeq.value
   if (!seq) {
@@ -461,10 +420,7 @@ async function confirmTripCompleted() {
   }
   tripCompleteBusy.value = true
   try {
-    await markTripLegSequenceCompleted(seq, {
-      dispatchHeader: buildTripHistoryDispatchHeader(),
-      tripDetails: buildTripHistoryDetailsPayload(),
-    })
+    await markTripLegSequenceCompleted(seq)
   } finally {
     tripCompleteBusy.value = false
     tripCompleteDialog.value = false
@@ -1321,10 +1277,11 @@ onUnmounted(() => {
         @click.self="tripCompleteDialog = false"
       >
         <div class="trip-complete-card">
-          <h3 id="trip-complete-title" class="trip-complete-title">Mark trip complete?</h3>
+          <h3 id="trip-complete-title" class="trip-complete-title">Remove trip from home?</h3>
           <p class="trip-complete-body">
-            Double-tap or double-click the Dispatch or Trip Details card to open this. Completing hides
-            dispatch and trip details until FedEx returns a different trip (new daily leg sequence).
+            Double-tap or double-click the Dispatch or Trip Details card to open this. This only removes
+            the trip from the home screen. Trips you load already appear in History. FedEx can still
+            return the same leg; use again if the trip reappears.
           </p>
           <div class="trip-complete-actions">
             <button type="button" class="btn tap" @click="tripCompleteDialog = false">Cancel</button>
@@ -1334,7 +1291,7 @@ onUnmounted(() => {
               :disabled="tripCompleteBusy"
               @click="confirmTripCompleted"
             >
-              {{ tripCompleteBusy ? 'Saving…' : 'Yes, completed' }}
+              {{ tripCompleteBusy ? 'Saving…' : 'Remove from home' }}
             </button>
           </div>
         </div>

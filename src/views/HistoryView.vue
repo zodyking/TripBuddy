@@ -1,7 +1,7 @@
 <script setup>
 import { ref, computed, onMounted, watch } from 'vue'
-import { getAssignment } from '../api.js'
-import { weekGroupMeta } from '../utils/historyWeekGroup.js'
+import { getAssignment, getCredentials, patchTripHistoryOutcome } from '../api.js'
+import { workWeekGroupMeta } from '../utils/workWeekGroup.js'
 
 /**
  * @typedef {object} LedgerEntry
@@ -10,9 +10,12 @@ import { weekGroupMeta } from '../utils/historyWeekGroup.js'
  * @property {number} displayDate
  * @property {number} completedAt
  * @property {string} dailyTripLegSequence
+ * @property {string} [outcome]
  * @property {Record<string, unknown>} dispatchHeader
  * @property {Record<string, unknown>} tripDetails
  */
+
+const workWeekFromCred = ref({ workWeekStartDay: 0, workWeekEndDay: 6 })
 
 const loading = ref(true)
 const error = ref('')
@@ -22,9 +25,32 @@ const entries = ref([])
 const openId = ref('')
 const openWeekKey = ref('')
 
+const DOUBLE_CLICK_MS = 500
+
+/**
+ * @param {unknown} x
+ */
+function normalizeOutcome(x) {
+  if (x == null) return ''
+  const t = String(x).trim().toLowerCase()
+  if (t === 'delivered' || t === 'rejected' || t === 'removed' || t === 'none') return t
+  return ''
+}
+
 async function load() {
   loading.value = true
   error.value = ''
+  try {
+    const c = await getCredentials()
+    const ws = typeof c.workWeekStartDay === 'number' ? c.workWeekStartDay : 0
+    const we = typeof c.workWeekEndDay === 'number' ? c.workWeekEndDay : 6
+    workWeekFromCred.value = {
+      workWeekStartDay: Math.min(6, Math.max(0, Math.floor(ws))),
+      workWeekEndDay: Math.min(6, Math.max(0, Math.floor(we))),
+    }
+  } catch {
+    /* use defaults */
+  }
   try {
     const a = await getAssignment()
     const raw = a?.tripHistoryLedger
@@ -46,12 +72,20 @@ async function load() {
         const displayDate = comp || rec
         const seq = String(x.dailyTripLegSequence ?? '').trim()
         const legKey = /^\d+$/.test(seq) ? seq : ''
+        const oRaw = /** @type {any} */ (x)
+        const o =
+          typeof oRaw.outcome === 'string' && oRaw.outcome
+            ? normalizeOutcome(oRaw.outcome)
+            : typeof oRaw.dispatchHeader === 'object' && oRaw.dispatchHeader
+              ? normalizeOutcome(/** @type {any} */ (oRaw.dispatchHeader).historyOutcome)
+              : ''
         const e = {
           id: String(x.id ?? ''),
           source: typeof x.source === 'string' ? x.source : 'complete',
           displayDate,
           completedAt: comp,
           dailyTripLegSequence: seq,
+          outcome: o,
           dispatchHeader:
             x.dispatchHeader && typeof x.dispatchHeader === 'object'
               ? /** @type {Record<string, unknown>} */ (x.dispatchHeader)
@@ -90,17 +124,19 @@ const sorted = computed(() =>
 /** @typedef {{ key: string, groupLabel: string, sortKey: number, items: LedgerEntry[]}} WeekGroup */
 const weekGroups = computed(() => {
   const list = sorted.value
-  /** @type {Map<string, { key: string, groupLabel: string, endMs: number, items: LedgerEntry[] }>} */
+  const wwm = { ...workWeekFromCred.value }
+  /** @type {Map<string, { key: string, groupLabel: string, endMs: number, weekStart: number, items: LedgerEntry[] }>} */
   const m = new Map()
   for (const e of list) {
-    const w = weekGroupMeta(e.displayDate)
+    const w = workWeekGroupMeta(e.displayDate, wwm)
     const key = w ? w.key : 'unknown'
     const groupLabel = w
       ? w.groupLabel
       : 'No date or invalid timestamp'
     const endMs = w ? w.endMs : 0
+    const wkStart = w ? w.weekStart : 0
     if (!m.has(key)) {
-      m.set(key, { key, groupLabel, endMs, items: [] })
+      m.set(key, { key, groupLabel, endMs, weekStart: wkStart, items: [] })
     }
     m.get(key).items.push(e)
   }
@@ -108,13 +144,7 @@ const weekGroups = computed(() => {
   for (const g of arr) {
     g.items.sort((a, b) => b.displayDate - a.displayDate)
   }
-  arr.sort((a, b) => {
-    const aMax = a.items[0]?.displayDate ?? 0
-    const bMax = b.items[0]?.displayDate ?? 0
-    if (aMax !== bMax) return bMax - aMax
-    if (a.endMs !== b.endMs) return b.endMs - a.endMs
-    return b.key.localeCompare(a.key)
-  })
+  arr.sort((a, b) => b.weekStart - a.weekStart)
   return arr.map((g) => ({
     key: g.key,
     groupLabel: g.groupLabel,
@@ -162,6 +192,84 @@ function sourceLabel(src) {
   return 'Saved'
 }
 
+const outcomeLabel = (o) => {
+  const t = str(o)
+  if (t === 'delivered') return 'Delivered'
+  if (t === 'rejected') return 'Rejected'
+  if (t === 'removed') return 'Removed'
+  if (t === 'none') return 'None'
+  return ''
+}
+
+const historySavingId = ref('')
+
+async function setOutcome(legSeq, o) {
+  if (!/^\d+$/.test(legSeq)) return
+  historySavingId.value = `seq-${legSeq}`
+  try {
+    await patchTripHistoryOutcome({ dailyTripLegSequence: legSeq, outcome: o })
+    const idx = entries.value.findIndex((e) => e.dailyTripLegSequence === legSeq)
+    if (idx >= 0) {
+      const e = { ...entries.value[idx], outcome: o }
+      if (e.dispatchHeader && typeof e.dispatchHeader === 'object') {
+        e.dispatchHeader = { ...e.dispatchHeader, historyOutcome: o, historyOutcomeAt: Date.now() }
+      } else {
+        e.dispatchHeader = { historyOutcome: o, historyOutcomeAt: Date.now() }
+      }
+      entries.value[idx] = e
+    } else {
+      void load()
+    }
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : String(err)
+  } finally {
+    historySavingId.value = ''
+  }
+}
+
+let lastDblT = 0
+let lastDblSeq = ''
+
+/**
+ * @param {LedgerEntry} e
+ */
+function onRowDoubleClick(e) {
+  if (!/^\d+$/.test(e.dailyTripLegSequence)) return
+  const now = Date.now()
+  if (
+    lastDblT &&
+    now - lastDblT < DOUBLE_CLICK_MS &&
+    lastDblSeq === e.dailyTripLegSequence
+  ) {
+    lastDblT = 0
+    lastDblSeq = ''
+    void cycleOutcome(e)
+    return
+  }
+  lastDblT = now
+  lastDblSeq = e.dailyTripLegSequence
+}
+
+/**
+ * @param {LedgerEntry} e
+ */
+function cycleOutcome(e) {
+  const s = e.dailyTripLegSequence
+  if (!/^\d+$/.test(s)) return
+  const o = (e.outcome && String(e.outcome)) || 'none'
+  const next =
+    o === 'none'
+      ? 'delivered'
+      : o === 'delivered'
+        ? 'rejected'
+        : o === 'rejected'
+          ? 'removed'
+          : o === 'removed'
+            ? 'none'
+            : 'delivered'
+  void setOutcome(s, next)
+}
+
 onMounted(() => {
   void load()
 })
@@ -172,7 +280,9 @@ onMounted(() => {
     <header class="history-head">
       <h1 class="history-title">History</h1>
       <p class="history-sub">
-        Trip snapshots from the Linehaul API (updated on refresh) and entries when you mark a trip complete.
+        Trips appear here when the Linehaul API returns them. Set your work week in Settings. Double-click a
+        card row to cycle: Delivered → Rejected → Removed → None. Use the buttons for a direct choice. Use
+        Remove from home on the main screen if a trip should stay out of the dashboard.
       </p>
       <button type="button" class="history-refresh tap" :disabled="loading" @click="load">
         {{ loading ? 'Loading…' : 'Refresh' }}
@@ -181,7 +291,7 @@ onMounted(() => {
 
     <p v-if="error" class="history-err">{{ error }}</p>
     <p v-else-if="!loading && weekGroups.length === 0" class="history-empty">
-      No history yet. History fills when we receive trip data from the API, or when you mark a trip complete.
+      No history yet. Trips are saved automatically from the API after each Linehaul refresh.
     </p>
 
     <ul v-else class="history-weeks" aria-label="Trip history by week">
@@ -230,7 +340,10 @@ onMounted(() => {
             }
           "
         >
-          <summary class="history-card-summary">
+          <summary
+            class="history-card-summary"
+            @dblclick.stop.prevent="onRowDoubleClick(e)"
+          >
             <span class="history-od-lane">
               <span class="history-od-compact" :title="str(e.dispatchHeader?.origin) || '—'">
                 <span class="summary-tag">O</span>
@@ -247,11 +360,42 @@ onMounted(() => {
               :datetime="new Date(e.displayDate).toISOString()"
               >{{ formatWhen(e.displayDate) }}</time
             >
-            <span class="history-seq" v-if="e.dailyTripLegSequence"
+            <span
+              v-if="e.dailyTripLegSequence"
+              class="history-seq"
+              :title="`Double-click: cycle outcome · Leg #${e.dailyTripLegSequence} · ${sourceLabel((str(e.dispatchHeader?.source) || e.source) || '')}`"
               >Leg #{{ e.dailyTripLegSequence }} ·
               {{ sourceLabel((str(e.dispatchHeader?.source) || e.source) || '') }}</span
             >
+            <span v-if="e.outcome" class="history-outcome" :class="`history-outcome--${e.outcome}`">
+              {{ outcomeLabel(e.outcome) }}
+            </span>
           </summary>
+        <div
+          v-if="e.dailyTripLegSequence"
+          class="history-outcome-row"
+          @click.stop
+        >
+          <div class="history-outcome-btns">
+            <button
+              v-for="opt in [
+                { k: 'delivered', t: 'Delivered' },
+                { k: 'rejected', t: 'Rejected' },
+                { k: 'removed', t: 'Removed' },
+                { k: 'none', t: 'Clear' },
+              ]"
+              :key="opt.k"
+              type="button"
+              class="history-o-btn tap"
+              :class="{ 'history-o-btn--active': (e.outcome || 'none') === opt.k }"
+              :disabled="historySavingId === `seq-${e.dailyTripLegSequence}`"
+              @click="setOutcome(e.dailyTripLegSequence, opt.k)"
+            >
+              {{ opt.t }}
+            </button>
+          </div>
+          <p class="history-dbl-hint">Double-click the card header to cycle: Delivered → Rejected → Removed → Clear</p>
+        </div>
         <div class="history-dispatch">
           <p v-if="str(e.dispatchHeader?.tripStatusText)" class="history-meta">
             Status: {{ str(e.dispatchHeader.tripStatusText) }}
@@ -567,6 +711,91 @@ onMounted(() => {
   font-size: 0.65rem;
   color: var(--color-text-tertiary, #6e6e7e);
   line-height: 1.3;
+}
+
+.history-outcome {
+  align-self: flex-end;
+  font-size: 0.58rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 0.1rem 0.35rem;
+  border-radius: 4px;
+  border: 1px solid #3f3f4c;
+  background: rgba(255, 255, 255, 0.04);
+  color: #a8a8b8;
+}
+
+.history-outcome--delivered {
+  border-color: #166534;
+  color: #86efac;
+  background: rgba(22, 101, 52, 0.25);
+}
+
+.history-outcome--rejected {
+  border-color: #991b1b;
+  color: #fecaca;
+  background: rgba(127, 29, 29, 0.35);
+}
+
+.history-outcome--removed {
+  border-color: #52525b;
+  color: #d4d4d8;
+  background: rgba(63, 63, 70, 0.4);
+}
+
+.history-outcome--none {
+  display: none;
+}
+
+.history-outcome-row {
+  padding: 0.4rem 0.75rem 0.5rem;
+  background: #1a1a22;
+  border-bottom: 1px solid #2e2e36;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.history-dbl-hint {
+  margin: 0;
+  font-size: 0.6rem;
+  line-height: 1.3;
+  color: #5c5c6a;
+}
+
+.history-outcome-btns {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem 0.35rem;
+  align-items: center;
+}
+
+.history-o-btn {
+  font-size: 0.6rem;
+  font-weight: 600;
+  padding: 0.25rem 0.4rem;
+  border-radius: 5px;
+  border: 1px solid #3a3a46;
+  background: #1f1f28;
+  color: #b4b4c0;
+  cursor: pointer;
+}
+
+.history-o-btn:hover {
+  background: #25252e;
+  border-color: #4a4a58;
+}
+
+.history-o-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.history-o-btn--active {
+  border-color: #7b4db5;
+  color: #e4d4ff;
+  background: rgba(123, 77, 181, 0.2);
 }
 
 .history-dispatch {

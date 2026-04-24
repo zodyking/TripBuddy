@@ -131,30 +131,11 @@ function applyHiddenTripFilter() {
  * @param {string} dailyTripLegSequence
  * @param {{ dispatchHeader?: Record<string, unknown>, tripDetails?: Record<string, unknown> } | null} [history]
  */
-export async function markTripLegSequenceCompleted(dailyTripLegSequence, history = null) {
+export async function markTripLegSequenceCompleted(dailyTripLegSequence) {
   const seq = String(dailyTripLegSequence ?? '').trim()
   if (!/^\d+$/.test(seq)) return
-  /** @type {Record<string, unknown>} */
+  /** Trip is already in history from the Linehaul poller; this only hides the leg on Home. */
   const body = { appendHiddenDailyTripLegSequence: seq }
-  if (
-    history &&
-    typeof history.dispatchHeader === 'object' &&
-    history.dispatchHeader != null &&
-    typeof history.tripDetails === 'object' &&
-    history.tripDetails != null
-  ) {
-    body.appendTripHistoryEntry = {
-      id: `trip-${seq}-${Date.now()}`,
-      source: 'complete',
-      completedAt: Date.now(),
-      dailyTripLegSequence: seq,
-      dispatchHeader: {
-        ...history.dispatchHeader,
-        source: 'complete',
-      },
-      tripDetails: history.tripDetails,
-    }
-  }
   const a = await putAssignment(body)
   hiddenDailyTripLegSequences.value = Array.isArray(a.hiddenDailyTripLegSequences)
     ? a.hiddenDailyTripLegSequences.map(String)

@@ -157,6 +157,19 @@ export async function putAssignment(body) {
 }
 
 /**
+ * @param {{ dailyTripLegSequence: string, outcome: 'delivered' | 'rejected' | 'removed' | 'none' }} p
+ */
+export async function patchTripHistoryOutcome(p) {
+  return putAssignment({
+    patchTripHistoryEntry: {
+      dailyTripLegSequence: String(p.dailyTripLegSequence),
+      outcome: p.outcome,
+      touchedAt: Date.now(),
+    },
+  })
+}
+
+/**
  * Mark a FedEx daily trip leg sequence as user-completed (hide until API changes).
  * @param {string} dailyTripLegSequence
  */

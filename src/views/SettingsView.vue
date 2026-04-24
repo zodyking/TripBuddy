@@ -276,8 +276,20 @@ let unregisterAssignment = () => {}
 
 const credUser = ref('')
 const credTractor = ref('')
+/** 0=Sun..6=Sat; History groups by your rolling 7-day work week starting on this day */
+const workWeekStartDay = ref(0)
+const workWeekEndDay = ref(6)
 const credLinehaulToken = ref('')
 const credPollMinutes = ref(0)
+const weekDayOptions = [
+  { v: 0, label: 'Sunday' },
+  { v: 1, label: 'Monday' },
+  { v: 2, label: 'Tuesday' },
+  { v: 3, label: 'Wednesday' },
+  { v: 4, label: 'Thursday' },
+  { v: 5, label: 'Friday' },
+  { v: 6, label: 'Saturday' },
+]
 /** Linehaul home refresh slider: 0 = manual only, max 60 min (1 min steps). */
 const LINEHAUL_POLL_MAX = 60
 const linehaulPollTickValues = Array.from(
@@ -383,6 +395,16 @@ async function loadCredentials() {
         Math.min(LINEHAUL_POLL_MAX, Math.floor(raw)),
       )
     }
+    {
+      const ws =
+        typeof credMeta.value.workWeekStartDay === 'number' ? credMeta.value.workWeekStartDay : 0
+      workWeekStartDay.value = Math.min(6, Math.max(0, Math.floor(ws)))
+    }
+    {
+      const we =
+        typeof credMeta.value.workWeekEndDay === 'number' ? credMeta.value.workWeekEndDay : 6
+      workWeekEndDay.value = Math.min(6, Math.max(0, Math.floor(we)))
+    }
     credLinehaulToken.value =
       typeof credMeta.value.fedexLinehaulBearer === 'string'
         ? credMeta.value.fedexLinehaulBearer
@@ -403,6 +425,8 @@ async function saveCredentials() {
       username: credUser.value,
       password: credPass.value || undefined,
       tractorNumber: credTractor.value,
+      workWeekStartDay: workWeekStartDay.value,
+      workWeekEndDay: workWeekEndDay.value,
       linehaulPollMinutes: Math.max(
         0,
         Math.min(LINEHAUL_POLL_MAX, Math.floor(Number(credPollMinutes.value) || 0)),
@@ -768,6 +792,33 @@ onUnmounted(() => {
           maxlength="6"
           @input="onCredTractorInput"
         />
+        <p class="cred-hint">History groups trips by a rolling 7-day “work week” that starts on the first day you pick below. End day is used in the group label only.</p>
+        <div class="work-week-row">
+          <div>
+            <label class="lbl" for="work-week-start">Work week starts</label>
+            <select
+              id="work-week-start"
+              v-model.number="workWeekStartDay"
+              class="inp tap"
+            >
+              <option v-for="o in weekDayOptions" :key="`ws-${o.v}`" :value="o.v">
+                {{ o.label }}
+              </option>
+            </select>
+          </div>
+          <div>
+            <label class="lbl" for="work-week-end">Work week ends (label)</label>
+            <select
+              id="work-week-end"
+              v-model.number="workWeekEndDay"
+              class="inp tap"
+            >
+              <option v-for="o in weekDayOptions" :key="`we-${o.v}`" :value="o.v">
+                {{ o.label }}
+              </option>
+            </select>
+          </div>
+        </div>
         <label class="lbl">Phone number</label>
         <input
           :value="phoneDisplay"
@@ -1241,6 +1292,24 @@ onUnmounted(() => {
 </template>
 
 <style scoped>
+.cred-hint {
+  font-size: var(--text-xs, 0.6875rem);
+  line-height: 1.4;
+  color: var(--color-text-tertiary, #6e6e7e);
+  margin: 0 0 0.5rem;
+  max-width: 36rem;
+}
+.work-week-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-3, 0.75rem);
+  margin-bottom: var(--space-3, 0.75rem);
+}
+@media (max-width: 500px) {
+  .work-week-row {
+    grid-template-columns: 1fr;
+  }
+}
 .shell {
   min-height: 100vh;
   min-height: 100dvh;

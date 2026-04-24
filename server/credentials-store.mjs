@@ -8,6 +8,9 @@ import { getDataAccountKey, keyForUser } from './scope-kv.mjs'
 const ALGO = 'aes-256-gcm'
 const SCRYPT_SALT = 'fedextool-cred-v1'
 
+/** 0=Sun .. 6=Sat for work-week boundaries in History */
+const DOW = new Set([0, 1, 2, 3, 4, 5, 6])
+
 export { getLastActiveAccountKey, setLastActiveAccountKey }
 
 export { accountKeyForUsername }
@@ -88,6 +91,12 @@ function parseCredData(data) {
   ) {
     pollM = Math.max(0, Math.min(24 * 60, Math.floor(data.linehaulPollMinutes)))
   }
+  const rawStart = data.workWeekStartDay
+  const rawEnd = data.workWeekEndDay
+  const workWeekStartDay =
+    typeof rawStart === 'number' && DOW.has(Math.floor(rawStart)) ? Math.floor(rawStart) : 0
+  const workWeekEndDay =
+    typeof rawEnd === 'number' && DOW.has(Math.floor(rawEnd)) ? Math.floor(rawEnd) : 6
   return {
     username: data.username ?? null,
     passwordEnc: data.passwordEnc ?? null,
@@ -98,6 +107,8 @@ function parseCredData(data) {
     linehaulBearerEnc: data.linehaulBearerEnc ?? null,
     driverName: typeof data.driverName === 'string' ? data.driverName : null,
     linehaulPollMinutes: pollM,
+    workWeekStartDay,
+    workWeekEndDay,
   }
 }
 
@@ -117,6 +128,8 @@ async function readFileRawForAccount(accountKey) {
     linehaulBearerEnc: null,
     driverName: null,
     linehaulPollMinutes: null,
+    workWeekStartDay: 0,
+    workWeekEndDay: 6,
   }
 }
 
@@ -168,6 +181,8 @@ export async function getCredentialsMeta() {
     linehaulBearerEnc,
     driverName,
     linehaulPollMinutes,
+    workWeekStartDay,
+    workWeekEndDay,
   } = await readFileRaw()
   const tn = tractorNumber?.trim() || null
   const en = employeeNumber?.trim() || null
@@ -175,6 +190,14 @@ export async function getCredentialsMeta() {
     typeof linehaulPollMinutes === 'number' ? linehaulPollMinutes : 0
   const acc = resolveAccountKey()
   const verified = acc ? (await readUserMeta(acc)).appLoginVerified : false
+  const wws =
+    typeof workWeekStartDay === 'number' && DOW.has(Math.floor(workWeekStartDay))
+      ? Math.floor(workWeekStartDay)
+      : 0
+  const wwe =
+    typeof workWeekEndDay === 'number' && DOW.has(Math.floor(workWeekEndDay))
+      ? Math.floor(workWeekEndDay)
+      : 6
   return {
     username: username || null,
     hasPassword: Boolean(passwordEnc?.data && passwordEnc?.iv && passwordEnc?.tag),
@@ -189,6 +212,8 @@ export async function getCredentialsMeta() {
     ),
     driverName: driverName || null,
     linehaulPollMinutes: poll,
+    workWeekStartDay: wws,
+    workWeekEndDay: wwe,
     appLoginVerified: verified,
   }
 }
@@ -263,6 +288,8 @@ export async function getDriverName() {
  *   driverName?: string,
  *   clearDriverName?: boolean,
  *   linehaulPollMinutes?: number,
+ *   workWeekStartDay?: number,
+ *   workWeekEndDay?: number,
  * }} body password optional = keep; linehaulPollMinutes 0–1440 (0 = no auto refresh)
  */
 export async function saveCredentials(body) {
@@ -324,6 +351,23 @@ export async function saveCredentials(body) {
     )
   }
 
+  let workWeekStartDay = prev.workWeekStartDay ?? 0
+  let workWeekEndDay = prev.workWeekEndDay ?? 6
+  if (
+    typeof body.workWeekStartDay === 'number' &&
+    !Number.isNaN(body.workWeekStartDay) &&
+    DOW.has(Math.floor(body.workWeekStartDay))
+  ) {
+    workWeekStartDay = Math.floor(body.workWeekStartDay)
+  }
+  if (
+    typeof body.workWeekEndDay === 'number' &&
+    !Number.isNaN(body.workWeekEndDay) &&
+    DOW.has(Math.floor(body.workWeekEndDay))
+  ) {
+    workWeekEndDay = Math.floor(body.workWeekEndDay)
+  }
+
   const next = {
     username: username || null,
     passwordEnc,
@@ -332,6 +376,8 @@ export async function saveCredentials(body) {
     linehaulBearerEnc,
     driverName,
     linehaulPollMinutes,
+    workWeekStartDay,
+    workWeekEndDay,
   }
   await writeKeyJson(credsKey(acc), next)
   return getCredentialsMeta()
@@ -350,6 +396,8 @@ export async function clearCredentials() {
     linehaulBearerEnc: null,
     driverName: null,
     linehaulPollMinutes: null,
+    workWeekStartDay: 0,
+    workWeekEndDay: 6,
   }
   await writeKeyJson(credsKey(acc), empty)
 }

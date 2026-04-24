@@ -48,6 +48,8 @@ export const PRESETS = {
 /** Max ledger entries per user (newest first). */
 const MAX_TRIP_HISTORY = 150
 
+const TRIP_OUTCOMES = new Set(['delivered', 'rejected', 'removed', 'none'])
+
 const DEFAULT_ASSIGNMENT = {
   instructions: '',
   driverPhone: '',
@@ -328,6 +330,29 @@ export async function writeAssignment(body) {
         (x) => x && String(x.dailyTripLegSequence) !== seq && x.id !== id,
       )
       tripHistoryLedger = [nextEntry, ...rest].slice(0, MAX_TRIP_HISTORY)
+    }
+  } else if (body.patchTripHistoryEntry && typeof body.patchTripHistoryEntry === 'object') {
+    const p = body.patchTripHistoryEntry
+    const seq = String(p.dailyTripLegSequence ?? '').trim()
+    const out =
+      typeof p.outcome === 'string' && TRIP_OUTCOMES.has(p.outcome.trim().toLowerCase())
+        ? p.outcome.trim().toLowerCase()
+        : 'none'
+    if (/^\d+$/.test(seq)) {
+      const at =
+        typeof p.touchedAt === 'number' && Number.isFinite(p.touchedAt)
+          ? p.touchedAt
+          : Date.now()
+      tripHistoryLedger = tripHistoryLedger
+        .map((x) => {
+          if (!x || String(x.dailyTripLegSequence) !== seq) return x
+          const o = { ...x, outcome: out, outcomeTouchedAt: at }
+          if (o.dispatchHeader && typeof o.dispatchHeader === 'object') {
+            o.dispatchHeader = { ...o.dispatchHeader, historyOutcome: out, historyOutcomeAt: at }
+          }
+          return o
+        })
+        .slice(0, MAX_TRIP_HISTORY)
     }
   }
 
