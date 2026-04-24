@@ -39,6 +39,9 @@ export const hiddenDailyTripLegSequences = ref(/** @type {string[]} */ ([]))
 /** Previous driver availability status to detect ENRT→ACT transition. */
 let prevDriverAvlStat = null
 
+/** Avoids spamming the server: same leg sequence only one upsert per app session. */
+let lastLinehaulHistoryWriteSeq = null
+
 function applyHiddenTripFilter() {
   const hidden = new Set(
     hiddenDailyTripLegSequences.value.map((s) => String(s).trim()).filter(Boolean),
@@ -111,9 +114,16 @@ function hydrateTripSnapshotsFromAssignment(assign) {
   if (!assign || typeof assign !== 'object') return
   const merged = assign.persistedLinehaulTripSnapshot
   if (merged != null && typeof merged === 'object' && !Array.isArray(merged)) {
-    linehaulTripsBody.value = /** @type {Record<string, unknown>} */ (merged)
-    linehaulTripsNoActive.value = false
-    linehaulTripsError.value = null
+    const pSeq = tripBodyDailySeq(merged)
+    const curSeq = tripBodyDailySeq(linehaulTripsBody.value)
+    const canApply =
+      linehaulTripsBody.value == null ||
+      (Boolean(pSeq) && Boolean(curSeq) && pSeq === curSeq)
+    if (canApply) {
+      linehaulTripsBody.value = /** @type {Record<string, unknown>} */ (merged)
+      linehaulTripsNoActive.value = false
+      linehaulTripsError.value = null
+    }
   }
   const pre = assign.persistedPrePlanTripSnapshot
   if (pre != null && typeof pre === 'object' && !Array.isArray(pre)) {
@@ -499,7 +509,9 @@ async function refreshLinehaulApisImpl(attempt) {
       ? /** @type {Record<string, unknown>} */ (cachedTripSnapshot.value)
       : null
 
-  const merged = deepMergeNonEmpty(cached, aprvdBody, dspchBody)
+  // Aprvd list response is canonical for leg ID + O/D; merge cached/dspch first so
+  // APVRD (last) wins for route/destination fields (avoids stuck labels from an old cache).
+  const merged = deepMergeNonEmpty(cached, dspchBody, aprvdBody)
 
   if (merged != null) {
     linehaulTripsBody.value = merged
@@ -540,28 +552,37 @@ async function refreshLinehaulApisImpl(attempt) {
   if (linehaulTripsBody.value && typeof linehaulTripsBody.value === 'object') {
     const seqU = tripBodyDailySeq(linehaulTripsBody.value)
     if (seqU) {
-      const fromAssign = String(assignmentInstructions ?? '').trim()
-      const fromApi = extractTripDispatchInstructions(linehaulTripsBody.value)
-      const mergedInstr =
-        fromAssign && fromApi
-          ? `${fromAssign}\n\n${fromApi}`
-          : fromAssign || fromApi
-      const snapBody = linehaulTripsBody.value
-      void putAssignment({
-        upsertTripHistoryEntry: {
-          id: `h-${seqU}`,
-          source: 'linehaul',
-          dailyTripLegSequence: seqU,
-          recordedAt: Date.now(),
-          dispatchHeader: buildHistoryDispatchHeaderFromBody(snapBody, {
+      if (seqU === lastLinehaulHistoryWriteSeq) {
+        // Poll tick already wrote this leg to history; skip duplicate PUTs.
+      } else {
+        lastLinehaulHistoryWriteSeq = seqU
+        const fromAssign = String(assignmentInstructions ?? '').trim()
+        const fromApi = extractTripDispatchInstructions(linehaulTripsBody.value)
+        const mergedInstr =
+          fromAssign && fromApi
+            ? `${fromAssign}\n\n${fromApi}`
+            : fromAssign || fromApi
+        const snapBody = linehaulTripsBody.value
+        void putAssignment({
+          upsertTripHistoryEntry: {
+            id: `h-${seqU}`,
             source: 'linehaul',
-            instructions: mergedInstr,
-            instructionsFinal: true,
-          }),
-          tripDetails: buildHistoryTripDetailsFromBody(snapBody),
-        },
-      }).catch(() => {})
+            dailyTripLegSequence: seqU,
+            recordedAt: Date.now(),
+            dispatchHeader: buildHistoryDispatchHeaderFromBody(snapBody, {
+              source: 'linehaul',
+              instructions: mergedInstr,
+              instructionsFinal: true,
+            }),
+            tripDetails: buildHistoryTripDetailsFromBody(snapBody),
+          },
+        }).catch(() => {
+          lastLinehaulHistoryWriteSeq = null
+        })
+      }
     }
+  } else {
+    lastLinehaulHistoryWriteSeq = null
   }
 
   const authFailed =

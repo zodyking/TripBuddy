@@ -20,6 +20,9 @@ function humanizeKey(key) {
 }
 
 /**
+ * Route labels for the dispatch card. FedEx trip payloads use current stop + trip
+ * destination; `originLocation` may equal current stop number — prefer current
+ * location for “where I am / start” and tripDest* for “where this leg is going.”
  * @param {unknown} body trips `body` object
  * @returns {{ origin: string, destination: string }}
  */
@@ -28,16 +31,18 @@ export function extractOriginDest(body) {
     return { origin: '—', destination: '—' }
   }
   const o = /** @type {Record<string, unknown>} */ (body)
-  const originNum = o.originLocation ?? o.currentLocationNumber
-  const originName = o.currentLocationName || o.currentLocationAbbrv || ''
-  const destNum = o.tripDestNumber
-  const destName = o.tripDest || o.tripDestAbbrv || ''
+  // Current position / origin side (tractor at this location)
+  const oNum = o.currentLocationNumber ?? o.originLocation
+  const oName = o.currentLocationName || o.currentLocationAbbrv || ''
+  // Trip destination (next terminal / end of leg in payload)
+  const dNum = o.tripDestNumber
+  const dName = o.tripDest || o.tripDestAbbrv || ''
 
-  let origin = originNum != null ? String(originNum) : '—'
-  if (originName) origin = `${origin} · ${originName}`
+  let origin = oNum != null && String(oNum).trim() !== '' ? String(oNum) : '—'
+  if (oName) origin = `${origin} · ${oName}`
 
-  let destination = destNum != null ? String(destNum) : '—'
-  if (destName) destination = `${destination} · ${destName}`
+  let destination = dNum != null && String(dNum).trim() !== '' ? String(dNum) : '—'
+  if (dName) destination = `${destination} · ${dName}`
 
   return { origin, destination }
 }

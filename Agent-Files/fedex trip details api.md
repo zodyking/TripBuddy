@@ -86,8 +86,9 @@ messageid: rrt-1405794849766731036-d-gea1-3210260-40293148-6
 
 Typical top-level fields used in the app:
 
-- **Origin / current stop:** `originLocation`, `currentLocationNumber`, `currentLocationName`, `currentLocationAbbrv`
-- **Destination:** `tripDestNumber`, `tripDest`, `tripDestAbbrv`, `tripDest` (name)
+- **Where you are (dispatch “origin”):** prefer `currentLocationNumber` + `currentLocationName` (or abbrv). `originLocation` often duplicates the number field — do not use it as the “destination” side of the leg.
+- **End of this leg (dispatch “destination”):** `tripDestNumber`, `tripDest`, `tripDestAbbrv`
+- **Other:** `currentLocationName`, `currentLocationAbbrv` (current stop label), `tripDest` (name)
 - **Trip meta:** `tripStatus`, `tripConfig`, `dailyTripLegSequence`, `tractorDomicileId`, `tractorDomicileAbbrv`, `tractorNumber`, `driver1Id`, `driver2Id`
 - **Dolly (optional):** `dollyNumber1`, `dollyNumber2`, `dollyEquipmentSequence1`, `dollyEquipmentSequence2`
 - **Trailers:** `trailers` — array of objects with e.g. `trlrOrder`, `emptyFlag`, `pkgWeight`, `sealNumber`, `trlrNbr`, `loadNumber`, `dailyTripLegConfigSeq`, etc.

@@ -285,6 +285,11 @@ export async function writeAssignment(body) {
       tripDetails:
         e.tripDetails && typeof e.tripDetails === 'object' ? e.tripDetails : {},
     }
+    if (/^\d+$/.test(seq)) {
+      tripHistoryLedger = tripHistoryLedger.filter(
+        (x) => String(x?.dailyTripLegSequence) !== seq,
+      )
+    }
     tripHistoryLedger = [entry, ...tripHistoryLedger].slice(0, MAX_TRIP_HISTORY)
   } else if (body.upsertTripHistoryEntry && typeof body.upsertTripHistoryEntry === 'object') {
     const e = body.upsertTripHistoryEntry

@@ -28,37 +28,53 @@ async function load() {
   try {
     const a = await getAssignment()
     const raw = a?.tripHistoryLedger
-    entries.value = Array.isArray(raw)
-      ? raw
-          .filter((x) => x && typeof x === 'object')
-          .map((x) => {
-            const comp =
-              typeof x.completedAt === 'number' && Number.isFinite(x.completedAt)
-                ? x.completedAt
-                : 0
-            const rec =
-              typeof x.recordedAt === 'number' && Number.isFinite(x.recordedAt)
-                ? x.recordedAt
-                : 0
-            const displayDate = comp || rec
-            return {
-            id: String(x.id ?? ''),
-            source: typeof x.source === 'string' ? x.source : 'complete',
-            displayDate,
-            completedAt: comp,
-            dailyTripLegSequence: String(x.dailyTripLegSequence ?? ''),
-            dispatchHeader:
-              x.dispatchHeader && typeof x.dispatchHeader === 'object'
-                ? /** @type {Record<string, unknown>} */ (x.dispatchHeader)
-                : {},
-            tripDetails:
-              x.tripDetails && typeof x.tripDetails === 'object'
-                ? /** @type {Record<string, unknown>} */ (x.tripDetails)
-                : {},
-          }
-          })
-          .filter((e) => e.id)
-      : []
+    if (!Array.isArray(raw)) {
+      entries.value = []
+    } else {
+      /** @type {Map<string, LedgerEntry>} */
+      const byLeg = new Map()
+      for (const x of raw) {
+        if (!x || typeof x !== 'object') continue
+        const comp =
+          typeof x.completedAt === 'number' && Number.isFinite(x.completedAt)
+            ? x.completedAt
+            : 0
+        const rec =
+          typeof x.recordedAt === 'number' && Number.isFinite(x.recordedAt)
+            ? x.recordedAt
+            : 0
+        const displayDate = comp || rec
+        const seq = String(x.dailyTripLegSequence ?? '').trim()
+        const legKey = /^\d+$/.test(seq) ? seq : ''
+        const e = {
+          id: String(x.id ?? ''),
+          source: typeof x.source === 'string' ? x.source : 'complete',
+          displayDate,
+          completedAt: comp,
+          dailyTripLegSequence: seq,
+          dispatchHeader:
+            x.dispatchHeader && typeof x.dispatchHeader === 'object'
+              ? /** @type {Record<string, unknown>} */ (x.dispatchHeader)
+              : {},
+          tripDetails:
+            x.tripDetails && typeof x.tripDetails === 'object'
+              ? /** @type {Record<string, unknown>} */ (x.tripDetails)
+              : {},
+        }
+        if (!e.id) continue
+        if (!legKey) {
+          byLeg.set(e.id, e)
+          continue
+        }
+        const cur = byLeg.get(legKey)
+        if (!cur || (e.displayDate || 0) > (cur.displayDate || 0)) {
+          byLeg.set(legKey, e)
+        }
+      }
+      entries.value = /** @type {LedgerEntry[]} */ (
+        Array.from(byLeg.values()).filter((e) => e && e.id)
+      )
+    }
   } catch (e) {
     error.value = e instanceof Error ? e.message : String(e)
     entries.value = []
