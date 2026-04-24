@@ -1,4 +1,12 @@
 const DAY = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
+const DOW3 = ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa']
+
+/**
+ * @param {number} d 0-6
+ */
+function dayShort(d) {
+  return DOW3[d] || ''
+}
 
 /**
  * @param {number} n
@@ -61,4 +69,46 @@ export function workWeekGroupMeta(
   const groupLabel = `Work week (${dowL}) — ${fmt(wStart)} – ${fmt(wEnd)}`
 
   return { key, endMs, groupLabel, weekStart: wStart.getTime() }
+}
+
+/**
+ * @param {number} tsMs
+ * @param {{ workWeekStartDay: number, workWeekEndDay: number }} [opts]
+ */
+export function workWeekKeyForDate(tsMs, opts = { workWeekStartDay: 0, workWeekEndDay: 6 }) {
+  const w = workWeekGroupMeta(tsMs, opts)
+  if (!w) return null
+  const wStart = new Date(w.weekStart)
+  const wEnd = new Date(w.weekStart + 7 * 24 * 60 * 60 * 1000 - 1)
+  return { key: w.key, weekStartMs: w.weekStart, weekEndMs: wEnd.getTime(), groupLabel: w.groupLabel }
+}
+
+/**
+ * Local YYYY-MM-DD
+ * @param {number} ts
+ */
+export function localDateKey(ts) {
+  const d = new Date(ts)
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+
+/**
+ * Day strip: Mon–Sun labels around a week
+ * @param {number} weekStartMs
+ */
+export function dayStripForWeek(weekStartMs) {
+  const a = new Date(weekStartMs)
+  a.setHours(0, 0, 0, 0)
+  const out = []
+  for (let i = 0; i < 7; i += 1) {
+    const d = new Date(a.getTime() + i * 24 * 60 * 60 * 1000)
+    out.push({
+      key: localDateKey(d.getTime()),
+      label: d.getDate().toString(),
+      dowLabel: dayShort(d.getDay()),
+      dow: d.getDay(),
+      d,
+    })
+  }
+  return out
 }

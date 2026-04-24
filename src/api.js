@@ -169,6 +169,45 @@ export async function patchTripHistoryOutcome(p) {
   })
 }
 
+/** @param {string} legSeq */
+export async function getDollyRegistry() {
+  const r = await apiFetch('/api/dolly')
+  return handleJson(r)
+}
+
+/**
+ * @param {string} [legSeq]
+ * @param {unknown} trip
+ */
+export async function syncDollyFromLinehaul(legSeq, trip) {
+  const r = await apiFetch('/api/dolly/sync', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ legSeq: legSeq || '', trip: trip ?? null }),
+  })
+  return handleJson(r)
+}
+
+/** @param {{ dollyNbr: string, legSeq?: string }} p */
+export async function putDollyNumber(p) {
+  const r = await apiFetch('/api/dolly', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(p),
+  })
+  return handleJson(r)
+}
+
+/** @param {{ dollyNbr: string, rating: 'none' | 'good' | 'bad' }} p */
+export async function patchDollyRating(p) {
+  const r = await apiFetch('/api/dolly', {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(p),
+  })
+  return handleJson(r)
+}
+
 /**
  * Mark a FedEx daily trip leg sequence as user-completed (hide until API changes).
  * @param {string} dailyTripLegSequence

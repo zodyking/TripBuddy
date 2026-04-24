@@ -222,4 +222,19 @@ export async function runDataMigrationOnStartup() {
   if (cStore && typeof cStore === 'object' && singleAccountHint) {
     await ensureKey(keyForUser(singleAccountHint, 'checkin:flow'), cStore)
   }
+  for (const d of userDirs) {
+    const accountKey = d.name
+    const oldDolly = await pgGetJson(`dolly:registry:${accountKey}`)
+    if (oldDolly && typeof oldDolly === 'object') {
+      try {
+        await ensureKey(
+          // scope-kv: u:<accountKey>:dolly:registry
+          `u:${accountKey}:dolly:registry`,
+          oldDolly,
+        )
+      } catch {
+        /* */
+      }
+    }
+  }
 }

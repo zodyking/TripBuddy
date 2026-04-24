@@ -8,6 +8,7 @@ import {
   getAssignment,
   putAssignment,
   postLinehaulCaptureBearer,
+  syncDollyFromLinehaul,
 } from '../api.js'
 import { pushLiveLog } from './liveLogStore.js'
 import {
@@ -623,6 +624,11 @@ async function refreshLinehaulApisImpl(attempt) {
     }
   } else {
     lastLinehaulHistoryWriteSeq = null
+  }
+
+  if (linehaulTripsBody.value && typeof linehaulTripsBody.value === 'object') {
+    const s = tripBodyDailySeq(linehaulTripsBody.value)
+    void syncDollyFromLinehaul(s || '', linehaulTripsBody.value).catch(() => {})
   }
 
   const authFailed =
