@@ -22,6 +22,9 @@ import {
   postCancelRetry,
   fetchFedexLinehaulLocation,
   saveLocationToDirectory,
+  getDollyRegistry,
+  putDollyNumber,
+  patchDollyRating,
 } from '../api.js'
 import {
   linehaulTractorBody,
@@ -270,6 +273,81 @@ const tripDollySection = computed(() =>
 )
 
 const copyToast = ref('')
+
+const dollyReg = ref(/** @type {null | { lastPrimaryNbr: string | null, items: Record<string, { rating?: string, nbr?: string }> }} */ (null))
+const dollyAddOpen = ref(false)
+const dollyAddDigits = ref('')
+const dollyPutBusy = ref(false)
+
+function dollySix(raw) {
+  if (raw == null) return ''
+  const t = String(raw).replace(/\D/g, '').slice(0, 6)
+  return t.length === 6 ? t : ''
+}
+
+const primaryDollyOnTrip = computed(() => {
+  const b = linehaulTripsBody.value
+  if (!b || typeof b !== 'object' || Array.isArray(b)) return ''
+  const o = /** @type {Record<string, unknown>} */ (b)
+  return dollySix(o.dollyNumber1) || dollySix(o.dollyNumber2) || ''
+})
+
+const dollyPrimaryDisplay = computed(() => primaryDollyOnTrip.value || dollyReg.value?.lastPrimaryNbr || '')
+
+const dollyRating = computed(() => {
+  const n = dollyPrimaryDisplay.value
+  if (!n || !dollyReg.value?.items?.[n]) return 'none'
+  const r = dollyReg.value.items[n].rating
+  if (r === 'good' || r === 'bad' || r === 'none') return r
+  return 'none'
+})
+
+async function loadDollyRegistry() {
+  try {
+    dollyReg.value = await getDollyRegistry()
+  } catch {
+    dollyReg.value = null
+  }
+}
+
+function onDollyAddInput(e) {
+  const t = e?.target
+  dollyAddDigits.value =
+    t && 'value' in t
+      ? String(/** @type {HTMLInputElement} */ (t).value)
+          .replace(/\D/g, '')
+          .slice(0, 6)
+      : ''
+}
+
+async function onAddDollySubmit() {
+  const n = dollySix(dollyAddDigits.value)
+  if (!n) return
+  dollyPutBusy.value = true
+  try {
+    dollyReg.value = await putDollyNumber({
+      dollyNbr: n,
+      legSeq: String(currentTripLegSeq.value || ''),
+    })
+    dollyAddOpen.value = false
+    dollyAddDigits.value = ''
+    void copyTripDetailValue(n, 'Dolly number')
+  } catch {
+    /* */
+  } finally {
+    dollyPutBusy.value = false
+  }
+}
+
+async function setDollyRate(r) {
+  const n = dollyPrimaryDisplay.value
+  if (!n) return
+  try {
+    dollyReg.value = await patchDollyRating({ dollyNbr: n, rating: r })
+  } catch {
+    /* */
+  }
+}
 
 async function copyTripDetailValue(value, label) {
   const v = String(value ?? '').trim()
@@ -835,6 +913,10 @@ watch(
   },
 )
 
+watch(linehaulLastFetchAt, () => {
+  void loadDollyRegistry()
+})
+
 watch(
   tripPhase,
   (newPhase, oldPhase) => {
@@ -1222,12 +1304,14 @@ onMounted(async () => {
   void pollAutomationPreview()
   previewPollTimer = setInterval(pollAutomationPreview, 1600)
   void setupLinehaulPolling()
+  void loadDollyRegistry()
   syncTripVoiceUnlockHint()
 })
 
 onActivated(() => {
   loadAssignment()
   void refreshLinehaulCredMeta()
+  void loadDollyRegistry()
   void loadQuickActions()
   void setupLinehaulPolling()
   syncTripVoiceUnlockHint()
@@ -1945,25 +2029,91 @@ onUnmounted(() => {
 
       <template v-if="linehaulTripsBody">
         <div class="trip-details-wrap">
-          <details v-if="tripDollySection.show" class="trip-details-block" open>
-            <summary class="trip-details-summary">Dolly</summary>
-            <dl class="trip-details-dl">
-              <template v-for="row in tripDollySection.rows" :key="row.label">
-                <dt>{{ row.label }}</dt>
-                <dd>
-                  <button
-                    type="button"
-                    class="copyable-dd tap"
-                    :disabled="row.value === '—' || !String(row.value).trim()"
-                    :title="row.value === '—' ? '' : 'Tap to copy'"
-                    @click="copyTripDetailValue(row.value, row.label)"
-                  >
-                    {{ row.value }}
-                  </button>
-                </dd>
-              </template>
-            </dl>
-          </details>
+          <div class="trip-details-block trip-dolly-hero">
+            <div class="trip-dolly-hero__head">
+              <span class="trip-details-summary--inline">Dolly</span>
+              <span v-if="dollyPrimaryDisplay" class="trip-dolly-hero__badge" :class="`trip-dolly-hero__badge--${dollyRating}`">
+                <template v-if="dollyRating === 'good'">Good dolly</template>
+                <template v-else-if="dollyRating === 'bad'">Bad dolly</template>
+                <template v-else>Unrated</template>
+              </span>
+            </div>
+            <div v-if="dollyPrimaryDisplay" class="trip-dolly-hero__primary">
+              <button
+                type="button"
+                class="trip-dolly-nbr copyable-inline tap"
+                @click="copyTripDetailValue(dollyPrimaryDisplay, 'Dolly number')"
+              >
+                #{{ dollyPrimaryDisplay }}
+              </button>
+              <div class="trip-dolly-hero__rate" @click.stop>
+                <span class="trip-dolly-hero__rate-lbl">Rate</span>
+                <button
+                  v-for="opt in [
+                    { k: 'good', t: '👍' },
+                    { k: 'bad', t: '👎' },
+                    { k: 'none', t: '·' },
+                  ]"
+                  :key="opt.k"
+                  type="button"
+                  class="trip-dolly-star tap"
+                  :class="{ 'trip-dolly-star--on': dollyRating === opt.k }"
+                  :title="opt.k === 'none' ? 'Clear rating' : `Mark ${opt.k}`"
+                  @click="setDollyRate(opt.k)"
+                >
+                  {{ opt.t }}
+                </button>
+              </div>
+            </div>
+            <p v-else class="trip-dolly-hero__empty">No dolly on this load yet</p>
+            <button
+              v-if="!dollyAddOpen"
+              type="button"
+              class="btn linkish tap trip-dolly-add"
+              @click="dollyAddOpen = true"
+            >
+              Add dolly
+            </button>
+            <div v-else class="trip-dolly-add-form">
+              <input
+                :value="dollyAddDigits"
+                class="inp tap"
+                inputmode="numeric"
+                maxlength="6"
+                placeholder="6 digit dolly #"
+                aria-label="6 digit dolly number"
+                @input="onDollyAddInput"
+              />
+              <button
+                type="button"
+                class="btn primary tap"
+                :disabled="dollyPutBusy || dollyAddDigits.length !== 6"
+                @click="onAddDollySubmit"
+              >
+                Save
+              </button>
+              <button type="button" class="btn tap" @click="(dollyAddOpen = false), (dollyAddDigits = '')">Cancel</button>
+            </div>
+            <details v-if="tripDollySection.show" class="trip-details-block trip-dolly-details" :open="false">
+              <summary class="trip-details-summary">All dolly fields from API</summary>
+              <dl class="trip-details-dl">
+                <template v-for="row in tripDollySection.rows" :key="row.label">
+                  <dt>{{ row.label }}</dt>
+                  <dd>
+                    <button
+                      type="button"
+                      class="copyable-dd tap"
+                      :disabled="row.value === '—' || !String(row.value).trim()"
+                      :title="row.value === '—' ? '' : 'Tap to copy'"
+                      @click="copyTripDetailValue(row.value, row.label)"
+                    >
+                      {{ row.value }}
+                    </button>
+                  </dd>
+                </template>
+              </dl>
+            </details>
+          </div>
 
           <div
             v-for="card in tripTrailerCards"
@@ -3153,6 +3303,121 @@ button.trailer-nbr.copyable-inline {
   border-radius: 8px;
   background: #25252e;
   overflow: hidden;
+}
+.trip-dolly-hero {
+  padding: 0.55rem 0.65rem 0.6rem;
+}
+.trip-dolly-hero__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-bottom: 0.35rem;
+}
+.trip-details-summary--inline {
+  font-size: 0.88rem;
+  font-weight: 600;
+  color: var(--text, #e8e8ee);
+}
+.trip-dolly-hero__badge {
+  font-size: 0.6rem;
+  text-transform: uppercase;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  padding: 0.1rem 0.35rem;
+  border-radius: 4px;
+  border: 1px solid #3f3f4c;
+  color: #9a9aa8;
+}
+.trip-dolly-hero__badge--good {
+  border-color: #166534;
+  color: #86efac;
+  background: rgba(22, 101, 52, 0.25);
+}
+.trip-dolly-hero__badge--bad {
+  border-color: #991b1b;
+  color: #fecaca;
+  background: rgba(127, 29, 29, 0.35);
+}
+.trip-dolly-hero__badge--none {
+  color: #8a8a98;
+}
+.trip-dolly-hero__primary {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.5rem 0.75rem;
+  margin-bottom: 0.4rem;
+}
+.trip-dolly-nbr {
+  font-size: 1.1rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  border: 1px solid #3f3f4c;
+  background: #1e1e24;
+  color: #e8e8f0;
+  border-radius: 8px;
+  padding: 0.35rem 0.5rem;
+  font-variant-numeric: tabular-nums;
+}
+.trip-dolly-hero__empty {
+  margin: 0 0 0.4rem;
+  font-size: 0.8rem;
+  color: #8a8a98;
+}
+.trip-dolly-hero__rate {
+  display: flex;
+  align-items: center;
+  gap: 0.2rem;
+}
+.trip-dolly-hero__rate-lbl {
+  font-size: 0.7rem;
+  color: #8a8a98;
+  text-transform: uppercase;
+  font-weight: 600;
+  margin-right: 0.15rem;
+}
+.trip-dolly-star {
+  min-width: 1.9rem;
+  min-height: 1.9rem;
+  font-size: 0.9rem;
+  line-height: 1;
+  border: 1px solid #3a3a44;
+  border-radius: 6px;
+  background: #1a1a20;
+  cursor: pointer;
+  color: #b8b8c8;
+}
+.trip-dolly-star--on {
+  border-color: #7b4db5;
+  background: rgba(123, 77, 181, 0.25);
+}
+.trip-dolly-add {
+  font-size: 0.75rem;
+  padding: 0.2rem 0.45rem;
+  margin: 0 0 0.4rem;
+  width: auto;
+  align-self: flex-start;
+  background: rgba(123, 77, 181, 0.15);
+  border: 1px solid #4a2f6a;
+  color: #d8c4ff;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.trip-dolly-add-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  align-items: center;
+  margin-bottom: 0.4rem;
+}
+.trip-dolly-add-form .inp {
+  max-width: 8rem;
+}
+.trip-dolly-details {
+  margin-top: 0.35rem;
+  border: 1px dashed #3a3a48;
+  background: #1e1e25;
 }
 .trip-details-summary {
   cursor: pointer;

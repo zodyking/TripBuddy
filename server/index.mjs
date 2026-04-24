@@ -111,6 +111,12 @@ import {
   markInAppAllRead,
 } from './in-app-notifications-store.mjs'
 import {
+  addOrTouchDolly,
+  readDollyRegistry,
+  setDollyRating,
+  syncDollyFromTrip,
+} from './dolly-store.mjs'
+import {
   getGeoFenceRedirectUrl,
   pointInPolygon,
 } from './geo-fence-check.mjs'
@@ -472,7 +478,7 @@ app.get('/api/notifications', async (req) => {
   return { ok: true, items: list, unreadCount }
 })
 
-app.post('/api/notifications/read', async (req) => {
+app.post('/api/notifications/read', async (req, reply) => {
   const ak = /** @type {any} */(req).credentialAccountKey
   if (!ak) {
     return reply.code(400).send({ error: 'Not signed in' })
@@ -482,14 +488,66 @@ app.post('/api/notifications/read', async (req) => {
   if (id && typeof id === 'string' && id.trim()) {
     const next = await markInAppRead(ak, [id.trim()])
     const list = next.items || []
-    const unreadCount = list.filter((x) => x && !x.read).length
-    return { ok: true, items: list, unreadCount }
+    const u = list.filter((x) => x && !x.read).length
+    return { ok: true, items: list, unreadCount: u }
   }
   if (b.all === true) {
     const next = await markInAppAllRead(ak)
     return { ok: true, items: next.items, unreadCount: 0 }
   }
   return reply.code(400).send({ error: 'Provide { id: string } or { all: true }' })
+})
+
+app.get('/api/dolly', async () => {
+  const d = await readDollyRegistry()
+  return { ok: true, ...d }
+})
+
+app.post('/api/dolly/sync', async (req, reply) => {
+  try {
+    const b = req.body ?? {}
+    const leg =
+      typeof b.legSeq === 'string' && /^\d+$/.test(b.legSeq) ? b.legSeq : ''
+    const trip = b.trip
+    const d = await syncDollyFromTrip(
+      trip,
+      leg || undefined,
+    )
+    return { ok: true, ...d }
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e)
+    return reply.code(400).send({ ok: false, error: msg })
+  }
+})
+
+app.put('/api/dolly', async (req, reply) => {
+  try {
+    const b = req.body ?? {}
+    const d = await addOrTouchDolly(
+      /** @type {any} */ (b).dollyNbr,
+      { legSeq: b.legSeq, manual: true },
+    )
+    return { ok: true, ...d }
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e)
+    return reply.code(400).send({ ok: false, error: msg })
+  }
+})
+
+app.patch('/api/dolly', async (req, reply) => {
+  try {
+    const b = req.body ?? {}
+    const n = b.dollyNbr
+    const r = b.rating
+    if (typeof r !== 'string') {
+      return reply.code(400).send({ error: 'rating required' })
+    }
+    const d = await setDollyRating(/** @type {any} */ (n), /** @type {'none' | 'good' | 'bad'} */ (r))
+    return { ok: true, ...d }
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e)
+    return reply.code(400).send({ ok: false, error: msg })
+  }
 })
 
 app.get('/api/settings/credentials', async (req) => {

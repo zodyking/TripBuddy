@@ -1,7 +1,13 @@
 <script setup>
-import { ref, computed, onMounted, watch } from 'vue'
-import { getAssignment, getCredentials, patchTripHistoryOutcome } from '../api.js'
-import { workWeekGroupMeta } from '../utils/workWeekGroup.js'
+import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
+import { getAssignment, getCredentials, patchTripHistoryOutcome, getDollyRegistry, patchDollyRating } from '../api.js'
+import {
+  workWeekGroupMeta,
+  dayStripForWeek,
+  localDateKey,
+  monthGridForWorkWeek,
+} from '../utils/workWeekGroup.js'
+import { copyTextToClipboard } from '../utils/copyToClipboard.js'
 
 /**
  * @typedef {object} LedgerEntry
@@ -26,6 +32,12 @@ const openId = ref('')
 const openWeekKey = ref('')
 
 const DOUBLE_CLICK_MS = 500
+
+/** YYYY-MM-DD; empty = show all days in selected work week */
+const filterDayKey = ref('')
+const outcomeMenuOpen = ref('')
+
+const dollyList = ref(/** @type {Array<{ nbr: string, rating?: string, lastSeenAt?: number }>} */ ([]))
 
 /**
  * @param {unknown} x
@@ -115,6 +127,7 @@ async function load() {
   } finally {
     loading.value = false
   }
+  void loadDolly()
 }
 
 const sorted = computed(() =>
@@ -149,9 +162,98 @@ const weekGroups = computed(() => {
     key: g.key,
     groupLabel: g.groupLabel,
     sortKey: g.items[0]?.displayDate ?? 0,
+    weekStartMs: g.weekStart,
     items: g.items,
   }))
 })
+
+const activeWeekGroup = computed(() => {
+  if (!weekGroups.value.length) return null
+  const w = weekGroups.value.find((g) => g.key === openWeekKey.value)
+  return w || weekGroups.value[0]
+})
+
+const dayStrip = computed(() => {
+  const w = activeWeekGroup.value
+  if (w == null || typeof w.weekStartMs !== 'number') return []
+  return dayStripForWeek(/** @type {number} */ (w.weekStartMs))
+})
+
+const weekFilteredItems = computed(() => {
+  const w = activeWeekGroup.value
+  if (!w) return []
+  if (!filterDayKey.value) return w.items
+  return w.items.filter(
+    (e) =>
+      e.displayDate && localDateKey(/** @type {number} */(e.displayDate)) === filterDayKey.value,
+  )
+})
+
+/** @type {import('vue').ComputedRef<{ headers: string[], cells: { key: string, dayNum: number, inWorkWeek: boolean, tripCount: number, isToday: boolean }[] }>} */
+const activeWeekCalendar = computed(() => {
+  const w = activeWeekGroup.value
+  if (w == null || typeof w.weekStartMs !== 'number') {
+    return { headers: ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'], cells: [] }
+  }
+  const counts = {}
+  for (const e of w.items) {
+    if (!e.displayDate) continue
+    const k = localDateKey(/** @type {number} */(e.displayDate))
+    counts[k] = (counts[k] || 0) + 1
+  }
+  return monthGridForWorkWeek(/** @type {number} */(w.weekStartMs), counts)
+})
+
+function closeOutcomeMenu() {
+  outcomeMenuOpen.value = ''
+}
+
+function toggleOutcomeMenu(id) {
+  outcomeMenuOpen.value = outcomeMenuOpen.value === id ? '' : id
+}
+
+async function loadDolly() {
+  try {
+    const d = await getDollyRegistry()
+    const it = d?.items && typeof d.items === 'object' ? d.items : {}
+    dollyList.value = Object.values(it)
+      .filter((x) => x && typeof (/** @type {any} */(x).nbr) === 'string')
+      .map((x) => ({
+        nbr: String((/** @type {any} */(x)).nbr),
+        rating: (/** @type {any} */(x)).rating,
+        lastSeenAt: (/** @type {any} */(x)).lastSeenAt,
+      }))
+      .sort(
+        (a, b) =>
+          (b.lastSeenAt || 0) - (a.lastSeenAt || 0),
+      )
+  } catch {
+    dollyList.value = []
+  }
+}
+
+/**
+ * @param {string} n
+ * @param {'none' | 'good' | 'bad'} r
+ */
+async function rateDolly(n, r) {
+  if (!/^\d{6}$/.test(n)) return
+  try {
+    await patchDollyRating({ dollyNbr: n, rating: r })
+    await loadDolly()
+  } catch {
+    /* */
+  }
+}
+
+/**
+ * @param {string} n
+ */
+function copyDollyN(n) {
+  const t = String(n).replace(/\D/g, '').slice(0, 6)
+  if (t.length !== 6) return
+  void copyTextToClipboard(t)
+}
 
 watch(
   weekGroups,
@@ -159,11 +261,13 @@ watch(
     if (!groups.length) {
       openId.value = ''
       openWeekKey.value = ''
+      filterDayKey.value = ''
       return
     }
     if (!groups.some((g) => g.key === openWeekKey.value)) {
       openWeekKey.value = groups[0].key
     }
+    filterDayKey.value = ''
     if (!sorted.value.some((e) => e.id === openId.value)) {
       const firstG = groups.find((g) => g.key === openWeekKey.value) || groups[0]
       openId.value = firstG?.items[0]?.id || ''
@@ -227,6 +331,20 @@ async function setOutcome(legSeq, o) {
   }
 }
 
+/**
+ * @param {LedgerEntry} e
+ * @param {string} o
+ * @param {Event} [ev]
+ */
+function pickOutcome(e, o, ev) {
+  ev?.stopPropagation()
+  if (!/^\d+$/.test(e.dailyTripLegSequence)) return
+  void setOutcome(e.dailyTripLegSequence, o)
+  nextTick(() => {
+    closeOutcomeMenu()
+  })
+}
+
 let lastDblT = 0
 let lastDblSeq = ''
 
@@ -271,7 +389,17 @@ function cycleOutcome(e) {
 }
 
 onMounted(() => {
+  if (typeof document !== 'undefined') {
+    document.addEventListener('click', closeOutcomeMenu)
+  }
   void load()
+  void loadDolly()
+})
+
+onUnmounted(() => {
+  if (typeof document !== 'undefined') {
+    document.removeEventListener('click', closeOutcomeMenu)
+  }
 })
 </script>
 
@@ -280,9 +408,9 @@ onMounted(() => {
     <header class="history-head">
       <h1 class="history-title">History</h1>
       <p class="history-sub">
-        Trips appear here when the Linehaul API returns them. Set your work week in Settings. Double-click a
-        card row to cycle: Delivered → Rejected → Removed → None. Use the buttons for a direct choice. Use
-        Remove from home on the main screen if a trip should stay out of the dashboard.
+        Work weeks come from Settings. Use the <strong>calendar strip</strong> to focus one day, or All week.
+        Double-click a trip’s header to cycle the stop outcome. Dolly list is your registry — tap a number to copy, rate
+        with 👍/👎, sync updates from the active load automatically.
       </p>
       <button type="button" class="history-refresh tap" :disabled="loading" @click="load">
         {{ loading ? 'Loading…' : 'Refresh' }}
@@ -304,25 +432,133 @@ onMounted(() => {
               const d = /** @type {HTMLDetailsElement} */ (ev.target)
               if (d.open) {
                 openWeekKey = g.key
+                filterDayKey = ''
                 if (!g.items.some((x) => x.id === openId)) {
                   openId = g.items[0]?.id || ''
                 }
               } else if (openWeekKey === g.key) {
                 openWeekKey = ''
+                filterDayKey = ''
               }
             }
           "
         >
           <summary class="history-week-summary">
-            <span class="history-week-title">{{ g.groupLabel }}</span>
-            <span class="history-week-count">{{ g.items.length }} trip(s)</span>
+            <div class="history-week-head-titles">
+              <span class="history-week-title">{{ g.groupLabel }}</span>
+              <span v-if="typeof g.weekStartMs === 'number'" class="history-week-iso-badge">
+                Week of {{ new Date(/** @type {number} */(g.weekStartMs)).toLocaleDateString() }}
+              </span>
+            </div>
+            <div class="history-week-meta">
+              <span class="history-week-count">{{ g.items.length }} in week</span>
+            </div>
           </summary>
+          <div
+            v-if="g.key === openWeekKey && activeWeekCalendar.cells.length"
+            class="history-cal-surface"
+            :aria-label="`Calendar: ${g.groupLabel}`"
+          >
+            <div class="history-cal-legend">
+              <span class="legend-dot legend-dot--ww" /> Work week
+              <span class="legend-dot legend-dot--trip" /> Has trips
+            </div>
+            <div class="history-month-grid" role="grid" :aria-colcount="7" :aria-rowcount="6">
+              <div class="history-month-dow" role="row" aria-label="Weekdays">
+                <div
+                  v-for="(h, hi) in activeWeekCalendar.headers"
+                  :key="`h-${hi}`"
+                  class="history-dow"
+                  role="columnheader"
+                >{{ h }}</div>
+              </div>
+              <div class="history-month-cells" role="row">
+                <button
+                  v-for="c in activeWeekCalendar.cells"
+                  :key="c.key"
+                  type="button"
+                  class="history-day-cell tap"
+                  :class="{
+                    'history-day-cell--in-ww': c.inWorkWeek,
+                    'history-day-cell--on': c.inWorkWeek && filterDayKey === c.key,
+                    'history-day-cell--empty': c.inWorkWeek && !c.tripCount,
+                    'history-day-cell--has': c.tripCount > 0,
+                    'history-day-cell--today': c.isToday,
+                  }"
+                  :title="`Trips: ${c.tripCount} · ${c.key}`"
+                  :aria-pressed="c.inWorkWeek && filterDayKey === c.key"
+                  :disabled="!c.inWorkWeek"
+                  @click="c.inWorkWeek && (filterDayKey = filterDayKey === c.key ? '' : c.key)"
+                >
+                  <span class="history-day-num">{{ c.dayNum }}</span>
+                  <span
+                    v-if="c.tripCount > 0"
+                    class="history-day-badge"
+                    aria-hidden="true"
+                  >{{ c.tripCount > 9 ? '9+' : c.tripCount }}</span
+                  >
+                </button>
+              </div>
+            </div>
+            <p v-if="filterDayKey" class="history-cal-filt">Filtered to <strong>{{ filterDayKey }}</strong> · <button type="button" class="history-link tap" @click="filterDayKey = ''">Clear</button></p>
+          </div>
+          <div v-if="g.key === openWeekKey && dayStrip.length" class="history-day-rail" role="group" aria-label="Filter by day in this work week">
+            <button
+              type="button"
+              class="history-day-chip history-day-chip--all tap"
+              :class="{ 'history-day-chip--on': !filterDayKey }"
+              @click="filterDayKey = ''"
+            >
+              <span class="dow">All</span>
+              <span class="dom">All week</span>
+            </button>
+            <button
+              v-for="d in dayStrip"
+              :key="d.key"
+              type="button"
+              class="history-day-chip tap"
+              :class="{
+                'history-day-chip--on': filterDayKey === d.key,
+                'history-day-chip--today': d.key === localDateKey(Date.now()),
+              }"
+              @click="filterDayKey = d.key"
+            >
+              <span class="dow">{{ d.dowLabel }}</span>
+              <span class="dom">{{ d.label }}</span>
+            </button>
+          </div>
+          <p v-if="g.key === openWeekKey" class="history-trips-count">
+            <template v-if="filterDayKey">Showing {{ weekFilteredItems.length }} on selected day (of {{ g.items.length }})</template>
+            <template v-else>Showing all {{ g.items.length }} in this work week</template>
+          </p>
+          <aside
+            v-if="g.key === openWeekKey && dollyList.length"
+            class="history-dolly-aside"
+            @click.stop
+            @keydown.stop
+          >
+            <h2 class="history-dolly-h">Your dollies (tap to copy · 👍/👎)</h2>
+            <ul class="history-dolly-ul">
+              <li v-for="d in dollyList.slice(0, 20)" :key="d.nbr" class="history-dolly-row">
+                <button type="button" class="history-dolly-nbr tap" @click="copyDollyN(d.nbr)">#{{ d.nbr }}</button>
+                <span
+                  v-if="d.rating && d.rating !== 'none'"
+                  class="history-dolly-stat"
+                >{{ d.rating === 'good' ? '· good' : '· bad' }}</span>
+                <div class="history-dolly-acts" @click.stop>
+                  <button type="button" class="history-dolly-ico tap" title="Good" @click="rateDolly(d.nbr, 'good')">👍</button>
+                  <button type="button" class="history-dolly-ico tap" title="Bad" @click="rateDolly(d.nbr, 'bad')">👎</button>
+                  <button type="button" class="history-dolly-ico tap" title="Clear" @click="rateDolly(d.nbr, 'none')">·</button>
+                </div>
+              </li>
+            </ul>
+          </aside>
           <ul
             class="history-list history-list--nested"
             :aria-label="`Trips in ${g.groupLabel}`"
           >
             <li
-              v-for="e in g.items"
+              v-for="e in (g.key === openWeekKey ? weekFilteredItems : g.items)"
               :id="`history-card-${e.id}`"
               :key="e.id"
               class="history-card"
@@ -343,6 +579,7 @@ onMounted(() => {
           <summary
             class="history-card-summary"
             @dblclick.stop.prevent="onRowDoubleClick(e)"
+            @click.stop
           >
             <span class="history-od-lane">
               <span class="history-od-compact" :title="str(e.dispatchHeader?.origin) || '—'">
@@ -355,47 +592,62 @@ onMounted(() => {
                 {{ str(e.dispatchHeader?.destination) || '—' }}
               </span>
             </span>
+            <div class="history-row-tr">
             <time
               class="history-date"
               :datetime="new Date(e.displayDate).toISOString()"
               >{{ formatWhen(e.displayDate) }}</time
             >
+            <div v-if="e.dailyTripLegSequence" class="history-top-actions" @click.stop>
+              <span
+                v-if="e.outcome && e.outcome !== 'none'"
+                class="history-outcome"
+                :class="`history-outcome--${e.outcome}`"
+                >{{ outcomeLabel(e.outcome) }}</span
+              >
+              <div class="history-gearbox">
+                <div
+                  v-if="outcomeMenuOpen === e.id"
+                  class="history-outcome-menu"
+                  @click.stop
+                  @pointerdown.stop
+                  @pointerup.stop
+                >
+                  <button
+                    v-for="opt in [
+                      { k: 'delivered', t: 'Delivered' },
+                      { k: 'rejected', t: 'Rejected' },
+                      { k: 'removed', t: 'Removed' },
+                      { k: 'none', t: 'None' },
+                    ]"
+                    :key="opt.k"
+                    type="button"
+                    class="history-outcome-mi"
+                    :disabled="historySavingId === `seq-${e.dailyTripLegSequence}`"
+                    @click="pickOutcome(e, opt.k, $event)"
+                  >
+                    {{ opt.t }}
+                  </button>
+                </div>
+                <button
+                  type="button"
+                  class="history-gear tap"
+                  :title="`Set stop outcome`"
+                  @click="toggleOutcomeMenu(e.id); $event.stopPropagation()"
+                >
+                  ⛭
+                </button>
+              </div>
+            </div>
+            </div>
             <span
               v-if="e.dailyTripLegSequence"
               class="history-seq"
-              :title="`Double-click: cycle outcome · Leg #${e.dailyTripLegSequence} · ${sourceLabel((str(e.dispatchHeader?.source) || e.source) || '')}`"
+              :title="`Double-tap header: cycle status · Leg #${e.dailyTripLegSequence}`"
               >Leg #{{ e.dailyTripLegSequence }} ·
               {{ sourceLabel((str(e.dispatchHeader?.source) || e.source) || '') }}</span
             >
-            <span v-if="e.outcome" class="history-outcome" :class="`history-outcome--${e.outcome}`">
-              {{ outcomeLabel(e.outcome) }}
-            </span>
           </summary>
-        <div
-          v-if="e.dailyTripLegSequence"
-          class="history-outcome-row"
-          @click.stop
-        >
-          <div class="history-outcome-btns">
-            <button
-              v-for="opt in [
-                { k: 'delivered', t: 'Delivered' },
-                { k: 'rejected', t: 'Rejected' },
-                { k: 'removed', t: 'Removed' },
-                { k: 'none', t: 'Clear' },
-              ]"
-              :key="opt.k"
-              type="button"
-              class="history-o-btn tap"
-              :class="{ 'history-o-btn--active': (e.outcome || 'none') === opt.k }"
-              :disabled="historySavingId === `seq-${e.dailyTripLegSequence}`"
-              @click="setOutcome(e.dailyTripLegSequence, opt.k)"
-            >
-              {{ opt.t }}
-            </button>
-          </div>
-          <p class="history-dbl-hint">Double-click the card header to cycle: Delivered → Rejected → Removed → Clear</p>
-        </div>
         <div class="history-dispatch">
           <p v-if="str(e.dispatchHeader?.tripStatusText)" class="history-meta">
             Status: {{ str(e.dispatchHeader.tripStatusText) }}
@@ -588,11 +840,293 @@ onMounted(() => {
   max-width: calc(100% - 5rem);
   padding-right: 0.5rem;
 }
+.history-week-head-titles {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  min-width: 0;
+  flex: 1;
+}
+.history-week-iso-badge {
+  font-size: 0.62rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #7a7a8a;
+}
+.history-week-meta {
+  flex: 0 0 auto;
+}
 
 .history-week-count {
   font-size: 0.72rem;
   font-weight: 600;
   color: #9ca3af;
+}
+.history-cal-surface {
+  margin: 0 0.55rem 0.4rem;
+  padding: 0.55rem 0.5rem 0.45rem;
+  border-radius: 12px;
+  background: linear-gradient(165deg, #15151c 0%, #0c0c10 100%);
+  border: 1px solid #2a2a34;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+}
+.history-cal-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 0.85rem;
+  align-items: center;
+  font-size: 0.58rem;
+  text-transform: uppercase;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: #6a6a7a;
+  margin-bottom: 0.4rem;
+}
+.history-cal-legend .legend-dot {
+  display: inline-block;
+  width: 0.45rem;
+  height: 0.45rem;
+  border-radius: 2px;
+  margin-right: 0.2rem;
+  vertical-align: middle;
+}
+.history-cal-legend .legend-dot--ww {
+  background: linear-gradient(135deg, #6d3fa8, #3b1f5c);
+  border: 1px solid #7b4db5;
+}
+.history-cal-legend .legend-dot--trip {
+  background: #22c55e;
+  border: 1px solid #14532d;
+}
+.history-month-grid {
+  user-select: none;
+}
+.history-month-dow {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 0.15rem;
+  margin-bottom: 0.2rem;
+}
+.history-dow {
+  text-align: center;
+  font-size: 0.5rem;
+  font-weight: 800;
+  color: #5a5a6a;
+  text-transform: uppercase;
+  padding: 0.1rem 0;
+}
+.history-month-cells {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 0.2rem;
+}
+.history-day-cell {
+  position: relative;
+  min-height: 2.1rem;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 0.15rem 0.1rem 0.25rem;
+  border-radius: 7px;
+  border: 1px solid #2a2a32;
+  background: #0f0f12;
+  color: #3a3a4a;
+  font-size: 0.6rem;
+  line-height: 1;
+  cursor: default;
+  font-variant-numeric: tabular-nums;
+}
+.history-day-cell:disabled {
+  cursor: not-allowed;
+  opacity: 0.4;
+  border-color: #1e1e20;
+  background: #0a0a0c;
+}
+.history-day-cell--in-ww:not(:disabled) {
+  color: #9a9ab0;
+  background: #15151a;
+  border-color: #3a3a48;
+  cursor: pointer;
+  opacity: 1;
+}
+.history-day-cell--in-ww:hover:not(:disabled) {
+  border-color: #7b4db5;
+  background: rgba(123, 77, 181, 0.1);
+}
+.history-day-cell--on {
+  border-color: #a78bfa !important;
+  background: rgba(123, 77, 181, 0.2) !important;
+  color: #f0e6ff;
+}
+.history-day-cell--empty {
+  opacity: 0.85;
+}
+.history-day-cell--has .history-day-num {
+  color: #e0e0f0;
+  font-weight: 800;
+}
+.history-day-cell--today:not(.history-day-cell--on) {
+  box-shadow: 0 0 0 1px rgba(34, 197, 94, 0.45);
+}
+.history-day-num {
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+.history-day-badge {
+  position: absolute;
+  right: 2px;
+  bottom: 2px;
+  min-width: 0.85rem;
+  padding: 0.05rem 0.2rem;
+  font-size: 0.5rem;
+  font-weight: 800;
+  border-radius: 4px;
+  background: #14532d;
+  color: #86efac;
+  border: 1px solid #166534;
+  line-height: 1.1;
+}
+.history-cal-filt {
+  margin: 0.45rem 0 0;
+  font-size: 0.62rem;
+  color: #6a6a7a;
+}
+.history-cal-filt .history-link {
+  background: none;
+  border: none;
+  color: #a78bfa;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+  font-size: inherit;
+  font-weight: 600;
+  padding: 0;
+  margin: 0;
+}
+.history-day-rail {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  padding: 0.5rem 0.65rem 0.3rem;
+  background: #12121a;
+  border-bottom: 1px solid #2a2a32;
+  align-items: center;
+}
+.history-day-chip {
+  min-width: 2.2rem;
+  min-height: 2.4rem;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.1rem;
+  border-radius: 8px;
+  border: 1px solid #34343c;
+  background: #1a1a20;
+  color: #a8a8b8;
+  font-size: 0.6rem;
+  line-height: 1.1;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 0.2rem 0.28rem;
+}
+.history-day-chip .dow {
+  font-size: 0.5rem;
+  text-transform: uppercase;
+  color: #6a6a78;
+}
+.history-day-chip .dom {
+  font-size: 0.85rem;
+  font-weight: 800;
+  color: #e8e8f0;
+}
+.history-day-chip--on {
+  border-color: #7b4db5;
+  background: rgba(123, 77, 181, 0.22);
+  color: #e0d0ff;
+}
+.history-day-chip--on .dow,
+.history-day-chip--on .dom {
+  color: #f0e6ff;
+}
+.history-day-chip--today:not(.history-day-chip--on) {
+  box-shadow: 0 0 0 1px rgba(96, 165, 250, 0.35);
+}
+.history-day-chip--all .dom {
+  font-size: 0.6rem;
+  text-transform: uppercase;
+}
+.history-trips-count {
+  margin: 0;
+  padding: 0.2rem 0.75rem 0.4rem;
+  font-size: 0.6rem;
+  color: #6a6a78;
+}
+.history-dolly-aside {
+  margin: 0 0.55rem 0.4rem;
+  padding: 0.5rem 0.6rem 0.55rem;
+  border: 1px solid #2f2f3a;
+  border-radius: 10px;
+  background: #16161e;
+}
+.history-dolly-h {
+  margin: 0 0 0.4rem;
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #9a9ab0;
+  font-weight: 700;
+}
+.history-dolly-ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+.history-dolly-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.3rem 0.45rem;
+  font-size: 0.72rem;
+  color: #b8b8c8;
+}
+.history-dolly-nbr {
+  font-size: 0.85rem;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  border: 1px solid #3c3c48;
+  background: #1b1b22;
+  color: #f0f0f8;
+  border-radius: 6px;
+  padding: 0.15rem 0.4rem;
+  cursor: pointer;
+}
+.history-dolly-stat {
+  color: #7a7a8a;
+  font-size: 0.64rem;
+}
+.history-dolly-acts {
+  display: flex;
+  align-items: center;
+  gap: 0.15rem;
+  margin-left: auto;
+}
+.history-dolly-ico {
+  min-width: 1.5rem;
+  min-height: 1.5rem;
+  font-size: 0.7rem;
+  line-height: 1;
+  border: 1px solid #3a3a44;
+  border-radius: 5px;
+  background: #1a1a1f;
+  cursor: pointer;
+  color: #c0c0d0;
 }
 
 .history-list {
@@ -705,6 +1239,73 @@ onMounted(() => {
   color: var(--color-text-secondary, #b8b8c8);
   font-variant-numeric: tabular-nums;
   align-self: flex-start;
+}
+.history-row-tr {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.35rem 0.4rem;
+  min-width: 0;
+  width: 100%;
+  justify-content: space-between;
+}
+.history-gear {
+  min-width: 1.6rem;
+  min-height: 1.6rem;
+  line-height: 1;
+  border-radius: 6px;
+  border: 1px solid #3a3a46;
+  background: #1e1e25;
+  color: #9a9ab0;
+  font-size: 0.7rem;
+  cursor: pointer;
+  padding: 0;
+  flex-shrink: 0;
+}
+.history-outcome-menu {
+  position: absolute;
+  z-index: 4;
+  display: flex;
+  flex-direction: column;
+  right: 0;
+  top: auto;
+  bottom: calc(100% + 6px);
+  min-width: 9.5rem;
+  border: 1px solid #3f3f4c;
+  border-radius: 8px;
+  background: #1c1c25;
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.45);
+  padding: 0.2rem 0;
+}
+.history-outcome-mi {
+  text-align: left;
+  width: 100%;
+  font-size: 0.7rem;
+  font-weight: 600;
+  padding: 0.4rem 0.65rem;
+  border: none;
+  background: transparent;
+  color: #d8d8e6;
+  cursor: pointer;
+}
+.history-outcome-mi:hover {
+  background: #2a2a35;
+}
+.history-outcome-mi:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.history-top-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  min-width: 0;
+  flex: 0 0 auto;
+  max-width: 11rem;
+}
+.history-gearbox {
+  position: relative;
+  flex: 0 0 auto;
 }
 
 .history-seq {
