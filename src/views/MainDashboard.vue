@@ -2004,10 +2004,32 @@ onUnmounted(() => {
       </button>
     </section>
 
-    <section class="panel trip-dolly-standalone" aria-label="Dolly you are carrying">
-      <h2>Dolly</h2>
-      <p class="dolly-standalone-hint">Track your dolly with or without an active trip. Tap the number to copy. Dispatch can replace this if the next load has a different dolly.</p>
-      <div class="trip-details-block trip-dolly-hero">
+    <section
+      v-if="showSealOrTripPanel"
+      ref="tripDetailsPanelRef"
+      class="panel trip-details-panel trip-details-panel--ruled"
+      @pointerdown="onTripPanelPointerDown"
+      @pointermove="onTripPanelPointerMove"
+      @pointerup="onTripPanelPointerUp"
+      @pointercancel="onTripPanelPointerCancel"
+      @dblclick="onTripPanelDblClick"
+    >
+      <h2>Trip Details</h2>
+      <p v-if="hasPrePlanTrip" class="trip-details-swipe-hint">Swipe left or right to match Dispatch (current vs pre-plan)</p>
+      <p
+        v-if="
+          linehaulTripsBody &&
+          typeof linehaulTripsBody === 'object' &&
+          linehaulTripsBody.tripStatus === 'DSPCH'
+        "
+        class="hint"
+      >
+        Dispatch snapshot (DSPCH); merged with approved trip fields when both are available.
+      </p>
+
+      <p class="subhead">Dolly</p>
+      <p class="trip-dolly-in-panel-hint">Works with or without a trip. Tap the number to copy. Dispatch can replace it if the next load uses a different dolly.</p>
+      <div class="trip-details-block trip-dolly-hero" role="group" aria-label="Dolly you are carrying">
         <div class="trip-dolly-hero__head">
           <span class="trip-details-summary--inline">Current dolly</span>
           <span
@@ -2051,7 +2073,7 @@ onUnmounted(() => {
         <button
           v-if="!dollyAddOpen"
           type="button"
-          class="btn linkish tap trip-dolly-add"
+          class="btn secondary tap trip-dolly-add"
           @click="dollyAddOpen = true"
         >
           Add dolly
@@ -2059,7 +2081,7 @@ onUnmounted(() => {
         <div v-else class="trip-dolly-add-form">
           <input
             :value="dollyAddDigits"
-            class="inp tap trip-dolly-add-input"
+            class="inp trip-dolly-add-input"
             inputmode="numeric"
             maxlength="6"
             placeholder="6 digit dolly #"
@@ -2077,7 +2099,7 @@ onUnmounted(() => {
             </button>
             <button
               type="button"
-              class="btn tap trip-dolly-add-cancel"
+              class="btn secondary tap trip-dolly-add-cancel"
               @click="(dollyAddOpen = false), (dollyAddDigits = '')"
             >
               Cancel
@@ -2108,30 +2130,6 @@ onUnmounted(() => {
           </dl>
         </details>
       </div>
-    </section>
-
-    <section
-      v-if="showSealOrTripPanel"
-      ref="tripDetailsPanelRef"
-      class="panel trip-details-panel trip-details-panel--ruled"
-      @pointerdown="onTripPanelPointerDown"
-      @pointermove="onTripPanelPointerMove"
-      @pointerup="onTripPanelPointerUp"
-      @pointercancel="onTripPanelPointerCancel"
-      @dblclick="onTripPanelDblClick"
-    >
-      <h2>Trip Details</h2>
-      <p v-if="hasPrePlanTrip" class="trip-details-swipe-hint">Swipe left or right to match Dispatch (current vs pre-plan)</p>
-      <p
-        v-if="
-          linehaulTripsBody &&
-          typeof linehaulTripsBody === 'object' &&
-          linehaulTripsBody.tripStatus === 'DSPCH'
-        "
-        class="hint"
-      >
-        Dispatch snapshot (DSPCH); merged with approved trip fields when both are available.
-      </p>
 
       <template v-if="linehaulTripsBody">
         <div class="trip-details-wrap">
@@ -2997,8 +2995,8 @@ button.trailer-nbr.copyable-inline {
   color: var(--color-text-primary, #f4f4f8);
   letter-spacing: var(--tracking-tight, -0.02em);
 }
-.dolly-standalone-hint {
-  margin: -0.2rem 0 0.65rem;
+.trip-dolly-in-panel-hint {
+  margin: 0 0 0.65rem;
   font-size: 0.75rem;
   line-height: 1.4;
   color: var(--color-text-tertiary, #8a8a98);
@@ -3332,6 +3330,27 @@ button.trailer-nbr.copyable-inline {
 }
 .trip-dolly-hero {
   padding: 0.55rem 0.65rem 0.6rem;
+  margin-bottom: 0.5rem;
+}
+/* Dolly 6-digit field: same tokens as Settings inputs (no unstyled browser default) */
+.trip-dolly-hero .inp {
+  width: 100%;
+  box-sizing: border-box;
+  padding: var(--space-2-5, 0.625rem) var(--space-3, 0.75rem);
+  border-radius: var(--radius-md, 0.5rem);
+  border: 1px solid var(--color-border, rgba(255, 255, 255, 0.08));
+  background: var(--color-bg-elevated, #0f0f14);
+  color: var(--color-text-primary, #f4f4f8);
+  font-size: var(--text-base, 0.9375rem);
+  transition: var(--transition-colors);
+}
+.trip-dolly-hero .inp:focus {
+  outline: none;
+  border-color: var(--color-accent-purple, #7b4db5);
+  box-shadow: 0 0 0 3px rgba(123, 77, 181, 0.15);
+}
+.trip-dolly-hero .inp::placeholder {
+  color: var(--color-text-tertiary, #6e6e7e);
 }
 .trip-dolly-hero__head {
   display: flex;
@@ -3419,16 +3438,21 @@ button.trailer-nbr.copyable-inline {
   background: rgba(123, 77, 181, 0.25);
 }
 .trip-dolly-add {
-  font-size: 0.75rem;
-  padding: 0.2rem 0.45rem;
+  width: 100%;
+  min-height: 2.4rem;
   margin: 0 0 0.4rem;
-  width: auto;
-  align-self: flex-start;
-  background: rgba(123, 77, 181, 0.15);
-  border: 1px solid #4a2f6a;
-  color: #d8c4ff;
-  border-radius: 6px;
-  cursor: pointer;
+  padding: 0.4rem 0.75rem;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  align-self: stretch;
+  justify-content: center;
+  border: 1px solid var(--color-border, rgba(255, 255, 255, 0.12)) !important;
+  background: var(--color-bg-surface, #16161d) !important;
+  color: var(--color-text-primary, #e8e8ee) !important;
+}
+.trip-dolly-add:hover {
+  border-color: var(--color-accent-purple, #7b4db5) !important;
+  background: var(--color-hover, rgba(255, 255, 255, 0.04)) !important;
 }
 .trip-dolly-add-form {
   display: flex;
@@ -3443,12 +3467,12 @@ button.trailer-nbr.copyable-inline {
   width: 100%;
   max-width: none;
   min-height: 2.6rem;
+  margin: 0;
   font-size: 1.05rem;
   font-weight: 600;
   font-variant-numeric: tabular-nums;
   letter-spacing: 0.12em;
   text-align: center;
-  padding: 0.5rem 0.75rem;
   box-sizing: border-box;
 }
 .trip-dolly-add-actions {
