@@ -256,7 +256,7 @@ const mapPins = computed(() => {
     const row = rows[i]
     const id = rowRouteId(row)
     if (!id) continue
-    const pos = getBridgeAnchorForRouteId(id)
+    const pos = getBridgeAnchorForRouteId(id, direction.value)
     if (!pos) continue
     const ti = trendInfo(row)
     out.push({
@@ -380,6 +380,7 @@ onUnmounted(() => {
         <BridgesMap
           v-if="!loading && payload"
           :pins="mapPins"
+          :travel-direction="direction"
           :highlight-id="highlightId"
           :fill-height="isLandscapeSplit"
           @select="onMapSelect"

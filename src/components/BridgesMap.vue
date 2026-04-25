@@ -13,6 +13,13 @@ const props = defineProps({
    *  trendFull: string, isPick: boolean, isClosed: boolean, rank: number
    * }>>} */
   pins: { type: Array, required: true },
+  /** To NY vs To NJ — when this changes, map re-fits to the current direction’s bridges */
+  travelDirection: {
+    type: String,
+    default: 'ToNY',
+    /** @param {string} v */
+    validator: (v) => v === 'ToNY' || v === 'ToNJ',
+  },
   /** Selected routeId */
   highlightId: { type: String, default: '' },
   fillHeight: { type: Boolean, default: false },
@@ -28,7 +35,13 @@ let map = null
 let streetLayer = null
 /** @type {L.TileLayer | null} */
 let satelliteLayer = null
+/**
+ * Road traffic (Google map tiles) — not official API; may 403 in some regions; optional toggle.
+ * @type {L.TileLayer | null}
+ */
+let trafficLayer = null
 const activeBaseLayer = ref(/** @type {'street' | 'satellite'} */ ('street'))
+const trafficOn = ref(true)
 /** @type {L.LayerGroup | null} */
 let markerLayer = null
 /** @type {L.LayerGroup | null} */
@@ -40,7 +53,8 @@ let userAccuracyCircle = null
 /** @type {Map<string, L.Marker>} */
 const markersById = new Map()
 
-let lastPinSetKey = ''
+/** Sorted route id list — when this changes, we fit bounds to pins (e.g. To NY ↔ To NJ) */
+let lastStructureKey = ''
 
 const userFix = ref(
   /** @type {{ lat: number, lng: number, accuracyM: number } | null} */(null),
@@ -92,6 +106,14 @@ function pinHtml(p, selected) {
 </div><div class="bridge-mrk__stem" aria-hidden="true"></div>`
 }
 
+function getStructureKey() {
+  return props.pins
+    .map((p) => String(p.id))
+    .slice()
+    .sort()
+    .join('|')
+}
+
 function allBoundsLatLngs() {
   /** @type {L.LatLng[]} */
   const pts = []
@@ -122,10 +144,43 @@ function applyFitToPins() {
   }
   const bounds = L.latLngBounds(pts)
   map.fitBounds(bounds, {
-    padding: [32, 32],
+    padding: [28, 28],
     maxZoom: 12,
     animate: !motion,
   })
+}
+
+function applyTrafficToMap() {
+  if (!map || !trafficLayer || !streetLayer) return
+  const on = trafficOn.value && activeBaseLayer.value === 'street'
+  if (on) {
+    if (!map.hasLayer(trafficLayer)) {
+      map.addLayer(trafficLayer)
+    }
+  } else if (map.hasLayer(trafficLayer)) {
+    map.removeLayer(trafficLayer)
+  }
+}
+
+function setBaseLayer(mode) {
+  if (!map || !streetLayer || !satelliteLayer) return
+  activeBaseLayer.value = mode
+  if (mode === 'satellite') {
+    map.removeLayer(streetLayer)
+    if (trafficLayer && map.hasLayer(trafficLayer)) {
+      map.removeLayer(trafficLayer)
+    }
+    satelliteLayer.addTo(map)
+  } else {
+    map.removeLayer(satelliteLayer)
+    streetLayer.addTo(map)
+  }
+  applyTrafficToMap()
+}
+
+function toggleTraffic() {
+  trafficOn.value = !trafficOn.value
+  applyTrafficToMap()
 }
 
 function syncUserOverlay() {
@@ -248,31 +303,26 @@ function toggleMyLocation() {
   )
 }
 
-function setBaseLayer(mode) {
-  if (!map || !streetLayer || !satelliteLayer) return
-  activeBaseLayer.value = mode
-  if (mode === 'satellite') {
-    map.removeLayer(streetLayer)
-    satelliteLayer.addTo(map)
-  } else {
-    map.removeLayer(satelliteLayer)
-    streetLayer.addTo(map)
-  }
+/**
+ * @param {import('vue').UnwrapRef<typeof props>['pins'][0]} p
+ * @param {boolean} selected
+ */
+function makeIcon(p, selected) {
+  return L.divIcon({
+    className: 'bridge-map-div-icon',
+    html: pinHtml(p, selected),
+    iconSize: [100, 72],
+    iconAnchor: [50, 80],
+  })
 }
 
 function syncMarkers() {
   if (!map || !markerLayer) return
 
-  const setKey = props.pins
-    .map((p) => p.id)
-    .slice()
-    .sort()
-    .join('|')
-  const pinSetChanged = setKey !== lastPinSetKey
-  if (pinSetChanged) lastPinSetKey = setKey
+  const sk = `${getStructureKey()}::${String(props.travelDirection)}`
+  const structChanged = sk !== lastStructureKey
 
-  markerLayer.clearLayers()
-  markersById.clear()
+  const wantIds = new Set(props.pins.map((p) => String(p.id)))
   const motion = prefersReducedMotion()
 
   for (const p of props.pins) {
@@ -281,19 +331,31 @@ function syncMarkers() {
     if (!Number.isFinite(la) || !Number.isFinite(ln)) continue
     const id = String(p.id)
     const selected = props.highlightId === id
-    const icon = L.divIcon({
-      className: 'bridge-map-div-icon',
-      html: pinHtml(p, selected),
-      iconSize: [100, 72],
-      iconAnchor: [50, 80],
-    })
-    const marker = L.marker([la, ln], { icon, title: p.title })
-    marker.on('click', () => emit('select', id))
-    marker.addTo(markerLayer)
-    markersById.set(id, marker)
+    const ll = L.latLng(la, ln)
+    const icon = makeIcon(/** @type {any} */(p), selected)
+    const existing = markersById.get(id)
+    if (existing) {
+      if (existing.getLatLng().lat !== la || existing.getLatLng().lng !== ln) {
+        existing.setLatLng(ll)
+      }
+      existing.setIcon(icon)
+    } else {
+      const marker = L.marker(ll, { icon, title: p.title })
+      marker.on('click', () => emit('select', id))
+      marker.addTo(markerLayer)
+      markersById.set(id, marker)
+    }
   }
 
-  if (pinSetChanged) {
+  for (const [id, mk] of [...markersById]) {
+    if (wantIds.has(id)) continue
+    markerLayer.removeLayer(mk)
+    markersById.delete(id)
+  }
+
+  lastStructureKey = sk
+
+  if (structChanged) {
     applyFitToPins()
   } else if (props.highlightId) {
     const m = markersById.get(props.highlightId)
@@ -312,23 +374,30 @@ function initMap() {
   streetLayer = L.tileLayer(
     'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
     {
-      attribution:
-        '&copy; OSM &copy; CARTO',
+      attribution: '&copy; OSM &copy; CARTO',
       subdomains: 'abcd',
       maxZoom: 20,
     },
   )
+  /** Road traffic color overlay (Google-style raster). Not a licensed API. */
+  trafficLayer = L.tileLayer(
+    'https://{s}.google.com/vt/lyrs=traffic&x={x}&y={y}&z={z}&hl=en',
+    {
+      subdomains: 'mt0 mt1 mt2 mt3',
+      maxZoom: 20,
+      opacity: 0.8,
+    },
+  )
   satelliteLayer = L.tileLayer(
     'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
-    {
-      attribution: 'Esri, Maxar',
-      maxZoom: 19,
-    },
+    { attribution: 'Esri, Maxar', maxZoom: 19 },
   )
   activeBaseLayer.value = 'street'
   streetLayer.addTo(map)
+  applyTrafficToMap()
   markerLayer = L.layerGroup().addTo(map)
   userLayer = L.layerGroup().addTo(map)
+  lastStructureKey = ''
   syncMarkers()
   nextTick(() => {
     map?.invalidateSize()
@@ -348,7 +417,8 @@ function destroyMap() {
   userLayer = null
   streetLayer = null
   satelliteLayer = null
-  lastPinSetKey = ''
+  trafficLayer = null
+  lastStructureKey = ''
 }
 
 let resizeObserver = null
@@ -374,7 +444,7 @@ onBeforeUnmount(() => {
 })
 
 watch(
-  () => [props.pins, props.highlightId, props.fillHeight],
+  () => [props.pins, props.highlightId, props.travelDirection, props.fillHeight],
   () => {
     syncMarkers()
     syncUserOverlay()
@@ -394,11 +464,20 @@ watch(
     <div class="bridge-map-controls">
       <button
         type="button"
+        class="bridge-map-traffic tap"
+        :class="{ 'is-on': trafficOn }"
+        :aria-pressed="trafficOn"
+        :disabled="activeBaseLayer === 'satellite'"
+        :title="activeBaseLayer === 'satellite' ? 'Traffic (street only)' : 'Live traffic (roads)'"
+        @click="toggleTraffic"
+      >Traff</button>
+      <button
+        type="button"
         class="bridge-map-layer tap"
         :class="{ 'is-sat': activeBaseLayer === 'satellite' }"
         :aria-pressed="activeBaseLayer === 'satellite'"
         title="Satellite"
-        @click="setBaseLayer(activeBaseLayer === 'street' ? 'satellite' : 'street')"
+        @click="setBaseLayer(activeBaseLayer === 'satellite' ? 'street' : 'satellite')"
       >Sat</button>
       <button
         type="button"
@@ -420,6 +499,8 @@ watch(
         </svg>
       </button>
     </div>
+    <p v-if="activeBaseLayer === 'satellite' && trafficOn" class="bridge-map-footnote" role="note"
+    >Traffic hidden on Sat — switch to map</p>
     <p v-if="geoPending" class="bridge-map-hint">Location…</p>
     <p v-else-if="geoDenied" class="bridge-map-hint is-warn">Location denied</p>
   </div>
@@ -466,6 +547,7 @@ watch(
   gap: 0.35rem;
   pointer-events: none;
 }
+.bridge-map-traffic,
 .bridge-map-layer,
 .bridge-map-loc {
   pointer-events: auto;
@@ -473,16 +555,35 @@ watch(
   align-items: center;
   justify-content: center;
   width: 2.25rem;
-  height: 2.25rem;
+  min-height: 2.1rem;
   border-radius: 0.5rem;
-  border: 1px solid rgba(123, 77, 181, 0.45);
+  border: 1px solid rgba(59, 130, 246, 0.45);
   background: rgba(8, 8, 12, 0.85);
+  color: #93c5fd;
+  font-size: 0.48rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  line-height: 1.1;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.bridge-map-traffic:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.bridge-map-traffic.is-on {
+  background: rgba(59, 130, 246, 0.3);
+  box-shadow: 0 0 0 1px rgba(96, 165, 250, 0.4);
+  color: #bfdbfe;
+}
+.bridge-map-layer,
+.bridge-map-loc {
+  border: 1px solid rgba(123, 77, 181, 0.45);
   color: #c4b5fd;
   font-size: 0.5rem;
   font-weight: 800;
-  letter-spacing: 0.06em;
-  cursor: pointer;
-  -webkit-tap-highlight-color: transparent;
+  min-height: 2.25rem;
 }
 .bridge-map-loc {
   color: #6ee7b7;
@@ -497,19 +598,27 @@ watch(
   width: 1.1rem;
   height: 1.1rem;
 }
-.bridge-map-hint {
+.bridge-map-hint,
+.bridge-map-footnote {
   position: absolute;
   left: 0.5rem;
   bottom: 0.4rem;
   z-index: 700;
   margin: 0;
-  font-size: 0.58rem;
+  font-size: 0.55rem;
   color: #6e6e80;
   font-weight: 600;
   background: rgba(0, 0, 0, 0.55);
   padding: 0.1rem 0.35rem;
   border-radius: 4px;
+  max-width: 85%;
+  line-height: 1.2;
   pointer-events: none;
+}
+.bridge-map-footnote {
+  bottom: 1.75rem;
+  color: #94a3b8;
+  font-size: 0.52rem;
 }
 .bridge-map-hint.is-warn {
   color: #fb923c;
@@ -603,7 +712,7 @@ watch(
 }
 :deep(.bridge-mrk--best .bridge-mrk__time) {
   color: #c4f4dd;
-  text-shadow: 0 0 18px rgba(52, 211, 153, 0.4);
+  text-shadow: 0 0 18px rgba(52, 211, 129, 0.4);
 }
 :deep(.bridge-mrk__suf) {
   font-size: 0.55rem;
