@@ -1,6 +1,8 @@
 <script setup>
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
 import { getBridgesPanynj } from '../api.js'
+import { getBridgeAnchorForRouteId } from '../bridges/bridgeRouteAnchors.js'
+import BridgesMap from '../components/BridgesMap.vue'
 
 defineOptions({ name: 'BridgesView' })
 
@@ -123,11 +125,11 @@ function displayTitle(row) {
 function trendInfo(row) {
   const id = rowRouteId(row)
   if (!id || !payload.value?.byRoute) {
-    return { short: '—', cls: 't--unk', full: 'No prior sample' }
+    return { short: '·', cls: 't--unk', full: 'Not enough data yet' }
   }
   const b = payload.value.byRoute[id]
   if (!b || !b.trend) {
-    return { short: '—', cls: 't--unk', full: 'No prior sample' }
+    return { short: '·', cls: 't--unk', full: 'Not enough data yet' }
   }
   const t = b.trend
   if (t === 'worse') {
@@ -223,6 +225,110 @@ function isBestPick(i, row) {
   return Number.isFinite(travelMinutes(row))
 }
 
+/** Current route id shown as selected (map + list) */
+const highlightId = ref('')
+
+/**
+ * @param {unknown} row
+ */
+function trendKeyForRow(row) {
+  const id = rowRouteId(row)
+  const t = id && payload.value?.byRoute?.[id]?.trend
+  if (t === 'worse') return /** @type {const} */('worse')
+  if (t === 'better') return /** @type {const} */('better')
+  if (t === 'neutral') return /** @type {const} */('neutral')
+  return /** @type {const} */('unk')
+}
+
+/**
+ * @param {unknown} row
+ */
+function displayTitleShort(row) {
+  const t = displayTitle(row)
+  if (t.length <= 22) return t
+  return `${t.slice(0, 21)}…`
+}
+
+const mapPins = computed(() => {
+  const rows = rankedRows.value
+  const out = []
+  for (let i = 0; i < rows.length; i++) {
+    const row = rows[i]
+    const id = rowRouteId(row)
+    if (!id) continue
+    const pos = getBridgeAnchorForRouteId(id)
+    if (!pos) continue
+    const ti = trendInfo(row)
+    out.push({
+      id,
+      lat: pos[0],
+      lng: pos[1],
+      title: displayTitleShort(row),
+      minutes: isClosedRow(row) ? '—' : (() => {
+        const m = travelMinutes(row)
+        return Number.isFinite(m) ? String(Math.round(m)) : '—'
+      })(),
+      trendIcon: ti.short,
+      trendKey: trendKeyForRow(row),
+      trendFull: ti.full,
+      isPick: isBestPick(i, row),
+      isClosed: isClosedRow(row),
+      rank: i + 1,
+    })
+  }
+  return out
+})
+
+const isLandscapeSplit = ref(false)
+let splitMql = /** @type {MediaQueryList | null} */(null)
+function updateLandscapeSplit() {
+  if (typeof window === 'undefined') return
+  isLandscapeSplit.value = window.matchMedia(
+    '(orientation: landscape) and (min-width: 700px)',
+  ).matches
+}
+function onSplitMqlChange() {
+  updateLandscapeSplit()
+}
+
+/**
+ * @param {string} id routeId
+ */
+function onMapSelect(id) {
+  const k = String(id)
+  highlightId.value = k
+  void nextTick(() => {
+    const el = document.getElementById(`bridge-tile-${k}`)
+    el?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
+  })
+}
+
+/**
+ * @param {unknown} row
+ */
+function onListTileClick(row) {
+  const id = rowRouteId(row)
+  if (id) highlightId.value = id
+}
+
+/**
+ * @param {unknown} row
+ * @param {string} [id] routeId
+ */
+function isHighlighted(row, id) {
+  return highlightId.value && (id || rowRouteId(row)) === highlightId.value
+}
+
+watch(direction, () => {
+  highlightId.value = ''
+})
+watch(rankedRows, () => {
+  const h = highlightId.value
+  if (h && !rankedRows.value.some((r) => rowRouteId(r) === h)) {
+    highlightId.value = ''
+  }
+})
+
 async function load() {
   error.value = ''
   const gen = ++tick
@@ -245,6 +351,11 @@ function setDir(d) {
 }
 
 onMounted(() => {
+  updateLandscapeSplit()
+  if (typeof window !== 'undefined' && window.matchMedia) {
+    splitMql = window.matchMedia('(orientation: landscape) and (min-width: 700px)')
+    splitMql.addEventListener('change', onSplitMqlChange)
+  }
   void load()
   intervalId = setInterval(() => {
     void load()
@@ -252,6 +363,9 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
+  if (splitMql) {
+    splitMql.removeEventListener('change', onSplitMqlChange)
+  }
   if (intervalId) {
     clearInterval(intervalId)
     intervalId = null
@@ -260,135 +374,246 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div class="bridges-page">
-    <div class="bridges-bar">
-      <div class="bridges-bar-top">
-        <h1 class="bridges-h1">Bridges</h1>
-        <p v-if="payload?.fetchError" class="bridges-warn" role="status">
-          Data may be stale · {{ payload.fetchError }}
-        </p>
-        <p v-else class="bridges-pill">
-          <span>Fastest first</span>
-          <span v-if="payload?.fetchedAt" class="bridges-time"
-          >· {{ fmtTime(payload.fetchedAt) }}</span>
-          <span class="bridges-note">· Tunnels off</span>
-        </p>
-      </div>
-
-      <div class="bridges-toggle" role="group" aria-label="Direction">
-        <button
-          type="button"
-          class="dir-btn tap"
-          :class="{ 'is-on': direction === 'ToNY' }"
-          @click="setDir('ToNY')"
-        >
-          To NY
-        </button>
-        <button
-          type="button"
-          class="dir-btn tap"
-          :class="{ 'is-on': direction === 'ToNJ' }"
-          @click="setDir('ToNJ')"
-        >
-          To NJ
-        </button>
+  <div class="bridges-page" :class="{ 'is-split': isLandscapeSplit }">
+    <div class="bridges-map-column">
+      <div class="bridges-map-shell" :class="{ 'is-tall': isLandscapeSplit }">
+        <BridgesMap
+          v-if="!loading && payload"
+          :pins="mapPins"
+          :highlight-id="highlightId"
+          :fill-height="isLandscapeSplit"
+          @select="onMapSelect"
+        />
+        <div
+          v-else
+          class="bridges-map-placeholder"
+          role="status"
+        >Map loading…</div>
       </div>
     </div>
 
-    <p v-if="error" class="bridges-err">{{ error }}</p>
-
-    <div v-if="loading && !payload" class="bridges-skel" aria-busy="true">Loading…</div>
-
-    <ul
-      v-else
-      class="bridge-grid"
-      aria-label="Bridges, fastest first"
+    <div
+      class="bridges-list-column"
+      :class="{ 'is-scroll-pane': isLandscapeSplit }"
     >
-      <li
-        v-for="(row, idx) in rankedRows"
-        :key="rowKey(row)"
-        class="bridge-tile"
-        :class="{
-          'is-closed': isClosedRow(row),
-          'is-pick': isBestPick(idx, row),
-        }"
+      <div
+        class="bridges-list-inner"
+        :class="{ 'is-scroll-pane': isLandscapeSplit }"
       >
-        <div class="bridge-tile-inner">
-          <div class="bridge-tile-top">
-            <div class="bridge-rank" aria-hidden="true">{{ idx + 1 }}</div>
-            <div class="bridge-name-block">
-              <h2 class="bridge-title">{{ displayTitle(row) }}</h2>
-            </div>
-            <div
-              class="bridge-trend ico"
-              :class="trendInfo(row).cls"
-              :title="trendInfo(row).full"
-            >{{ trendInfo(row).short }}</div>
+        <div class="bridges-bar">
+          <div class="bridges-bar-top">
+            <h1 class="bridges-h1">Bridges</h1>
+            <p v-if="payload?.fetchError" class="bridges-warn" role="status">
+              Data may be stale · {{ payload.fetchError }}
+            </p>
+            <p v-else class="bridges-pill">
+              <span>Fastest first</span>
+              <span v-if="payload?.fetchedAt" class="bridges-time"
+              >· {{ fmtTime(payload.fetchedAt) }}</span>
+              <span class="bridges-note">· Tunnels off</span>
+            </p>
           </div>
-          <div class="bridge-mid">
-            <div class="bridge-min-block">
-              <span class="bridge-min-num">
-                <template
-                  v-if="row && typeof row === 'object' && (/** @type {any} */(row)).isCrossingClosed"
-                >—</template>
-                <template
-                  v-else-if="row && typeof row === 'object' && (/** @type {any} */(row)).routeTravelTime != null"
-                >{{ String((/** @type {any} */(row)).routeTravelTime) }}</template>
-                <template v-else>—</template>
-              </span>
-              <span class="bridge-min-suf">min</span>
-            </div>
-            <div
-              v-if="row && typeof row === 'object' && (/** @type {any} */(row)).routeSpeed != null"
-              class="bridge-mph"
-            >{{ (/** @type {any} */(row)).routeSpeed }}&nbsp;mph</div>
-          </div>
-          <div v-if="seriesForRow(row).length > 0" class="sparkline-wrap">
-            <svg
-              class="spark-svg"
-              viewBox="0 0 100 22"
-              preserveAspectRatio="none"
-              width="100%"
-              height="22"
-              :aria-label="`Recent travel time for ${displayTitle(row)}`"
+
+          <div class="bridges-toggle" role="group" aria-label="Direction">
+            <button
+              type="button"
+              class="dir-btn tap"
+              :class="{ 'is-on': direction === 'ToNY' }"
+              @click="setDir('ToNY')"
             >
-              <line
-                x1="0"
-                y1="20"
-                x2="100"
-                y2="20"
-                stroke="rgba(255,255,255,0.06)"
-                stroke-width="1"
-              />
-              <path
-                v-if="sparkPathD(row)"
-                :d="sparkPathD(row)"
-                fill="none"
-                stroke="var(--b-spark, #9d7ed8)"
-                stroke-width="2.25"
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                vector-effect="non-scaling-stroke"
-              />
-            </svg>
+              To NY
+            </button>
+            <button
+              type="button"
+              class="dir-btn tap"
+              :class="{ 'is-on': direction === 'ToNJ' }"
+              @click="setDir('ToNJ')"
+            >
+              To NJ
+            </button>
           </div>
         </div>
-      </li>
-    </ul>
+
+        <p v-if="error" class="bridges-err">{{ error }}</p>
+        <div v-if="loading && !payload" class="bridges-skel" aria-busy="true">Loading…</div>
+
+        <ul
+          v-else
+          class="bridge-grid"
+          aria-label="Bridges, fastest first"
+        >
+          <li
+            v-for="(row, idx) in rankedRows"
+            :id="`bridge-tile-${rowRouteId(row)}`"
+            :key="rowKey(row)"
+            class="bridge-tile"
+            :class="{
+              'is-closed': isClosedRow(row),
+              'is-pick': isBestPick(idx, row),
+              'is-hi': isHighlighted(row),
+            }"
+            @click="onListTileClick(row)"
+          >
+            <div class="bridge-tile-inner">
+              <div class="bridge-tile-top">
+                <div class="bridge-rank" aria-hidden="true">{{ idx + 1 }}</div>
+                <div class="bridge-name-block">
+                  <h2 class="bridge-title">{{ displayTitle(row) }}</h2>
+                </div>
+                <div
+                  class="bridge-trend ico"
+                  :class="trendInfo(row).cls"
+                  :title="trendInfo(row).full"
+                >{{ trendInfo(row).short }}</div>
+              </div>
+              <div class="bridge-mid">
+                <div class="bridge-min-block">
+                  <span class="bridge-min-num">
+                    <template
+                      v-if="row && typeof row === 'object' && (/** @type {any} */(row)).isCrossingClosed"
+                    >—</template>
+                    <template
+                      v-else-if="row && typeof row === 'object' && (/** @type {any} */(row)).routeTravelTime != null"
+                    >{{ String((/** @type {any} */(row)).routeTravelTime) }}</template>
+                    <template v-else>—</template>
+                  </span>
+                  <span class="bridge-min-suf">min</span>
+                </div>
+                <div
+                  v-if="row && typeof row === 'object' && (/** @type {any} */(row)).routeSpeed != null"
+                  class="bridge-mph"
+                >{{ (/** @type {any} */(row)).routeSpeed }}&nbsp;mph</div>
+              </div>
+              <div v-if="seriesForRow(row).length > 0" class="sparkline-wrap">
+                <svg
+                  class="spark-svg"
+                  viewBox="0 0 100 22"
+                  preserveAspectRatio="none"
+                  width="100%"
+                  height="22"
+                  :aria-label="`Recent travel time for ${displayTitle(row)}`"
+                >
+                  <line
+                    x1="0"
+                    y1="20"
+                    x2="100"
+                    y2="20"
+                    stroke="rgba(255,255,255,0.06)"
+                    stroke-width="1"
+                  />
+                  <path
+                    v-if="sparkPathD(row)"
+                    :d="sparkPathD(row)"
+                    fill="none"
+                    stroke="var(--b-spark, #9d7ed8)"
+                    stroke-width="2.25"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    vector-effect="non-scaling-stroke"
+                  />
+                </svg>
+              </div>
+            </div>
+          </li>
+        </ul>
+      </div>
+    </div>
   </div>
 </template>
 
 <style scoped>
 .bridges-page {
   width: 100%;
-  max-width: 1280px;
-  margin-inline: auto;
-  padding: 0.65rem min(1.25rem, 3.5vw) calc(var(--nav-height, 4rem) + 0.85rem);
-  min-height: 100%;
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
   color: var(--color-text-primary, #f4f4f8);
   --b-spark: #a78bfa;
   --b-pick: rgba(52, 211, 153, 0.5);
   box-sizing: border-box;
+  padding-bottom: calc(var(--nav-height, 4rem) + env(safe-area-inset-bottom, 0));
+}
+
+.bridges-page:not(.is-split) {
+  padding-left: max(env(safe-area-inset-left, 0px), var(--space-2, 0.5rem));
+  padding-right: max(env(safe-area-inset-right, 0px), var(--space-2, 0.5rem));
+  padding-top: 0.5rem;
+}
+
+/* Landscape: map left, list right (scrolls) — same model as directory */
+.bridges-page.is-split {
+  flex: 1;
+  min-height: 0;
+  flex-direction: row;
+  align-items: stretch;
+  padding-left: 0;
+  padding-right: 0;
+  padding-top: 0;
+  padding-bottom: calc(var(--nav-height, 4rem) + env(safe-area-inset-bottom, 0));
+}
+
+.bridges-map-column {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+
+.bridges-page.is-split .bridges-map-column {
+  flex: 1.25 1 0;
+  border-right: 1px solid var(--color-border, rgba(255, 255, 255, 0.08));
+}
+
+.bridges-map-shell {
+  min-height: min(42vh, 19rem);
+  display: flex;
+  flex-direction: column;
+  flex: 0 0 auto;
+}
+
+.bridges-map-shell.is-tall {
+  flex: 1 1 0;
+  min-height: 0;
+  height: 100%;
+}
+
+.bridges-map-placeholder {
+  min-height: min(42vh, 19rem);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #6e6e80;
+  font-size: 0.9rem;
+  background: #0a0a0f;
+  border-bottom: 1px solid var(--color-border, rgba(255, 255, 255, 0.1));
+}
+
+.bridges-list-column {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.bridges-list-inner {
+  padding: 0.65rem min(1.25rem, 3.5vw) 0.85rem;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.bridges-list-inner.is-scroll-pane {
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+}
+
+.bridges-page.is-split .bridges-list-inner {
+  padding-top: 0.65rem;
+  padding-left: var(--space-3, 0.75rem);
+  padding-right: max(env(safe-area-inset-right, 0px), var(--space-3, 0.75rem));
 }
 
 .bridges-bar {
@@ -505,13 +730,17 @@ onUnmounted(() => {
 }
 
 @media (min-width: 900px) {
-  .bridges-page {
-    padding-inline: 1.5rem;
-  }
-  .bridge-grid {
+  .bridges-page:not(.is-split) .bridge-grid {
     grid-template-columns: repeat(3, minmax(0, 1fr));
     gap: 0.75rem;
   }
+}
+
+/* Split view: one column, easier to scan with map on the side */
+.bridges-page.is-split .bridge-grid {
+  grid-template-columns: 1fr;
+  gap: 0.5rem;
+  max-width: 30rem;
 }
 
 .bridge-tile {
@@ -521,6 +750,14 @@ onUnmounted(() => {
   background: linear-gradient(150deg, #181822 0%, #0b0b0f 100%);
   border: 1px solid rgba(255, 255, 255, 0.09);
   box-shadow: 0 4px 20px rgba(0, 0, 0, 0.35);
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition: border-color 0.12s, box-shadow 0.12s;
+}
+
+.bridge-tile.is-hi {
+  border-color: rgba(199, 168, 255, 0.55);
+  box-shadow: 0 0 0 1px rgba(199, 168, 255, 0.25);
 }
 
 .bridge-tile.is-pick {

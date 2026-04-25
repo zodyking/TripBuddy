@@ -695,14 +695,18 @@ onUnmounted(() => {
 }
 
 .app-main.app-main--bridges > * {
+  display: flex;
+  flex-direction: column;
   flex: 1 0 auto;
   width: 100%;
   min-width: 0;
+  min-height: 0;
 }
 
-/* Split-pane directory: only the list column scrolls, not the main element */
+/* Split-pane directory / bridges: only the list column scrolls, not the main element */
 @media (orientation: landscape) and (min-width: 700px) {
-  .app-main.app-main--directory {
+  .app-main.app-main--directory,
+  .app-main.app-main--bridges {
     overflow-y: hidden;
   }
 }
