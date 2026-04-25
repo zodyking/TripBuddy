@@ -182,3 +182,74 @@ export function monthGridForWorkWeek(
   }
   return { headers: CAL_HEADERS, cells }
 }
+
+/**
+ * Full calendar month (42 cells, Sunday start). `inMonth` marks days in the target month; others are padding.
+ * @param {number} year
+ * @param {number} monthIndex0 0–11
+ * @param {Record<string, number>} [tripCounts] keys: shift YYYY-MM-DD
+ * @param {{ shiftStartMins?: number, shiftEndMins?: number }} [shift]
+ * @returns {{ year: number, monthIndex0: number, monthLabel: string, headers: string[], cells: { key: string, dayNum: number, inMonth: boolean, tripCount: number, isToday: boolean }[]}}
+ */
+export function monthGridForCalendarMonth(
+  year,
+  monthIndex0,
+  tripCounts = {},
+  shift = { shiftStartMins: 0, shiftEndMins: 1439 },
+) {
+  const sM = Math.max(0, Math.min(1439, Math.floor(Number(shift?.shiftStartMins) || 0)))
+  const eM = Math.max(0, Math.min(1439, Math.floor(Number(shift?.shiftEndMins) || 1439)))
+  const todayK = shiftDateKeyForEventMs(Date.now(), sM, eM) || localDateKey(Date.now())
+  const y = Math.floor(year)
+  const m0 = Math.max(0, Math.min(11, Math.floor(monthIndex0)))
+  const first = new Date(y, m0, 1, 0, 0, 0, 0)
+  if (isNaN(first.getTime())) {
+    return {
+      year: y,
+      monthIndex0: m0,
+      monthLabel: '—',
+      headers: CAL_HEADERS,
+      cells: [],
+    }
+  }
+  const monthLabel = first.toLocaleString('en-US', { month: 'long', year: 'numeric' })
+  const startDow = first.getDay()
+  const grid0 = new Date(y, m0, 1 - startDow, 0, 0, 0, 0)
+  const cells = []
+  for (let i = 0; i < 42; i += 1) {
+    const d = new Date(grid0.getTime() + i * 24 * 60 * 60 * 1000)
+    const k = shiftDateKeyForEventMs(d.getTime(), sM, eM) || localDateKey(d.getTime())
+    const inMonth = d.getFullYear() === y && d.getMonth() === m0
+    const tripCount = typeof tripCounts[k] === 'number' ? tripCounts[k] : 0
+    cells.push({
+      key: k,
+      dayNum: d.getDate(),
+      inMonth,
+      tripCount,
+      isToday: k === todayK,
+    })
+  }
+  return { year: y, monthIndex0: m0, monthLabel, headers: CAL_HEADERS, cells }
+}
+
+/**
+ * @param {number} year
+ * @param {number} monthIndex0
+ */
+export function dayStripForMonth(year, monthIndex0) {
+  const y = Math.floor(year)
+  const m0 = Math.max(0, Math.min(11, Math.floor(monthIndex0)))
+  const last = new Date(y, m0 + 1, 0, 0, 0, 0, 0)
+  const n = last.getDate()
+  const out = []
+  for (let day = 1; day <= n; day += 1) {
+    const d = new Date(y, m0, day, 12, 0, 0, 0)
+    out.push({
+      key: localDateKey(d.getTime()),
+      label: String(day),
+      dowLabel: dayShort(d.getDay()),
+      dow: d.getDay(),
+    })
+  }
+  return out
+}

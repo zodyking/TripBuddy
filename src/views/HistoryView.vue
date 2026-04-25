@@ -1,11 +1,10 @@
 <script setup>
-import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch, nextTick, Teleport } from 'vue'
 import { getAssignment, getCredentials, patchTripHistoryOutcome, getDollyRegistry, patchDollyRating } from '../api.js'
 import {
-  workWeekGroupMeta,
-  dayStripForWeek,
+  dayStripForMonth,
   localDateKey,
-  monthGridForWorkWeek,
+  monthGridForCalendarMonth,
 } from '../utils/workWeekGroup.js'
 import { shiftDateKeyForEventMs } from '../utils/shiftCalendar.js'
 import { copyTextToClipboard } from '../utils/copyToClipboard.js'
@@ -35,13 +34,20 @@ const error = ref('')
 const entries = ref([])
 
 const openId = ref('')
-const openWeekKey = ref('')
+const openMonthKey = ref('')
+
+const monthScrollRef = ref(/** @type {HTMLElement | null} */ (null))
+/** Oldest and newest month currently rendered (infinite scroll, calendar months). @type {import('vue').Ref<{ y: number, m0: number } | null>} */
+const rangeStart = ref(null)
+const rangeEnd = ref(null)
 
 const DOUBLE_CLICK_MS = 500
 
 /** YYYY-MM-DD; empty = show all days in selected work week */
 const filterDayKey = ref('')
 const outcomeMenuOpen = ref('')
+const outcomeMenuPos = ref(/** @type {null | { top: number, left: number, minWidth: number }} */ (null))
+const outcomeRowForMenu = ref(/** @type {null | LedgerEntry} */ (null))
 const dollyList = ref(/** @type {Array<{ nbr: string, rating?: string, lastSeenAt?: number }>} */ ([]))
 
 const outcomeMenuOpts = [
@@ -107,12 +113,13 @@ async function load() {
         const seq = String(x.dailyTripLegSequence ?? '').trim()
         const legKey = /^\d+$/.test(seq) ? seq : ''
         const oRaw = /** @type {any} */ (x)
-        const o =
+        const rawO =
           typeof oRaw.outcome === 'string' && oRaw.outcome
             ? normalizeOutcome(oRaw.outcome)
             : typeof oRaw.dispatchHeader === 'object' && oRaw.dispatchHeader
               ? normalizeOutcome(/** @type {any} */ (oRaw.dispatchHeader).historyOutcome)
               : ''
+        const o = rawO || 'delivered'
         const e = {
           id: String(x.id ?? ''),
           source: typeof x.source === 'string' ? x.source : 'complete',
@@ -156,78 +163,125 @@ const sorted = computed(() =>
   [...entries.value].sort((a, b) => b.displayDate - a.displayDate),
 )
 
-/** @typedef {{ key: string, groupLabel: string, sortKey: number, items: LedgerEntry[]}} WeekGroup */
-const weekGroups = computed(() => {
+/**
+ * @param {number} y
+ * @param {number} m0
+ */
+function monthKey(y, m0) {
+  return `${y}-${String(m0 + 1).padStart(2, '0')}`
+}
+
+/**
+ * @param {number} tMs
+ */
+function monthKeyFromMs(tMs) {
+  const d = new Date(tMs)
+  if (isNaN(d.getTime())) return { y: 1970, m0: 0, key: '1970-01' }
+  const y = d.getFullYear()
+  const m0 = d.getMonth()
+  return { y, m0, key: monthKey(y, m0) }
+}
+
+function prevMonthFrom(y, m0) {
+  if (m0 <= 0) return { y: y - 1, m0: 11 }
+  return { y, m0: m0 - 1 }
+}
+
+function nextMonthFrom(y, m0) {
+  if (m0 >= 11) return { y: y + 1, m0: 0 }
+  return { y, m0: m0 + 1 }
+}
+
+const monthByKey = computed(() => {
   const list = sorted.value
-  const wwm = { ...workWeekFromCred.value }
-  /** @type {Map<string, { key: string, groupLabel: string, endMs: number, weekStart: number, items: LedgerEntry[] }>} */
   const m = new Map()
   for (const e of list) {
     const t = e.displayDate
-    const w = t ? workWeekGroupMeta(t, wwm) : null
-    const key = w ? w.key : 'unknown'
-    const groupLabel = w
-      ? w.groupLabel
-      : 'No date or invalid timestamp'
-    const endMs = w ? w.endMs : 0
-    const wkStart = w ? w.weekStart : 0
+    if (typeof t !== 'number' || !Number.isFinite(t) || t <= 0) {
+      if (!m.has('unknown')) {
+        m.set('unknown', { key: 'unknown', y: 0, m0: 0, groupLabel: 'No date', items: [] })
+      }
+      m.get('unknown').items.push(e)
+      continue
+    }
+    const { y, m0, key } = monthKeyFromMs(t)
     if (!m.has(key)) {
-      m.set(key, { key, groupLabel, endMs, weekStart: wkStart, items: [] })
+      const d0 = new Date(y, m0, 1, 12, 0, 0, 0)
+      const groupLabel = d0.toLocaleString('en-US', { month: 'long', year: 'numeric' })
+      m.set(key, { key, y, m0, groupLabel, items: [] })
     }
     m.get(key).items.push(e)
   }
-  const arr = [...m.values()]
-  for (const g of arr) {
+  for (const g of m.values()) {
     g.items.sort((a, b) => b.displayDate - a.displayDate)
   }
-  arr.sort((a, b) => b.weekStart - a.weekStart)
-  return arr.map((g) => ({
-    key: g.key,
-    groupLabel: g.groupLabel,
-    sortKey: g.items[0]?.displayDate ?? 0,
-    weekStartMs: g.weekStart,
-    items: g.items,
-  }))
+  return m
 })
 
-const activeWeekGroup = computed(() => {
-  if (!weekGroups.value.length) return null
-  const w = weekGroups.value.find((g) => g.key === openWeekKey.value)
-  return w || weekGroups.value[0]
+const monthGroupList = computed(() => {
+  const a = rangeStart.value
+  const b = rangeEnd.value
+  if (!a || !b) return []
+  const { y: ay, m0: am0 } = a
+  const { y: by, m0: bm0 } = b
+  const out = []
+  let cy = ay
+  let cm0 = am0
+  for (;;) {
+    out.push({ y: cy, m0: cm0, key: monthKey(cy, cm0) })
+    if (cy === by && cm0 === bm0) break
+    const n = nextMonthFrom(cy, cm0)
+    cy = n.y
+    cm0 = n.m0
+  }
+  return out
 })
 
-const dayStrip = computed(() => {
-  const w = activeWeekGroup.value
-  if (w == null || typeof w.weekStartMs !== 'number') return []
-  return dayStripForWeek(/** @type {number} */ (w.weekStartMs))
+const monthGroups = computed(() => {
+  const by = monthByKey.value
+  return monthGroupList.value.map(({ y, m0, key }) => {
+    const g0 = by.get(key)
+    const d0 = new Date(y, m0, 1, 12, 0, 0, 0)
+    return {
+      key,
+      y,
+      m0,
+      monthLabel: d0.toLocaleString('en-US', { month: 'long', year: 'numeric' }),
+      groupLabel: d0.toLocaleString('en-US', { month: 'long', year: 'numeric' }),
+      weekStartMs: d0.getTime(),
+      items: g0 && Array.isArray(g0.items) ? g0.items : [],
+    }
+  })
 })
 
 const weekFilteredItems = computed(() => {
-  const w = activeWeekGroup.value
+  const w =
+    !monthGroups.value.length
+      ? null
+      : monthGroups.value.find((g) => g.key === openMonthKey.value) || monthGroups.value[0]
   if (!w) return []
   if (!filterDayKey.value) return w.items
-  return w.items.filter(
-    (e) => {
-      if (!e.displayDate) return false
-      const t = /** @type {number} */ (e.displayDate)
-      const k = shiftDateKeyForEventMs(
-        t,
-        workWeekFromCred.value.shiftStartMins,
-        workWeekFromCred.value.shiftEndMins,
-      )
-      return k === filterDayKey.value
-    },
-  )
+  return w.items.filter((e) => {
+    if (!e.displayDate) return false
+    const t = /** @type {number} */(e.displayDate)
+    const k = shiftDateKeyForEventMs(
+      t,
+      workWeekFromCred.value.shiftStartMins,
+      workWeekFromCred.value.shiftEndMins,
+    )
+    return k === filterDayKey.value
+  })
 })
 
-/** @type {import('vue').ComputedRef<{ headers: string[], cells: { key: string, dayNum: number, inWorkWeek: boolean, tripCount: number, isToday: boolean }[] }>} */
-const activeWeekCalendar = computed(() => {
-  const w = activeWeekGroup.value
-  if (w == null || typeof w.weekStartMs !== 'number') {
-    return { headers: ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'], cells: [] }
+/**
+ * @param {{ y: number, m0: number, items: LedgerEntry[] }} g
+ */
+function monthCalendarForGroup(g) {
+  if (g == null) {
+    return { year: 0, monthIndex0: 0, monthLabel: '', headers: ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'], cells: [] }
   }
   const counts = {}
-  for (const e of w.items) {
+  for (const e of g.items) {
     if (!e.displayDate) continue
     const k = shiftDateKeyForEventMs(
       /** @type {number} */(e.displayDate),
@@ -237,11 +291,99 @@ const activeWeekCalendar = computed(() => {
     if (!k) continue
     counts[k] = (counts[k] || 0) + 1
   }
-  return monthGridForWorkWeek(/** @type {number} */(w.weekStartMs), counts, {
+  return monthGridForCalendarMonth(/** @type {number} */(g.y), g.m0, counts, {
     shiftStartMins: workWeekFromCred.value.shiftStartMins,
     shiftEndMins: workWeekFromCred.value.shiftEndMins,
   })
-})
+}
+
+let scrollBusy = false
+
+/**
+ * @param {number} dY
+ * @param {number} dM
+ */
+function extendRange(dY, dM) {
+  const a = rangeStart.value
+  const b = rangeEnd.value
+  if (!a || !b) return
+  let y = a.y
+  let m0 = a.m0
+  for (let i = 0; i < dM; i += 1) {
+    const p = prevMonthFrom(y, m0)
+    y = p.y
+    m0 = p.m0
+  }
+  if (dY) {
+    y -= dY
+  }
+  if (a.y !== y || a.m0 !== m0) {
+    rangeStart.value = { y, m0 }
+  }
+  let y2 = b.y
+  let m1 = b.m0
+  for (let i = 0; i < dM; i += 1) {
+    const n = nextMonthFrom(y2, m1)
+    y2 = n.y
+    m1 = n.m0
+  }
+  if (dY) {
+    y2 += dY
+  }
+  if (b.y !== y2 || b.m0 !== m1) {
+    rangeEnd.value = { y: y2, m0: m1 }
+  }
+}
+
+function onMonthScroll() {
+  const el = monthScrollRef.value
+  if (!el || scrollBusy) return
+  if (el.scrollTop < 64) {
+    const prevH = el.scrollHeight
+    scrollBusy = true
+    extendRange(0, 2)
+    nextTick(() => {
+      el.scrollTop = el.scrollHeight - prevH + el.scrollTop
+      scrollBusy = false
+    })
+  }
+  const fromBottom = el.scrollHeight - el.clientHeight - el.scrollTop
+  if (fromBottom < 64) {
+    scrollBusy = true
+    extendRange(0, 2)
+    nextTick(() => {
+      scrollBusy = false
+    })
+  }
+}
+
+watch(sorted, (list) => {
+  if (!list.length) {
+    rangeStart.value = null
+    rangeEnd.value = null
+    return
+  }
+  const newest = list[0].displayDate
+  const oldest = list[list.length - 1].displayDate
+  if (typeof newest !== 'number' || typeof oldest !== 'number' || !newest) return
+  const mNew = monthKeyFromMs(newest)
+  const mOld = monthKeyFromMs(oldest)
+  if (!rangeStart.value || !rangeEnd.value) {
+    rangeStart.value = { y: mOld.y, m0: mOld.m0 }
+    rangeEnd.value = { y: mNew.y, m0: mNew.m0 }
+    return
+  }
+  const older = mOld.y < rangeStart.value.y
+    || (mOld.y === rangeStart.value.y && mOld.m0 < rangeStart.value.m0)
+  if (older) {
+    rangeStart.value = { y: mOld.y, m0: mOld.m0 }
+  }
+  const newer = mNew.y > rangeEnd.value.y
+    || (mNew.y === rangeEnd.value.y && mNew.m0 > rangeEnd.value.m0)
+  if (newer) {
+    rangeEnd.value = { y: mNew.y, m0: mNew.m0 }
+  }
+}, { immediate: true, deep: false })
 
 async function loadDolly() {
   try {
@@ -287,22 +429,26 @@ function copyDollyN(n) {
 }
 
 watch(
-  weekGroups,
+  monthGroups,
   (groups) => {
     if (!groups.length) {
       openId.value = ''
-      openWeekKey.value = ''
+      openMonthKey.value = ''
       filterDayKey.value = ''
       return
     }
-    if (!groups.some((g) => g.key === openWeekKey.value)) {
-      openWeekKey.value = groups[0].key
+    if (!groups.some((g) => g.key === openMonthKey.value)) {
+      openMonthKey.value = groups[groups.length - 1].key
     }
     filterDayKey.value = ''
     if (!sorted.value.some((e) => e.id === openId.value)) {
-      const firstG = groups.find((g) => g.key === openWeekKey.value) || groups[0]
+      const firstG = groups.find((g) => g.key === openMonthKey.value) || groups[groups.length - 1]
       openId.value = firstG?.items[0]?.id || ''
     }
+    nextTick(() => {
+      const el = monthScrollRef.value
+      if (el) el.scrollTop = el.scrollHeight
+    })
   },
   { immediate: true },
 )
@@ -341,9 +487,9 @@ const outcomeLabel = (o) => {
  * @returns {'none' | 'delivered' | 'rejected' | 'removed'}
  */
 function outcomeSelectValue(e) {
-  const t = (e.outcome && String(e.outcome).trim().toLowerCase()) || 'none'
+  const t = (e.outcome && String(e.outcome).trim().toLowerCase()) || 'delivered'
   if (t === 'delivered' || t === 'rejected' || t === 'removed' || t === 'none') return t
-  return 'none'
+  return 'delivered'
 }
 
 const historySavingId = ref('')
@@ -374,6 +520,8 @@ async function setOutcome(legSeq, o) {
 
 function closeOutcomeMenu() {
   outcomeMenuOpen.value = ''
+  outcomeRowForMenu.value = null
+  outcomeMenuPos.value = null
 }
 
 /**
@@ -384,8 +532,33 @@ function closeOutcomeMenu() {
 function toggleOutcomeMenu(row, id, ev) {
   ev?.stopPropagation()
   if (!/^\d+$/.test(row.dailyTripLegSequence)) return
-  const next = outcomeMenuOpen.value === id ? '' : id
-  outcomeMenuOpen.value = next
+  if (outcomeMenuOpen.value === id) {
+    closeOutcomeMenu()
+    return
+  }
+  outcomeMenuOpen.value = id
+  outcomeRowForMenu.value = row
+  if (typeof document === 'undefined' || !ev?.currentTarget) return
+  const place = () => {
+    const el = /** @type {HTMLElement} */(ev.currentTarget)
+    if (!el?.getBoundingClientRect) return
+    const r = el.getBoundingClientRect()
+    const w = 180
+    let left = Math.min(
+      r.left,
+      (typeof window !== 'undefined' ? window.innerWidth : 400) - w - 8,
+    )
+    left = Math.max(8, left)
+    outcomeMenuPos.value = {
+      top: r.bottom + 6,
+      left,
+      minWidth: Math.max(140, Math.min(w, r.width)),
+    }
+  }
+  place()
+  if (typeof window !== 'undefined') {
+    window.requestAnimationFrame(place)
+  }
 }
 
 /**
@@ -433,17 +606,17 @@ function onRowDoubleClick(e) {
 function cycleOutcome(e) {
   const s = e.dailyTripLegSequence
   if (!/^\d+$/.test(s)) return
-  const o = (e.outcome && String(e.outcome)) || 'none'
+  const cur = outcomeSelectValue(e)
   const next =
-    o === 'none'
+    cur === 'none'
       ? 'delivered'
-      : o === 'delivered'
+      : cur === 'delivered'
         ? 'rejected'
-        : o === 'rejected'
+        : cur === 'rejected'
           ? 'removed'
-          : o === 'removed'
+          : cur === 'removed'
             ? 'none'
-            : 'delivered'
+            : 'none'
   void setOutcome(s, next)
 }
 
@@ -451,13 +624,22 @@ let docClickOutcome = (/** @type {Event} */ e) => {
   const t = e.target
   if (t && typeof t === 'object' && 'closest' in /** @type {any} */ (t)) {
     if (/** @type {Element} */ (t).closest('.history-outcome-wrap')) return
+    if (/** @type {Element} */ (t).closest('.history-outcome-pop-layer')) return
   }
   closeOutcomeMenu()
+}
+
+function onOutcomeMenuViewport() {
+  if (outcomeMenuOpen.value) closeOutcomeMenu()
 }
 
 onMounted(() => {
   if (typeof document !== 'undefined') {
     document.addEventListener('click', docClickOutcome, true)
+  }
+  if (typeof window !== 'undefined') {
+    window.addEventListener('scroll', onOutcomeMenuViewport, true)
+    window.addEventListener('resize', onOutcomeMenuViewport, true)
   }
   void load()
   void loadDolly()
@@ -467,6 +649,10 @@ onUnmounted(() => {
   if (typeof document !== 'undefined') {
     document.removeEventListener('click', docClickOutcome, true)
   }
+  if (typeof window !== 'undefined') {
+    window.removeEventListener('scroll', onOutcomeMenuViewport, true)
+    window.removeEventListener('resize', onOutcomeMenuViewport, true)
+  }
 })
 </script>
 
@@ -475,36 +661,42 @@ onUnmounted(() => {
     <header class="history-head">
       <h1 class="history-title">History</h1>
       <p class="history-sub">
-        Work weeks come from Settings. Use the <strong>calendar strip</strong> to focus one day, or All week.
-        Double-click a trip’s header to cycle the stop outcome. Dolly list is your registry — tap a number to copy, rate
-        with 👍/👎, sync updates from the active load automatically.
+        <strong>Shift</strong> times in Settings set which <strong>calendar day</strong> a trip falls on. Scroll the month list, open a
+        month, then use the strip or grid to filter one day. Double-tap a trip header to cycle outcome (default
+        <strong>Delivered</strong>). Dolly list is your registry — tap to copy, rate with 👍/👎.
       </p>
-      <button type="button" class="history-refresh tap" :disabled="loading" @click="load">
+      <button type="button" class="btn secondary history-refresh tap" :disabled="loading" @click="load">
         {{ loading ? 'Loading…' : 'Refresh' }}
       </button>
     </header>
 
     <p v-if="error" class="history-err">{{ error }}</p>
-    <p v-else-if="!loading && weekGroups.length === 0" class="history-empty">
+    <p v-else-if="!loading && monthGroups.length === 0" class="history-empty">
       No history yet. Trips are saved automatically from the API after each Linehaul refresh.
     </p>
 
-    <ul v-else class="history-weeks" aria-label="Trip history by week">
-      <li v-for="g in weekGroups" :key="g.key" class="history-week">
+    <div
+      v-else
+      ref="monthScrollRef"
+      class="history-months-scroll"
+      @scroll.passive="onMonthScroll"
+    >
+    <ul class="history-weeks" aria-label="Trip history by month (scroll)">
+      <li v-for="g in monthGroups" :key="g.key" class="history-week">
         <details
-          :open="openWeekKey === g.key"
+          :open="openMonthKey === g.key"
           class="history-week-drop"
           @toggle="
             (ev) => {
               const d = /** @type {HTMLDetailsElement} */ (ev.target)
               if (d.open) {
-                openWeekKey = g.key
+                openMonthKey = g.key
                 filterDayKey = ''
                 if (!g.items.some((x) => x.id === openId)) {
                   openId = g.items[0]?.id || ''
                 }
-              } else if (openWeekKey === g.key) {
-                openWeekKey = ''
+              } else if (openMonthKey === g.key) {
+                openMonthKey = ''
                 filterDayKey = ''
               }
             }
@@ -513,49 +705,49 @@ onUnmounted(() => {
           <summary class="history-week-summary">
             <div class="history-week-head-titles">
               <span class="history-week-title">{{ g.groupLabel }}</span>
-              <span v-if="typeof g.weekStartMs === 'number'" class="history-week-iso-badge">
-                Week of {{ new Date(/** @type {number} */(g.weekStartMs)).toLocaleDateString() }}
-              </span>
             </div>
             <div class="history-week-meta">
-              <span class="history-week-count">{{ g.items.length }} in week</span>
+              <span class="history-week-count"
+                >{{ g.key === openMonthKey && filterDayKey ? weekFilteredItems.length : g.items.length }} trips</span
+              >
             </div>
           </summary>
           <div
-            v-if="g.key === openWeekKey && activeWeekCalendar.cells.length"
+            v-if="g.key === openMonthKey && monthCalendarForGroup(g).cells.length"
             class="history-cal-surface"
             :aria-label="`Calendar: ${g.groupLabel}`"
           >
             <div class="history-cal-legend">
-              <span class="legend-dot legend-dot--ww" /> Work week
+              <span class="legend-dot legend-dot--ww" /> In month
               <span class="legend-dot legend-dot--trip" /> Has trips
             </div>
             <div class="history-month-grid" role="grid" :aria-colcount="7" :aria-rowcount="6">
               <div class="history-month-dow" role="row" aria-label="Weekdays">
                 <div
-                  v-for="(h, hi) in activeWeekCalendar.headers"
-                  :key="`h-${hi}`"
+                  v-for="(h, hi) in monthCalendarForGroup(g).headers"
+                  :key="`h-${g.key}-${hi}`"
                   class="history-dow"
                   role="columnheader"
                 >{{ h }}</div>
               </div>
               <div class="history-month-cells" role="row">
                 <button
-                  v-for="c in activeWeekCalendar.cells"
-                  :key="c.key"
+                  v-for="c in monthCalendarForGroup(g).cells"
+                  :key="c.key + '-' + g.key"
                   type="button"
                   class="history-day-cell tap"
                   :class="{
-                    'history-day-cell--in-ww': c.inWorkWeek,
-                    'history-day-cell--on': c.inWorkWeek && filterDayKey === c.key,
-                    'history-day-cell--empty': c.inWorkWeek && !c.tripCount,
+                    'history-day-cell--in-ww': c.inMonth,
+                    'history-day-cell--on': c.inMonth && filterDayKey === c.key,
+                    'history-day-cell--empty': c.inMonth && !c.tripCount,
                     'history-day-cell--has': c.tripCount > 0,
                     'history-day-cell--today': c.isToday,
+                    'history-day-cell--faint': !c.inMonth,
                   }"
                   :title="`Trips: ${c.tripCount} · ${c.key}`"
-                  :aria-pressed="c.inWorkWeek && filterDayKey === c.key"
-                  :disabled="!c.inWorkWeek"
-                  @click="c.inWorkWeek && (filterDayKey = filterDayKey === c.key ? '' : c.key)"
+                  :aria-pressed="c.inMonth && filterDayKey === c.key"
+                  :disabled="!c.inMonth"
+                  @click="c.inMonth && (filterDayKey = filterDayKey === c.key ? '' : c.key)"
                 >
                   <span class="history-day-num">{{ c.dayNum }}</span>
                   <span
@@ -569,7 +761,12 @@ onUnmounted(() => {
             </div>
             <p v-if="filterDayKey" class="history-cal-filt">Filtered to <strong>{{ filterDayKey }}</strong> · <button type="button" class="history-link tap" @click="filterDayKey = ''">Clear</button></p>
           </div>
-          <div v-if="g.key === openWeekKey && dayStrip.length" class="history-day-rail" role="group" aria-label="Filter by day in this work week">
+          <div
+            v-if="g.key === openMonthKey && dayStripForMonth(/** @type {number} */(g.y), g.m0).length"
+            class="history-day-rail"
+            role="group"
+            :aria-label="`Filter by day in ${g.groupLabel}`"
+          >
             <button
               type="button"
               class="history-day-chip history-day-chip--all tap"
@@ -577,10 +774,10 @@ onUnmounted(() => {
               @click="filterDayKey = ''"
             >
               <span class="dow">All</span>
-              <span class="dom">All week</span>
+              <span class="dom">All month</span>
             </button>
             <button
-              v-for="d in dayStrip"
+              v-for="d in dayStripForMonth(/** @type {number} */(g.y), g.m0)"
               :key="d.key"
               type="button"
               class="history-day-chip tap"
@@ -594,12 +791,14 @@ onUnmounted(() => {
               <span class="dom">{{ d.label }}</span>
             </button>
           </div>
-          <p v-if="g.key === openWeekKey" class="history-trips-count">
-            <template v-if="filterDayKey">Showing {{ weekFilteredItems.length }} on selected day (of {{ g.items.length }})</template>
-            <template v-else>Showing all {{ g.items.length }} in this work week</template>
+          <p v-if="g.key === openMonthKey" class="history-trips-count">
+            <template v-if="filterDayKey"
+              >Showing {{ weekFilteredItems.length }} on selected day (of {{ g.items.length }})</template
+            >
+            <template v-else>Showing all {{ g.items.length }} in this month</template>
           </p>
           <aside
-            v-if="g.key === openWeekKey && dollyList.length"
+            v-if="g.key === openMonthKey && dollyList.length"
             class="history-dolly-aside"
             @click.stop
             @keydown.stop
@@ -625,7 +824,7 @@ onUnmounted(() => {
             :aria-label="`Trips in ${g.groupLabel}`"
           >
             <li
-              v-for="e in (g.key === openWeekKey ? weekFilteredItems : g.items)"
+              v-for="e in (g.key === openMonthKey ? weekFilteredItems : g.items)"
               :id="`history-card-${e.id}`"
               :key="e.id"
               class="history-card"
@@ -638,7 +837,7 @@ onUnmounted(() => {
               const d = /** @type {HTMLDetailsElement} */ (ev.target)
               if (d.open) {
                 openId = e.id
-                openWeekKey = g.key
+                openMonthKey = g.key
               } else if (openId === e.id) openId = ''
             }
           "
@@ -680,32 +879,6 @@ onUnmounted(() => {
                   <span class="history-outcome-pill__txt">{{ outcomeLabel(outcomeSelectValue(e)) }}</span>
                   <span class="history-outcome-pill__chev" aria-hidden="true">▾</span>
                 </button>
-                <ul
-                  v-if="outcomeMenuOpen === e.id"
-                  class="history-outcome-pop"
-                  role="listbox"
-                  @click.stop
-                  @pointerdown.stop
-                >
-                  <li
-                    v-for="opt in outcomeMenuOpts"
-                    :key="opt.k"
-                    role="option"
-                    :aria-selected="outcomeSelectValue(e) === opt.k"
-                  >
-                    <button
-                      type="button"
-                      class="history-outcome-mi"
-                      :disabled="historySavingId === `seq-${e.dailyTripLegSequence}`"
-                      :class="{
-                        'history-outcome-mi--on': outcomeSelectValue(e) === opt.k,
-                      }"
-                      @click="pickOutcomeFromMenu(e, opt.k, $event)"
-                    >
-                      {{ opt.t }}
-                    </button>
-                  </li>
-                </ul>
               </div>
             </div>
             </div>
@@ -788,6 +961,40 @@ onUnmounted(() => {
         </details>
       </li>
     </ul>
+    </div>
+    <Teleport to="body">
+      <ul
+        v-if="outcomeRowForMenu && outcomeMenuPos && outcomeMenuOpen"
+        class="history-outcome-pop history-outcome-pop--fixed history-outcome-pop-layer"
+        role="listbox"
+        :style="{
+          top: outcomeMenuPos.top + 'px',
+          left: outcomeMenuPos.left + 'px',
+          minWidth: outcomeMenuPos.minWidth + 'px',
+        }"
+        @click.stop
+        @pointerdown.stop
+      >
+        <li
+          v-for="opt in outcomeMenuOpts"
+          :key="opt.k"
+          role="option"
+          :aria-selected="outcomeSelectValue(outcomeRowForMenu) === opt.k"
+        >
+          <button
+            type="button"
+            class="history-outcome-mi"
+            :disabled="historySavingId === 'seq-' + (outcomeRowForMenu.dailyTripLegSequence || '')"
+            :class="{
+              'history-outcome-mi--on': outcomeSelectValue(outcomeRowForMenu) === opt.k,
+            }"
+            @click="pickOutcomeFromMenu(outcomeRowForMenu, opt.k, $event)"
+          >
+            {{ opt.t }}
+          </button>
+        </li>
+      </ul>
+    </Teleport>
   </div>
 </template>
 
@@ -834,6 +1041,18 @@ onUnmounted(() => {
 .history-refresh:disabled {
   opacity: 0.6;
   cursor: not-allowed;
+}
+.history-refresh.btn.secondary,
+.btn.secondary.history-refresh {
+  min-height: 2.25rem;
+  padding: 0.4rem 1rem;
+  background: var(--color-bg-surface, #16161d);
+  border: 1px solid var(--color-border, rgba(255, 255, 255, 0.12));
+  color: var(--color-text-primary, #e8e8f0);
+}
+.btn.secondary.history-refresh:hover:not(:disabled) {
+  background: var(--color-hover, rgba(255, 255, 255, 0.04));
+  border-color: var(--color-accent-purple, #7b4db5);
 }
 
 .history-err {
@@ -1217,7 +1436,7 @@ onUnmounted(() => {
   border: 1px solid #34343e;
   border-radius: 12px;
   background: #1a1a22;
-  overflow: hidden;
+  overflow: visible;
 }
 
 .history-drop {
@@ -1372,7 +1591,7 @@ onUnmounted(() => {
   position: absolute;
   right: 0;
   top: calc(100% + 4px);
-  z-index: 8;
+  z-index: 10090;
   min-width: 7.5rem;
   max-width: 12rem;
   margin: 0;
@@ -1382,6 +1601,30 @@ onUnmounted(() => {
   border-radius: 8px;
   background: #1a1a22;
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+}
+.history-outcome-pop--fixed {
+  position: fixed;
+  right: auto;
+  top: auto;
+  z-index: 10090;
+  max-width: min(12rem, calc(100vw - 16px));
+}
+.history-months-scroll {
+  max-height: min(70vh, 32rem);
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  padding: 0 0 0.5rem;
+  margin: 0 -0.1rem 0.5rem;
+  scrollbar-gutter: stable;
+}
+.history-week-drop[open] {
+  overflow: visible;
+}
+.history-day-cell--faint {
+  opacity: 0.35;
+}
+.history-day-cell--faint:disabled {
+  pointer-events: none;
 }
 .history-outcome-pop li {
   margin: 0;
