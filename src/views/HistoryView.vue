@@ -34,12 +34,12 @@ const error = ref('')
 const entries = ref([])
 
 const openId = ref('')
-const openMonthKey = ref('')
 
-const monthScrollRef = ref(/** @type {HTMLElement | null} */ (null))
-/** Oldest and newest month currently rendered (infinite scroll, calendar months). @type {import('vue').Ref<{ y: number, m0: number } | null>} */
-const rangeStart = ref(null)
-const rangeEnd = ref(null)
+/** Viewed calendar month (prev/next, no year cap). */
+const viewYear = ref(/** @type {number} */(new Date().getFullYear()))
+const viewMonth0 = ref(/** @type {number} */(new Date().getMonth()))
+/** On first data load, snap calendar to the month of the newest trip. */
+const calendarSyncedToData = ref(false)
 
 const DOUBLE_CLICK_MS = 500
 
@@ -218,65 +218,40 @@ const monthByKey = computed(() => {
   return m
 })
 
-const monthGroupList = computed(() => {
-  const a = rangeStart.value
-  const b = rangeEnd.value
-  if (!a || !b) return []
-  const { y: ay, m0: am0 } = a
-  const { y: by, m0: bm0 } = b
-  const out = []
-  let cy = ay
-  let cm0 = am0
-  for (;;) {
-    out.push({ y: cy, m0: cm0, key: monthKey(cy, cm0) })
-    if (cy === by && cm0 === bm0) break
-    const n = nextMonthFrom(cy, cm0)
-    cy = n.y
-    cm0 = n.m0
+const viewMonthInfo = computed(() => {
+  const y = viewYear.value
+  const m0 = viewMonth0.value
+  const k = monthKey(y, m0)
+  const g = monthByKey.value.get(k)
+  const d0 = new Date(y, m0, 1, 12, 0, 0, 0)
+  const longTitle = d0.toLocaleString('en-US', { month: 'long', year: 'numeric' })
+  return {
+    key: k,
+    y,
+    m0,
+    groupLabel: longTitle,
+    weekStartMs: d0.getTime(),
+    items: g?.items && Array.isArray(g.items) ? g.items : [],
   }
-  return out
-})
-
-const monthGroups = computed(() => {
-  const by = monthByKey.value
-  return monthGroupList.value.map(({ y, m0, key }) => {
-    const g0 = by.get(key)
-    const d0 = new Date(y, m0, 1, 12, 0, 0, 0)
-    return {
-      key,
-      y,
-      m0,
-      monthLabel: d0.toLocaleString('en-US', { month: 'long', year: 'numeric' }),
-      groupLabel: d0.toLocaleString('en-US', { month: 'long', year: 'numeric' }),
-      weekStartMs: d0.getTime(),
-      items: g0 && Array.isArray(g0.items) ? g0.items : [],
-    }
-  })
 })
 
 const weekFilteredItems = computed(() => {
-  const w =
-    !monthGroups.value.length
-      ? null
-      : monthGroups.value.find((g) => g.key === openMonthKey.value) || monthGroups.value[0]
-  if (!w) return []
+  const w = viewMonthInfo.value
   if (!filterDayKey.value) return w.items
   return w.items.filter((e) => {
     if (!e.displayDate) return false
     const t = /** @type {number} */(e.displayDate)
-    const k = shiftDateKeyForEventMs(
+    const k2 = shiftDateKeyForEventMs(
       t,
       workWeekFromCred.value.shiftStartMins,
       workWeekFromCred.value.shiftEndMins,
     )
-    return k === filterDayKey.value
+    return k2 === filterDayKey.value
   })
 })
 
-/**
- * @param {{ y: number, m0: number, items: LedgerEntry[] }} g
- */
-function monthCalendarForGroup(g) {
+const viewMonthGrid = computed(() => {
+  const g = viewMonthInfo.value
   if (g == null) {
     return { year: 0, monthIndex0: 0, monthLabel: '', headers: ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'], cells: [] }
   }
@@ -295,95 +270,35 @@ function monthCalendarForGroup(g) {
     shiftStartMins: workWeekFromCred.value.shiftStartMins,
     shiftEndMins: workWeekFromCred.value.shiftEndMins,
   })
+})
+
+function goPrevViewMonth() {
+  filterDayKey.value = ''
+  const p = prevMonthFrom(viewYear.value, viewMonth0.value)
+  viewYear.value = p.y
+  viewMonth0.value = p.m0
 }
 
-let scrollBusy = false
-
-/**
- * @param {number} dY
- * @param {number} dM
- */
-function extendRange(dY, dM) {
-  const a = rangeStart.value
-  const b = rangeEnd.value
-  if (!a || !b) return
-  let y = a.y
-  let m0 = a.m0
-  for (let i = 0; i < dM; i += 1) {
-    const p = prevMonthFrom(y, m0)
-    y = p.y
-    m0 = p.m0
-  }
-  if (dY) {
-    y -= dY
-  }
-  if (a.y !== y || a.m0 !== m0) {
-    rangeStart.value = { y, m0 }
-  }
-  let y2 = b.y
-  let m1 = b.m0
-  for (let i = 0; i < dM; i += 1) {
-    const n = nextMonthFrom(y2, m1)
-    y2 = n.y
-    m1 = n.m0
-  }
-  if (dY) {
-    y2 += dY
-  }
-  if (b.y !== y2 || b.m0 !== m1) {
-    rangeEnd.value = { y: y2, m0: m1 }
-  }
+function goNextViewMonth() {
+  filterDayKey.value = ''
+  const p = nextMonthFrom(viewYear.value, viewMonth0.value)
+  viewYear.value = p.y
+  viewMonth0.value = p.m0
 }
 
-function onMonthScroll() {
-  const el = monthScrollRef.value
-  if (!el || scrollBusy) return
-  if (el.scrollTop < 64) {
-    const prevH = el.scrollHeight
-    scrollBusy = true
-    extendRange(0, 2)
-    nextTick(() => {
-      el.scrollTop = el.scrollHeight - prevH + el.scrollTop
-      scrollBusy = false
-    })
-  }
-  const fromBottom = el.scrollHeight - el.clientHeight - el.scrollTop
-  if (fromBottom < 64) {
-    scrollBusy = true
-    extendRange(0, 2)
-    nextTick(() => {
-      scrollBusy = false
-    })
-  }
-}
-
-watch(sorted, (list) => {
-  if (!list.length) {
-    rangeStart.value = null
-    rangeEnd.value = null
-    return
-  }
-  const newest = list[0].displayDate
-  const oldest = list[list.length - 1].displayDate
-  if (typeof newest !== 'number' || typeof oldest !== 'number' || !newest) return
-  const mNew = monthKeyFromMs(newest)
-  const mOld = monthKeyFromMs(oldest)
-  if (!rangeStart.value || !rangeEnd.value) {
-    rangeStart.value = { y: mOld.y, m0: mOld.m0 }
-    rangeEnd.value = { y: mNew.y, m0: mNew.m0 }
-    return
-  }
-  const older = mOld.y < rangeStart.value.y
-    || (mOld.y === rangeStart.value.y && mOld.m0 < rangeStart.value.m0)
-  if (older) {
-    rangeStart.value = { y: mOld.y, m0: mOld.m0 }
-  }
-  const newer = mNew.y > rangeEnd.value.y
-    || (mNew.y === rangeEnd.value.y && mNew.m0 > rangeEnd.value.m0)
-  if (newer) {
-    rangeEnd.value = { y: mNew.y, m0: mNew.m0 }
-  }
-}, { immediate: true, deep: false })
+watch(
+  () => (sorted.value[0] ? sorted.value[0].displayDate : 0),
+  (d) => {
+    if (calendarSyncedToData.value) return
+    if (typeof d === 'number' && Number.isFinite(d) && d > 0) {
+      const m = monthKeyFromMs(d)
+      viewYear.value = m.y
+      viewMonth0.value = m.m0
+      calendarSyncedToData.value = true
+    }
+  },
+  { immediate: true },
+)
 
 async function loadDolly() {
   try {
@@ -429,26 +344,15 @@ function copyDollyN(n) {
 }
 
 watch(
-  monthGroups,
-  (groups) => {
-    if (!groups.length) {
+  weekFilteredItems,
+  (list) => {
+    if (!list.length) {
       openId.value = ''
-      openMonthKey.value = ''
-      filterDayKey.value = ''
       return
     }
-    if (!groups.some((g) => g.key === openMonthKey.value)) {
-      openMonthKey.value = groups[groups.length - 1].key
+    if (!list.some((e) => e.id === openId.value)) {
+      openId.value = list[0].id
     }
-    filterDayKey.value = ''
-    if (!sorted.value.some((e) => e.id === openId.value)) {
-      const firstG = groups.find((g) => g.key === openMonthKey.value) || groups[groups.length - 1]
-      openId.value = firstG?.items[0]?.id || ''
-    }
-    nextTick(() => {
-      const el = monthScrollRef.value
-      if (el) el.scrollTop = el.scrollHeight
-    })
   },
   { immediate: true },
 )
@@ -660,175 +564,154 @@ onUnmounted(() => {
   <div class="history-view">
     <header class="history-head">
       <h1 class="history-title">History</h1>
-      <p class="history-sub">
-        <strong>Shift</strong> times in Settings set which <strong>calendar day</strong> a trip falls on. Scroll the month list, open a
-        month, then use the strip or grid to filter one day. Double-tap a trip header to cycle outcome (default
-        <strong>Delivered</strong>). Dolly list is your registry — tap to copy, rate with 👍/👎.
-      </p>
-      <button type="button" class="btn secondary history-refresh tap" :disabled="loading" @click="load">
-        {{ loading ? 'Loading…' : 'Refresh' }}
+      <button
+        type="button"
+        class="btn secondary history-refresh tap"
+        :disabled="loading"
+        @click="load"
+      >
+        {{ loading ? 'Loading' : 'Refresh' }}
       </button>
     </header>
 
     <p v-if="error" class="history-err">{{ error }}</p>
-    <p v-else-if="!loading && monthGroups.length === 0" class="history-empty">
-      No history yet. Trips are saved automatically from the API after each Linehaul refresh.
-    </p>
-
     <div
       v-else
-      ref="monthScrollRef"
-      class="history-months-scroll"
-      @scroll.passive="onMonthScroll"
+      v-show="!loading"
+      class="history-content"
     >
-    <ul class="history-weeks" aria-label="Trip history by month (scroll)">
-      <li v-for="g in monthGroups" :key="g.key" class="history-week">
-        <details
-          :open="openMonthKey === g.key"
-          class="history-week-drop"
-          @toggle="
-            (ev) => {
-              const d = /** @type {HTMLDetailsElement} */ (ev.target)
-              if (d.open) {
-                openMonthKey = g.key
-                filterDayKey = ''
-                if (!g.items.some((x) => x.id === openId)) {
-                  openId = g.items[0]?.id || ''
-                }
-              } else if (openMonthKey === g.key) {
-                openMonthKey = ''
-                filterDayKey = ''
-              }
-            }
-          "
+      <p v-if="!sorted.length" class="history-empty">No trips</p>
+      <div class="history-month-body">
+      <div class="history-month-nav" role="group" aria-label="Month">
+        <button
+          type="button"
+          class="history-mnav tap"
+          title="Previous month"
+          :disabled="loading"
+          @click="goPrevViewMonth"
         >
-          <summary class="history-week-summary">
-            <div class="history-week-head-titles">
-              <span class="history-week-title">{{ g.groupLabel }}</span>
-            </div>
-            <div class="history-week-meta">
-              <span class="history-week-count"
-                >{{ g.key === openMonthKey && filterDayKey ? weekFilteredItems.length : g.items.length }} trips</span
-              >
-            </div>
-          </summary>
-          <div
-            v-if="g.key === openMonthKey && monthCalendarForGroup(g).cells.length"
-            class="history-cal-surface"
-            :aria-label="`Calendar: ${g.groupLabel}`"
-          >
-            <div class="history-cal-legend">
-              <span class="legend-dot legend-dot--ww" /> In month
-              <span class="legend-dot legend-dot--trip" /> Has trips
-            </div>
-            <div class="history-month-grid" role="grid" :aria-colcount="7" :aria-rowcount="6">
-              <div class="history-month-dow" role="row" aria-label="Weekdays">
-                <div
-                  v-for="(h, hi) in monthCalendarForGroup(g).headers"
-                  :key="`h-${g.key}-${hi}`"
-                  class="history-dow"
-                  role="columnheader"
-                >{{ h }}</div>
-              </div>
-              <div class="history-month-cells" role="row">
-                <button
-                  v-for="c in monthCalendarForGroup(g).cells"
-                  :key="c.key + '-' + g.key"
-                  type="button"
-                  class="history-day-cell tap"
-                  :class="{
-                    'history-day-cell--in-ww': c.inMonth,
-                    'history-day-cell--on': c.inMonth && filterDayKey === c.key,
-                    'history-day-cell--empty': c.inMonth && !c.tripCount,
-                    'history-day-cell--has': c.tripCount > 0,
-                    'history-day-cell--today': c.isToday,
-                    'history-day-cell--faint': !c.inMonth,
-                  }"
-                  :title="`Trips: ${c.tripCount} · ${c.key}`"
-                  :aria-pressed="c.inMonth && filterDayKey === c.key"
-                  :disabled="!c.inMonth"
-                  @click="c.inMonth && (filterDayKey = filterDayKey === c.key ? '' : c.key)"
-                >
-                  <span class="history-day-num">{{ c.dayNum }}</span>
-                  <span
-                    v-if="c.tripCount > 0"
-                    class="history-day-badge"
-                    aria-hidden="true"
-                  >{{ c.tripCount > 9 ? '9+' : c.tripCount }}</span
-                  >
-                </button>
-              </div>
-            </div>
-            <p v-if="filterDayKey" class="history-cal-filt">Filtered to <strong>{{ filterDayKey }}</strong> · <button type="button" class="history-link tap" @click="filterDayKey = ''">Clear</button></p>
+          ←
+        </button>
+        <h2 class="history-month-h2">{{ viewMonthInfo.groupLabel }}</h2>
+        <button
+          type="button"
+          class="history-mnav tap"
+          title="Next month"
+          :disabled="loading"
+          @click="goNextViewMonth"
+        >
+          →
+        </button>
+      </div>
+      <div
+        v-if="viewMonthGrid.cells.length"
+        class="history-cal-surface"
+        :aria-label="`Month grid ${viewMonthInfo.groupLabel}`"
+      >
+        <div class="history-month-grid" role="grid" :aria-colcount="7" :aria-rowcount="6">
+          <div class="history-month-dow" role="row" aria-label="Weekdays">
+            <div
+              v-for="(h, hi) in viewMonthGrid.headers"
+              :key="`h-mgrid-${hi}`"
+              class="history-dow"
+              role="columnheader"
+            >{{ h }}</div>
           </div>
-          <div
-            v-if="g.key === openMonthKey && dayStripForMonth(/** @type {number} */(g.y), g.m0).length"
-            class="history-day-rail"
-            role="group"
-            :aria-label="`Filter by day in ${g.groupLabel}`"
-          >
+          <div class="history-month-cells" role="row">
             <button
+              v-for="c in viewMonthGrid.cells"
+              :key="`d-${c.key}`"
               type="button"
-              class="history-day-chip history-day-chip--all tap"
-              :class="{ 'history-day-chip--on': !filterDayKey }"
-              @click="filterDayKey = ''"
-            >
-              <span class="dow">All</span>
-              <span class="dom">All month</span>
-            </button>
-            <button
-              v-for="d in dayStripForMonth(/** @type {number} */(g.y), g.m0)"
-              :key="d.key"
-              type="button"
-              class="history-day-chip tap"
+              class="history-day-cell tap"
               :class="{
-                'history-day-chip--on': filterDayKey === d.key,
-                'history-day-chip--today': d.key === localDateKey(Date.now()),
+                'history-day-cell--in-ww': c.inMonth,
+                'history-day-cell--on': c.inMonth && filterDayKey === c.key,
+                'history-day-cell--empty': c.inMonth && !c.tripCount,
+                'history-day-cell--has': c.tripCount > 0,
+                'history-day-cell--today': c.isToday,
+                'history-day-cell--faint': !c.inMonth,
               }"
-              @click="filterDayKey = d.key"
+              :title="`Trips: ${c.tripCount}`"
+              :aria-pressed="c.inMonth && filterDayKey === c.key"
+              :disabled="!c.inMonth"
+              @click="c.inMonth && (filterDayKey = filterDayKey === c.key ? '' : c.key)"
             >
-              <span class="dow">{{ d.dowLabel }}</span>
-              <span class="dom">{{ d.label }}</span>
+              <span class="history-day-num">{{ c.dayNum }}</span>
+              <span
+                v-if="c.tripCount > 0"
+                class="history-day-badge"
+                aria-hidden="true"
+              >{{ c.tripCount > 9 ? '9+' : c.tripCount }}</span
+              >
             </button>
           </div>
-          <p v-if="g.key === openMonthKey" class="history-trips-count">
-            <template v-if="filterDayKey"
-              >Showing {{ weekFilteredItems.length }} on selected day (of {{ g.items.length }})</template
-            >
-            <template v-else>Showing all {{ g.items.length }} in this month</template>
-          </p>
-          <aside
-            v-if="g.key === openMonthKey && dollyList.length"
-            class="history-dolly-aside"
-            @click.stop
-            @keydown.stop
-          >
-            <h2 class="history-dolly-h">Your dollies (tap to copy · 👍/👎)</h2>
-            <ul class="history-dolly-ul">
-              <li v-for="d in dollyList.slice(0, 20)" :key="d.nbr" class="history-dolly-row">
-                <button type="button" class="history-dolly-nbr tap" @click="copyDollyN(d.nbr)">#{{ d.nbr }}</button>
-                <span
-                  v-if="d.rating && d.rating !== 'none'"
-                  class="history-dolly-stat"
-                >{{ d.rating === 'good' ? '· good' : '· bad' }}</span>
-                <div class="history-dolly-acts" @click.stop>
-                  <button type="button" class="history-dolly-ico tap" title="Good" @click="rateDolly(d.nbr, 'good')">👍</button>
-                  <button type="button" class="history-dolly-ico tap" title="Bad" @click="rateDolly(d.nbr, 'bad')">👎</button>
-                  <button type="button" class="history-dolly-ico tap" title="Clear" @click="rateDolly(d.nbr, 'none')">·</button>
-                </div>
-              </li>
-            </ul>
-          </aside>
-          <ul
-            class="history-list history-list--nested"
-            :aria-label="`Trips in ${g.groupLabel}`"
-          >
-            <li
-              v-for="e in (g.key === openMonthKey ? weekFilteredItems : g.items)"
-              :id="`history-card-${e.id}`"
-              :key="e.id"
-              class="history-card"
-            >
+        </div>
+        <p v-if="filterDayKey" class="history-cal-filt">Day <strong>{{ filterDayKey }}</strong> &nbsp;·&nbsp; <button type="button" class="history-link tap" @click="filterDayKey = ''">Reset</button></p>
+      </div>
+      <div
+        v-if="dayStripForMonth(/** @type {number} */(viewYear), viewMonth0).length"
+        class="history-day-rail"
+        role="group"
+        :aria-label="`Days`"
+      >
+        <button
+          type="button"
+          class="history-day-chip history-day-chip--all tap"
+          :class="{ 'history-day-chip--on': !filterDayKey }"
+          @click="filterDayKey = ''"
+        >
+          <span class="dow">All</span>
+          <span class="dom">All</span>
+        </button>
+        <button
+          v-for="d in dayStripForMonth(/** @type {number} */(viewYear), viewMonth0)"
+          :key="d.key"
+          type="button"
+          class="history-day-chip tap"
+          :class="{
+            'history-day-chip--on': filterDayKey === d.key,
+            'history-day-chip--today': d.key === localDateKey(Date.now()),
+          }"
+          @click="filterDayKey = d.key"
+        >
+          <span class="dow">{{ d.dowLabel }}</span>
+          <span class="dom">{{ d.label }}</span>
+        </button>
+      </div>
+      <p v-if="!weekFilteredItems.length" class="history-no-month">No trips this month</p>
+      <aside
+        v-if="dollyList.length"
+        class="history-dolly-aside"
+        @click.stop
+        @keydown.stop
+      >
+        <h2 class="history-dolly-h">Dollies</h2>
+        <ul class="history-dolly-ul">
+          <li v-for="d in dollyList.slice(0, 20)" :key="d.nbr" class="history-dolly-row">
+            <button type="button" class="history-dolly-nbr tap" @click="copyDollyN(d.nbr)">#{{ d.nbr }}</button>
+            <span
+              v-if="d.rating && d.rating !== 'none'"
+              class="history-dolly-stat"
+            >{{ d.rating === 'good' ? '· good' : '· bad' }}</span>
+            <div class="history-dolly-acts" @click.stop>
+              <button type="button" class="history-dolly-ico tap" title="Good" @click="rateDolly(d.nbr, 'good')">👍</button>
+              <button type="button" class="history-dolly-ico tap" title="Bad" @click="rateDolly(d.nbr, 'bad')">👎</button>
+              <button type="button" class="history-dolly-ico tap" title="Clear" @click="rateDolly(d.nbr, 'none')">·</button>
+            </div>
+          </li>
+        </ul>
+      </aside>
+      <ul
+        v-if="weekFilteredItems.length"
+        class="history-list history-list--nested"
+        aria-label="Month trips"
+      >
+        <li
+          v-for="e in weekFilteredItems"
+          :id="`history-card-${e.id}`"
+          :key="e.id"
+          class="history-card"
+        >
         <details
           :open="openId === e.id"
           class="history-drop"
@@ -837,7 +720,6 @@ onUnmounted(() => {
               const d = /** @type {HTMLDetailsElement} */ (ev.target)
               if (d.open) {
                 openId = e.id
-                openMonthKey = g.key
               } else if (openId === e.id) openId = ''
             }
           "
@@ -958,9 +840,7 @@ onUnmounted(() => {
             </details>
             </li>
           </ul>
-        </details>
-      </li>
-    </ul>
+    </div>
     </div>
     <Teleport to="body">
       <ul
@@ -1008,14 +888,69 @@ onUnmounted(() => {
 }
 
 .history-head {
-  margin-bottom: var(--space-4, 1rem);
+  margin-bottom: var(--space-3, 0.75rem);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem 0.75rem;
+}
+
+.history-content {
+  display: block;
+  width: 100%;
 }
 
 .history-title {
-  margin: 0 0 0.35rem;
+  margin: 0;
   font-size: var(--text-xl, 1.25rem);
   font-weight: 600;
   color: var(--color-text-primary, #f4f4f8);
+}
+
+.history-month-nav {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-bottom: 0.5rem;
+}
+
+.history-mnav {
+  flex: 0 0 auto;
+  min-width: 2.4rem;
+  min-height: 2.4rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  border: 1px solid #3a3a46;
+  background: #1c1c24;
+  color: #e0e0ee;
+  font-size: 1rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.history-mnav:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.history-month-h2 {
+  margin: 0;
+  font-size: 0.9rem;
+  font-weight: 700;
+  color: var(--color-text-primary, #f0f0f8);
+  line-height: 1.2;
+  text-align: center;
+  flex: 1;
+  min-width: 0;
+  padding: 0 0.2rem;
+}
+
+.history-month-body {
+  width: 100%;
 }
 
 .history-sub {
@@ -1064,6 +999,12 @@ onUnmounted(() => {
   color: var(--color-text-tertiary, #6e6e7e);
   font-size: var(--text-sm, 0.8125rem);
   line-height: 1.5;
+  margin: 0 0 0.5rem;
+}
+.history-no-month {
+  margin: 0.35rem 0 0.5rem;
+  font-size: 0.8rem;
+  color: #7a7a8a;
 }
 
 .history-weeks {
@@ -1608,17 +1549,6 @@ onUnmounted(() => {
   top: auto;
   z-index: 10090;
   max-width: min(12rem, calc(100vw - 16px));
-}
-.history-months-scroll {
-  max-height: min(70vh, 32rem);
-  overflow-y: auto;
-  -webkit-overflow-scrolling: touch;
-  padding: 0 0 0.5rem;
-  margin: 0 -0.1rem 0.5rem;
-  scrollbar-gutter: stable;
-}
-.history-week-drop[open] {
-  overflow: visible;
 }
 .history-day-cell--faint {
   opacity: 0.35;
