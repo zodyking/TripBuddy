@@ -203,6 +203,7 @@ onUnmounted(() => {
           class="app-main"
           :class="{
             'app-main--directory': route.name === 'directory',
+            'app-main--bridges': route.name === 'bridges',
           }"
         >
           <RouterView />
@@ -676,6 +677,27 @@ onUnmounted(() => {
   overflow-y: auto;
   display: flex;
   flex-direction: column;
+}
+
+/* Bridges: same full-bleed width as directory; inner page handles padding */
+.app-main.app-main--bridges {
+  flex: 1;
+  min-height: 0;
+  max-width: none;
+  width: 100%;
+  margin-inline: 0;
+  padding-inline: 0;
+  padding-bottom: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+}
+
+.app-main.app-main--bridges > * {
+  flex: 1 0 auto;
+  width: 100%;
+  min-width: 0;
 }
 
 /* Split-pane directory: only the list column scrolls, not the main element */
