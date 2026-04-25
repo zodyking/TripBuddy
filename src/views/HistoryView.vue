@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed, onMounted, watch, nextTick } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
 import { getAssignment, getCredentials, patchTripHistoryOutcome, getDollyRegistry, patchDollyRating } from '../api.js'
 import {
   workWeekGroupMeta,
@@ -41,7 +41,15 @@ const DOUBLE_CLICK_MS = 500
 
 /** YYYY-MM-DD; empty = show all days in selected work week */
 const filterDayKey = ref('')
+const outcomeMenuOpen = ref('')
 const dollyList = ref(/** @type {Array<{ nbr: string, rating?: string, lastSeenAt?: number }>} */ ([]))
+
+const outcomeMenuOpts = [
+  { k: 'none', t: 'None' },
+  { k: 'delivered', t: 'Delivered' },
+  { k: 'rejected', t: 'Rejected' },
+  { k: 'removed', t: 'Removed' },
+]
 
 /**
  * @param {unknown} x
@@ -364,22 +372,35 @@ async function setOutcome(legSeq, o) {
   }
 }
 
+function closeOutcomeMenu() {
+  outcomeMenuOpen.value = ''
+}
+
 /**
- * @param {Event} ev
  * @param {LedgerEntry} row
+ * @param {string} id
+ * @param {Event} [ev]
  */
-function onOutcomeSelect(ev, row) {
+function toggleOutcomeMenu(row, id, ev) {
   ev?.stopPropagation()
   if (!/^\d+$/.test(row.dailyTripLegSequence)) return
-  const t = ev && 'target' in ev ? ev.target : null
-  const v = t && 'value' in /** @type {any} */ (t) ? String(/** @type {any} */ (t).value) : ''
-  if (v === 'none' || v === 'delivered' || v === 'rejected' || v === 'removed') {
-    void setOutcome(row.dailyTripLegSequence, v)
+  const next = outcomeMenuOpen.value === id ? '' : id
+  outcomeMenuOpen.value = next
+}
+
+/**
+ * @param {LedgerEntry} e
+ * @param {string} o
+ * @param {Event} [ev]
+ */
+function pickOutcomeFromMenu(e, o, ev) {
+  ev?.stopPropagation()
+  if (!/^\d+$/.test(e.dailyTripLegSequence)) return
+  if (o === 'none' || o === 'delivered' || o === 'rejected' || o === 'removed') {
+    void setOutcome(e.dailyTripLegSequence, o)
   }
   nextTick(() => {
-    if (t && 'blur' in /** @type {any} */ (t) && typeof /** @type {any} */ (t).blur === 'function') {
-      ;/** @type {any} */ (t).blur()
-    }
+    closeOutcomeMenu()
   })
 }
 
@@ -426,9 +447,26 @@ function cycleOutcome(e) {
   void setOutcome(s, next)
 }
 
+let docClickOutcome = (/** @type {Event} */ e) => {
+  const t = e.target
+  if (t && typeof t === 'object' && 'closest' in /** @type {any} */ (t)) {
+    if (/** @type {Element} */ (t).closest('.history-outcome-wrap')) return
+  }
+  closeOutcomeMenu()
+}
+
 onMounted(() => {
+  if (typeof document !== 'undefined') {
+    document.addEventListener('click', docClickOutcome, true)
+  }
   void load()
   void loadDolly()
+})
+
+onUnmounted(() => {
+  if (typeof document !== 'undefined') {
+    document.removeEventListener('click', docClickOutcome, true)
+  }
 })
 </script>
 
@@ -628,29 +666,46 @@ onMounted(() => {
               >{{ formatWhen(e.displayDate) }}</time
             >
             <div v-if="e.dailyTripLegSequence" class="history-top-actions" @click.stop>
-              <span
-                v-if="e.outcome && e.outcome !== 'none'"
-                class="history-outcome"
-                :class="`history-outcome--${e.outcome}`"
-                >{{ outcomeLabel(e.outcome) }}</span
-              >
-              <div class="history-outcome-select-wrap" @click.stop>
-                <label
-                  :for="`outcome-${e.id}`"
-                  class="sr-only"
-                >Stop outcome</label>
-                <select
-                  :id="`outcome-${e.id}`"
-                  class="history-outcome-select tap"
-                  :value="outcomeSelectValue(e)"
+              <div class="history-outcome-wrap" @click.stop>
+                <button
+                  type="button"
+                  class="history-outcome-pill tap"
+                  :class="`history-outcome--${outcomeSelectValue(e)}`"
                   :disabled="historySavingId === `seq-${e.dailyTripLegSequence}`"
-                  @change="onOutcomeSelect($event, e)"
+                  :title="'Tap to change: ' + outcomeLabel(outcomeSelectValue(e))"
+                  :aria-expanded="outcomeMenuOpen === e.id"
+                  aria-haspopup="listbox"
+                  @click="toggleOutcomeMenu(e, e.id, $event)"
                 >
-                  <option value="none">None</option>
-                  <option value="delivered">Delivered</option>
-                  <option value="rejected">Rejected</option>
-                  <option value="removed">Removed</option>
-                </select>
+                  <span class="history-outcome-pill__txt">{{ outcomeLabel(outcomeSelectValue(e)) }}</span>
+                  <span class="history-outcome-pill__chev" aria-hidden="true">▾</span>
+                </button>
+                <ul
+                  v-if="outcomeMenuOpen === e.id"
+                  class="history-outcome-pop"
+                  role="listbox"
+                  @click.stop
+                  @pointerdown.stop
+                >
+                  <li
+                    v-for="opt in outcomeMenuOpts"
+                    :key="opt.k"
+                    role="option"
+                    :aria-selected="outcomeSelectValue(e) === opt.k"
+                  >
+                    <button
+                      type="button"
+                      class="history-outcome-mi"
+                      :disabled="historySavingId === `seq-${e.dailyTripLegSequence}`"
+                      :class="{
+                        'history-outcome-mi--on': outcomeSelectValue(e) === opt.k,
+                      }"
+                      @click="pickOutcomeFromMenu(e, opt.k, $event)"
+                    >
+                      {{ opt.t }}
+                    </button>
+                  </li>
+                </ul>
               </div>
             </div>
             </div>
@@ -1263,17 +1318,6 @@ onMounted(() => {
   width: 100%;
   justify-content: space-between;
 }
-.sr-only {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  padding: 0;
-  margin: -1px;
-  overflow: hidden;
-  clip: rect(0, 0, 0, 0);
-  white-space: nowrap;
-  border: 0;
-}
 .history-top-actions {
   display: flex;
   align-items: center;
@@ -1282,31 +1326,110 @@ onMounted(() => {
   flex: 1 1 auto;
   justify-content: flex-end;
 }
-.history-outcome-select-wrap {
+.history-outcome-wrap {
+  position: relative;
   flex: 0 0 auto;
+  max-width: min(10rem, 100%);
 }
-.history-outcome-select {
-  max-width: 6.2rem;
-  min-height: 1.75rem;
-  padding: 0.1rem 1.6rem 0.1rem 0.4rem;
-  font-size: 0.6rem;
+.history-outcome-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.25rem;
+  width: 100%;
+  min-height: 1.65rem;
+  min-width: 0;
+  padding: 0.1rem 0.35rem 0.1rem 0.4rem;
+  line-height: 1.1;
+  border: 1px solid;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.04);
+  color: #a8a8b8;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.history-outcome-pill:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.history-outcome-pill__txt {
+  font-size: 0.58rem;
   font-weight: 800;
   text-transform: uppercase;
-  letter-spacing: 0.03em;
-  border-radius: 6px;
-  border: 1px solid #3f3f4a;
-  background: #1b1b22
-    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 20 20'%3E%3Cpath fill='%2394a3b8' d='M5.5 7.5L10 12l4.5-4.5'/%3E%3C/svg%3E")
-    no-repeat right 0.35rem center;
-  color: #e4e4ee;
-  -webkit-appearance: none;
-  appearance: none;
-  cursor: pointer;
-  line-height: 1.2;
+  letter-spacing: 0.04em;
+  text-align: left;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
-.history-outcome-select:disabled {
-  opacity: 0.45;
+.history-outcome-pill__chev {
+  font-size: 0.5rem;
+  line-height: 1;
+  opacity: 0.7;
+  flex-shrink: 0;
+}
+.history-outcome-pop {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 4px);
+  z-index: 8;
+  min-width: 7.5rem;
+  max-width: 12rem;
+  margin: 0;
+  padding: 0.2rem;
+  list-style: none;
+  border: 1px solid #3f3f4c;
+  border-radius: 8px;
+  background: #1a1a22;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+}
+.history-outcome-pop li {
+  margin: 0;
+  padding: 0;
+}
+.history-outcome-mi {
+  width: 100%;
+  text-align: left;
+  font-size: 0.7rem;
+  font-weight: 600;
+  padding: 0.4rem 0.55rem;
+  border: none;
+  background: transparent;
+  color: #d8d8e6;
+  border-radius: 4px;
+  cursor: pointer;
+  line-height: 1.25;
+}
+.history-outcome-mi:hover:not(:disabled) {
+  background: #2a2a32;
+}
+.history-outcome-mi:disabled {
+  opacity: 0.4;
   cursor: not-allowed;
+}
+.history-outcome-mi--on {
+  color: #c4b5fd;
+  background: rgba(123, 77, 181, 0.2);
+}
+.history-outcome-pill.history-outcome--none {
+  border-color: #3f3f4a;
+  color: #7a7a8a;
+  background: rgba(0, 0, 0, 0.15);
+}
+.history-outcome-pill.history-outcome--delivered {
+  border-color: #166534;
+  color: #86efac;
+  background: rgba(22, 101, 52, 0.25);
+}
+.history-outcome-pill.history-outcome--rejected {
+  border-color: #991b1b;
+  color: #fecaca;
+  background: rgba(127, 29, 29, 0.35);
+}
+.history-outcome-pill.history-outcome--removed {
+  border-color: #52525b;
+  color: #d4d4d8;
+  background: rgba(63, 63, 70, 0.4);
 }
 
 .history-seq {
@@ -1315,36 +1438,6 @@ onMounted(() => {
   line-height: 1.3;
 }
 
-.history-outcome {
-  align-self: flex-end;
-  font-size: 0.58rem;
-  font-weight: 800;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  padding: 0.1rem 0.35rem;
-  border-radius: 4px;
-  border: 1px solid #3f3f4c;
-  background: rgba(255, 255, 255, 0.04);
-  color: #a8a8b8;
-}
-
-.history-outcome--delivered {
-  border-color: #166534;
-  color: #86efac;
-  background: rgba(22, 101, 52, 0.25);
-}
-
-.history-outcome--rejected {
-  border-color: #991b1b;
-  color: #fecaca;
-  background: rgba(127, 29, 29, 0.35);
-}
-
-.history-outcome--removed {
-  border-color: #52525b;
-  color: #d4d4d8;
-  background: rgba(63, 63, 70, 0.4);
-}
 
 .history-outcome--none {
   display: none;

@@ -2059,28 +2059,30 @@ onUnmounted(() => {
         <div v-else class="trip-dolly-add-form">
           <input
             :value="dollyAddDigits"
-            class="inp tap"
+            class="inp tap trip-dolly-add-input"
             inputmode="numeric"
             maxlength="6"
             placeholder="6 digit dolly #"
             aria-label="6 digit dolly number"
             @input="onDollyAddInput"
           />
-          <button
-            type="button"
-            class="btn primary tap"
-            :disabled="dollyPutBusy || dollyAddDigits.length !== 6"
-            @click="onAddDollySubmit"
-          >
-            Save
-          </button>
-          <button
-            type="button"
-            class="btn tap"
-            @click="(dollyAddOpen = false), (dollyAddDigits = '')"
-          >
-            Cancel
-          </button>
+          <div class="trip-dolly-add-actions">
+            <button
+              type="button"
+              class="btn primary tap trip-dolly-add-save"
+              :disabled="dollyPutBusy || dollyAddDigits.length !== 6"
+              @click="onAddDollySubmit"
+            >
+              Save
+            </button>
+            <button
+              type="button"
+              class="btn tap trip-dolly-add-cancel"
+              @click="(dollyAddOpen = false), (dollyAddDigits = '')"
+            >
+              Cancel
+            </button>
+          </div>
         </div>
         <details
           v-if="tripDollySection.show"
@@ -3430,13 +3432,43 @@ button.trailer-nbr.copyable-inline {
 }
 .trip-dolly-add-form {
   display: flex;
-  flex-wrap: wrap;
-  gap: 0.4rem;
-  align-items: center;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.55rem;
   margin-bottom: 0.4rem;
+  width: 100%;
+  max-width: 100%;
 }
-.trip-dolly-add-form .inp {
-  max-width: 8rem;
+.trip-dolly-add-input {
+  width: 100%;
+  max-width: none;
+  min-height: 2.6rem;
+  font-size: 1.05rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.12em;
+  text-align: center;
+  padding: 0.5rem 0.75rem;
+  box-sizing: border-box;
+}
+.trip-dolly-add-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.4rem;
+}
+.trip-dolly-add-save,
+.trip-dolly-add-cancel {
+  min-height: 2.25rem;
+  padding: 0.35rem 0.85rem;
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+.trip-dolly-add-save {
+  min-width: 4.5rem;
+}
+.trip-dolly-add-cancel {
+  min-width: 3.5rem;
 }
 .trip-dolly-details {
   margin-top: 0.35rem;
