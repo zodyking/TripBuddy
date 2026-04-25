@@ -276,6 +276,9 @@ const credTractor = ref('')
 /** 0=Sun..6=Sat; History groups by your rolling 7-day work week starting on this day */
 const workWeekStartDay = ref(0)
 const workWeekEndDay = ref(6)
+/** History calendar "shift day" — overnight (e.g. 19:00–07:00) uses the date the shift started. */
+const shiftStartTime = ref('00:00')
+const shiftEndTime = ref('23:59')
 const credLinehaulToken = ref('')
 const credPollMinutes = ref(0)
 const weekDayOptions = [
@@ -402,6 +405,20 @@ async function loadCredentials() {
         typeof credMeta.value.workWeekEndDay === 'number' ? credMeta.value.workWeekEndDay : 6
       workWeekEndDay.value = Math.min(6, Math.max(0, Math.floor(we)))
     }
+    {
+      const mToStr = (m) => {
+        const n = Math.max(0, Math.min(1439, Math.floor(Number(m) || 0)))
+        return `${String(Math.floor(n / 60)).padStart(2, '0')}:${String(n % 60).padStart(2, '0')}`
+      }
+      shiftStartTime.value =
+        typeof credMeta.value.shiftStartMins === 'number'
+          ? mToStr(credMeta.value.shiftStartMins)
+          : '00:00'
+      shiftEndTime.value =
+        typeof credMeta.value.shiftEndMins === 'number'
+          ? mToStr(credMeta.value.shiftEndMins)
+          : '23:59'
+    }
     credLinehaulToken.value =
       typeof credMeta.value.fedexLinehaulBearer === 'string'
         ? credMeta.value.fedexLinehaulBearer
@@ -418,12 +435,24 @@ async function saveCredentials() {
   credMsg.value = null
   try {
     const hasBearerInput = credLinehaulToken.value.trim().length > 0
+    const tToM = (s) => {
+      const t = String(s).trim()
+      if (!/^\d{1,2}:\d{2}$/.test(t)) return 0
+      const [a, b] = t.split(':')
+      const h = Math.min(23, Math.max(0, parseInt(a, 10) || 0))
+      const mi = Math.min(59, Math.max(0, parseInt(b, 10) || 0))
+      return h * 60 + mi
+    }
+    const ssm = tToM(shiftStartTime.value)
+    const sem = tToM(shiftEndTime.value)
     const body = {
       username: credUser.value,
       password: credPass.value || undefined,
       tractorNumber: credTractor.value,
       workWeekStartDay: workWeekStartDay.value,
       workWeekEndDay: workWeekEndDay.value,
+      shiftStartMins: ssm,
+      shiftEndMins: sem,
       linehaulPollMinutes: Math.max(
         0,
         Math.min(LINEHAUL_POLL_MAX, Math.floor(Number(credPollMinutes.value) || 0)),
@@ -771,7 +800,27 @@ onUnmounted(() => {
           maxlength="6"
           @input="onCredTractorInput"
         />
-        <p class="cred-hint">History groups trips by a rolling 7-day “work week” that starts on the first day you pick below. End day is used in the group label only.</p>
+        <p class="cred-hint">History uses your work week below. Shift times set which <strong>calendar day</strong> a trip belongs to (e.g. 7:00 PM–7:00 AM: a trip at 1:00 AM still counts on the <strong>previous</strong> calendar day, when your shift started).</p>
+        <div class="work-week-row work-week-row--3">
+          <div>
+            <label class="lbl" for="shift-start">Shift start (local)</label>
+            <input
+              id="shift-start"
+              v-model="shiftStartTime"
+              class="inp tap"
+              type="time"
+            />
+          </div>
+          <div>
+            <label class="lbl" for="shift-end">Shift end (local)</label>
+            <input
+              id="shift-end"
+              v-model="shiftEndTime"
+              class="inp tap"
+              type="time"
+            />
+          </div>
+        </div>
         <div class="work-week-row">
           <div>
             <label class="lbl" for="work-week-start">Work week starts</label>
@@ -1283,6 +1332,9 @@ onUnmounted(() => {
   grid-template-columns: 1fr 1fr;
   gap: var(--space-3, 0.75rem);
   margin-bottom: var(--space-3, 0.75rem);
+}
+.work-week-row--3 {
+  grid-template-columns: 1fr 1fr;
 }
 @media (max-width: 500px) {
   .work-week-row {

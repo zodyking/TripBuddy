@@ -2004,6 +2004,110 @@ onUnmounted(() => {
       </button>
     </section>
 
+    <section class="panel trip-dolly-standalone" aria-label="Dolly you are carrying">
+      <h2>Dolly</h2>
+      <p class="dolly-standalone-hint">Track your dolly with or without an active trip. Tap the number to copy. Dispatch can replace this if the next load has a different dolly.</p>
+      <div class="trip-details-block trip-dolly-hero">
+        <div class="trip-dolly-hero__head">
+          <span class="trip-details-summary--inline">Current dolly</span>
+          <span
+            v-if="dollyPrimaryDisplay"
+            class="trip-dolly-hero__badge"
+            :class="`trip-dolly-hero__badge--${dollyRating}`"
+          >
+            <template v-if="dollyRating === 'good'">Good dolly</template>
+            <template v-else-if="dollyRating === 'bad'">Bad dolly</template>
+            <template v-else>Unrated</template>
+          </span>
+        </div>
+        <div v-if="dollyPrimaryDisplay" class="trip-dolly-hero__primary">
+          <button
+            type="button"
+            class="trip-dolly-nbr copyable-inline tap"
+            @click="copyTripDetailValue(dollyPrimaryDisplay, 'Dolly number')"
+          >
+            #{{ dollyPrimaryDisplay }}
+          </button>
+          <div class="trip-dolly-hero__rate" @click.stop>
+            <span class="trip-dolly-hero__rate-lbl">Rate</span>
+            <button
+              v-for="opt in [
+                { k: 'good', t: '👍' },
+                { k: 'bad', t: '👎' },
+                { k: 'none', t: '·' },
+              ]"
+              :key="opt.k"
+              type="button"
+              class="trip-dolly-star tap"
+              :class="{ 'trip-dolly-star--on': dollyRating === opt.k }"
+              :title="opt.k === 'none' ? 'Clear rating' : `Mark ${opt.k}`"
+              @click="setDollyRate(opt.k)"
+            >
+              {{ opt.t }}
+            </button>
+          </div>
+        </div>
+        <p v-else class="trip-dolly-hero__empty">No dolly saved — add one or load trip data from dispatch.</p>
+        <button
+          v-if="!dollyAddOpen"
+          type="button"
+          class="btn linkish tap trip-dolly-add"
+          @click="dollyAddOpen = true"
+        >
+          Add dolly
+        </button>
+        <div v-else class="trip-dolly-add-form">
+          <input
+            :value="dollyAddDigits"
+            class="inp tap"
+            inputmode="numeric"
+            maxlength="6"
+            placeholder="6 digit dolly #"
+            aria-label="6 digit dolly number"
+            @input="onDollyAddInput"
+          />
+          <button
+            type="button"
+            class="btn primary tap"
+            :disabled="dollyPutBusy || dollyAddDigits.length !== 6"
+            @click="onAddDollySubmit"
+          >
+            Save
+          </button>
+          <button
+            type="button"
+            class="btn tap"
+            @click="(dollyAddOpen = false), (dollyAddDigits = '')"
+          >
+            Cancel
+          </button>
+        </div>
+        <details
+          v-if="tripDollySection.show"
+          class="trip-details-block trip-dolly-details"
+          :open="false"
+        >
+          <summary class="trip-details-summary">All dolly fields from active trip (API)</summary>
+          <dl class="trip-details-dl">
+            <template v-for="row in tripDollySection.rows" :key="row.label">
+              <dt>{{ row.label }}</dt>
+              <dd>
+                <button
+                  type="button"
+                  class="copyable-dd tap"
+                  :disabled="row.value === '—' || !String(row.value).trim()"
+                  :title="row.value === '—' ? '' : 'Tap to copy'"
+                  @click="copyTripDetailValue(row.value, row.label)"
+                >
+                  {{ row.value }}
+                </button>
+              </dd>
+            </template>
+          </dl>
+        </details>
+      </div>
+    </section>
+
     <section
       v-if="showSealOrTripPanel"
       ref="tripDetailsPanelRef"
@@ -2029,92 +2133,6 @@ onUnmounted(() => {
 
       <template v-if="linehaulTripsBody">
         <div class="trip-details-wrap">
-          <div class="trip-details-block trip-dolly-hero">
-            <div class="trip-dolly-hero__head">
-              <span class="trip-details-summary--inline">Dolly</span>
-              <span v-if="dollyPrimaryDisplay" class="trip-dolly-hero__badge" :class="`trip-dolly-hero__badge--${dollyRating}`">
-                <template v-if="dollyRating === 'good'">Good dolly</template>
-                <template v-else-if="dollyRating === 'bad'">Bad dolly</template>
-                <template v-else>Unrated</template>
-              </span>
-            </div>
-            <div v-if="dollyPrimaryDisplay" class="trip-dolly-hero__primary">
-              <button
-                type="button"
-                class="trip-dolly-nbr copyable-inline tap"
-                @click="copyTripDetailValue(dollyPrimaryDisplay, 'Dolly number')"
-              >
-                #{{ dollyPrimaryDisplay }}
-              </button>
-              <div class="trip-dolly-hero__rate" @click.stop>
-                <span class="trip-dolly-hero__rate-lbl">Rate</span>
-                <button
-                  v-for="opt in [
-                    { k: 'good', t: '👍' },
-                    { k: 'bad', t: '👎' },
-                    { k: 'none', t: '·' },
-                  ]"
-                  :key="opt.k"
-                  type="button"
-                  class="trip-dolly-star tap"
-                  :class="{ 'trip-dolly-star--on': dollyRating === opt.k }"
-                  :title="opt.k === 'none' ? 'Clear rating' : `Mark ${opt.k}`"
-                  @click="setDollyRate(opt.k)"
-                >
-                  {{ opt.t }}
-                </button>
-              </div>
-            </div>
-            <p v-else class="trip-dolly-hero__empty">No dolly on this load yet</p>
-            <button
-              v-if="!dollyAddOpen"
-              type="button"
-              class="btn linkish tap trip-dolly-add"
-              @click="dollyAddOpen = true"
-            >
-              Add dolly
-            </button>
-            <div v-else class="trip-dolly-add-form">
-              <input
-                :value="dollyAddDigits"
-                class="inp tap"
-                inputmode="numeric"
-                maxlength="6"
-                placeholder="6 digit dolly #"
-                aria-label="6 digit dolly number"
-                @input="onDollyAddInput"
-              />
-              <button
-                type="button"
-                class="btn primary tap"
-                :disabled="dollyPutBusy || dollyAddDigits.length !== 6"
-                @click="onAddDollySubmit"
-              >
-                Save
-              </button>
-              <button type="button" class="btn tap" @click="(dollyAddOpen = false), (dollyAddDigits = '')">Cancel</button>
-            </div>
-            <details v-if="tripDollySection.show" class="trip-details-block trip-dolly-details" :open="false">
-              <summary class="trip-details-summary">All dolly fields from API</summary>
-              <dl class="trip-details-dl">
-                <template v-for="row in tripDollySection.rows" :key="row.label">
-                  <dt>{{ row.label }}</dt>
-                  <dd>
-                    <button
-                      type="button"
-                      class="copyable-dd tap"
-                      :disabled="row.value === '—' || !String(row.value).trim()"
-                      :title="row.value === '—' ? '' : 'Tap to copy'"
-                      @click="copyTripDetailValue(row.value, row.label)"
-                    >
-                      {{ row.value }}
-                    </button>
-                  </dd>
-                </template>
-              </dl>
-            </details>
-          </div>
-
           <div
             v-for="card in tripTrailerCards"
             :key="card.id"
@@ -2976,6 +2994,12 @@ button.trailer-nbr.copyable-inline {
   font-weight: var(--weight-semibold, 600);
   color: var(--color-text-primary, #f4f4f8);
   letter-spacing: var(--tracking-tight, -0.02em);
+}
+.dolly-standalone-hint {
+  margin: -0.2rem 0 0.65rem;
+  font-size: 0.75rem;
+  line-height: 1.4;
+  color: var(--color-text-tertiary, #8a8a98);
 }
 .hint {
   font-size: var(--text-sm, 0.8125rem);

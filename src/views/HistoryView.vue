@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
+import { ref, computed, onMounted, watch, nextTick } from 'vue'
 import { getAssignment, getCredentials, patchTripHistoryOutcome, getDollyRegistry, patchDollyRating } from '../api.js'
 import {
   workWeekGroupMeta,
@@ -7,6 +7,7 @@ import {
   localDateKey,
   monthGridForWorkWeek,
 } from '../utils/workWeekGroup.js'
+import { shiftDateKeyForEventMs } from '../utils/shiftCalendar.js'
 import { copyTextToClipboard } from '../utils/copyToClipboard.js'
 
 /**
@@ -21,7 +22,12 @@ import { copyTextToClipboard } from '../utils/copyToClipboard.js'
  * @property {Record<string, unknown>} tripDetails
  */
 
-const workWeekFromCred = ref({ workWeekStartDay: 0, workWeekEndDay: 6 })
+const workWeekFromCred = ref({
+  workWeekStartDay: 0,
+  workWeekEndDay: 6,
+  shiftStartMins: 0,
+  shiftEndMins: 1439,
+})
 
 const loading = ref(true)
 const error = ref('')
@@ -35,8 +41,6 @@ const DOUBLE_CLICK_MS = 500
 
 /** YYYY-MM-DD; empty = show all days in selected work week */
 const filterDayKey = ref('')
-const outcomeMenuOpen = ref('')
-
 const dollyList = ref(/** @type {Array<{ nbr: string, rating?: string, lastSeenAt?: number }>} */ ([]))
 
 /**
@@ -56,9 +60,19 @@ async function load() {
     const c = await getCredentials()
     const ws = typeof c.workWeekStartDay === 'number' ? c.workWeekStartDay : 0
     const we = typeof c.workWeekEndDay === 'number' ? c.workWeekEndDay : 6
+    const ssm =
+      typeof c.shiftStartMins === 'number' && !Number.isNaN(c.shiftStartMins)
+        ? Math.max(0, Math.min(1439, Math.floor(c.shiftStartMins)))
+        : 0
+    const sem =
+      typeof c.shiftEndMins === 'number' && !Number.isNaN(c.shiftEndMins)
+        ? Math.max(0, Math.min(1439, Math.floor(c.shiftEndMins)))
+        : 1439
     workWeekFromCred.value = {
       workWeekStartDay: Math.min(6, Math.max(0, Math.floor(ws))),
       workWeekEndDay: Math.min(6, Math.max(0, Math.floor(we))),
+      shiftStartMins: ssm,
+      shiftEndMins: sem,
     }
   } catch {
     /* use defaults */
@@ -141,7 +155,8 @@ const weekGroups = computed(() => {
   /** @type {Map<string, { key: string, groupLabel: string, endMs: number, weekStart: number, items: LedgerEntry[] }>} */
   const m = new Map()
   for (const e of list) {
-    const w = workWeekGroupMeta(e.displayDate, wwm)
+    const t = e.displayDate
+    const w = t ? workWeekGroupMeta(t, wwm) : null
     const key = w ? w.key : 'unknown'
     const groupLabel = w
       ? w.groupLabel
@@ -184,8 +199,16 @@ const weekFilteredItems = computed(() => {
   if (!w) return []
   if (!filterDayKey.value) return w.items
   return w.items.filter(
-    (e) =>
-      e.displayDate && localDateKey(/** @type {number} */(e.displayDate)) === filterDayKey.value,
+    (e) => {
+      if (!e.displayDate) return false
+      const t = /** @type {number} */ (e.displayDate)
+      const k = shiftDateKeyForEventMs(
+        t,
+        workWeekFromCred.value.shiftStartMins,
+        workWeekFromCred.value.shiftEndMins,
+      )
+      return k === filterDayKey.value
+    },
   )
 })
 
@@ -198,19 +221,19 @@ const activeWeekCalendar = computed(() => {
   const counts = {}
   for (const e of w.items) {
     if (!e.displayDate) continue
-    const k = localDateKey(/** @type {number} */(e.displayDate))
+    const k = shiftDateKeyForEventMs(
+      /** @type {number} */(e.displayDate),
+      workWeekFromCred.value.shiftStartMins,
+      workWeekFromCred.value.shiftEndMins,
+    )
+    if (!k) continue
     counts[k] = (counts[k] || 0) + 1
   }
-  return monthGridForWorkWeek(/** @type {number} */(w.weekStartMs), counts)
+  return monthGridForWorkWeek(/** @type {number} */(w.weekStartMs), counts, {
+    shiftStartMins: workWeekFromCred.value.shiftStartMins,
+    shiftEndMins: workWeekFromCred.value.shiftEndMins,
+  })
 })
-
-function closeOutcomeMenu() {
-  outcomeMenuOpen.value = ''
-}
-
-function toggleOutcomeMenu(id) {
-  outcomeMenuOpen.value = outcomeMenuOpen.value === id ? '' : id
-}
 
 async function loadDolly() {
   try {
@@ -305,6 +328,16 @@ const outcomeLabel = (o) => {
   return ''
 }
 
+/**
+ * @param {LedgerEntry} e
+ * @returns {'none' | 'delivered' | 'rejected' | 'removed'}
+ */
+function outcomeSelectValue(e) {
+  const t = (e.outcome && String(e.outcome).trim().toLowerCase()) || 'none'
+  if (t === 'delivered' || t === 'rejected' || t === 'removed' || t === 'none') return t
+  return 'none'
+}
+
 const historySavingId = ref('')
 
 async function setOutcome(legSeq, o) {
@@ -332,16 +365,21 @@ async function setOutcome(legSeq, o) {
 }
 
 /**
- * @param {LedgerEntry} e
- * @param {string} o
- * @param {Event} [ev]
+ * @param {Event} ev
+ * @param {LedgerEntry} row
  */
-function pickOutcome(e, o, ev) {
+function onOutcomeSelect(ev, row) {
   ev?.stopPropagation()
-  if (!/^\d+$/.test(e.dailyTripLegSequence)) return
-  void setOutcome(e.dailyTripLegSequence, o)
+  if (!/^\d+$/.test(row.dailyTripLegSequence)) return
+  const t = ev && 'target' in ev ? ev.target : null
+  const v = t && 'value' in /** @type {any} */ (t) ? String(/** @type {any} */ (t).value) : ''
+  if (v === 'none' || v === 'delivered' || v === 'rejected' || v === 'removed') {
+    void setOutcome(row.dailyTripLegSequence, v)
+  }
   nextTick(() => {
-    closeOutcomeMenu()
+    if (t && 'blur' in /** @type {any} */ (t) && typeof /** @type {any} */ (t).blur === 'function') {
+      ;/** @type {any} */ (t).blur()
+    }
   })
 }
 
@@ -389,17 +427,8 @@ function cycleOutcome(e) {
 }
 
 onMounted(() => {
-  if (typeof document !== 'undefined') {
-    document.addEventListener('click', closeOutcomeMenu)
-  }
   void load()
   void loadDolly()
-})
-
-onUnmounted(() => {
-  if (typeof document !== 'undefined') {
-    document.removeEventListener('click', closeOutcomeMenu)
-  }
 })
 </script>
 
@@ -605,38 +634,23 @@ onUnmounted(() => {
                 :class="`history-outcome--${e.outcome}`"
                 >{{ outcomeLabel(e.outcome) }}</span
               >
-              <div class="history-gearbox">
-                <div
-                  v-if="outcomeMenuOpen === e.id"
-                  class="history-outcome-menu"
-                  @click.stop
-                  @pointerdown.stop
-                  @pointerup.stop
+              <div class="history-outcome-select-wrap" @click.stop>
+                <label
+                  :for="`outcome-${e.id}`"
+                  class="sr-only"
+                >Stop outcome</label>
+                <select
+                  :id="`outcome-${e.id}`"
+                  class="history-outcome-select tap"
+                  :value="outcomeSelectValue(e)"
+                  :disabled="historySavingId === `seq-${e.dailyTripLegSequence}`"
+                  @change="onOutcomeSelect($event, e)"
                 >
-                  <button
-                    v-for="opt in [
-                      { k: 'delivered', t: 'Delivered' },
-                      { k: 'rejected', t: 'Rejected' },
-                      { k: 'removed', t: 'Removed' },
-                      { k: 'none', t: 'None' },
-                    ]"
-                    :key="opt.k"
-                    type="button"
-                    class="history-outcome-mi"
-                    :disabled="historySavingId === `seq-${e.dailyTripLegSequence}`"
-                    @click="pickOutcome(e, opt.k, $event)"
-                  >
-                    {{ opt.t }}
-                  </button>
-                </div>
-                <button
-                  type="button"
-                  class="history-gear tap"
-                  :title="`Set stop outcome`"
-                  @click="toggleOutcomeMenu(e.id); $event.stopPropagation()"
-                >
-                  ⛭
-                </button>
+                  <option value="none">None</option>
+                  <option value="delivered">Delivered</option>
+                  <option value="rejected">Rejected</option>
+                  <option value="removed">Removed</option>
+                </select>
               </div>
             </div>
             </div>
@@ -1249,63 +1263,50 @@ onUnmounted(() => {
   width: 100%;
   justify-content: space-between;
 }
-.history-gear {
-  min-width: 1.6rem;
-  min-height: 1.6rem;
-  line-height: 1;
-  border-radius: 6px;
-  border: 1px solid #3a3a46;
-  background: #1e1e25;
-  color: #9a9ab0;
-  font-size: 0.7rem;
-  cursor: pointer;
-  padding: 0;
-  flex-shrink: 0;
-}
-.history-outcome-menu {
+.sr-only {
   position: absolute;
-  z-index: 4;
-  display: flex;
-  flex-direction: column;
-  right: 0;
-  top: auto;
-  bottom: calc(100% + 6px);
-  min-width: 9.5rem;
-  border: 1px solid #3f3f4c;
-  border-radius: 8px;
-  background: #1c1c25;
-  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.45);
-  padding: 0.2rem 0;
-}
-.history-outcome-mi {
-  text-align: left;
-  width: 100%;
-  font-size: 0.7rem;
-  font-weight: 600;
-  padding: 0.4rem 0.65rem;
-  border: none;
-  background: transparent;
-  color: #d8d8e6;
-  cursor: pointer;
-}
-.history-outcome-mi:hover {
-  background: #2a2a35;
-}
-.history-outcome-mi:disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
 }
 .history-top-actions {
   display: flex;
   align-items: center;
-  gap: 0.3rem;
+  gap: 0.35rem;
   min-width: 0;
-  flex: 0 0 auto;
-  max-width: 11rem;
+  flex: 1 1 auto;
+  justify-content: flex-end;
 }
-.history-gearbox {
-  position: relative;
+.history-outcome-select-wrap {
   flex: 0 0 auto;
+}
+.history-outcome-select {
+  max-width: 6.2rem;
+  min-height: 1.75rem;
+  padding: 0.1rem 1.6rem 0.1rem 0.4rem;
+  font-size: 0.6rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  border-radius: 6px;
+  border: 1px solid #3f3f4a;
+  background: #1b1b22
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 20 20'%3E%3Cpath fill='%2394a3b8' d='M5.5 7.5L10 12l4.5-4.5'/%3E%3C/svg%3E")
+    no-repeat right 0.35rem center;
+  color: #e4e4ee;
+  -webkit-appearance: none;
+  appearance: none;
+  cursor: pointer;
+  line-height: 1.2;
+}
+.history-outcome-select:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
 }
 
 .history-seq {

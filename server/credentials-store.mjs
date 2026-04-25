@@ -97,6 +97,16 @@ function parseCredData(data) {
     typeof rawStart === 'number' && DOW.has(Math.floor(rawStart)) ? Math.floor(rawStart) : 0
   const workWeekEndDay =
     typeof rawEnd === 'number' && DOW.has(Math.floor(rawEnd)) ? Math.floor(rawEnd) : 6
+  const rawSsm = data.shiftStartMins
+  const rawSem = data.shiftEndMins
+  const shiftStartMins =
+    typeof rawSsm === 'number' && !Number.isNaN(rawSsm)
+      ? Math.max(0, Math.min(1439, Math.floor(rawSsm)))
+      : 0
+  const shiftEndMins =
+    typeof rawSem === 'number' && !Number.isNaN(rawSem)
+      ? Math.max(0, Math.min(1439, Math.floor(rawSem)))
+      : 1439
   return {
     username: data.username ?? null,
     passwordEnc: data.passwordEnc ?? null,
@@ -109,6 +119,8 @@ function parseCredData(data) {
     linehaulPollMinutes: pollM,
     workWeekStartDay,
     workWeekEndDay,
+    shiftStartMins,
+    shiftEndMins,
   }
 }
 
@@ -130,6 +142,8 @@ async function readFileRawForAccount(accountKey) {
     linehaulPollMinutes: null,
     workWeekStartDay: 0,
     workWeekEndDay: 6,
+    shiftStartMins: 0,
+    shiftEndMins: 1439,
   }
 }
 
@@ -183,6 +197,8 @@ export async function getCredentialsMeta() {
     linehaulPollMinutes,
     workWeekStartDay,
     workWeekEndDay,
+    shiftStartMins,
+    shiftEndMins,
   } = await readFileRaw()
   const tn = tractorNumber?.trim() || null
   const en = employeeNumber?.trim() || null
@@ -198,6 +214,14 @@ export async function getCredentialsMeta() {
     typeof workWeekEndDay === 'number' && DOW.has(Math.floor(workWeekEndDay))
       ? Math.floor(workWeekEndDay)
       : 6
+  const ssm =
+    typeof shiftStartMins === 'number' && !Number.isNaN(shiftStartMins)
+      ? Math.max(0, Math.min(1439, Math.floor(shiftStartMins)))
+      : 0
+  const sem =
+    typeof shiftEndMins === 'number' && !Number.isNaN(shiftEndMins)
+      ? Math.max(0, Math.min(1439, Math.floor(shiftEndMins)))
+      : 1439
   return {
     username: username || null,
     hasPassword: Boolean(passwordEnc?.data && passwordEnc?.iv && passwordEnc?.tag),
@@ -214,6 +238,8 @@ export async function getCredentialsMeta() {
     linehaulPollMinutes: poll,
     workWeekStartDay: wws,
     workWeekEndDay: wwe,
+    shiftStartMins: ssm,
+    shiftEndMins: sem,
     appLoginVerified: verified,
   }
 }
@@ -368,6 +394,18 @@ export async function saveCredentials(body) {
     workWeekEndDay = Math.floor(body.workWeekEndDay)
   }
 
+  let shiftStartMins = prev.shiftStartMins ?? 0
+  let shiftEndMins = prev.shiftEndMins ?? 1439
+  if (
+    typeof body.shiftStartMins === 'number' &&
+    !Number.isNaN(body.shiftStartMins)
+  ) {
+    shiftStartMins = Math.max(0, Math.min(1439, Math.floor(body.shiftStartMins)))
+  }
+  if (typeof body.shiftEndMins === 'number' && !Number.isNaN(body.shiftEndMins)) {
+    shiftEndMins = Math.max(0, Math.min(1439, Math.floor(body.shiftEndMins)))
+  }
+
   const next = {
     username: username || null,
     passwordEnc,
@@ -378,6 +416,8 @@ export async function saveCredentials(body) {
     linehaulPollMinutes,
     workWeekStartDay,
     workWeekEndDay,
+    shiftStartMins,
+    shiftEndMins,
   }
   await writeKeyJson(credsKey(acc), next)
   return getCredentialsMeta()
@@ -398,6 +438,8 @@ export async function clearCredentials() {
     linehaulPollMinutes: null,
     workWeekStartDay: 0,
     workWeekEndDay: 6,
+    shiftStartMins: 0,
+    shiftEndMins: 1439,
   }
   await writeKeyJson(credsKey(acc), empty)
 }
