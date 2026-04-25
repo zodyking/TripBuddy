@@ -15,6 +15,10 @@ import {
   buildHistoryDispatchHeaderFromBody,
   buildHistoryTripDetailsFromBody,
 } from '../utils/tripHistorySnapshot.js'
+import {
+  extractOriginDest,
+  extractTripDispatchInstructions,
+} from '../utils/tripDetailsDisplay.js'
 
 export const linehaulTractorBody = ref(null)
 export const linehaulDriverBody = ref(null)
@@ -40,8 +44,12 @@ export const hiddenDailyTripLegSequences = ref(/** @type {string[]} */ ([]))
 /** Previous driver availability status to detect ENRT→ACT transition. */
 let prevDriverAvlStat = null
 
-/** Avoids spamming the server: same leg sequence only one upsert per app session. */
-let lastLinehaulHistoryWriteSeq = null
+/**
+ * Fingerprint of the last *successful* history upsert for the active leg — avoids
+ * duplicate PUTs on every poll, but still retries after failures and re-syncs when
+ * route / trip data / instructions change.
+ */
+let lastHistoryUpsertOkFingerprint = null
 
 /** Clear in-memory trip state (call on sign-out; hidden seq comes from getAssignment on next sign-in). */
 export function resetLinehaulSession() {
@@ -59,7 +67,7 @@ export function resetLinehaulSession() {
   cachedTripSnapshot.value = null
   prePlanTripSnapshot.value = null
   hiddenDailyTripLegSequences.value = []
-  lastLinehaulHistoryWriteSeq = null
+  lastHistoryUpsertOkFingerprint = null
   prevDriverAvlStat = null
   if (persistTripDebounceTimer) {
     clearTimeout(persistTripDebounceTimer)
@@ -316,6 +324,24 @@ export function tripBodyDailySeq(body) {
   if (s == null) return null
   const str = String(s).trim()
   return /^\d+$/.test(str) ? str : null
+}
+
+/**
+ * Fingerprint for trip-history upserts: changes when O/D, status, or merged instructions
+ * change so we re-save without spamming identical PUTs every poll.
+ * @param {string} dailySeq
+ * @param {string} fromAssign
+ * @param {Record<string, unknown>} body
+ */
+function historyLedgerFingerprint(dailySeq, fromAssign, body) {
+  const status = String(body.tripStatus ?? '').trim()
+  const { origin, destination } = extractOriginDest(body)
+  const fromApi = extractTripDispatchInstructions(body)
+  const merged =
+    fromAssign && fromApi
+      ? `${fromAssign}\n\n${fromApi}`
+      : fromAssign || fromApi
+  return [dailySeq, status, origin, destination, merged].join('|||')
 }
 
 /** Same rule as server getLinehaulDriverId: digits-only username, else employeeNumber. */
@@ -593,37 +619,42 @@ async function refreshLinehaulApisImpl(attempt) {
   if (linehaulTripsBody.value && typeof linehaulTripsBody.value === 'object') {
     const seqU = tripBodyDailySeq(linehaulTripsBody.value)
     if (seqU) {
-      if (seqU === lastLinehaulHistoryWriteSeq) {
-        // Poll tick already wrote this leg to history; skip duplicate PUTs.
-      } else {
-        lastLinehaulHistoryWriteSeq = seqU
-        const fromAssign = String(assignmentInstructions ?? '').trim()
-        const fromApi = extractTripDispatchInstructions(linehaulTripsBody.value)
-        const mergedInstr =
-          fromAssign && fromApi
-            ? `${fromAssign}\n\n${fromApi}`
-            : fromAssign || fromApi
-        const snapBody = linehaulTripsBody.value
-        void putAssignment({
-          upsertTripHistoryEntry: {
-            id: `h-${seqU}`,
-            source: 'linehaul',
-            dailyTripLegSequence: seqU,
-            recordedAt: Date.now(),
-            dispatchHeader: buildHistoryDispatchHeaderFromBody(snapBody, {
-              source: 'linehaul',
-              instructions: mergedInstr,
-              instructionsFinal: true,
-            }),
-            tripDetails: buildHistoryTripDetailsFromBody(snapBody),
-          },
-        }).catch(() => {
-          lastLinehaulHistoryWriteSeq = null
-        })
+      const fromAssign = String(assignmentInstructions ?? '').trim()
+      const snapBody = /** @type {Record<string, unknown>} */ (linehaulTripsBody.value)
+      const fromApi = extractTripDispatchInstructions(snapBody)
+      const mergedInstr =
+        fromAssign && fromApi
+          ? `${fromAssign}\n\n${fromApi}`
+          : fromAssign || fromApi
+      const fp = historyLedgerFingerprint(seqU, fromAssign, snapBody)
+      if (fp !== lastHistoryUpsertOkFingerprint) {
+        void (async () => {
+          try {
+            await putAssignment({
+              upsertTripHistoryEntry: {
+                id: `h-${seqU}`,
+                source: 'linehaul',
+                dailyTripLegSequence: seqU,
+                recordedAt: Date.now(),
+                dispatchHeader: buildHistoryDispatchHeaderFromBody(snapBody, {
+                  source: 'linehaul',
+                  instructions: mergedInstr,
+                  instructionsFinal: true,
+                }),
+                tripDetails: buildHistoryTripDetailsFromBody(snapBody),
+              },
+            })
+            lastHistoryUpsertOkFingerprint = fp
+          } catch {
+            /* offline / 401: retry on next refresh */
+          }
+        })()
       }
+    } else {
+      lastHistoryUpsertOkFingerprint = null
     }
   } else {
-    lastLinehaulHistoryWriteSeq = null
+    lastHistoryUpsertOkFingerprint = null
   }
 
   if (linehaulTripsBody.value && typeof linehaulTripsBody.value === 'object') {
