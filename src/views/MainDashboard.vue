@@ -278,6 +278,8 @@ const dollyReg = ref(/** @type {null | { lastPrimaryNbr: string | null, items: R
 const dollyAddOpen = ref(false)
 const dollyAddDigits = ref('')
 const dollyPutBusy = ref(false)
+/** When trip exposes API dolly fields, user can expand a detail block (mirrors trailer cards). */
+const expandedDollyApi = ref(false)
 
 function dollySix(raw) {
   if (raw == null) return ''
@@ -338,6 +340,18 @@ async function onAddDollySubmit() {
     dollyPutBusy.value = false
   }
 }
+
+function onDollyHeaderClick() {
+  if (!tripDollySection.value?.show) return
+  expandedDollyApi.value = !expandedDollyApi.value
+}
+
+watch(
+  () => tripDollySection.value?.show,
+  (ok) => {
+    if (!ok) expandedDollyApi.value = false
+  },
+)
 
 async function setDollyRate(r) {
   const n = dollyPrimaryDisplay.value
@@ -2027,112 +2041,216 @@ onUnmounted(() => {
         Dispatch snapshot (DSPCH); merged with approved trip fields when both are available.
       </p>
 
-      <p class="subhead">Dolly</p>
-      <p class="trip-dolly-in-panel-hint">Works with or without a trip. Tap the number to copy. Dispatch can replace it if the next load uses a different dolly.</p>
-      <div class="trip-details-block trip-dolly-hero" role="group" aria-label="Dolly you are carrying">
-        <div class="trip-dolly-hero__head">
-          <span class="trip-details-summary--inline">Current dolly</span>
-          <span
-            v-if="dollyPrimaryDisplay"
-            class="trip-dolly-hero__badge"
-            :class="`trip-dolly-hero__badge--${dollyRating}`"
+      <div
+        v-if="(linehaulTripsBody || linehaulTripsNoActive) && !(linehaulTripsError && suppressHomeLinehaulErrors)"
+        class="trip-details-wrap"
+      >
+        <div class="trailer-card trailer-card--dolly" role="group" aria-label="Dolly you are carrying">
+          <div
+            v-if="!tripDollySection.show"
+            class="trailer-card-header trailer-card-header--dolly-static"
           >
-            <template v-if="dollyRating === 'good'">Good dolly</template>
-            <template v-else-if="dollyRating === 'bad'">Bad dolly</template>
-            <template v-else>Unrated</template>
-          </span>
-        </div>
-        <div v-if="dollyPrimaryDisplay" class="trip-dolly-hero__primary">
-          <button
-            type="button"
-            class="trip-dolly-nbr copyable-inline tap"
-            @click="copyTripDetailValue(dollyPrimaryDisplay, 'Dolly number')"
-          >
-            #{{ dollyPrimaryDisplay }}
-          </button>
-          <div class="trip-dolly-hero__rate" @click.stop>
-            <span class="trip-dolly-hero__rate-lbl">Rate</span>
-            <button
-              v-for="opt in [
-                { k: 'good', t: '👍' },
-                { k: 'bad', t: '👎' },
-                { k: 'none', t: '·' },
-              ]"
-              :key="opt.k"
-              type="button"
-              class="trip-dolly-star tap"
-              :class="{ 'trip-dolly-star--on': dollyRating === opt.k }"
-              :title="opt.k === 'none' ? 'Clear rating' : `Mark ${opt.k}`"
-              @click="setDollyRate(opt.k)"
-            >
-              {{ opt.t }}
-            </button>
+            <div class="trailer-card-header-inline">
+              <span class="dolly-label">Dolly</span>
+              <button
+                v-if="dollyPrimaryDisplay"
+                type="button"
+                class="trailer-nbr copyable-inline tap"
+                title="Tap to copy"
+                @click.stop="copyTripDetailValue(dollyPrimaryDisplay, 'Dolly number')"
+              >
+                #{{ dollyPrimaryDisplay }}
+              </button>
+              <span v-else class="dolly-nbr--empty" aria-hidden="true">—</span>
+              <span
+                v-if="dollyPrimaryDisplay"
+                class="dolly-rating-pill"
+                :class="`dolly-rating-pill--${dollyRating}`"
+              >
+                <template v-if="dollyRating === 'good'">Good</template>
+                <template v-else-if="dollyRating === 'bad'">Bad</template>
+                <template v-else>Unrated</template>
+              </span>
+            </div>
+            <div class="trailer-card-actions dolly-header-actions" @click.stop>
+              <div class="dolly-rate-inline" @click.stop>
+                <span class="dolly-rate-inline__lbl">Rate</span>
+                <button
+                  v-for="opt in [
+                    { k: 'good', t: '👍' },
+                    { k: 'bad', t: '👎' },
+                    { k: 'none', t: '·' },
+                  ]"
+                  :key="opt.k"
+                  type="button"
+                  class="trip-dolly-star tap dolly-star--header"
+                  :class="{ 'trip-dolly-star--on': dollyRating === opt.k }"
+                  :title="opt.k === 'none' ? 'Clear rating' : `Mark ${opt.k}`"
+                  :disabled="!dollyPrimaryDisplay"
+                  @click="setDollyRate(opt.k)"
+                >
+                  {{ opt.t }}
+                </button>
+              </div>
+              <button
+                v-if="!dollyAddOpen"
+                type="button"
+                class="dolly-add-tile tap"
+                title="Set dolly number"
+                aria-label="Add or change dolly number"
+                @click="dollyAddOpen = true"
+              >
+                +
+              </button>
+              <button
+                v-else
+                type="button"
+                class="dolly-add-tile dolly-add-tile--active tap"
+                title="Close add dolly"
+                aria-label="Close"
+                @click="(dollyAddOpen = false), (dollyAddDigits = '')"
+              >
+                ×
+              </button>
+            </div>
           </div>
-        </div>
-        <p v-else class="trip-dolly-hero__empty">No dolly saved — add one or load trip data from dispatch.</p>
-        <button
-          v-if="!dollyAddOpen"
-          type="button"
-          class="btn secondary tap trip-dolly-add"
-          @click="dollyAddOpen = true"
-        >
-          Add dolly
-        </button>
-        <div v-else class="trip-dolly-add-form">
-          <input
-            :value="dollyAddDigits"
-            class="inp trip-dolly-add-input"
-            inputmode="numeric"
-            maxlength="6"
-            placeholder="6 digit dolly #"
-            aria-label="6 digit dolly number"
-            @input="onDollyAddInput"
-          />
-          <div class="trip-dolly-add-actions">
+          <div
+            v-else
+            class="trailer-card-header"
+            role="button"
+            tabindex="0"
+            :aria-expanded="!!expandedDollyApi"
+            @click="onDollyHeaderClick"
+            @keydown.enter.space.prevent="onDollyHeaderClick"
+          >
+            <div class="trailer-card-header-inline">
+              <span class="dolly-label">Dolly</span>
+              <button
+                v-if="dollyPrimaryDisplay"
+                type="button"
+                class="trailer-nbr copyable-inline tap"
+                title="Tap to copy"
+                @click.stop="copyTripDetailValue(dollyPrimaryDisplay, 'Dolly number')"
+              >
+                #{{ dollyPrimaryDisplay }}
+              </button>
+              <span v-else class="dolly-nbr--empty" aria-hidden="true">—</span>
+              <span
+                v-if="dollyPrimaryDisplay"
+                class="dolly-rating-pill"
+                :class="`dolly-rating-pill--${dollyRating}`"
+              >
+                <template v-if="dollyRating === 'good'">Good</template>
+                <template v-else-if="dollyRating === 'bad'">Bad</template>
+                <template v-else>Unrated</template>
+              </span>
+            </div>
+            <div class="trailer-card-actions dolly-header-actions" @click.stop>
+              <div class="dolly-rate-inline" @click.stop>
+                <span class="dolly-rate-inline__lbl">Rate</span>
+                <button
+                  v-for="opt in [
+                    { k: 'good', t: '👍' },
+                    { k: 'bad', t: '👎' },
+                    { k: 'none', t: '·' },
+                  ]"
+                  :key="opt.k"
+                  type="button"
+                  class="trip-dolly-star tap dolly-star--header"
+                  :class="{ 'trip-dolly-star--on': dollyRating === opt.k }"
+                  :title="opt.k === 'none' ? 'Clear rating' : `Mark ${opt.k}`"
+                  :disabled="!dollyPrimaryDisplay"
+                  @click="setDollyRate(opt.k)"
+                >
+                  {{ opt.t }}
+                </button>
+              </div>
+              <button
+                v-if="!dollyAddOpen"
+                type="button"
+                class="dolly-add-tile tap"
+                title="Set dolly number"
+                aria-label="Add or change dolly number"
+                @click="dollyAddOpen = true"
+              >
+                +
+              </button>
+              <button
+                v-else
+                type="button"
+                class="dolly-add-tile dolly-add-tile--active tap"
+                title="Close add dolly"
+                aria-label="Close"
+                @click="(dollyAddOpen = false), (dollyAddDigits = '')"
+              >
+                ×
+              </button>
+              <span
+                v-if="tripDollySection.show"
+                class="trailer-expand-icon"
+                aria-hidden="true"
+              >
+                {{ expandedDollyApi ? '−' : '+' }}
+              </span>
+            </div>
+          </div>
+          <div
+            v-if="dollyAddOpen"
+            class="trailer-card-summary dolly-add-compact"
+          >
+            <label class="sr-only" for="dolly-compact-inp">6 digit dolly number</label>
+            <input
+              id="dolly-compact-inp"
+              :value="dollyAddDigits"
+              class="dolly-compact-inp"
+              inputmode="numeric"
+              maxlength="6"
+              placeholder="6 digits"
+              @input="onDollyAddInput"
+              @keydown.enter.prevent="dollyAddDigits.length === 6 && onAddDollySubmit()"
+            />
             <button
               type="button"
-              class="btn primary tap trip-dolly-add-save"
+              class="dolly-compact-btn btn primary"
               :disabled="dollyPutBusy || dollyAddDigits.length !== 6"
               @click="onAddDollySubmit"
             >
-              Save
+              Add
             </button>
             <button
               type="button"
-              class="btn secondary tap trip-dolly-add-cancel"
+              class="dolly-compact-btn btn secondary"
+              :disabled="dollyPutBusy"
               @click="(dollyAddOpen = false), (dollyAddDigits = '')"
             >
               Cancel
             </button>
           </div>
+          <div
+            v-if="expandedDollyApi && tripDollySection.show"
+            class="trailer-card-summary trip-dolly-api-block"
+          >
+            <h3 class="dolly-api-sub">From trip (API)</h3>
+            <dl class="trip-details-dl trip-details-dl--dolly-api">
+              <template v-for="row in tripDollySection.rows" :key="row.label">
+                <dt>{{ row.label }}</dt>
+                <dd>
+                  <button
+                    type="button"
+                    class="copyable-dd tap"
+                    :disabled="row.value === '—' || !String(row.value).trim()"
+                    :title="row.value === '—' ? '' : 'Tap to copy'"
+                    @click="copyTripDetailValue(row.value, row.label)"
+                  >
+                    {{ row.value }}
+                  </button>
+                </dd>
+              </template>
+            </dl>
+          </div>
         </div>
-        <details
-          v-if="tripDollySection.show"
-          class="trip-details-block trip-dolly-details"
-          :open="false"
-        >
-          <summary class="trip-details-summary">All dolly fields from active trip (API)</summary>
-          <dl class="trip-details-dl">
-            <template v-for="row in tripDollySection.rows" :key="row.label">
-              <dt>{{ row.label }}</dt>
-              <dd>
-                <button
-                  type="button"
-                  class="copyable-dd tap"
-                  :disabled="row.value === '—' || !String(row.value).trim()"
-                  :title="row.value === '—' ? '' : 'Tap to copy'"
-                  @click="copyTripDetailValue(row.value, row.label)"
-                >
-                  {{ row.value }}
-                </button>
-              </dd>
-            </template>
-          </dl>
-        </details>
-      </div>
 
-      <template v-if="linehaulTripsBody">
-        <div class="trip-details-wrap">
+        <template v-if="linehaulTripsBody">
           <div
             v-for="card in tripTrailerCards"
             :key="card.id"
@@ -2231,8 +2349,8 @@ onUnmounted(() => {
               </dl>
             </div>
           </div>
-        </div>
-      </template>
+        </template>
+      </div>
       <p v-else-if="linehaulTripsNoActive" class="empty trip-details-idle">No active trip</p>
       <p
         v-else-if="linehaulTripsError && !suppressHomeLinehaulErrors"
@@ -2995,12 +3113,6 @@ button.trailer-nbr.copyable-inline {
   color: var(--color-text-primary, #f4f4f8);
   letter-spacing: var(--tracking-tight, -0.02em);
 }
-.trip-dolly-in-panel-hint {
-  margin: 0 0 0.65rem;
-  font-size: 0.75rem;
-  line-height: 1.4;
-  color: var(--color-text-tertiary, #8a8a98);
-}
 .hint {
   font-size: var(--text-sm, 0.8125rem);
   color: var(--color-text-tertiary, #6e6e7e);
@@ -3328,99 +3440,109 @@ button.trailer-nbr.copyable-inline {
   background: #25252e;
   overflow: hidden;
 }
-.trip-dolly-hero {
-  padding: 0.55rem 0.65rem 0.6rem;
-  margin-bottom: 0.5rem;
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
 }
-/* Dolly 6-digit field: same tokens as Settings inputs (no unstyled browser default) */
-.trip-dolly-hero .inp {
-  width: 100%;
-  box-sizing: border-box;
-  padding: var(--space-2-5, 0.625rem) var(--space-3, 0.75rem);
-  border-radius: var(--radius-md, 0.5rem);
-  border: 1px solid var(--color-border, rgba(255, 255, 255, 0.08));
-  background: var(--color-bg-elevated, #0f0f14);
-  color: var(--color-text-primary, #f4f4f8);
-  font-size: var(--text-base, 0.9375rem);
-  transition: var(--transition-colors);
-}
-.trip-dolly-hero .inp:focus {
-  outline: none;
-  border-color: var(--color-accent-purple, #7b4db5);
-  box-shadow: 0 0 0 3px rgba(123, 77, 181, 0.15);
-}
-.trip-dolly-hero .inp::placeholder {
-  color: var(--color-text-tertiary, #6e6e7e);
-}
-.trip-dolly-hero__head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.5rem;
-  margin-bottom: 0.35rem;
-}
-.trip-details-summary--inline {
-  font-size: 0.88rem;
-  font-weight: 600;
+/* Dolly row: same card shell as trailers; first card in trip-details-wrap */
+.trailer-card--dolly .dolly-label {
+  font-weight: 700;
+  font-size: 1em;
+  line-height: 1.05;
   color: var(--text, #e8e8ee);
+  flex: 0 0 auto;
+  min-width: 0;
+  white-space: nowrap;
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+  background: none;
+  border: none;
 }
-.trip-dolly-hero__badge {
-  font-size: 0.6rem;
-  text-transform: uppercase;
-  font-weight: 800;
-  letter-spacing: 0.05em;
-  padding: 0.1rem 0.35rem;
-  border-radius: 4px;
-  border: 1px solid #3f3f4c;
-  color: #9a9aa8;
-}
-.trip-dolly-hero__badge--good {
-  border-color: #166534;
-  color: #86efac;
-  background: rgba(22, 101, 52, 0.25);
-}
-.trip-dolly-hero__badge--bad {
-  border-color: #991b1b;
-  color: #fecaca;
-  background: rgba(127, 29, 29, 0.35);
-}
-.trip-dolly-hero__badge--none {
-  color: #8a8a98;
-}
-.trip-dolly-hero__primary {
-  display: flex;
+.trailer-card--dolly .trailer-card-header-inline {
+  min-width: 0;
+  flex: 1;
+  justify-content: flex-start;
+  gap: clamp(0.2rem, 1.2vw, 0.35rem);
   align-items: center;
-  flex-wrap: wrap;
-  gap: 0.5rem 0.75rem;
-  margin-bottom: 0.4rem;
 }
-.trip-dolly-nbr {
-  font-size: 1.1rem;
-  font-weight: 800;
-  letter-spacing: 0.04em;
-  border: 1px solid #3f3f4c;
-  background: #1e1e24;
-  color: #e8e8f0;
-  border-radius: 8px;
-  padding: 0.35rem 0.5rem;
-  font-variant-numeric: tabular-nums;
-}
-.trip-dolly-hero__empty {
-  margin: 0 0 0.4rem;
-  font-size: 0.8rem;
-  color: #8a8a98;
-}
-.trip-dolly-hero__rate {
-  display: flex;
+.dolly-rating-pill {
+  display: inline-flex;
   align-items: center;
-  gap: 0.2rem;
-}
-.trip-dolly-hero__rate-lbl {
-  font-size: 0.7rem;
-  color: #8a8a98;
+  justify-content: center;
+  padding: 0.06rem 0.3rem;
+  border-radius: 2px;
+  font-size: 0.88em;
+  line-height: 1.1;
+  font-weight: 700;
   text-transform: uppercase;
+  letter-spacing: 0.01em;
+  border: 1px solid #3e3e48;
+  color: #9898a8;
+  flex-shrink: 1;
+  min-width: 0;
+  white-space: nowrap;
+  max-height: 1.1rem;
+  box-sizing: border-box;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.dolly-rating-pill--good {
+  background: rgba(34, 197, 94, 0.15);
+  color: #4ade80;
+  border-color: rgba(34, 197, 94, 0.3);
+}
+.dolly-rating-pill--bad {
+  background: rgba(239, 68, 68, 0.12);
+  color: #f87171;
+  border-color: rgba(239, 68, 68, 0.35);
+}
+.dolly-rating-pill--none {
+  color: #9ca3af;
+}
+.dolly-nbr--empty {
+  color: #6e6e7e;
   font-weight: 600;
-  margin-right: 0.15rem;
+  font-size: 1em;
+  flex: 0 0 auto;
+}
+.dolly-header-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: nowrap;
+  flex-shrink: 0;
+  gap: 0.2rem;
+  min-width: 0;
+  max-width: 46%;
+}
+.dolly-header-actions .dolly-add-tile {
+  flex: 0 0 auto;
+}
+.dolly-header-actions .trailer-expand-icon {
+  flex: 0 0 auto;
+}
+.dolly-rate-inline {
+  display: flex;
+  align-items: center;
+  gap: 0.1rem;
+  min-width: 0;
+  flex: 0 1 auto;
+}
+.dolly-rate-inline__lbl {
+  display: none;
+  font-size: 0.58rem;
+  text-transform: uppercase;
+  color: #8a8a98;
+  font-weight: 600;
+  flex-shrink: 0;
+  margin-right: 0.1rem;
 }
 .trip-dolly-star {
   min-width: 1.9rem;
@@ -3433,71 +3555,106 @@ button.trailer-nbr.copyable-inline {
   cursor: pointer;
   color: #b8b8c8;
 }
+.trip-dolly-star:disabled {
+  cursor: not-allowed;
+  opacity: 0.4;
+}
+.trip-dolly-star.dolly-star--header {
+  min-width: 1.35rem;
+  min-height: 1.35rem;
+  font-size: 0.72rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  flex-shrink: 0;
+  border: 1px solid #3a3a44;
+  border-radius: 6px;
+  background: #1a1a20;
+  cursor: pointer;
+  color: #b8b8c8;
+}
 .trip-dolly-star--on {
   border-color: #7b4db5;
   background: rgba(123, 77, 181, 0.25);
 }
-.trip-dolly-add {
-  width: 100%;
-  min-height: 2.4rem;
-  margin: 0 0 0.4rem;
-  padding: 0.4rem 0.75rem;
-  font-size: 0.8125rem;
-  font-weight: 600;
-  align-self: stretch;
-  justify-content: center;
-  border: 1px solid var(--color-border, rgba(255, 255, 255, 0.12)) !important;
-  background: var(--color-bg-surface, #16161d) !important;
-  color: var(--color-text-primary, #e8e8ee) !important;
-}
-.trip-dolly-add:hover {
-  border-color: var(--color-accent-purple, #7b4db5) !important;
-  background: var(--color-hover, rgba(255, 255, 255, 0.04)) !important;
-}
-.trip-dolly-add-form {
+.dolly-add-tile {
   display: flex;
-  flex-direction: column;
-  align-items: stretch;
-  gap: 0.55rem;
-  margin-bottom: 0.4rem;
-  width: 100%;
-  max-width: 100%;
+  align-items: center;
+  justify-content: center;
+  width: 1.5rem;
+  height: 1.5rem;
+  border-radius: 6px;
+  border: 1px solid rgba(123, 77, 181, 0.4);
+  background: rgba(123, 77, 181, 0.1);
+  color: #c4b5fd;
+  font-size: 1.15rem;
+  font-weight: 700;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0;
 }
-.trip-dolly-add-input {
-  width: 100%;
-  max-width: none;
-  min-height: 2.6rem;
-  margin: 0;
+.dolly-add-tile--active {
+  border-color: #5a5a6a;
+  background: #2a2a32;
+  color: #c8c8d2;
   font-size: 1.05rem;
-  font-weight: 600;
-  font-variant-numeric: tabular-nums;
-  letter-spacing: 0.12em;
-  text-align: center;
-  box-sizing: border-box;
 }
-.trip-dolly-add-actions {
+.trailer-card-header--dolly-static {
+  cursor: default;
+  pointer-events: auto;
+}
+.trailer-card--dolly .dolly-compact-btn {
+  min-height: 1.9rem;
+  padding: 0.25rem 0.5rem;
+  font-size: 0.8rem;
+}
+.dolly-add-compact {
   display: flex;
   flex-wrap: wrap;
-  justify-content: flex-end;
-  gap: 0.4rem;
+  align-items: center;
+  gap: 0.45rem 0.5rem;
+  padding: 0.4rem 0.65rem !important;
 }
-.trip-dolly-add-save,
-.trip-dolly-add-cancel {
-  min-height: 2.25rem;
-  padding: 0.35rem 0.85rem;
-  font-size: 0.8rem;
+.dolly-compact-inp {
+  flex: 1 1 8rem;
+  min-width: 0;
+  min-height: 2.2rem;
+  max-width: 12rem;
+  font-size: 0.95rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.08em;
+  text-align: center;
+  padding: 0.35rem 0.5rem;
+  box-sizing: border-box;
+  border-radius: 6px;
+  border: 1px solid var(--color-border, rgba(255, 255, 255, 0.1));
+  background: var(--color-bg-elevated, #0f0f14);
+  color: var(--color-text-primary, #f4f4f8);
+}
+.dolly-compact-inp::placeholder {
+  color: #6e6e7e;
+  letter-spacing: 0.02em;
+}
+.dolly-compact-inp:focus {
+  outline: none;
+  border-color: #7b4db5;
+  box-shadow: 0 0 0 2px rgba(123, 77, 181, 0.2);
+}
+.trip-dolly-api-block {
+  text-align: left;
+}
+.dolly-api-sub {
+  margin: 0 0 0.45rem;
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #8a8a98;
   font-weight: 600;
 }
-.trip-dolly-add-save {
-  min-width: 4.5rem;
-}
-.trip-dolly-add-cancel {
-  min-width: 3.5rem;
-}
-.trip-dolly-details {
-  margin-top: 0.35rem;
-  border: 1px dashed #3a3a48;
-  background: #1e1e25;
+.trip-details-dl--dolly-api {
+  padding: 0;
 }
 .trip-details-summary {
   cursor: pointer;
