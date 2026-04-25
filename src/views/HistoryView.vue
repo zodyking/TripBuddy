@@ -1,13 +1,8 @@
 <script setup>
 import { ref, computed, onMounted, onUnmounted, watch, nextTick, Teleport } from 'vue'
-import { getAssignment, getCredentials, patchTripHistoryOutcome, getDollyRegistry, patchDollyRating } from '../api.js'
-import {
-  dayStripForMonth,
-  localDateKey,
-  monthGridForCalendarMonth,
-} from '../utils/workWeekGroup.js'
+import { getAssignment, getCredentials, patchTripHistoryOutcome } from '../api.js'
+import { monthGridForCalendarMonth } from '../utils/workWeekGroup.js'
 import { shiftDateKeyForEventMs } from '../utils/shiftCalendar.js'
-import { copyTextToClipboard } from '../utils/copyToClipboard.js'
 
 /**
  * @typedef {object} LedgerEntry
@@ -33,8 +28,6 @@ const error = ref('')
 /** @type {import('vue').Ref<LedgerEntry[]>} */
 const entries = ref([])
 
-const openId = ref('')
-
 /** Viewed calendar month (prev/next, no year cap). */
 const viewYear = ref(/** @type {number} */(new Date().getFullYear()))
 const viewMonth0 = ref(/** @type {number} */(new Date().getMonth()))
@@ -48,7 +41,6 @@ const filterDayKey = ref('')
 const outcomeMenuOpen = ref('')
 const outcomeMenuPos = ref(/** @type {null | { top: number, left: number, minWidth: number }} */ (null))
 const outcomeRowForMenu = ref(/** @type {null | LedgerEntry} */ (null))
-const dollyList = ref(/** @type {Array<{ nbr: string, rating?: string, lastSeenAt?: number }>} */ ([]))
 
 const outcomeMenuOpts = [
   { k: 'none', t: 'None' },
@@ -156,7 +148,6 @@ async function load() {
   } finally {
     loading.value = false
   }
-  void loadDolly()
 }
 
 const sorted = computed(() =>
@@ -295,63 +286,6 @@ watch(
       viewYear.value = m.y
       viewMonth0.value = m.m0
       calendarSyncedToData.value = true
-    }
-  },
-  { immediate: true },
-)
-
-async function loadDolly() {
-  try {
-    const d = await getDollyRegistry()
-    const it = d?.items && typeof d.items === 'object' ? d.items : {}
-    dollyList.value = Object.values(it)
-      .filter((x) => x && typeof (/** @type {any} */(x).nbr) === 'string')
-      .map((x) => ({
-        nbr: String((/** @type {any} */(x)).nbr),
-        rating: (/** @type {any} */(x)).rating,
-        lastSeenAt: (/** @type {any} */(x)).lastSeenAt,
-      }))
-      .sort(
-        (a, b) =>
-          (b.lastSeenAt || 0) - (a.lastSeenAt || 0),
-      )
-  } catch {
-    dollyList.value = []
-  }
-}
-
-/**
- * @param {string} n
- * @param {'none' | 'good' | 'bad'} r
- */
-async function rateDolly(n, r) {
-  if (!/^\d{6}$/.test(n)) return
-  try {
-    await patchDollyRating({ dollyNbr: n, rating: r })
-    await loadDolly()
-  } catch {
-    /* */
-  }
-}
-
-/**
- * @param {string} n
- */
-function copyDollyN(n) {
-  const t = String(n).replace(/\D/g, '').slice(0, 6)
-  if (t.length !== 6) return
-  void copyTextToClipboard(t)
-}
-
-watch(
-  weekFilteredItems,
-  (list) => {
-    if (!list.length) {
-      openId.value = ''
-      return
-    }
-    if (!list.some((e) => e.id === openId.value)) {
-      openId.value = list[0].id
     }
   },
   { immediate: true },
@@ -546,7 +480,6 @@ onMounted(() => {
     window.addEventListener('resize', onOutcomeMenuViewport, true)
   }
   void load()
-  void loadDolly()
 })
 
 onUnmounted(() => {
@@ -648,59 +581,8 @@ onUnmounted(() => {
         </div>
         <p v-if="filterDayKey" class="history-cal-filt">Day <strong>{{ filterDayKey }}</strong> &nbsp;·&nbsp; <button type="button" class="history-link tap" @click="filterDayKey = ''">Reset</button></p>
       </div>
-      <div
-        v-if="dayStripForMonth(/** @type {number} */(viewYear), viewMonth0).length"
-        class="history-day-rail"
-        role="group"
-        :aria-label="`Days`"
-      >
-        <button
-          type="button"
-          class="history-day-chip history-day-chip--all tap"
-          :class="{ 'history-day-chip--on': !filterDayKey }"
-          @click="filterDayKey = ''"
-        >
-          <span class="dow">All</span>
-          <span class="dom">All</span>
-        </button>
-        <button
-          v-for="d in dayStripForMonth(/** @type {number} */(viewYear), viewMonth0)"
-          :key="d.key"
-          type="button"
-          class="history-day-chip tap"
-          :class="{
-            'history-day-chip--on': filterDayKey === d.key,
-            'history-day-chip--today': d.key === localDateKey(Date.now()),
-          }"
-          @click="filterDayKey = d.key"
-        >
-          <span class="dow">{{ d.dowLabel }}</span>
-          <span class="dom">{{ d.label }}</span>
-        </button>
-      </div>
-      <p v-if="!weekFilteredItems.length" class="history-no-month">No trips this month</p>
-      <aside
-        v-if="dollyList.length"
-        class="history-dolly-aside"
-        @click.stop
-        @keydown.stop
-      >
-        <h2 class="history-dolly-h">Dollies</h2>
-        <ul class="history-dolly-ul">
-          <li v-for="d in dollyList.slice(0, 20)" :key="d.nbr" class="history-dolly-row">
-            <button type="button" class="history-dolly-nbr tap" @click="copyDollyN(d.nbr)">#{{ d.nbr }}</button>
-            <span
-              v-if="d.rating && d.rating !== 'none'"
-              class="history-dolly-stat"
-            >{{ d.rating === 'good' ? '· good' : '· bad' }}</span>
-            <div class="history-dolly-acts" @click.stop>
-              <button type="button" class="history-dolly-ico tap" title="Good" @click="rateDolly(d.nbr, 'good')">👍</button>
-              <button type="button" class="history-dolly-ico tap" title="Bad" @click="rateDolly(d.nbr, 'bad')">👎</button>
-              <button type="button" class="history-dolly-ico tap" title="Clear" @click="rateDolly(d.nbr, 'none')">·</button>
-            </div>
-          </li>
-        </ul>
-      </aside>
+      <h2 v-if="weekFilteredItems.length" class="history-trips-h2">Trips</h2>
+      <p v-else class="history-no-month">No trips this month</p>
       <ul
         v-if="weekFilteredItems.length"
         class="history-list history-list--nested"
@@ -713,21 +595,11 @@ onUnmounted(() => {
           class="history-card"
         >
         <details
-          :open="openId === e.id"
           class="history-drop"
-          @toggle="
-            (ev) => {
-              const d = /** @type {HTMLDetailsElement} */ (ev.target)
-              if (d.open) {
-                openId = e.id
-              } else if (openId === e.id) openId = ''
-            }
-          "
         >
           <summary
             class="history-card-summary"
             @dblclick.stop.prevent="onRowDoubleClick(e)"
-            @click.stop
           >
             <span class="history-od-lane">
               <span class="history-od-compact" :title="str(e.dispatchHeader?.origin) || '—'">
@@ -899,6 +771,11 @@ onUnmounted(() => {
 .history-content {
   display: block;
   width: 100%;
+  border-radius: 14px;
+  border: 1px solid #26262e;
+  background: #0c0c10;
+  padding: 0.5rem 0.45rem 0.75rem;
+  box-sizing: border-box;
 }
 
 .history-title {
@@ -951,13 +828,9 @@ onUnmounted(() => {
 
 .history-month-body {
   width: 100%;
-}
-
-.history-sub {
-  margin: 0 0 var(--space-3, 0.75rem);
-  font-size: var(--text-sm, 0.8125rem);
-  color: var(--color-text-secondary, #a8a8b8);
-  line-height: 1.45;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
 }
 
 .history-refresh {
@@ -1007,126 +880,13 @@ onUnmounted(() => {
   color: #7a7a8a;
 }
 
-.history-weeks {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-3, 0.75rem);
-}
-
-.history-week {
-  list-style: none;
-}
-
-.history-week-drop {
-  list-style: none;
-  border: 1px solid #2e2e36;
-  border-radius: 14px;
-  background: #14141a;
-  overflow: hidden;
-}
-
-.history-week-summary {
-  list-style: none;
-  position: relative;
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 0.5rem 1rem;
-  padding: 0.75rem 2.1rem 0.65rem 0.9rem;
-  cursor: pointer;
-  user-select: none;
-  background: linear-gradient(180deg, #1e1e28 0%, #18181f 100%);
-  border-bottom: 1px solid #2a2a34;
-}
-
-.history-week-summary::-webkit-details-marker {
-  display: none;
-}
-
-.history-week-summary::after {
-  content: '▾';
-  position: absolute;
-  right: 0.85rem;
-  top: 0.8rem;
-  font-size: 0.7rem;
-  color: #8a8a98;
-  pointer-events: none;
-}
-
-.history-week-drop[open] .history-week-summary::after {
-  content: '▴';
-}
-
-.history-week-title {
-  font-size: 0.9rem;
-  font-weight: 700;
-  color: var(--color-text-primary, #f0f0f8);
-  line-height: 1.35;
-  max-width: calc(100% - 5rem);
-  padding-right: 0.5rem;
-}
-.history-week-head-titles {
-  display: flex;
-  flex-direction: column;
-  gap: 0.2rem;
-  min-width: 0;
-  flex: 1;
-}
-.history-week-iso-badge {
-  font-size: 0.62rem;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: #7a7a8a;
-}
-.history-week-meta {
-  flex: 0 0 auto;
-}
-
-.history-week-count {
-  font-size: 0.72rem;
-  font-weight: 600;
-  color: #9ca3af;
-}
 .history-cal-surface {
-  margin: 0 0.55rem 0.4rem;
-  padding: 0.55rem 0.5rem 0.45rem;
+  margin: 0 0 0.5rem;
+  padding: 0.5rem 0.45rem 0.4rem;
   border-radius: 12px;
-  background: linear-gradient(165deg, #15151c 0%, #0c0c10 100%);
-  border: 1px solid #2a2a34;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
-}
-.history-cal-legend {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem 0.85rem;
-  align-items: center;
-  font-size: 0.58rem;
-  text-transform: uppercase;
-  font-weight: 600;
-  letter-spacing: 0.04em;
-  color: #6a6a7a;
-  margin-bottom: 0.4rem;
-}
-.history-cal-legend .legend-dot {
-  display: inline-block;
-  width: 0.45rem;
-  height: 0.45rem;
-  border-radius: 2px;
-  margin-right: 0.2rem;
-  vertical-align: middle;
-}
-.history-cal-legend .legend-dot--ww {
-  background: linear-gradient(135deg, #6d3fa8, #3b1f5c);
-  border: 1px solid #7b4db5;
-}
-.history-cal-legend .legend-dot--trip {
-  background: #22c55e;
-  border: 1px solid #14532d;
+  background: #14141a;
+  border: 1px solid #2a2a32;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.2);
 }
 .history-month-grid {
   user-select: none;
@@ -1235,127 +995,13 @@ onUnmounted(() => {
   padding: 0;
   margin: 0;
 }
-.history-day-rail {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.35rem;
-  padding: 0.5rem 0.65rem 0.3rem;
-  background: #12121a;
-  border-bottom: 1px solid #2a2a32;
-  align-items: center;
-}
-.history-day-chip {
-  min-width: 2.2rem;
-  min-height: 2.4rem;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 0.1rem;
-  border-radius: 8px;
-  border: 1px solid #34343c;
-  background: #1a1a20;
-  color: #a8a8b8;
-  font-size: 0.6rem;
-  line-height: 1.1;
-  font-weight: 600;
-  cursor: pointer;
-  padding: 0.2rem 0.28rem;
-}
-.history-day-chip .dow {
-  font-size: 0.5rem;
-  text-transform: uppercase;
-  color: #6a6a78;
-}
-.history-day-chip .dom {
-  font-size: 0.85rem;
-  font-weight: 800;
-  color: #e8e8f0;
-}
-.history-day-chip--on {
-  border-color: #7b4db5;
-  background: rgba(123, 77, 181, 0.22);
-  color: #e0d0ff;
-}
-.history-day-chip--on .dow,
-.history-day-chip--on .dom {
-  color: #f0e6ff;
-}
-.history-day-chip--today:not(.history-day-chip--on) {
-  box-shadow: 0 0 0 1px rgba(96, 165, 250, 0.35);
-}
-.history-day-chip--all .dom {
-  font-size: 0.6rem;
-  text-transform: uppercase;
-}
-.history-trips-count {
-  margin: 0;
-  padding: 0.2rem 0.75rem 0.4rem;
-  font-size: 0.6rem;
-  color: #6a6a78;
-}
-.history-dolly-aside {
-  margin: 0 0.55rem 0.4rem;
-  padding: 0.5rem 0.6rem 0.55rem;
-  border: 1px solid #2f2f3a;
-  border-radius: 10px;
-  background: #16161e;
-}
-.history-dolly-h {
-  margin: 0 0 0.4rem;
-  font-size: 0.7rem;
+.history-trips-h2 {
+  margin: 0.65rem 0 0.4rem;
+  font-size: 0.72rem;
+  font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.04em;
-  color: #9a9ab0;
-  font-weight: 700;
-}
-.history-dolly-ul {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 0.3rem;
-}
-.history-dolly-row {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 0.3rem 0.45rem;
-  font-size: 0.72rem;
-  color: #b8b8c8;
-}
-.history-dolly-nbr {
-  font-size: 0.85rem;
-  font-weight: 800;
-  font-variant-numeric: tabular-nums;
-  border: 1px solid #3c3c48;
-  background: #1b1b22;
-  color: #f0f0f8;
-  border-radius: 6px;
-  padding: 0.15rem 0.4rem;
-  cursor: pointer;
-}
-.history-dolly-stat {
-  color: #7a7a8a;
-  font-size: 0.64rem;
-}
-.history-dolly-acts {
-  display: flex;
-  align-items: center;
-  gap: 0.15rem;
-  margin-left: auto;
-}
-.history-dolly-ico {
-  min-width: 1.5rem;
-  min-height: 1.5rem;
-  font-size: 0.7rem;
-  line-height: 1;
-  border: 1px solid #3a3a44;
-  border-radius: 5px;
-  background: #1a1a1f;
-  cursor: pointer;
-  color: #c0c0d0;
+  color: #8a8a98;
 }
 
 .history-list {
@@ -1368,9 +1014,12 @@ onUnmounted(() => {
 }
 
 .history-list--nested {
-  padding: 0.65rem 0.55rem 0.85rem;
-  gap: 0.65rem;
-  background: #0f0f14;
+  margin: 0;
+  padding: 0.4rem 0.25rem 0.5rem;
+  gap: 0.5rem;
+  background: transparent;
+  border: none;
+  border-radius: 0;
 }
 
 .history-card {
