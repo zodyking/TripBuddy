@@ -246,6 +246,17 @@ onUnmounted(() => {
       </RouterLink>
       <RouterLink
         class="nav-item"
+        :class="{ 'is-active': route.name === 'bridges' }"
+        to="/bridges"
+      >
+        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M2 20h4l4-12 3 6 3-6h6"/>
+          <path d="M2 20h20"/>
+        </svg>
+        <span class="nav-label">Bridges</span>
+      </RouterLink>
+      <RouterLink
+        class="nav-item"
         :class="{ 'is-active': route.name === 'settings' }"
         to="/settings"
       >
