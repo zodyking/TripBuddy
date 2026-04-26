@@ -36,6 +36,23 @@ function fmtTime(ts) {
 }
 
 /**
+ * PANYNJ JSON usually uses "ToNY" / "ToNJ" but normalize in case of spacing/casing drift.
+ * @param {unknown} v
+ * @returns {'ToNY' | 'ToNJ' | ''}
+ */
+function normalizeApiTravelDir(v) {
+  const s = String(v ?? '')
+    .replace(/\s+/g, '')
+    .replace(/[–—-]/g, '')
+    .toUpperCase()
+  if (s === 'TONY' || s === 'TOWARDNY' || s === 'TONYC') return 'ToNY'
+  if (s === 'TONJ' || s === 'TOWARDNJ' || s === 'TONJE') return 'ToNJ'
+  if (s.includes('TO') && s.includes('NY') && !s.includes('NJ')) return 'ToNY'
+  if (s.includes('TO') && s.includes('NJ') && !s.includes('NY')) return 'ToNJ'
+  return ''
+}
+
+/**
  * @param {unknown} row
  * @param {string} d
  */
@@ -43,7 +60,8 @@ function matchDir(row, d) {
   if (row == null || typeof row !== 'object' || !('travelDirection' in row)) {
     return false
   }
-  return String(/** @type {Record<string, unknown>} */(row).travelDirection) === d
+  const raw = /** @type {Record<string, unknown>} */(row).travelDirection
+  return normalizeApiTravelDir(raw) === d
 }
 
 /**
@@ -83,11 +101,44 @@ function travelMinutes(row) {
   return Number.POSITIVE_INFINITY
 }
 
+/**
+ * GWB: API returns 4 route rows; show only the pair for the current toggle (2 markers), not all four.
+ * @param {unknown} row
+ */
+function isGwbRow(row) {
+  return (
+    row != null &&
+    typeof row === 'object' &&
+    /george washington bridge/i.test(
+      String(/** @type {Record<string, unknown>} */(row).crossingDisplayName || ''),
+    )
+  )
+}
+
+/**
+ * @param {unknown} row
+ * @param {'ToNY' | 'ToNJ'} d
+ */
+function gwbMatchRouteForToggle(row, d) {
+  const o = /** @type {Record<string, unknown>} */(row)
+  const rid = o.routeId
+  const n = typeof rid === 'number' ? rid : Number(rid)
+  if (d === 'ToNY') {
+    return n === 211 || n === 212
+  }
+  return n === 12 || n === 11
+}
+
 const rankedRows = computed(() => {
   const live = payload.value?.live
   if (!Array.isArray(live)) return []
   const d = direction.value
-  const out = live.filter((r) => !isTunnelRow(r) && matchDir(r, d))
+  const out = live.filter((r) => {
+    if (isTunnelRow(r)) return false
+    if (!matchDir(r, d)) return false
+    if (isGwbRow(r) && !gwbMatchRouteForToggle(r, d)) return false
+    return true
+  })
   return out.sort((a, b) => {
     const ac = isClosedRow(a) ? 1 : 0
     const bc = isClosedRow(b) ? 1 : 0

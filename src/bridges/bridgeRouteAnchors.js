@@ -1,24 +1,68 @@
 /**
- * Map anchors per PANYNJ `routeId` (one row per live API record; bridges only — no tunnels).
- * Slightly offset for ToNY / ToNJ so the map “leans” the right way when a direction is selected.
+ * Bridge deck center / landmark coordinates (WGS84, public sources: Wikipedia, HAER where noted).
+ * One set per `routeId` in PANYNJ `crossingtimesapi.json` (bridge rows only).
+ * Slight nudge between ToNY and ToNJ per span so the map re-centers on toggle; all points sit on
+ * the crossing — not the distant highway approaches.
  * @type {Readonly<Record<string, { ToNY: readonly [number, number], ToNJ: readonly [number, number] }>>}
  */
 const BRIDGE_ANCHORS_BYDIR = Object.freeze(
   /** @type {Record<string, { ToNY: readonly [number, number], ToNJ: readonly [number, number] }>} */({
-    // Bayonne
-    217: { ToNY: [40.6412, -74.1336], ToNJ: [40.6405, -74.1345] },
-    222: { ToNY: [40.641, -74.1328], ToNJ: [40.64, -74.1332] },
-    // George Washington — per deck / direction
-    12: { ToNY: [40.8524, -73.9515], ToNJ: [40.8522, -73.9522] },
-    211: { ToNY: [40.8508, -73.9526], ToNJ: [40.8505, -73.9531] },
-    11: { ToNY: [40.8509, -73.9512], ToNJ: [40.8504, -73.9517] },
-    212: { ToNY: [40.8488, -73.9526], ToNJ: [40.8485, -73.9529] },
-    // Goethals
-    87: { ToNY: [40.6192, -74.1892], ToNJ: [40.6185, -74.1902] },
-    86: { ToNY: [40.6188, -74.1882], ToNJ: [40.618, -74.189] },
-    // Outerbridge
-    260: { ToNY: [40.5308, -74.2522], ToNJ: [40.53, -74.2532] },
-    2520: { ToNY: [40.5292, -74.2492], ToNJ: [40.5285, -74.2502] },
+    /**
+     * Bayonne Bridge — Wikipedia: 40.6419°N, 74.1422°W (center / landmark).
+     * 217 westbound to NJ, 222 eastbound to NY.
+     */
+    217: {
+      ToNY: [40.64185, -74.1414],
+      ToNJ: [40.6415, -74.143],
+    },
+    222: {
+      ToNY: [40.6419, -74.1412],
+      ToNJ: [40.6414, -74.1431],
+    },
+    /**
+     * George Washington Bridge — Wikipedia landmark: 40.8517°N, 73.9527°W (Hudson center span).
+     * 211, 212: eastbound / To NY. 12, 11: westbound / To NJ. Upper/lower: tiny offsets along the span.
+     */
+    12: {
+      ToNY: [40.8514, -73.9534],
+      ToNJ: [40.85185, -73.9521],
+    },
+    11: {
+      ToNY: [40.8509, -73.9536],
+      ToNJ: [40.8514, -73.9520],
+    },
+    211: {
+      ToNY: [40.85175, -73.9530],
+      ToNJ: [40.8512, -73.9533],
+    },
+    212: {
+      ToNY: [40.85095, -73.9532],
+      ToNJ: [40.8504, -73.9534],
+    },
+    /**
+     * Goethals Bridge — Wikipedia: 40.63556°N, 74.19722°W (centermost main span, HAER ±12 m).
+     * 86 east to NY, 87 west to NJ.
+     */
+    87: {
+      ToNY: [40.6351, -74.1962],
+      ToNJ: [40.636, -74.1981],
+    },
+    86: {
+      ToNY: [40.6352, -74.1960],
+      ToNJ: [40.6359, -74.1980],
+    },
+    /**
+     * Outerbridge — Wikipedia: 40.525°N, 74.247°W (landmark).
+     * 2520 east to NY, 260 west to NJ.
+     */
+    260: {
+      ToNY: [40.5254, -74.2460],
+      ToNJ: [40.5244, -74.2475],
+    },
+    2520: {
+      ToNY: [40.5253, -74.2458],
+      ToNJ: [40.5243, -74.2473],
+    },
   }),
 )
 

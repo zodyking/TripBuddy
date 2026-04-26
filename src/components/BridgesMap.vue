@@ -6,6 +6,14 @@ import 'leaflet/dist/leaflet.css'
 const DEFAULT_CENTER = Object.freeze([40.64, -74.18])
 const DEFAULT_ZOOM = 9
 
+/** Set in `.env` (Vite) for real road traffic overlay. https://developer.tomtom.com/ (Traffic Raster Flow) */
+const TOMTOM_KEY = String(
+  typeof import.meta !== 'undefined' && import.meta.env?.VITE_TOMTOM_KEY
+    ? import.meta.env.VITE_TOMTOM_KEY
+    : '',
+).trim()
+const hasTomtomTraffic = TOMTOM_KEY.length > 0
+
 const props = defineProps({
   /** @type {import('vue').PropType<Array<{
    *  id: string, lat: number, lng: number, title: string, minutes: string, trendIcon: string,
@@ -36,12 +44,12 @@ let streetLayer = null
 /** @type {L.TileLayer | null} */
 let satelliteLayer = null
 /**
- * Road traffic (Google map tiles) — not official API; may 403 in some regions; optional toggle.
+ * TomTom Traffic raster flow (needs `VITE_TOMTOM_KEY` at build time).
  * @type {L.TileLayer | null}
  */
 let trafficLayer = null
 const activeBaseLayer = ref(/** @type {'street' | 'satellite'} */ ('street'))
-const trafficOn = ref(true)
+const trafficOn = ref(hasTomtomTraffic)
 /** @type {L.LayerGroup | null} */
 let markerLayer = null
 /** @type {L.LayerGroup | null} */
@@ -151,7 +159,8 @@ function applyFitToPins() {
 }
 
 function applyTrafficToMap() {
-  if (!map || !trafficLayer || !streetLayer) return
+  if (!map || !streetLayer) return
+  if (!trafficLayer) return
   const on = trafficOn.value && activeBaseLayer.value === 'street'
   if (on) {
     if (!map.hasLayer(trafficLayer)) {
@@ -179,6 +188,7 @@ function setBaseLayer(mode) {
 }
 
 function toggleTraffic() {
+  if (!hasTomtomTraffic) return
   trafficOn.value = !trafficOn.value
   applyTrafficToMap()
 }
@@ -379,15 +389,16 @@ function initMap() {
       maxZoom: 20,
     },
   )
-  /** Road traffic color overlay (Google-style raster). Not a licensed API. */
-  trafficLayer = L.tileLayer(
-    'https://{s}.google.com/vt/lyrs=traffic&x={x}&y={y}&z={z}&hl=en',
-    {
-      subdomains: 'mt0 mt1 mt2 mt3',
-      maxZoom: 20,
-      opacity: 0.8,
-    },
-  )
+  if (hasTomtomTraffic) {
+    trafficLayer = L.tileLayer(
+      `https://api.tomtom.com/traffic/map/4/tile/flow/absolute/{z}/{x}/{y}.png?key=${encodeURIComponent(
+        TOMTOM_KEY,
+      )}&tileSize=256`,
+      { maxZoom: 22, opacity: 0.8, zIndex: 400 },
+    )
+  } else {
+    trafficLayer = null
+  }
   satelliteLayer = L.tileLayer(
     'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
     { attribution: 'Esri, Maxar', maxZoom: 19 },
@@ -465,10 +476,12 @@ watch(
       <button
         type="button"
         class="bridge-map-traffic tap"
-        :class="{ 'is-on': trafficOn }"
+        :class="{ 'is-on': trafficOn, 'is-missing-key': !hasTomtomTraffic }"
         :aria-pressed="trafficOn"
-        :disabled="activeBaseLayer === 'satellite'"
-        :title="activeBaseLayer === 'satellite' ? 'Traffic (street only)' : 'Live traffic (roads)'"
+        :disabled="activeBaseLayer === 'satellite' || !hasTomtomTraffic"
+        :title="!hasTomtomTraffic
+          ? 'Set VITE_TOMTOM_KEY in .env and rebuild (TomTom free tier)'
+          : (activeBaseLayer === 'satellite' ? 'Traffic (street only)' : 'Live traffic (TomTom)')"
         @click="toggleTraffic"
       >Traff</button>
       <button
@@ -499,7 +512,9 @@ watch(
         </svg>
       </button>
     </div>
-    <p v-if="activeBaseLayer === 'satellite' && trafficOn" class="bridge-map-footnote" role="note"
+    <p v-if="!hasTomtomTraffic" class="bridge-map-footnote" role="note"
+    >Road traffic: add VITE_TOMTOM_KEY to .env and rebuild</p>
+    <p v-else-if="activeBaseLayer === 'satellite' && trafficOn" class="bridge-map-footnote" role="note"
     >Traffic hidden on Sat — switch to map</p>
     <p v-if="geoPending" class="bridge-map-hint">Location…</p>
     <p v-else-if="geoDenied" class="bridge-map-hint is-warn">Location denied</p>
@@ -571,6 +586,11 @@ watch(
 .bridge-map-traffic:disabled {
   opacity: 0.45;
   cursor: not-allowed;
+}
+.bridge-map-traffic.is-missing-key {
+  border-color: #3f3f4c;
+  color: #5c5c6c;
+  opacity: 0.6;
 }
 .bridge-map-traffic.is-on {
   background: rgba(59, 130, 246, 0.3);
