@@ -2,6 +2,9 @@
 import { ref, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
+import 'leaflet.markercluster/dist/leaflet.markercluster-src.js'
+import 'leaflet.markercluster/dist/MarkerCluster.css'
+import 'leaflet.markercluster/dist/MarkerCluster.Default.css'
 
 const DEFAULT_CENTER = Object.freeze([40.64, -74.18])
 const DEFAULT_ZOOM = 9
@@ -50,7 +53,10 @@ let satelliteLayer = null
 let trafficLayer = null
 const activeBaseLayer = ref(/** @type {'street' | 'satellite'} */ ('street'))
 const trafficOn = ref(hasTomtomTraffic)
-/** @type {L.LayerGroup | null} */
+/**
+ * @type {L.MarkerClusterGroup | L.LayerGroup | null}
+ * Clustering prevents oversized HTML markers from stacking on the same view (e.g. GWB upper/lower).
+ */
 let markerLayer = null
 /** @type {L.LayerGroup | null} */
 let userLayer = null
@@ -326,6 +332,32 @@ function makeIcon(p, selected) {
   })
 }
 
+/**
+ * Themed count bubble when several bridges share a pixel region (e.g. GWB decks).
+ * @param {L.MarkerCluster} cluster
+ */
+function clusterIcon(cluster) {
+  const n = cluster.getChildCount()
+  const size = 44
+  return L.divIcon({
+    html: `<div class="bclus-inner"><span class="bclus-n">${n}</span></div>`,
+    className: `bclus-ico bclus-ico--${n < 10 ? 's' : n < 20 ? 'm' : 'l'}`,
+    iconSize: L.point(size, size),
+  })
+}
+
+function createMarkerCluster() {
+  return L.markerClusterGroup({
+    maxClusterRadius: 52,
+    /** Show individual bridge cards (large HTML icons) at street level */
+    disableClusteringAtZoom: 15,
+    spiderfyOnMaxZoom: true,
+    showCoverageOnHover: false,
+    removeOutsideVisibleBounds: true,
+    iconCreateFunction: clusterIcon,
+  })
+}
+
 function syncMarkers() {
   if (!map || !markerLayer) return
 
@@ -334,6 +366,11 @@ function syncMarkers() {
 
   const wantIds = new Set(props.pins.map((p) => String(p.id)))
   const motion = prefersReducedMotion()
+
+  if (structChanged) {
+    /** @type {L.MarkerClusterGroup} */(markerLayer).clearLayers()
+    markersById.clear()
+  }
 
   for (const p of props.pins) {
     const la = Number(p.lat)
@@ -344,7 +381,12 @@ function syncMarkers() {
     const ll = L.latLng(la, ln)
     const icon = makeIcon(/** @type {any} */(p), selected)
     const existing = markersById.get(id)
-    if (existing) {
+    if (structChanged) {
+      const marker = L.marker(ll, { icon, title: p.title })
+      marker.on('click', () => emit('select', id))
+      marker.addTo(markerLayer)
+      markersById.set(id, marker)
+    } else if (existing) {
       if (existing.getLatLng().lat !== la || existing.getLatLng().lng !== ln) {
         existing.setLatLng(ll)
       }
@@ -357,11 +399,15 @@ function syncMarkers() {
     }
   }
 
-  for (const [id, mk] of [...markersById]) {
-    if (wantIds.has(id)) continue
-    markerLayer.removeLayer(mk)
-    markersById.delete(id)
+  if (!structChanged) {
+    for (const [id, mk] of [...markersById]) {
+      if (wantIds.has(id)) continue
+      markerLayer.removeLayer(mk)
+      markersById.delete(id)
+    }
   }
+
+  /** @type {L.MarkerClusterGroup} */(markerLayer).refreshClusters()
 
   lastStructureKey = sk
 
@@ -369,7 +415,12 @@ function syncMarkers() {
     applyFitToPins()
   } else if (props.highlightId) {
     const m = markersById.get(props.highlightId)
-    if (m) map.panTo(m.getLatLng(), { animate: !motion })
+    if (m) {
+      /** @type {L.MarkerClusterGroup} */(markerLayer).zoomToShowLayer(
+        m,
+        () => map?.panTo(m.getLatLng(), { animate: !motion }),
+      )
+    }
   }
 
   nextTick(() => {
@@ -406,7 +457,8 @@ function initMap() {
   activeBaseLayer.value = 'street'
   streetLayer.addTo(map)
   applyTrafficToMap()
-  markerLayer = L.layerGroup().addTo(map)
+  markerLayer = createMarkerCluster()
+  map.addLayer(markerLayer)
   userLayer = L.layerGroup().addTo(map)
   lastStructureKey = ''
   syncMarkers()
@@ -417,6 +469,9 @@ function initMap() {
 
 function destroyMap() {
   clearGeoWatch()
+  if (markerLayer) {
+    /** @type {L.MarkerClusterGroup} */(markerLayer).clearLayers()
+  }
   markersById.clear()
   userMarker = null
   userAccuracyCircle = null
@@ -658,12 +713,44 @@ watch(
   font-family: inherit;
   background: #0a0a0f;
 }
-:deep(.leaflet-marker-icon.bridge-map-div-icon) {
-  z-index: 1 !important;
+:deep(.bridge-map-div-icon) {
+  z-index: 500 !important;
   border: none;
   background: none;
   margin: 0 !important;
   transform-origin: center bottom;
+  pointer-events: auto;
+}
+:deep(.bclus-ico) {
+  background: none !important;
+  border: none;
+}
+:deep(.bclus-inner) {
+  width: 100%;
+  height: 100%;
+  border-radius: 999px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1rem;
+  font-weight: 800;
+  color: #e8e2ff;
+  background: linear-gradient(145deg, rgba(100, 70, 160, 0.88), rgba(40, 20, 70, 0.9));
+  border: 1px solid rgba(199, 168, 255, 0.4);
+  box-shadow:
+    0 3px 14px rgba(0, 0, 0, 0.5),
+    0 0 0 1px rgba(0, 0, 0, 0.35) inset;
+}
+:deep(.bclus-ico--l .bclus-inner) {
+  background: linear-gradient(145deg, rgba(90, 60, 140, 0.9), rgba(20, 12, 40, 0.95));
+  color: #f4f0ff;
+}
+:deep(.bclus-ico--m .bclus-inner) {
+  color: #fde68a;
+}
+:deep(.leaflet-cluster-anim .leaflet-marker-icon) {
+  -webkit-backface-visibility: hidden;
+  backface-visibility: hidden;
 }
 :deep(.bridge-mrk) {
   width: 100px;

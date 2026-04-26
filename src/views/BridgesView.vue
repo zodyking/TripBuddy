@@ -489,85 +489,93 @@ onUnmounted(() => {
         <p v-if="error" class="bridges-err">{{ error }}</p>
         <div v-if="loading && !payload" class="bridges-skel" aria-busy="true">Loading…</div>
 
-        <ul
+        <div
           v-else
-          class="bridge-grid"
-          aria-label="Bridges, fastest first"
+          class="bridges-content-panel"
+          aria-label="Crossing times list"
         >
-          <li
-            v-for="(row, idx) in rankedRows"
-            :id="`bridge-tile-${rowRouteId(row)}`"
-            :key="rowKey(row)"
-            class="bridge-tile"
-            :class="{
-              'is-closed': isClosedRow(row),
-              'is-pick': isBestPick(idx, row),
-              'is-hi': isHighlighted(row),
-            }"
-            @click="onListTileClick(row)"
+          <h2 v-if="rankedRows.length" class="bridges-trips-h2">Crossings</h2>
+          <ul
+            v-if="rankedRows.length"
+            class="bridge-grid"
+            aria-label="Bridges, fastest first"
           >
-            <div class="bridge-tile-inner">
-              <div class="bridge-tile-top">
-                <div class="bridge-rank" aria-hidden="true">{{ idx + 1 }}</div>
-                <div class="bridge-name-block">
-                  <h2 class="bridge-title">{{ displayTitle(row) }}</h2>
+            <li
+              v-for="(row, idx) in rankedRows"
+              :id="`bridge-tile-${rowRouteId(row)}`"
+              :key="rowKey(row)"
+              class="bridge-tile"
+              :class="{
+                'is-closed': isClosedRow(row),
+                'is-pick': isBestPick(idx, row),
+                'is-hi': isHighlighted(row),
+              }"
+              @click="onListTileClick(row)"
+            >
+              <div class="bridge-tile-inner">
+                <div class="bridge-tile-top">
+                  <div class="bridge-rank" aria-hidden="true">{{ idx + 1 }}</div>
+                  <div class="bridge-name-block">
+                    <h2 class="bridge-title">{{ displayTitle(row) }}</h2>
+                  </div>
+                  <div
+                    class="bridge-trend ico"
+                    :class="trendInfo(row).cls"
+                    :title="trendInfo(row).full"
+                  >{{ trendInfo(row).short }}</div>
                 </div>
-                <div
-                  class="bridge-trend ico"
-                  :class="trendInfo(row).cls"
-                  :title="trendInfo(row).full"
-                >{{ trendInfo(row).short }}</div>
-              </div>
-              <div class="bridge-mid">
-                <div class="bridge-min-block">
-                  <span class="bridge-min-num">
-                    <template
-                      v-if="row && typeof row === 'object' && (/** @type {any} */(row)).isCrossingClosed"
-                    >—</template>
-                    <template
-                      v-else-if="row && typeof row === 'object' && (/** @type {any} */(row)).routeTravelTime != null"
-                    >{{ String((/** @type {any} */(row)).routeTravelTime) }}</template>
-                    <template v-else>—</template>
-                  </span>
-                  <span class="bridge-min-suf">min</span>
+                <div class="bridge-mid">
+                  <div class="bridge-min-block">
+                    <span class="bridge-min-num">
+                      <template
+                        v-if="row && typeof row === 'object' && (/** @type {any} */(row)).isCrossingClosed"
+                      >—</template>
+                      <template
+                        v-else-if="row && typeof row === 'object' && (/** @type {any} */(row)).routeTravelTime != null"
+                      >{{ String((/** @type {any} */(row)).routeTravelTime) }}</template>
+                      <template v-else>—</template>
+                    </span>
+                    <span class="bridge-min-suf">min</span>
+                  </div>
+                  <div
+                    v-if="row && typeof row === 'object' && (/** @type {any} */(row)).routeSpeed != null"
+                    class="bridge-mph"
+                  >{{ (/** @type {any} */(row)).routeSpeed }}&nbsp;mph</div>
                 </div>
-                <div
-                  v-if="row && typeof row === 'object' && (/** @type {any} */(row)).routeSpeed != null"
-                  class="bridge-mph"
-                >{{ (/** @type {any} */(row)).routeSpeed }}&nbsp;mph</div>
+                <div v-if="seriesForRow(row).length > 0" class="sparkline-wrap">
+                  <svg
+                    class="spark-svg"
+                    viewBox="0 0 100 22"
+                    preserveAspectRatio="none"
+                    width="100%"
+                    height="22"
+                    :aria-label="`Recent travel time for ${displayTitle(row)}`"
+                  >
+                    <line
+                      x1="0"
+                      y1="20"
+                      x2="100"
+                      y2="20"
+                      stroke="rgba(255,255,255,0.06)"
+                      stroke-width="1"
+                    />
+                    <path
+                      v-if="sparkPathD(row)"
+                      :d="sparkPathD(row)"
+                      fill="none"
+                      stroke="var(--b-spark, #9d7ed8)"
+                      stroke-width="2.25"
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                      vector-effect="non-scaling-stroke"
+                    />
+                  </svg>
+                </div>
               </div>
-              <div v-if="seriesForRow(row).length > 0" class="sparkline-wrap">
-                <svg
-                  class="spark-svg"
-                  viewBox="0 0 100 22"
-                  preserveAspectRatio="none"
-                  width="100%"
-                  height="22"
-                  :aria-label="`Recent travel time for ${displayTitle(row)}`"
-                >
-                  <line
-                    x1="0"
-                    y1="20"
-                    x2="100"
-                    y2="20"
-                    stroke="rgba(255,255,255,0.06)"
-                    stroke-width="1"
-                  />
-                  <path
-                    v-if="sparkPathD(row)"
-                    :d="sparkPathD(row)"
-                    fill="none"
-                    stroke="var(--b-spark, #9d7ed8)"
-                    stroke-width="2.25"
-                    stroke-linecap="round"
-                    stroke-linejoin="round"
-                    vector-effect="non-scaling-stroke"
-                  />
-                </svg>
-              </div>
-            </div>
-          </li>
-        </ul>
+            </li>
+          </ul>
+          <p v-else class="bridges-no-crossings">No bridge data for this direction</p>
+        </div>
       </div>
     </div>
   </div>
@@ -682,12 +690,10 @@ onUnmounted(() => {
 }
 
 .bridges-h1 {
-  font-size: clamp(1.1rem, 2.2vw, 1.35rem);
-  font-weight: 800;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
   margin: 0;
-  color: #e8e0f4;
+  font-size: var(--text-xl, 1.25rem);
+  font-weight: 600;
+  color: var(--color-text-primary, #f4f4f8);
 }
 
 .bridges-warn {
@@ -761,6 +767,32 @@ onUnmounted(() => {
   padding: 1.2rem 0;
   color: #9a9ab0;
   font-size: 0.9rem;
+}
+
+.bridges-content-panel {
+  display: block;
+  width: 100%;
+  border-radius: 14px;
+  border: 1px solid #26262e;
+  background: #0c0c10;
+  padding: 0.5rem 0.45rem 0.75rem;
+  box-sizing: border-box;
+  margin-top: 0.25rem;
+}
+
+.bridges-trips-h2 {
+  margin: 0 0 0.4rem 0.15rem;
+  font-size: 0.65rem;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: #6e6e7e;
+}
+
+.bridges-no-crossings {
+  margin: 0.5rem 0.25rem 0.35rem;
+  font-size: 0.8rem;
+  color: #7a7a8c;
 }
 
 /* Responsive grid: one column on narrow phones, two from ~480px, three on large tablets/desktop */
