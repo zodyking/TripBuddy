@@ -7,7 +7,7 @@ import BridgesMap from '../components/BridgesMap.vue'
 defineOptions({ name: 'BridgesView' })
 
 const POLL_MS = 5 * 60 * 1000
-const MAX_SPARK_POINTS = 20
+const MAX_SPARK_POINTS = 48
 
 /** @typedef {'ToNY' | 'ToNJ'} TravelDir */
 /** @type {import('vue').Ref<TravelDir>} */
@@ -116,6 +116,8 @@ function isGwbRow(row) {
 }
 
 /**
+ * GWB: show **upper deck only** (one card + one map pin). Lower deck still in API for data.
+ * To NY: 211 upper / 212 lower. To NJ: 12 upper / 11 lower.
  * @param {unknown} row
  * @param {'ToNY' | 'ToNJ'} d
  */
@@ -124,9 +126,9 @@ function gwbMatchRouteForToggle(row, d) {
   const rid = o.routeId
   const n = typeof rid === 'number' ? rid : Number(rid)
   if (d === 'ToNY') {
-    return n === 211 || n === 212
+    return n === 211
   }
-  return n === 12 || n === 11
+  return n === 12
 }
 
 const rankedRows = computed(() => {
@@ -166,6 +168,12 @@ function displayTitle(row) {
   const name =
     typeof o.crossingDisplayName === 'string' ? o.crossingDisplayName : 'Bridge'
   const mod = typeof o.facilityModifier === 'string' ? o.facilityModifier.trim() : ''
+  if (isGwbRow(row)) {
+    const base = String(name)
+      .replace(/\s*[—–-]\s*(upper|lower)\s*$/i, '')
+      .trim()
+    return `${base || name} — Upper`
+  }
   if (mod) return `${name} — ${mod}`
   return name
 }
@@ -225,7 +233,7 @@ function downsampleTimeSeries(points, maxN = MAX_SPARK_POINTS) {
 }
 
 /**
- * Simple spark: few points, thick line, no axes text.
+ * Rich mini-chart: area fill, grid, min/max + last point.
  * @param {Array<{ t: number, m: number, s: number }>} points
  */
 function sparklinePathD(points) {
@@ -233,8 +241,9 @@ function sparklinePathD(points) {
   const p = downsampleTimeSeries(points, MAX_SPARK_POINTS)
   if (p.length < 1) return ''
   const w = 100
-  const h = 22
-  const pad = 2
+  const h = 32
+  const padX = 4
+  const padY = 6
   const vals = p.map((x) => x.m)
   const minV = Math.min(...vals, 0)
   const maxV = Math.max(...vals, 1)
@@ -242,11 +251,55 @@ function sparklinePathD(points) {
   const n = p.length
   return p
     .map((pt, i) => {
-      const x = pad + (w - 2 * pad) * (n <= 1 ? 0.5 : i / (n - 1))
-      const y = pad + (h - 2 * pad) * (1 - (pt.m - minV) / span)
+      const x = padX + (w - 2 * padX) * (n <= 1 ? 0.5 : i / (n - 1))
+      const y = padY + (h - 2 * padY) * (1 - (pt.m - minV) / span)
       return `${i === 0 ? 'M' : 'L'}${x.toFixed(1)},${y.toFixed(1)}`
     })
     .join(' ')
+}
+
+/**
+ * @param {Array<{ t: number, m: number, s: number }>} points
+ */
+function sparkAreaPathD(points) {
+  if (!Array.isArray(points) || points.length < 1) return ''
+  const p = downsampleTimeSeries(points, MAX_SPARK_POINTS)
+  if (p.length < 1) return ''
+  const w = 100
+  const h = 32
+  const padX = 4
+  const padY = 6
+  const vals = p.map((x) => x.m)
+  const minV = Math.min(...vals, 0)
+  const maxV = Math.max(...vals, 1)
+  const span = Math.max(maxV - minV, 0.1)
+  const n = p.length
+  const pts = p.map((pt, i) => {
+    const x = padX + (w - 2 * padX) * (n <= 1 ? 0.5 : i / (n - 1))
+    const y = padY + (h - 2 * padY) * (1 - (pt.m - minV) / span)
+    return { x, y }
+  })
+  const yBase = h - 2
+  return `M${pts[0].x.toFixed(1)},${yBase.toFixed(1)}${pts
+    .map((o) => `L${o.x.toFixed(1)},${o.y.toFixed(1)}`)
+    .join('')}L${pts[pts.length - 1].x.toFixed(1)},${yBase.toFixed(1)}Z`
+}
+
+/**
+ * @param {unknown} row
+ */
+/**
+ * @param {unknown} row
+ */
+function sparkMeta(row) {
+  const s = seriesForRow(row)
+  if (!s.length) return { min: 0, max: 0 }
+  const p = downsampleTimeSeries(s, MAX_SPARK_POINTS)
+  const vals = p.map((x) => x.m)
+  return {
+    min: Math.min(...vals, 0),
+    max: Math.max(...vals, 1),
+  }
 }
 
 /**
@@ -265,6 +318,28 @@ function rowKey(row) {
  */
 function sparkPathD(row) {
   return sparklinePathD(seriesForRow(row))
+}
+function sparkAreaD(row) {
+  return sparkAreaPathD(seriesForRow(row))
+}
+function sparkLastPoint(row) {
+  const s = seriesForRow(row)
+  const p = downsampleTimeSeries(s, MAX_SPARK_POINTS)
+  if (p.length < 1) return { x: 50, y: 16 }
+  const w = 100
+  const h = 32
+  const padX = 4
+  const padY = 6
+  const vals = p.map((x) => x.m)
+  const minV = Math.min(...vals, 0)
+  const maxV = Math.max(...vals, 1)
+  const span = Math.max(maxV - minV, 0.1)
+  const n = p.length
+  const last = p[n - 1]
+  const i = n - 1
+  const x = padX + (w - 2 * padX) * (n <= 1 ? 0.5 : i / (n - 1))
+  const y = padY + (h - 2 * padY) * (1 - (last.m - minV) / span)
+  return { x, y, m: last.m }
 }
 
 /**
@@ -543,31 +618,74 @@ onUnmounted(() => {
                   >{{ (/** @type {any} */(row)).routeSpeed }}&nbsp;mph</div>
                 </div>
                 <div v-if="seriesForRow(row).length > 0" class="sparkline-wrap">
+                  <div class="spark-head">
+                    <span class="spark-lab">Recent (min)</span>
+                    <span
+                      v-if="sparkMeta(row).max > 0"
+                      class="spark-range"
+                    >{{ Math.round(sparkMeta(row).min) }}–{{ Math.round(sparkMeta(row).max) }}</span>
+                  </div>
                   <svg
                     class="spark-svg"
-                    viewBox="0 0 100 22"
+                    viewBox="0 0 100 32"
                     preserveAspectRatio="none"
                     width="100%"
-                    height="22"
+                    height="32"
                     :aria-label="`Recent travel time for ${displayTitle(row)}`"
                   >
+                    <defs>
+                      <linearGradient
+                        :id="`spg-r${rowRouteId(row)}`"
+                        x1="0"
+                        y1="0"
+                        x2="0"
+                        y2="1"
+                      >
+                        <stop offset="0%" stop-color="rgba(167,139,250,0.35)" />
+                        <stop offset="100%" stop-color="rgba(167,139,250,0.02)" />
+                      </linearGradient>
+                    </defs>
                     <line
-                      x1="0"
-                      y1="20"
-                      x2="100"
-                      y2="20"
-                      stroke="rgba(255,255,255,0.06)"
-                      stroke-width="1"
+                      x1="4"
+                      y1="8"
+                      x2="96"
+                      y2="8"
+                      class="spark-grid"
+                    />
+                    <line
+                      x1="4"
+                      y1="16"
+                      x2="96"
+                      y2="16"
+                      class="spark-grid"
+                    />
+                    <line
+                      x1="4"
+                      y1="24"
+                      x2="96"
+                      y2="24"
+                      class="spark-grid"
+                    />
+                    <path
+                      v-if="sparkAreaD(row)"
+                      :d="sparkAreaD(row)"
+                      :fill="`url(#spg-r${rowRouteId(row)})`"
                     />
                     <path
                       v-if="sparkPathD(row)"
                       :d="sparkPathD(row)"
                       fill="none"
-                      stroke="var(--b-spark, #9d7ed8)"
-                      stroke-width="2.25"
+                      stroke="var(--b-spark, #c4b5fd)"
+                      stroke-width="1.75"
                       stroke-linecap="round"
                       stroke-linejoin="round"
-                      vector-effect="non-scaling-stroke"
+                    />
+                    <circle
+                      v-if="seriesForRow(row).length"
+                      :cx="sparkLastPoint(row).x"
+                      :cy="sparkLastPoint(row).y"
+                      r="2.2"
+                      class="spark-dot"
                     />
                   </svg>
                 </div>
@@ -772,12 +890,14 @@ onUnmounted(() => {
 .bridges-content-panel {
   display: block;
   width: 100%;
-  border-radius: 14px;
-  border: 1px solid #26262e;
-  background: #0c0c10;
-  padding: 0.5rem 0.45rem 0.75rem;
+  max-width: none;
+  border-radius: 16px;
+  border: 1px solid rgba(199, 168, 255, 0.12);
+  background: linear-gradient(165deg, #101018 0%, #0a0a0e 100%);
+  padding: 0.6rem 0.55rem 0.8rem;
   box-sizing: border-box;
   margin-top: 0.25rem;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
 }
 
 .bridges-trips-h2 {
@@ -795,48 +915,35 @@ onUnmounted(() => {
   color: #7a7a8c;
 }
 
-/* Responsive grid: one column on narrow phones, two from ~480px, three on large tablets/desktop */
+/* Single full-width column for at-a-glance driving */
 .bridge-grid {
   list-style: none;
   margin: 0;
   padding: 0;
-  display: grid;
-  grid-template-columns: 1fr;
-  gap: 0.55rem;
-  align-items: stretch;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  width: 100%;
+  max-width: none;
 }
-
-@media (min-width: 480px) {
-  .bridge-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 0.65rem;
-  }
-}
-
-@media (min-width: 900px) {
-  .bridges-page:not(.is-split) .bridge-grid {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-    gap: 0.75rem;
-  }
-}
-
-/* Split view: one column, easier to scan with map on the side */
 .bridges-page.is-split .bridge-grid {
-  grid-template-columns: 1fr;
-  gap: 0.5rem;
-  max-width: 30rem;
+  max-width: none;
 }
 
 .bridge-tile {
   min-width: 0;
+  width: 100%;
   border-radius: 14px;
   position: relative;
-  background: linear-gradient(150deg, #181822 0%, #0b0b0f 100%);
-  border: 1px solid rgba(255, 255, 255, 0.09);
+  background: linear-gradient(150deg, #1a1a24 0%, #0c0c12 100%);
+  border: 1px solid rgba(255, 255, 255, 0.1);
   box-shadow: 0 4px 20px rgba(0, 0, 0, 0.35);
   cursor: pointer;
   -webkit-tap-highlight-color: transparent;
-  transition: border-color 0.12s, box-shadow 0.12s;
+  transition: border-color 0.12s, box-shadow 0.12s, transform 0.1s;
+}
+.bridge-tile:active {
+  transform: scale(0.998);
 }
 
 .bridge-tile.is-hi {
@@ -1004,14 +1111,43 @@ onUnmounted(() => {
 }
 
 .sparkline-wrap {
-  margin-top: 0.15rem;
-  padding-top: 0.2rem;
-  border-top: 1px solid rgba(255, 255, 255, 0.05);
-  opacity: 0.9;
+  margin-top: 0.25rem;
+  padding-top: 0.3rem;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+.spark-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 0.2rem;
+  padding: 0 0.1rem;
+}
+.spark-lab {
+  font-size: 0.55rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: #6b6b78;
+}
+.spark-range {
+  font-size: 0.6rem;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  color: #9a9aac;
+}
+.spark-grid {
+  stroke: rgba(255, 255, 255, 0.04);
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+}
+.spark-dot {
+  fill: #e9d5ff;
+  stroke: #7c3aed;
+  stroke-width: 1.2;
 }
 .spark-svg {
   display: block;
   max-width: 100%;
-  min-height: 1.1rem;
+  min-height: 1.5rem;
 }
 </style>

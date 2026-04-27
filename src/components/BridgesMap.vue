@@ -1,21 +1,16 @@
 <script setup>
-import { ref, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
+import { ref, watch, computed, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 import 'leaflet.markercluster/dist/leaflet.markercluster-src.js'
 import 'leaflet.markercluster/dist/MarkerCluster.css'
 import 'leaflet.markercluster/dist/MarkerCluster.Default.css'
+import { tomtomKeyEffective } from '../stores/trafficTileKey.js'
 
 const DEFAULT_CENTER = Object.freeze([40.64, -74.18])
 const DEFAULT_ZOOM = 9
 
-/** Set in `.env` (Vite) for real road traffic overlay. https://developer.tomtom.com/ (Traffic Raster Flow) */
-const TOMTOM_KEY = String(
-  typeof import.meta !== 'undefined' && import.meta.env?.VITE_TOMTOM_KEY
-    ? import.meta.env.VITE_TOMTOM_KEY
-    : '',
-).trim()
-const hasTomtomTraffic = TOMTOM_KEY.length > 0
+const hasTomtomTraffic = computed(() => tomtomKeyEffective.value.length > 0)
 
 const props = defineProps({
   /** @type {import('vue').PropType<Array<{
@@ -52,7 +47,7 @@ let satelliteLayer = null
  */
 let trafficLayer = null
 const activeBaseLayer = ref(/** @type {'street' | 'satellite'} */ ('street'))
-const trafficOn = ref(hasTomtomTraffic)
+const trafficOn = ref(tomtomKeyEffective.value.length > 0)
 /**
  * @type {L.MarkerClusterGroup | L.LayerGroup | null}
  * Clustering prevents oversized HTML markers from stacking on the same view (e.g. GWB upper/lower).
@@ -194,7 +189,7 @@ function setBaseLayer(mode) {
 }
 
 function toggleTraffic() {
-  if (!hasTomtomTraffic) return
+  if (!hasTomtomTraffic.value) return
   trafficOn.value = !trafficOn.value
   applyTrafficToMap()
 }
@@ -428,6 +423,28 @@ function syncMarkers() {
   })
 }
 
+function getTomtomKeyStr() {
+  return String(tomtomKeyEffective.value || '').trim()
+}
+
+function setTrafficLayerFromKey() {
+  if (!map) return
+  const k = getTomtomKeyStr()
+  if (trafficLayer && map.hasLayer(trafficLayer)) {
+    map.removeLayer(trafficLayer)
+  }
+  trafficLayer = null
+  if (k) {
+    trafficLayer = L.tileLayer(
+      `https://api.tomtom.com/traffic/map/4/tile/flow/absolute/{z}/{x}/{y}.png?key=${encodeURIComponent(
+        k,
+      )}&tileSize=256`,
+      { maxZoom: 22, opacity: 0.8, zIndex: 400 },
+    )
+  }
+  trafficOn.value = !!k
+}
+
 function initMap() {
   if (!containerRef.value) return
   map = L.map(containerRef.value, { zoomControl: true, scrollWheelZoom: true })
@@ -440,16 +457,7 @@ function initMap() {
       maxZoom: 20,
     },
   )
-  if (hasTomtomTraffic) {
-    trafficLayer = L.tileLayer(
-      `https://api.tomtom.com/traffic/map/4/tile/flow/absolute/{z}/{x}/{y}.png?key=${encodeURIComponent(
-        TOMTOM_KEY,
-      )}&tileSize=256`,
-      { maxZoom: 22, opacity: 0.8, zIndex: 400 },
-    )
-  } else {
-    trafficLayer = null
-  }
+  setTrafficLayerFromKey()
   satelliteLayer = L.tileLayer(
     'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
     { attribution: 'Esri, Maxar', maxZoom: 19 },
@@ -517,6 +525,13 @@ watch(
   },
   { deep: true },
 )
+
+watch(tomtomKeyEffective, () => {
+  if (map) {
+    setTrafficLayerFromKey()
+    applyTrafficToMap()
+  }
+})
 </script>
 
 <template>
@@ -535,7 +550,7 @@ watch(
         :aria-pressed="trafficOn"
         :disabled="activeBaseLayer === 'satellite' || !hasTomtomTraffic"
         :title="!hasTomtomTraffic
-          ? 'Set VITE_TOMTOM_KEY in .env and rebuild (TomTom free tier)'
+          ? 'Add TomTom key in Settings (free developer tier) or VITE_TOMTOM_KEY in .env'
           : (activeBaseLayer === 'satellite' ? 'Traffic (street only)' : 'Live traffic (TomTom)')"
         @click="toggleTraffic"
       >Traff</button>
@@ -568,7 +583,7 @@ watch(
       </button>
     </div>
     <p v-if="!hasTomtomTraffic" class="bridge-map-footnote" role="note"
-    >Road traffic: add VITE_TOMTOM_KEY to .env and rebuild</p>
+    >Traffic: set TomTom key in Settings, or <code class="bmk">VITE_TOMTOM_KEY</code> in <code class="bmk">.env</code> (free tier)</p>
     <p v-else-if="activeBaseLayer === 'satellite' && trafficOn" class="bridge-map-footnote" role="note"
     >Traffic hidden on Sat — switch to map</p>
     <p v-if="geoPending" class="bridge-map-hint">Location…</p>
@@ -687,6 +702,12 @@ watch(
   padding: 0.1rem 0.35rem;
   border-radius: 4px;
   max-width: 85%;
+}
+.bmk {
+  font-size: 0.9em;
+  background: rgba(0, 0, 0, 0.35);
+  padding: 0.05em 0.2em;
+  border-radius: 2px;
   line-height: 1.2;
   pointer-events: none;
 }
