@@ -81,6 +81,7 @@ onUnmounted(() => {
           class="app-main"
           :class="{
             'app-main--directory': route.name === 'directory',
+            'app-main--bridges': route.name === 'bridges',
             'app-main--ce': route.name === 'carriersEdge',
           }"
         >
@@ -122,6 +123,18 @@ onUnmounted(() => {
           <path d="M12 6v6l4 2"/>
         </svg>
         <span class="nav-label">History</span>
+      </RouterLink>
+      <RouterLink
+        class="nav-item"
+        :class="{ 'is-active': route.name === 'bridges' }"
+        to="/bridges"
+      >
+        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M4 18h3l2-4h6l2 4h3"/>
+          <path d="M6 18V9l2-3h8l2 3v9"/>
+          <path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/>
+        </svg>
+        <span class="nav-label">Bridges</span>
       </RouterLink>
       <RouterLink
         class="nav-item"
@@ -337,7 +350,8 @@ onUnmounted(() => {
 }
 
 /* Directory: edge-to-edge horizontal, no centered column — inner view owns scroll regions */
-.app-main.app-main--directory {
+.app-main.app-main--directory,
+.app-main.app-main--bridges {
   flex: 1;
   min-height: 0;
   max-width: none;
@@ -350,14 +364,16 @@ onUnmounted(() => {
   flex-direction: column;
 }
 
-/* Split-pane directory: only the list column scrolls, not the main element */
+/* Split-pane directory/bridges: only the list column scrolls, not the main element */
 @media (orientation: landscape) and (min-width: 700px) {
-  .app-main.app-main--directory {
+  .app-main.app-main--directory,
+  .app-main.app-main--bridges {
     overflow-y: hidden;
   }
 }
 
-.app-main.app-main--directory > * {
+.app-main.app-main--directory > *,
+.app-main.app-main--bridges > * {
   flex: 0 1 auto;
   display: flex;
   flex-direction: column;
@@ -377,7 +393,8 @@ onUnmounted(() => {
 }
 
 @media (orientation: landscape) and (min-width: 700px) {
-  .app-main.app-main--directory > * {
+  .app-main.app-main--directory > *,
+  .app-main.app-main--bridges > * {
     flex: 1;
     min-height: 0;
   }

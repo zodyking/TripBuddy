@@ -142,6 +142,12 @@ export async function getHealth() {
   return handleJson(r)
 }
 
+/** Port Authority bridge/tunnel times + series for charts (server-cached). */
+export async function getBridgesPanynj() {
+  const r = await apiFetch('/api/bridges/panynj')
+  return handleJson(r)
+}
+
 export async function getAssignment() {
   const r = await apiFetch('/api/assignment')
   return handleJson(r)

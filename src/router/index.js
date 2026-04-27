@@ -4,6 +4,7 @@ import MainDashboard from '../views/MainDashboard.vue'
 import SettingsView from '../views/SettingsView.vue'
 import DirectoryView from '../views/DirectoryView.vue'
 import HistoryView from '../views/HistoryView.vue'
+import BridgesView from '../views/BridgesView.vue'
 import CarriersEdgeView from '../views/CarriersEdgeView.vue'
 import LoginView from '../views/LoginView.vue'
 import { getAuthStatus } from '../api.js'
@@ -38,6 +39,12 @@ export const router = createRouter({
           name: 'history',
           component: HistoryView,
           meta: { title: 'History' },
+        },
+        {
+          path: 'bridges',
+          name: 'bridges',
+          component: BridgesView,
+          meta: { title: 'Bridges' },
         },
         {
           path: 'carriers-edge',

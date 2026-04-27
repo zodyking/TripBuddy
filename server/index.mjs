@@ -104,6 +104,11 @@ import {
   pointInPolygon,
 } from './geo-fence-check.mjs'
 import { lookupIpLatLng, reverseGeocodeNominatim } from './ip-geolocation.mjs'
+import {
+  getBridgesResponsePayload,
+  refreshPanynjCrossingData,
+  startPanynjBridgePoll,
+} from './bridge-panynj.mjs'
 
 await fs.mkdir(UPLOADS_DIR, { recursive: true })
 
@@ -388,6 +393,8 @@ app.get('/api/status', async () => ({
     isRunnerBusy() || isBlockRunnerBusy() || isLinehaulCaptureBusy(),
   poll: getPollStatus(),
 }))
+
+app.get('/api/bridges/panynj', async () => getBridgesResponsePayload())
 
 app.get('/api/events', async (req, reply) => {
   if (!isAuthEnabled()) {
@@ -1222,6 +1229,11 @@ try {
 } catch (e) {
   console.error('[data-migration]', e)
 }
+
+await refreshPanynjCrossingData().catch((e) => {
+  console.error('[bridge-panynj] initial', (e && e.message) || e)
+})
+startPanynjBridgePoll()
 
 try {
   await app.listen({ port: API_PORT, host })
