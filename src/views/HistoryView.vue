@@ -8,7 +8,7 @@ import { shiftDateKeyForEventMs } from '../utils/shiftCalendar.js'
  * @typedef {object} LedgerEntry
  * @property {string} id
  * @property {string} [source]
- * @property {number} displayDate
+ * @property {number} displayDate (Linehaul: first-saved/dispatch time from recordedAt; complete: completedAt)
  * @property {number} completedAt
  * @property {string} dailyTripLegSequence
  * @property {string} [outcome]
@@ -31,13 +31,12 @@ const entries = ref([])
 /** Viewed calendar month (prev/next, no year cap). */
 const viewYear = ref(/** @type {number} */(new Date().getFullYear()))
 const viewMonth0 = ref(/** @type {number} */(new Date().getMonth()))
-/** On first data load, snap calendar to the month of the newest trip. */
-const calendarSyncedToData = ref(false)
-
 const DOUBLE_CLICK_MS = 500
 
 /** YYYY-MM-DD; empty = show all days in selected work week */
 const filterDayKey = ref('')
+/** First successful load: pin calendar + day filter to "today" (shift-aware). */
+const dayFilterInitDone = ref(false)
 const outcomeMenuOpen = ref('')
 const outcomeMenuPos = ref(/** @type {null | { top: number, left: number, minWidth: number }} */ (null))
 const outcomeRowForMenu = ref(/** @type {null | LedgerEntry} */ (null))
@@ -101,7 +100,15 @@ async function load() {
           typeof x.recordedAt === 'number' && Number.isFinite(x.recordedAt)
             ? x.recordedAt
             : 0
-        const displayDate = comp || rec
+        const sourceStr = typeof x.source === 'string' ? x.source : 'complete'
+        const displayDate =
+          sourceStr === 'linehaul' && rec > 0
+            ? rec
+            : comp > 0
+              ? comp
+              : rec > 0
+                ? rec
+                : 0
         const seq = String(x.dailyTripLegSequence ?? '').trim()
         const legKey = /^\d+$/.test(seq) ? seq : ''
         const oRaw = /** @type {any} */ (x)
@@ -114,7 +121,7 @@ async function load() {
         const o = rawO || 'delivered'
         const e = {
           id: String(x.id ?? ''),
-          source: typeof x.source === 'string' ? x.source : 'complete',
+          source: sourceStr,
           displayDate,
           completedAt: comp,
           dailyTripLegSequence: seq,
@@ -134,8 +141,14 @@ async function load() {
           continue
         }
         const cur = byLeg.get(legKey)
-        if (!cur || (e.displayDate || 0) > (cur.displayDate || 0)) {
+        if (!cur) {
           byLeg.set(legKey, e)
+        } else {
+          const tNew = e.displayDate
+          const tCur = cur.displayDate
+          const tN = typeof tNew === 'number' && tNew > 0 ? tNew : Infinity
+          const tC = typeof tCur === 'number' && tCur > 0 ? tCur : Infinity
+          if (tN < tC) byLeg.set(legKey, e)
         }
       }
       entries.value = /** @type {LedgerEntry[]} */ (
@@ -146,12 +159,36 @@ async function load() {
     error.value = e instanceof Error ? e.message : String(e)
     entries.value = []
   } finally {
+    if (!dayFilterInitDone.value) {
+      const k = shiftDateKeyForEventMs(
+        Date.now(),
+        workWeekFromCred.value.shiftStartMins,
+        workWeekFromCred.value.shiftEndMins,
+      )
+      if (k) {
+        filterDayKey.value = k
+        const ymd = k.split('-')
+        if (ymd.length === 3) {
+          const y = Number(ymd[0])
+          const mo = Number(ymd[1])
+          if (Number.isFinite(y) && Number.isFinite(mo) && mo >= 1 && mo <= 12) {
+            viewYear.value = y
+            viewMonth0.value = mo - 1
+          }
+        }
+      }
+      dayFilterInitDone.value = true
+    }
     loading.value = false
   }
 }
 
 const sorted = computed(() =>
-  [...entries.value].sort((a, b) => b.displayDate - a.displayDate),
+  [...entries.value]
+    .filter(
+      (e) => typeof e.displayDate === 'number' && e.displayDate > 0,
+    )
+    .sort((a, b) => b.displayDate - a.displayDate),
 )
 
 /**
@@ -277,24 +314,36 @@ function goNextViewMonth() {
   viewMonth0.value = p.m0
 }
 
-watch(
-  () => (sorted.value[0] ? sorted.value[0].displayDate : 0),
-  (d) => {
-    if (calendarSyncedToData.value) return
-    if (typeof d === 'number' && Number.isFinite(d) && d > 0) {
-      const m = monthKeyFromMs(d)
-      viewYear.value = m.y
-      viewMonth0.value = m.m0
-      calendarSyncedToData.value = true
+function goToToday() {
+  const k = shiftDateKeyForEventMs(
+    Date.now(),
+    workWeekFromCred.value.shiftStartMins,
+    workWeekFromCred.value.shiftEndMins,
+  )
+  if (k) {
+    const parts = k.split('-')
+    if (parts.length === 3) {
+      const y = Number(parts[0])
+      const m = Number(parts[1])
+      if (Number.isFinite(y) && Number.isFinite(m) && m >= 1 && m <= 12) {
+        viewYear.value = y
+        viewMonth0.value = m - 1
+      }
     }
-  },
-  { immediate: true },
-)
+    filterDayKey.value = k
+  }
+}
 
 function formatWhen(ts) {
   if (!ts) return '—'
   try {
-    return new Date(ts).toLocaleString()
+    return new Date(ts).toLocaleString(undefined, {
+      year: 'numeric',
+      month: 'numeric',
+      day: 'numeric',
+      hour: 'numeric',
+      minute: '2-digit',
+    })
   } catch {
     return '—'
   }
@@ -496,15 +545,21 @@ onUnmounted(() => {
 <template>
   <div class="history-view">
     <header class="history-head">
-      <h1 class="history-title">History</h1>
-      <button
-        type="button"
-        class="btn secondary history-refresh tap"
-        :disabled="loading"
-        @click="load"
-      >
-        {{ loading ? 'Loading' : 'Refresh' }}
-      </button>
+      <div class="history-head-top">
+        <h1 class="history-title">History</h1>
+        <button
+          type="button"
+          class="btn secondary history-refresh tap"
+          :disabled="loading"
+          @click="load"
+        >
+          {{ loading ? 'Loading' : 'Refresh' }}
+        </button>
+      </div>
+      <p class="history-sub">
+        List time is <strong>dispatch</strong> (first Linehaul save) or
+        <strong>when you marked complete</strong> — it does not change when status updates.
+      </p>
     </header>
 
     <p v-if="error" class="history-err">{{ error }}</p>
@@ -534,6 +589,15 @@ onUnmounted(() => {
           @click="goNextViewMonth"
         >
           →
+        </button>
+        <button
+          type="button"
+          class="btn secondary history-today tap"
+          title="Jump to today and filter to this shift day"
+          :disabled="loading"
+          @click="goToToday"
+        >
+          Today
         </button>
       </div>
       <div
@@ -579,7 +643,13 @@ onUnmounted(() => {
             </button>
           </div>
         </div>
-        <p v-if="filterDayKey" class="history-cal-filt">Day <strong>{{ filterDayKey }}</strong> &nbsp;·&nbsp; <button type="button" class="history-link tap" @click="filterDayKey = ''">Reset</button></p>
+        <p v-if="filterDayKey" class="history-cal-filt">
+          Day <strong>{{ filterDayKey }}</strong>
+          &nbsp;·&nbsp;
+          <button type="button" class="history-link tap" @click="goToToday">Today</button>
+          &nbsp;·&nbsp;
+          <button type="button" class="history-link tap" @click="filterDayKey = ''">Show month</button>
+        </p>
       </div>
       <h2 v-if="weekFilteredItems.length" class="history-trips-h2">Trips</h2>
       <p v-else class="history-no-month">No trips this month</p>
@@ -613,11 +683,16 @@ onUnmounted(() => {
               </span>
             </span>
             <div class="history-row-tr">
-            <time
-              class="history-date"
-              :datetime="new Date(e.displayDate).toISOString()"
-              >{{ formatWhen(e.displayDate) }}</time
-            >
+            <div class="history-time-block">
+              <span class="history-time-lab">{{
+                e.source === 'linehaul' ? 'Dispatched' : 'Time'
+              }}</span>
+              <time
+                class="history-date"
+                :datetime="new Date(e.displayDate).toISOString()"
+                >{{ formatWhen(e.displayDate) }}</time
+              >
+            </div>
             <div v-if="e.dailyTripLegSequence" class="history-top-actions" @click.stop>
               <div class="history-outcome-wrap" @click.stop>
                 <button
@@ -762,6 +837,13 @@ onUnmounted(() => {
 .history-head {
   margin-bottom: var(--space-3, 0.75rem);
   display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.45rem;
+}
+
+.history-head-top {
+  display: flex;
   flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
@@ -783,6 +865,18 @@ onUnmounted(() => {
   font-size: var(--text-xl, 1.25rem);
   font-weight: 600;
   color: var(--color-text-primary, #f4f4f8);
+}
+
+.history-sub {
+  margin: 0;
+  font-size: 0.75rem;
+  line-height: 1.45;
+  color: var(--color-text-tertiary, #8a8a9a);
+}
+
+.history-sub strong {
+  color: #c4b5fd;
+  font-weight: 700;
 }
 
 .history-month-nav {
@@ -824,6 +918,16 @@ onUnmounted(() => {
   flex: 1;
   min-width: 0;
   padding: 0 0.2rem;
+}
+
+.history-today {
+  flex: 0 0 auto;
+  min-height: 2.4rem;
+  font-size: 0.65rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 0.35rem 0.55rem;
 }
 
 .history-month-body {
@@ -1111,10 +1215,27 @@ onUnmounted(() => {
   vertical-align: 0.1em;
 }
 
+.history-time-block {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.1rem;
+  min-width: 0;
+  flex: 0 1 auto;
+}
+
+.history-time-lab {
+  font-size: 0.5rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #6e6e7e;
+}
+
 .history-date {
-  font-size: 0.75rem;
-  font-weight: 600;
-  color: var(--color-text-secondary, #b8b8c8);
+  font-size: 0.78rem;
+  font-weight: 800;
+  color: #e4dff8;
   font-variant-numeric: tabular-nums;
   align-self: flex-start;
 }

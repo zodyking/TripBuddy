@@ -28,7 +28,6 @@ export function buildHistoryDispatchHeaderFromBody(body, opts = {}) {
       ? String(/** @type {Record<string, unknown>} */ (body).tripStatus ?? '')
       : ''
   return {
-    savedAt: Date.now(),
     source: opts.source || 'linehaul',
     tripStatusText: status || '—',
     tripStatusKind: 'linehaul',
