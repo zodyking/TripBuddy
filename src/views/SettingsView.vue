@@ -34,6 +34,7 @@ import SettingsSection from '../components/settings/SettingsSection.vue'
 import LeafletPinModal from '../components/LeafletPinModal.vue'
 import GeoFenceEditor from '../components/GeoFenceEditor.vue'
 import ApiStatusBadge from '../components/ApiStatusBadge.vue'
+import { trafficTomtomKeyOverride, setTomtomTrafficKey } from '../stores/trafficTileKey.js'
 import AutomationList from '../components/automation/AutomationList.vue'
 import AutomationEditor from '../components/automation/AutomationEditor.vue'
 import {
@@ -324,6 +325,22 @@ const linehaulPollAriaNow = computed(() =>
 /** US phone: digits only (max 10); shown in the field as (XXX) XXX XXXX */
 const phoneDigits = ref('')
 const credMsg = ref(null)
+
+/** TomTom Traffic Raster API key (Bridges map overlay). Free developer account: developer.tomtom.com */
+const tomtomTrafficDraft = ref('')
+const tomtomTrafficMsg = ref('')
+const tomtomKeyFromEnv = Boolean(
+  typeof import.meta !== 'undefined' &&
+    import.meta.env?.VITE_TOMTOM_KEY &&
+    String(import.meta.env.VITE_TOMTOM_KEY).trim().length > 0,
+)
+
+function saveTomtomTrafficKey() {
+  setTomtomTrafficKey(tomtomTrafficDraft.value)
+  tomtomTrafficMsg.value = tomtomKeyFromEnv
+    ? 'Saved locally. Build VITE_TOMTOM_KEY still takes priority if set.'
+    : 'Map traffic key saved in this browser.'
+}
 
 const screenshotModal = ref(null)
 
@@ -707,6 +724,7 @@ onMounted(() => {
   unregisterRecover = registerApiRecover(reconnectLiveLogStream)
   loadCredentials()
   loadAssignmentState()
+  tomtomTrafficDraft.value = trafficTomtomKeyOverride.value
 })
 
 watch(settingsTab, (tab) => {
@@ -946,6 +964,40 @@ onUnmounted(() => {
             <button type="button" class="btn tap" @click="clearCredentials">Clear</button>
           </div>
           <ApiStatusBadge />
+        </div>
+      </SettingsSection>
+
+      <SettingsSection title="Map: bridge traffic (TomTom)">
+        <p class="cred-hint">
+          Live road traffic on the <strong>Bridges</strong> map uses
+          <a
+            href="https://developer.tomtom.com/traffic-api/documentation/product-information/introduction"
+            target="_blank"
+            rel="noopener noreferrer"
+            class="ext-link"
+          >TomTom Traffic</a>
+          (free developer tier, API key). Paste your key here — it is stored only in
+          <strong>this browser</strong>. You can also set
+          <code class="bmk">VITE_TOMTOM_KEY</code> in
+          <code class="bmk">.env</code> (build) which overrides the pasted value.
+        </p>
+        <p v-if="tomtomKeyFromEnv" class="cred-hint" style="color: #fbbf24; font-weight: 600">
+          A build-time <code class="bmk">VITE_TOMTOM_KEY</code> is set — the map uses it first.
+        </p>
+        <label class="lbl" for="tomtom-traffic-key">TomTom API key (optional)</label>
+        <input
+          id="tomtom-traffic-key"
+          v-model="tomtomTrafficDraft"
+          class="inp tap"
+          type="password"
+          autocomplete="off"
+          placeholder="Paste API key"
+          :aria-describedby="'tomtom-hint'"
+        />
+        <p id="tomtom-hint" class="cred-hint">In-browser key: {{ trafficTomtomKeyOverride ? 'on file' : 'empty' }}</p>
+        <p v-if="tomtomTrafficMsg" class="cred-msg">{{ tomtomTrafficMsg }}</p>
+        <div class="btn-row">
+          <button type="button" class="btn primary tap" @click="saveTomtomTrafficKey">Save traffic key</button>
         </div>
       </SettingsSection>
 
@@ -1945,6 +1997,17 @@ onUnmounted(() => {
 }
 code {
   font-size: 0.85em;
+}
+.bmk {
+  background: rgba(0, 0, 0, 0.35);
+  padding: 0.1em 0.35em;
+  border-radius: 4px;
+  font-size: 0.78em;
+}
+.ext-link {
+  color: #a78bfa;
+  text-decoration: underline;
+  text-underline-offset: 2px;
 }
 @media (max-width: 480px) {
   .log-line {
