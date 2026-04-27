@@ -2,7 +2,7 @@
 import { ref, computed, onMounted, onUnmounted, watch, nextTick, Teleport } from 'vue'
 import { getAssignment, getCredentials, patchTripHistoryOutcome } from '../api.js'
 import { monthGridForCalendarMonth } from '../utils/workWeekGroup.js'
-import { shiftDateKeyForEventMs } from '../utils/shiftCalendar.js'
+import { shiftDateKeyForEventMs, parseYmdAtNoon } from '../utils/shiftCalendar.js'
 
 /**
  * @typedef {object} LedgerEntry
@@ -56,6 +56,18 @@ function normalizeOutcome(x) {
   const t = String(x).trim().toLowerCase()
   if (t === 'delivered' || t === 'rejected' || t === 'removed' || t === 'none') return t
   return ''
+}
+
+/**
+ * @param {number} ts
+ */
+function eventShiftDayKey(ts) {
+  if (typeof ts !== 'number' || !Number.isFinite(ts) || ts <= 0) return ''
+  return shiftDateKeyForEventMs(
+    ts,
+    workWeekFromCred.value.shiftStartMins,
+    workWeekFromCred.value.shiftEndMins,
+  )
 }
 
 async function load() {
@@ -146,8 +158,8 @@ async function load() {
         } else {
           const tNew = e.displayDate
           const tCur = cur.displayDate
-          const tN = typeof tNew === 'number' && tNew > 0 ? tNew : Infinity
-          const tC = typeof tCur === 'number' && tCur > 0 ? tCur : Infinity
+          const tN = typeof tNew === 'number' && tNew > 0 ? tNew : Number.POSITIVE_INFINITY
+          const tC = typeof tCur === 'number' && tCur > 0 ? tCur : Number.POSITIVE_INFINITY
           if (tN < tC) byLeg.set(legKey, e)
         }
       }
@@ -160,21 +172,13 @@ async function load() {
     entries.value = []
   } finally {
     if (!dayFilterInitDone.value) {
-      const k = shiftDateKeyForEventMs(
-        Date.now(),
-        workWeekFromCred.value.shiftStartMins,
-        workWeekFromCred.value.shiftEndMins,
-      )
+      const k = eventShiftDayKey(Date.now())
       if (k) {
         filterDayKey.value = k
-        const ymd = k.split('-')
-        if (ymd.length === 3) {
-          const y = Number(ymd[0])
-          const mo = Number(ymd[1])
-          if (Number.isFinite(y) && Number.isFinite(mo) && mo >= 1 && mo <= 12) {
-            viewYear.value = y
-            viewMonth0.value = mo - 1
-          }
+        const d0 = parseYmdAtNoon(k)
+        if (d0) {
+          viewYear.value = d0.getFullYear()
+          viewMonth0.value = d0.getMonth()
         }
       }
       dayFilterInitDone.value = true
@@ -232,7 +236,16 @@ const monthByKey = computed(() => {
       m.get('unknown').items.push(e)
       continue
     }
-    const { y, m0, key } = monthKeyFromMs(t)
+    const sk = eventShiftDayKey(t)
+    const anchor = sk ? parseYmdAtNoon(sk) : null
+    if (!anchor) {
+      if (!m.has('unknown')) {
+        m.set('unknown', { key: 'unknown', y: 0, m0: 0, groupLabel: 'No date', items: [] })
+      }
+      m.get('unknown').items.push(e)
+      continue
+    }
+    const { y, m0, key } = monthKeyFromMs(anchor.getTime())
     if (!m.has(key)) {
       const d0 = new Date(y, m0, 1, 12, 0, 0, 0)
       const groupLabel = d0.toLocaleString('en-US', { month: 'long', year: 'numeric' })
@@ -269,12 +282,7 @@ const weekFilteredItems = computed(() => {
   return w.items.filter((e) => {
     if (!e.displayDate) return false
     const t = /** @type {number} */(e.displayDate)
-    const k2 = shiftDateKeyForEventMs(
-      t,
-      workWeekFromCred.value.shiftStartMins,
-      workWeekFromCred.value.shiftEndMins,
-    )
-    return k2 === filterDayKey.value
+    return eventShiftDayKey(t) === filterDayKey.value
   })
 })
 
@@ -286,11 +294,7 @@ const viewMonthGrid = computed(() => {
   const counts = {}
   for (const e of g.items) {
     if (!e.displayDate) continue
-    const k = shiftDateKeyForEventMs(
-      /** @type {number} */(e.displayDate),
-      workWeekFromCred.value.shiftStartMins,
-      workWeekFromCred.value.shiftEndMins,
-    )
+    const k = eventShiftDayKey(/** @type {number} */(e.displayDate))
     if (!k) continue
     counts[k] = (counts[k] || 0) + 1
   }
@@ -314,23 +318,14 @@ function goNextViewMonth() {
   viewMonth0.value = p.m0
 }
 
-function goToToday() {
-  const k = shiftDateKeyForEventMs(
-    Date.now(),
-    workWeekFromCred.value.shiftStartMins,
-    workWeekFromCred.value.shiftEndMins,
-  )
-  if (k) {
-    const parts = k.split('-')
-    if (parts.length === 3) {
-      const y = Number(parts[0])
-      const m = Number(parts[1])
-      if (Number.isFinite(y) && Number.isFinite(m) && m >= 1 && m <= 12) {
-        viewYear.value = y
-        viewMonth0.value = m - 1
-      }
-    }
-    filterDayKey.value = k
+function goToTodayShift() {
+  const k = eventShiftDayKey(Date.now())
+  if (!k) return
+  filterDayKey.value = k
+  const d0 = parseYmdAtNoon(k)
+  if (d0) {
+    viewYear.value = d0.getFullYear()
+    viewMonth0.value = d0.getMonth()
   }
 }
 
@@ -559,6 +554,7 @@ onUnmounted(() => {
       <p class="history-sub">
         List time is <strong>dispatch</strong> (first Linehaul save) or
         <strong>when you marked complete</strong> — it does not change when status updates.
+        Calendar <strong>days</strong> are <strong>shift buckets</strong> (from your shift start until the same time next day). Trip times are unchanged.
       </p>
     </header>
 
@@ -589,15 +585,6 @@ onUnmounted(() => {
           @click="goNextViewMonth"
         >
           →
-        </button>
-        <button
-          type="button"
-          class="btn secondary history-today tap"
-          title="Jump to today and filter to this shift day"
-          :disabled="loading"
-          @click="goToToday"
-        >
-          Today
         </button>
       </div>
       <div
@@ -644,10 +631,10 @@ onUnmounted(() => {
           </div>
         </div>
         <p v-if="filterDayKey" class="history-cal-filt">
-          Day <strong>{{ filterDayKey }}</strong>
-          &nbsp;·&nbsp;
-          <button type="button" class="history-link tap" @click="goToToday">Today</button>
-          &nbsp;·&nbsp;
+          Shift day <strong>{{ filterDayKey }}</strong>
+          <span class="history-cal-filt-mid">·</span>
+          <button type="button" class="history-link tap" @click="goToTodayShift">Today</button>
+          <span class="history-cal-filt-mid">·</span>
           <button type="button" class="history-link tap" @click="filterDayKey = ''">Show month</button>
         </p>
       </div>
@@ -850,6 +837,17 @@ onUnmounted(() => {
   gap: 0.5rem 0.75rem;
 }
 
+.history-sub {
+  margin: 0;
+  font-size: 0.7rem;
+  line-height: 1.4;
+  color: var(--color-text-tertiary, #8a8a9a);
+}
+.history-sub strong {
+  color: #c4b5fd;
+  font-weight: 700;
+}
+
 .history-content {
   display: block;
   width: 100%;
@@ -918,16 +916,6 @@ onUnmounted(() => {
   flex: 1;
   min-width: 0;
   padding: 0 0.2rem;
-}
-
-.history-today {
-  flex: 0 0 auto;
-  min-height: 2.4rem;
-  font-size: 0.65rem;
-  font-weight: 800;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  padding: 0.35rem 0.55rem;
 }
 
 .history-month-body {
@@ -1086,6 +1074,10 @@ onUnmounted(() => {
   margin: 0.45rem 0 0;
   font-size: 0.62rem;
   color: #6a6a7a;
+}
+.history-cal-filt-mid {
+  color: #4a4a58;
+  margin: 0 0.1rem;
 }
 .history-cal-filt .history-link {
   background: none;

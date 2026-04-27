@@ -155,7 +155,7 @@ export function monthGridForWorkWeek(
   }
   const sM = Math.max(0, Math.min(1439, Math.floor(Number(shift?.shiftStartMins) || 0)))
   const eM = Math.max(0, Math.min(1439, Math.floor(Number(shift?.shiftEndMins) || 1439)))
-  const todayK = shiftDateKeyForEventMs(Date.now(), sM, eM) || localDateKey(Date.now())
+  const todayK = localDateKey(Date.now())
   const ws = new Date(workWeekStartMs)
   ws.setHours(0, 0, 0, 0)
   const wEndT = new Date(ws.getTime() + 6 * 24 * 60 * 60 * 1000)
@@ -195,11 +195,8 @@ export function monthGridForCalendarMonth(
   year,
   monthIndex0,
   tripCounts = {},
-  shift = { shiftStartMins: 0, shiftEndMins: 1439 },
+  _shift = { shiftStartMins: 0, shiftEndMins: 1439 },
 ) {
-  const sM = Math.max(0, Math.min(1439, Math.floor(Number(shift?.shiftStartMins) || 0)))
-  const eM = Math.max(0, Math.min(1439, Math.floor(Number(shift?.shiftEndMins) || 1439)))
-  const todayK = shiftDateKeyForEventMs(Date.now(), sM, eM) || localDateKey(Date.now())
   const y = Math.floor(year)
   const m0 = Math.max(0, Math.min(11, Math.floor(monthIndex0)))
   const first = new Date(y, m0, 1, 0, 0, 0, 0)
@@ -218,7 +215,8 @@ export function monthGridForCalendarMonth(
   const cells = []
   for (let i = 0; i < 42; i += 1) {
     const d = new Date(grid0.getTime() + i * 24 * 60 * 60 * 1000)
-    const k = shiftDateKeyForEventMs(d.getTime(), sM, eM) || localDateKey(d.getTime())
+    /** One bucket per *calendar* day: shift starting `shiftStart` on this date (see shiftCalendar). */
+    const k = localDateKey(d.getTime())
     const inMonth = d.getFullYear() === y && d.getMonth() === m0
     const tripCount = typeof tripCounts[k] === 'number' ? tripCounts[k] : 0
     cells.push({
@@ -226,7 +224,7 @@ export function monthGridForCalendarMonth(
       dayNum: d.getDate(),
       inMonth,
       tripCount,
-      isToday: k === todayK,
+      isToday: k === localDateKey(Date.now()),
     })
   }
   return { year: y, monthIndex0: m0, monthLabel, headers: CAL_HEADERS, cells }

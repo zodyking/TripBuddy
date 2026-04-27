@@ -1,40 +1,31 @@
 /**
- * "Shift day" for overnight shifts (e.g. 7pm–7am): a trip at 1am Tuesday belongs to
- * the shift that **started** Monday evening, so the calendar key is the Monday date.
- * For non-overnight shifts, the shift's calendar day is the local date of the event.
- * Times are minutes from midnight (0–1439).
+ * "Shift day" for calendar bucketing: rolling windows [shiftStart, shiftStart) next day.
+ * Example: shift 9pm → bucket `YYYY-MM-DD` of the **9pm you passed through most recently
+ * and then stayed until the next 9pm**. 9pm Nov5 → 9pm Nov6 (exclusive of end) → all those
+ * trips are assigned to **2026-11-05**; actual timestamps are unchanged, only the bucket key.
+ *
  * @param {number} eventMs
- * @param {number} [shiftStartMins=0] default full calendar day
- * @param {number} [shiftEndMins=1439]
+ * @param {number} [shiftStartMins=0] minutes from local midnight; 0 = use calendar YYYY-MM-DD
+ * @param {number} [_shiftEndMins=1439] legacy; not used (keep call sites compatible)
  */
 export function shiftDateKeyForEventMs(
   eventMs,
   shiftStartMins = 0,
-  shiftEndMins = 1439,
+  _shiftEndMins = 1439,
 ) {
   if (typeof eventMs !== 'number' || !Number.isFinite(eventMs)) {
     return ''
   }
   const d = new Date(eventMs)
   if (isNaN(d.getTime())) return ''
-  const s = Math.max(0, Math.min(1439, Math.floor(shiftStartMins)))
-  const e = Math.max(0, Math.min(1439, Math.floor(shiftEndMins)))
-  const mins = d.getHours() * 60 + d.getMinutes()
-  const overnight = s > e
-
-  if (overnight) {
-    if (mins >= s) {
-      return localYmd(d)
-    }
-    if (mins < e) {
-      const p = new Date(d.getTime() - 24 * 60 * 60 * 1000)
-      return localYmd(p)
-    }
+  const s = Math.max(0, Math.min(1440, Math.floor(shiftStartMins)))
+  if (s <= 0 || s >= 24 * 60) {
     return localYmd(d)
   }
-
-  if (mins >= s && mins < e) {
-    return localYmd(d)
+  const mins = d.getHours() * 60 + d.getMinutes() + d.getSeconds() / 60
+  if (mins < s) {
+    const p = new Date(d.getTime() - 24 * 60 * 60 * 1000)
+    return localYmd(p)
   }
   return localYmd(d)
 }
