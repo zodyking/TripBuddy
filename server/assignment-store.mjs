@@ -274,13 +274,16 @@ export async function writeAssignment(body) {
     const seq = String(e.dailyTripLegSequence ?? '').trim()
     const source =
       typeof e.source === 'string' && e.source.trim() ? e.source.trim() : 'complete'
+    const atComplete =
+      typeof e.completedAt === 'number' && Number.isFinite(e.completedAt)
+        ? e.completedAt
+        : Date.now()
     const entry = {
       id,
       source,
-      completedAt:
-        typeof e.completedAt === 'number' && Number.isFinite(e.completedAt)
-          ? e.completedAt
-          : Date.now(),
+      completedAt: atComplete,
+      /** Same instant as completedAt for day grouping / display. */
+      recordedAt: atComplete,
       dailyTripLegSequence: /^\d+$/.test(seq) ? seq : '',
       dispatchHeader: {
         ...(e.dispatchHeader && typeof e.dispatchHeader === 'object' ? e.dispatchHeader : {}),
@@ -310,23 +313,50 @@ export async function writeAssignment(body) {
     } else {
       const id =
         typeof e.id === 'string' && e.id.trim() ? e.id.trim() : `h-${seq}`
-      const at =
+      const incomingAt =
         typeof e.recordedAt === 'number' && Number.isFinite(e.recordedAt)
           ? e.recordedAt
           : typeof e.completedAt === 'number' && Number.isFinite(e.completedAt)
             ? e.completedAt
             : Date.now()
+      const existingForSeq = tripHistoryLedger.find(
+        (x) => x && String(x.dailyTripLegSequence) === seq,
+      )
+      const existingForId =
+        !existingForSeq && id
+          ? tripHistoryLedger.find((x) => x && x.id === id)
+          : null
+      const prior = existingForSeq || existingForId
+      const priorAt =
+        prior && typeof prior.recordedAt === 'number' && Number.isFinite(prior.recordedAt) && prior.recordedAt > 0
+          ? prior.recordedAt
+          : prior &&
+              typeof prior.completedAt === 'number' &&
+              Number.isFinite(prior.completedAt) &&
+              prior.completedAt > 0
+            ? prior.completedAt
+            : 0
+      /** First-seen instant only — do not move forward on every Linehaul poll. */
+      const at = priorAt > 0 ? priorAt : incomingAt
+      const newDh =
+        e.dispatchHeader && typeof e.dispatchHeader === 'object' ? e.dispatchHeader : {}
+      const oldDh =
+        prior && prior.dispatchHeader && typeof prior.dispatchHeader === 'object'
+          ? prior.dispatchHeader
+          : {}
+      const mergedDispatchHeader = { ...oldDh, ...newDh }
+      const newTd = e.tripDetails && typeof e.tripDetails === 'object' ? e.tripDetails : {}
+      const oldTd = prior && prior.tripDetails && typeof prior.tripDetails === 'object' ? prior.tripDetails : {}
+      const mergedTripDetails = { ...oldTd, ...newTd }
       const nextEntry = {
         id,
         source: typeof e.source === 'string' && e.source.trim() ? e.source.trim() : 'linehaul',
-        /** API snapshots use recordedAt; completion entries keep completedAt */
+        /** API snapshots: first poll only; later polls must not change this. */
         recordedAt: at,
         completedAt: at,
         dailyTripLegSequence: seq,
-        dispatchHeader:
-          e.dispatchHeader && typeof e.dispatchHeader === 'object' ? e.dispatchHeader : {},
-        tripDetails:
-          e.tripDetails && typeof e.tripDetails === 'object' ? e.tripDetails : {},
+        dispatchHeader: mergedDispatchHeader,
+        tripDetails: mergedTripDetails,
       }
       const rest = tripHistoryLedger.filter(
         (x) => x && String(x.dailyTripLegSequence) !== seq && x.id !== id,
