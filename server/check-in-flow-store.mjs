@@ -1,12 +1,13 @@
-import fs from 'node:fs/promises'
-import path from 'node:path'
 import {
   CHECKIN_XPATH,
   CHECKIN_XPATH_KEYS,
 } from './playwright/checkInXpathDefaults.mjs'
-import { LOCAL_DIR } from './config.mjs'
+import { readKeyJson, writeKeyJson } from './kv-store.mjs'
+import { userScopeKey } from './scope-kv.mjs'
 
-const CHECK_IN_FLOW_FILE = path.join(LOCAL_DIR, 'check-in-flow.json')
+function checkinKey() {
+  return userScopeKey('checkin:flow')
+}
 
 /** @typedef {{ instructions: string, xpaths: Partial<Record<string, string>> }} CheckInFlowDoc */
 
@@ -55,16 +56,10 @@ export function mergeCheckInXpaths(overrides = {}) {
 }
 
 export async function readCheckInFlow() {
-  await fs.mkdir(LOCAL_DIR, { recursive: true })
-  try {
-    const raw = await fs.readFile(CHECK_IN_FLOW_FILE, 'utf8')
-    const parsed = JSON.parse(raw)
-    const v = validateCheckInFlowBody(parsed)
-    if (!v.ok) return defaultDoc()
-    return v.data
-  } catch {
-    return defaultDoc()
-  }
+  const parsed = await readKeyJson(checkinKey(), () => defaultDoc())
+  const v = validateCheckInFlowBody(parsed)
+  if (!v.ok) return defaultDoc()
+  return v.data
 }
 
 /**
@@ -93,12 +88,7 @@ export async function writeCheckInFlow(body) {
   if (!v.ok) {
     throw new Error(v.error)
   }
-  await fs.mkdir(LOCAL_DIR, { recursive: true })
-  await fs.writeFile(
-    CHECK_IN_FLOW_FILE,
-    `${JSON.stringify(v.data, null, 2)}\n`,
-    'utf8',
-  )
+  await writeKeyJson(checkinKey(), v.data)
   return v.data
 }
 

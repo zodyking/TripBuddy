@@ -3,7 +3,19 @@
  * All announcements go through the unified queue in alertAudioQueue.js.
  * Bell: `public/sounds/trip-ready-bell.mp3` (Mixkit preview SFX, royalty-free — mixkit.co).
  */
-import { extractOriginDest, hasTripOriginAndDestination } from './tripDetailsDisplay.js'
+import {
+  extractOriginDest,
+  hasTripOriginAndDestination,
+} from './tripDetailsDisplay.js'
+
+/** @param {unknown} body */
+function legSeqKey(body) {
+  if (body == null || typeof body !== 'object' || Array.isArray(body)) return ''
+  const s = /** @type {Record<string, unknown>} */ (body).dailyTripLegSequence
+  if (s == null) return ''
+  const t = String(s).trim()
+  return /^\d+$/.test(t) ? t : ''
+}
 import { pushLiveLog } from '../stores/liveLogStore.js'
 import { enqueueAnnouncement, speakDirect, cancelAllAlerts } from './alertAudioQueue.js'
 
@@ -259,7 +271,8 @@ export function maybeAnnounceNewTrip(tripsBody, noActiveTrip) {
   if (!hasTripOriginAndDestination(tripsBody)) return
 
   const { origin, destination } = extractOriginDest(tripsBody)
-  const fp = `${origin}|||${destination}`
+  const leg = legSeqKey(tripsBody)
+  const fp = `${leg}|||${origin}|||${destination}`
   if (fp === lastFingerprint) return
 
   const o = toSpeechPhrase(origin)
@@ -295,7 +308,8 @@ export function maybeAnnouncePrePlanTrip(prePlanBody) {
   if (!hasTripOriginAndDestination(prePlanBody)) return
 
   const { origin, destination } = extractOriginDest(prePlanBody)
-  const fp = `preplan:${origin}|||${destination}`
+  const leg = legSeqKey(prePlanBody)
+  const fp = `preplan:${leg}|||${origin}|||${destination}`
   if (fp === lastPrePlanFingerprint) return
 
   const o = toSpeechPhrase(origin)

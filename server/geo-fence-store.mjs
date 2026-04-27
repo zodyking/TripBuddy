@@ -1,9 +1,8 @@
-import fs from 'node:fs/promises'
-import path from 'node:path'
-import { LOCAL_DIR } from './config.mjs'
+import { readKeyJson, writeKeyJson } from './kv-store.mjs'
 import { clearFenceDecisionCache } from './geo-fence-ip-cache.mjs'
+import { G } from './scope-kv.mjs'
 
-const FILE = path.join(LOCAL_DIR, 'geo-fence.json')
+const KV_KEY = G('geofence:config')
 
 /**
  * @typedef {{ lat: number, lng: number }} LatLngPoint
@@ -53,32 +52,37 @@ export async function readGeoFence() {
       polygon: cachedConfig.polygon.map((p) => ({ ...p })),
     }
   }
-  try {
-    const raw = await fs.readFile(FILE, 'utf8')
-    const data = JSON.parse(raw)
-    const polygon = Array.isArray(data.polygon)
-      ? data.polygon.filter(isPoint).map((p) => ({
-          lat: Number(p.lat),
-          lng: Number(p.lng),
-        }))
-      : []
-    const next = {
-      enabled: data.enabled === true,
-      redirectUrl:
-        typeof data.redirectUrl === 'string' ? data.redirectUrl.trim() : '',
-      polygon,
-    }
-    cachedConfig = {
-      ...next,
-      polygon: next.polygon.map((p) => ({ ...p })),
-    }
-    cachedAt = now
-    return next
-  } catch {
+  const data = await readKeyJson(
+    KV_KEY,
+    () => ({ enabled: false, redirectUrl: '', polygon: [] }),
+  )
+  if (!data || typeof data !== 'object') {
     cachedConfig = { ...DEFAULT, polygon: [] }
     cachedAt = now
     return { ...DEFAULT }
   }
+  const o = /** @type {Record<string, unknown>} */ (data)
+  const polyRaw = o.polygon
+  const polygon = Array.isArray(polyRaw)
+    ? polyRaw
+        .filter((p) => isPoint(/** @type {unknown} */ (p)))
+        .map((p) => {
+          const q = /** @type {Record<string, unknown>} */ (p)
+          return { lat: Number(q.lat), lng: Number(q.lng) }
+        })
+    : []
+  const next = {
+    enabled: o.enabled === true,
+    redirectUrl:
+      typeof o.redirectUrl === 'string' ? o.redirectUrl.trim() : '',
+    polygon,
+  }
+  cachedConfig = {
+    ...next,
+    polygon: next.polygon.map((p) => ({ ...p })),
+  }
+  cachedAt = now
+  return next
 }
 
 /**
@@ -101,8 +105,7 @@ export async function writeGeoFence(patch) {
         }))
       : prev.polygon,
   }
-  await fs.mkdir(LOCAL_DIR, { recursive: true })
-  await fs.writeFile(FILE, JSON.stringify(next, null, 2), 'utf8')
+  await writeKeyJson(KV_KEY, next)
   invalidateGeoFenceCache()
   return next
 }

@@ -22,6 +22,9 @@ import {
   postCancelRetry,
   fetchFedexLinehaulLocation,
   saveLocationToDirectory,
+  getDollyRegistry,
+  putDollyNumber,
+  patchDollyRating,
 } from '../api.js'
 import {
   linehaulTractorBody,
@@ -108,7 +111,6 @@ const PORTAL_Z_BANNER = 2_147_483_000
 const PORTAL_Z_MODAL = 2_147_483_001
 const PORTAL_Z_LOCATION_MODAL = 2_147_483_002
 
-const assignmentAlert = ref(null)
 const loadError = ref(null)
 const runMsg = ref(null)
 const runErrorBanner = ref(null)
@@ -272,6 +274,95 @@ const tripDollySection = computed(() =>
 
 const copyToast = ref('')
 
+const dollyReg = ref(/** @type {null | { lastPrimaryNbr: string | null, items: Record<string, { rating?: string, nbr?: string }> }} */ (null))
+const dollyAddOpen = ref(false)
+const dollyAddDigits = ref('')
+const dollyPutBusy = ref(false)
+/** When trip exposes API dolly fields, user can expand a detail block (mirrors trailer cards). */
+const expandedDollyApi = ref(false)
+
+function dollySix(raw) {
+  if (raw == null) return ''
+  const t = String(raw).replace(/\D/g, '').slice(0, 6)
+  return t.length === 6 ? t : ''
+}
+
+const primaryDollyOnTrip = computed(() => {
+  const b = linehaulTripsBody.value
+  if (!b || typeof b !== 'object' || Array.isArray(b)) return ''
+  const o = /** @type {Record<string, unknown>} */ (b)
+  return dollySix(o.dollyNumber1) || dollySix(o.dollyNumber2) || ''
+})
+
+const dollyPrimaryDisplay = computed(() => primaryDollyOnTrip.value || dollyReg.value?.lastPrimaryNbr || '')
+
+const dollyRating = computed(() => {
+  const n = dollyPrimaryDisplay.value
+  if (!n || !dollyReg.value?.items?.[n]) return 'none'
+  const r = dollyReg.value.items[n].rating
+  if (r === 'good' || r === 'bad' || r === 'none') return r
+  return 'none'
+})
+
+async function loadDollyRegistry() {
+  try {
+    dollyReg.value = await getDollyRegistry()
+  } catch {
+    dollyReg.value = null
+  }
+}
+
+function onDollyAddInput(e) {
+  const t = e?.target
+  dollyAddDigits.value =
+    t && 'value' in t
+      ? String(/** @type {HTMLInputElement} */ (t).value)
+          .replace(/\D/g, '')
+          .slice(0, 6)
+      : ''
+}
+
+async function onAddDollySubmit() {
+  const n = dollySix(dollyAddDigits.value)
+  if (!n) return
+  dollyPutBusy.value = true
+  try {
+    dollyReg.value = await putDollyNumber({
+      dollyNbr: n,
+      legSeq: String(currentTripLegSeq.value || ''),
+    })
+    dollyAddOpen.value = false
+    dollyAddDigits.value = ''
+    void copyTripDetailValue(n, 'Dolly number')
+  } catch {
+    /* */
+  } finally {
+    dollyPutBusy.value = false
+  }
+}
+
+function onDollyHeaderClick() {
+  if (!tripDollySection.value?.show) return
+  expandedDollyApi.value = !expandedDollyApi.value
+}
+
+watch(
+  () => tripDollySection.value?.show,
+  (ok) => {
+    if (!ok) expandedDollyApi.value = false
+  },
+)
+
+async function setDollyRate(r) {
+  const n = dollyPrimaryDisplay.value
+  if (!n) return
+  try {
+    dollyReg.value = await patchDollyRating({ dollyNbr: n, rating: r })
+  } catch {
+    /* */
+  }
+}
+
 async function copyTripDetailValue(value, label) {
   const v = String(value ?? '').trim()
   if (!v || v === '—') return
@@ -412,47 +503,6 @@ function onTripPanelDblClick(e) {
   registerTripDoubleComplete()
 }
 
-function buildTripHistoryDispatchHeader() {
-  const od = tripOriginDest.value
-  return {
-    savedAt: Date.now(),
-    source: 'complete',
-    tripStatusText: tripStatusUi.value.text,
-    tripStatusKind: tripStatusUi.value.kind,
-    origin: od.origin,
-    destination: od.destination,
-    instructions: String(mergedDispatchInstructions.value ?? '').trim(),
-  }
-}
-
-function buildTripHistoryDetailsPayload() {
-  const body = linehaulTripsBody.value
-  const trailers = tripTrailerCards.value.map((c) => ({
-    order: c.order,
-    trlrNbr: c.trlrNbr,
-    size: c.size,
-    statusLabel: c.statusLabel,
-    loadType: c.loadType,
-    summaryRows: c.summaryRows,
-  }))
-  const dolly = tripDollySection.value.show
-    ? {
-        rows: tripDollySection.value.rows.map((r) => ({
-          label: r.label,
-          value: r.value,
-        })),
-      }
-    : null
-  let tripStatus = ''
-  let tractorNumber = ''
-  if (body && typeof body === 'object' && !Array.isArray(body)) {
-    const b = /** @type {Record<string, unknown>} */ (body)
-    tripStatus = b.tripStatus != null ? String(b.tripStatus) : ''
-    tractorNumber = b.tractorNumber != null ? String(b.tractorNumber) : ''
-  }
-  return { trailers, dolly, tripStatus, tractorNumber }
-}
-
 async function confirmTripCompleted() {
   const seq = tripCompleteTargetSeq.value
   if (!seq) {
@@ -461,10 +511,7 @@ async function confirmTripCompleted() {
   }
   tripCompleteBusy.value = true
   try {
-    await markTripLegSequenceCompleted(seq, {
-      dispatchHeader: buildTripHistoryDispatchHeader(),
-      tripDetails: buildTripHistoryDetailsPayload(),
-    })
+    await markTripLegSequenceCompleted(seq)
   } finally {
     tripCompleteBusy.value = false
     tripCompleteDialog.value = false
@@ -880,6 +927,10 @@ watch(
   },
 )
 
+watch(linehaulLastFetchAt, () => {
+  void loadDollyRegistry()
+})
+
 watch(
   tripPhase,
   (newPhase, oldPhase) => {
@@ -979,10 +1030,6 @@ async function loadAssignment() {
   } catch (e) {
     loadError.value = e instanceof Error ? e.message : String(e)
   }
-}
-
-function dismissAlert() {
-  assignmentAlert.value = null
 }
 
 /** Dedupe directory writes for the same trip destination + origin pair. */
@@ -1250,11 +1297,6 @@ let unregisterSession = () => {}
 
 onMounted(async () => {
   unregisterAssignment = registerAssignmentListener((data) => {
-    assignmentAlert.value = {
-      ts: data.ts,
-      message: data.message || 'Assignment change detected',
-      detail: data.current ?? data,
-    }
     if (data.source === 'save') {
       void loadAssignment()
     }
@@ -1276,12 +1318,14 @@ onMounted(async () => {
   void pollAutomationPreview()
   previewPollTimer = setInterval(pollAutomationPreview, 1600)
   void setupLinehaulPolling()
+  void loadDollyRegistry()
   syncTripVoiceUnlockHint()
 })
 
 onActivated(() => {
   loadAssignment()
   void refreshLinehaulCredMeta()
+  void loadDollyRegistry()
   void loadQuickActions()
   void setupLinehaulPolling()
   syncTripVoiceUnlockHint()
@@ -1321,10 +1365,11 @@ onUnmounted(() => {
         @click.self="tripCompleteDialog = false"
       >
         <div class="trip-complete-card">
-          <h3 id="trip-complete-title" class="trip-complete-title">Mark trip complete?</h3>
+          <h3 id="trip-complete-title" class="trip-complete-title">Remove trip from home?</h3>
           <p class="trip-complete-body">
-            Double-tap or double-click the Dispatch or Trip Details card to open this. Completing hides
-            dispatch and trip details until FedEx returns a different trip (new daily leg sequence).
+            Double-tap or double-click the Dispatch or Trip Details card to open this. This only removes
+            the trip from the home screen. Trips you load already appear in History. FedEx can still
+            return the same leg; use again if the trip reappears.
           </p>
           <div class="trip-complete-actions">
             <button type="button" class="btn tap" @click="tripCompleteDialog = false">Cancel</button>
@@ -1334,7 +1379,7 @@ onUnmounted(() => {
               :disabled="tripCompleteBusy"
               @click="confirmTripCompleted"
             >
-              {{ tripCompleteBusy ? 'Saving…' : 'Yes, completed' }}
+              {{ tripCompleteBusy ? 'Saving…' : 'Remove from home' }}
             </button>
           </div>
         </div>
@@ -1625,11 +1670,6 @@ onUnmounted(() => {
       <button type="button" class="tap icon-close" aria-label="Dismiss" @click="dismissRunErrorBanner">
         ×
       </button>
-    </div>
-
-    <div v-if="assignmentAlert" class="banner" role="status">
-      <span>{{ assignmentAlert.message }}</span>
-      <button type="button" class="tap dismiss" @click="dismissAlert">Dismiss</button>
     </div>
 
     <p v-if="loadError" class="err">{{ loadError }}</p>
@@ -2001,11 +2041,197 @@ onUnmounted(() => {
         Dispatch snapshot (DSPCH); merged with approved trip fields when both are available.
       </p>
 
-      <template v-if="linehaulTripsBody">
-        <div class="trip-details-wrap">
-          <details v-if="tripDollySection.show" class="trip-details-block" open>
-            <summary class="trip-details-summary">Dolly</summary>
-            <dl class="trip-details-dl">
+      <div
+        v-if="(linehaulTripsBody || linehaulTripsNoActive) && !(linehaulTripsError && suppressHomeLinehaulErrors)"
+        class="trip-details-wrap"
+      >
+        <div class="trailer-card trailer-card--dolly" role="group" aria-label="Dolly you are carrying">
+          <div
+            v-if="!tripDollySection.show"
+            class="trailer-card-header trailer-card-header--dolly-static"
+          >
+            <div class="trailer-card-header-inline">
+              <span class="dolly-label">Dolly</span>
+              <button
+                v-if="dollyPrimaryDisplay"
+                type="button"
+                class="trailer-nbr copyable-inline tap"
+                title="Tap to copy"
+                @click.stop="copyTripDetailValue(dollyPrimaryDisplay, 'Dolly number')"
+              >
+                #{{ dollyPrimaryDisplay }}
+              </button>
+              <span v-else class="dolly-nbr--empty" aria-hidden="true">—</span>
+              <span
+                v-if="dollyPrimaryDisplay"
+                class="dolly-rating-pill"
+                :class="`dolly-rating-pill--${dollyRating}`"
+              >
+                <template v-if="dollyRating === 'good'">Good</template>
+                <template v-else-if="dollyRating === 'bad'">Bad</template>
+                <template v-else>Unrated</template>
+              </span>
+            </div>
+            <div class="trailer-card-actions dolly-header-actions" @click.stop>
+              <div class="dolly-rate-inline" @click.stop>
+                <span class="dolly-rate-inline__lbl">Rate</span>
+                <button
+                  v-for="opt in [
+                    { k: 'good', t: '👍' },
+                    { k: 'bad', t: '👎' },
+                    { k: 'none', t: '·' },
+                  ]"
+                  :key="opt.k"
+                  type="button"
+                  class="trip-dolly-star tap dolly-star--header"
+                  :class="{ 'trip-dolly-star--on': dollyRating === opt.k }"
+                  :title="opt.k === 'none' ? 'Clear rating' : `Mark ${opt.k}`"
+                  :disabled="!dollyPrimaryDisplay"
+                  @click="setDollyRate(opt.k)"
+                >
+                  {{ opt.t }}
+                </button>
+              </div>
+              <button
+                v-if="!dollyAddOpen"
+                type="button"
+                class="dolly-add-tile tap"
+                title="Set dolly number"
+                aria-label="Add or change dolly number"
+                @click="dollyAddOpen = true"
+              >
+                +
+              </button>
+              <button
+                v-else
+                type="button"
+                class="dolly-add-tile dolly-add-tile--active tap"
+                title="Close add dolly"
+                aria-label="Close"
+                @click="(dollyAddOpen = false), (dollyAddDigits = '')"
+              >
+                ×
+              </button>
+            </div>
+          </div>
+          <div
+            v-else
+            class="trailer-card-header"
+            role="button"
+            tabindex="0"
+            :aria-expanded="!!expandedDollyApi"
+            @click="onDollyHeaderClick"
+            @keydown.enter.space.prevent="onDollyHeaderClick"
+          >
+            <div class="trailer-card-header-inline">
+              <span class="dolly-label">Dolly</span>
+              <button
+                v-if="dollyPrimaryDisplay"
+                type="button"
+                class="trailer-nbr copyable-inline tap"
+                title="Tap to copy"
+                @click.stop="copyTripDetailValue(dollyPrimaryDisplay, 'Dolly number')"
+              >
+                #{{ dollyPrimaryDisplay }}
+              </button>
+              <span v-else class="dolly-nbr--empty" aria-hidden="true">—</span>
+              <span
+                v-if="dollyPrimaryDisplay"
+                class="dolly-rating-pill"
+                :class="`dolly-rating-pill--${dollyRating}`"
+              >
+                <template v-if="dollyRating === 'good'">Good</template>
+                <template v-else-if="dollyRating === 'bad'">Bad</template>
+                <template v-else>Unrated</template>
+              </span>
+            </div>
+            <div class="trailer-card-actions dolly-header-actions" @click.stop>
+              <div class="dolly-rate-inline" @click.stop>
+                <span class="dolly-rate-inline__lbl">Rate</span>
+                <button
+                  v-for="opt in [
+                    { k: 'good', t: '👍' },
+                    { k: 'bad', t: '👎' },
+                    { k: 'none', t: '·' },
+                  ]"
+                  :key="opt.k"
+                  type="button"
+                  class="trip-dolly-star tap dolly-star--header"
+                  :class="{ 'trip-dolly-star--on': dollyRating === opt.k }"
+                  :title="opt.k === 'none' ? 'Clear rating' : `Mark ${opt.k}`"
+                  :disabled="!dollyPrimaryDisplay"
+                  @click="setDollyRate(opt.k)"
+                >
+                  {{ opt.t }}
+                </button>
+              </div>
+              <button
+                v-if="!dollyAddOpen"
+                type="button"
+                class="dolly-add-tile tap"
+                title="Set dolly number"
+                aria-label="Add or change dolly number"
+                @click="dollyAddOpen = true"
+              >
+                +
+              </button>
+              <button
+                v-else
+                type="button"
+                class="dolly-add-tile dolly-add-tile--active tap"
+                title="Close add dolly"
+                aria-label="Close"
+                @click="(dollyAddOpen = false), (dollyAddDigits = '')"
+              >
+                ×
+              </button>
+              <span
+                v-if="tripDollySection.show"
+                class="trailer-expand-icon"
+                aria-hidden="true"
+              >
+                {{ expandedDollyApi ? '−' : '+' }}
+              </span>
+            </div>
+          </div>
+          <div
+            v-if="dollyAddOpen"
+            class="trailer-card-summary dolly-add-compact"
+          >
+            <label class="sr-only" for="dolly-compact-inp">6 digit dolly number</label>
+            <input
+              id="dolly-compact-inp"
+              :value="dollyAddDigits"
+              class="dolly-compact-inp"
+              inputmode="numeric"
+              maxlength="6"
+              placeholder="6 digits"
+              @input="onDollyAddInput"
+              @keydown.enter.prevent="dollyAddDigits.length === 6 && onAddDollySubmit()"
+            />
+            <button
+              type="button"
+              class="dolly-compact-btn btn primary"
+              :disabled="dollyPutBusy || dollyAddDigits.length !== 6"
+              @click="onAddDollySubmit"
+            >
+              Add
+            </button>
+            <button
+              type="button"
+              class="dolly-compact-btn btn secondary"
+              :disabled="dollyPutBusy"
+              @click="(dollyAddOpen = false), (dollyAddDigits = '')"
+            >
+              Cancel
+            </button>
+          </div>
+          <div
+            v-if="expandedDollyApi && tripDollySection.show"
+            class="trailer-card-summary trip-dolly-api-block"
+          >
+            <h3 class="dolly-api-sub">From trip (API)</h3>
+            <dl class="trip-details-dl trip-details-dl--dolly-api">
               <template v-for="row in tripDollySection.rows" :key="row.label">
                 <dt>{{ row.label }}</dt>
                 <dd>
@@ -2021,8 +2247,10 @@ onUnmounted(() => {
                 </dd>
               </template>
             </dl>
-          </details>
+          </div>
+        </div>
 
+        <template v-if="linehaulTripsBody">
           <div
             v-for="card in tripTrailerCards"
             :key="card.id"
@@ -2121,8 +2349,8 @@ onUnmounted(() => {
               </dl>
             </div>
           </div>
-        </div>
-      </template>
+        </template>
+      </div>
       <p v-else-if="linehaulTripsNoActive" class="empty trip-details-idle">No active trip</p>
       <p
         v-else-if="linehaulTripsError && !suppressHomeLinehaulErrors"
@@ -2848,33 +3076,6 @@ button.trailer-nbr.copyable-inline {
   line-height: 1;
   cursor: pointer;
 }
-.banner {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-3, 0.75rem);
-  padding: var(--space-3, 0.75rem) var(--space-4, 1rem);
-  background: var(--color-warning-muted, rgba(245, 158, 11, 0.15));
-  border: 1px solid var(--color-warning-border, rgba(245, 158, 11, 0.3));
-  border-radius: var(--radius-lg, 0.75rem);
-  font-size: var(--text-sm, 0.8125rem);
-  animation: slide-up var(--duration-normal, 200ms) var(--ease-out);
-}
-.dismiss {
-  flex-shrink: 0;
-  padding: var(--space-1-5, 0.375rem) var(--space-3, 0.75rem);
-  border-radius: var(--radius-md, 0.5rem);
-  border: 1px solid var(--color-border, rgba(255, 255, 255, 0.08));
-  background: var(--color-bg-surface, #16161d);
-  color: var(--color-text-primary, #f4f4f8);
-  font-size: var(--text-sm, 0.8125rem);
-  font-weight: var(--weight-medium, 500);
-  cursor: pointer;
-  transition: var(--transition-colors);
-}
-.dismiss:hover {
-  background: var(--color-hover, rgba(255, 255, 255, 0.04));
-}
 .err {
   color: #ff8a80;
 }
@@ -3239,6 +3440,222 @@ button.trailer-nbr.copyable-inline {
   background: #25252e;
   overflow: hidden;
 }
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+/* Dolly row: same card shell as trailers; first card in trip-details-wrap */
+.trailer-card--dolly .dolly-label {
+  font-weight: 700;
+  font-size: 1em;
+  line-height: 1.05;
+  color: var(--text, #e8e8ee);
+  flex: 0 0 auto;
+  min-width: 0;
+  white-space: nowrap;
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+  background: none;
+  border: none;
+}
+.trailer-card--dolly .trailer-card-header-inline {
+  min-width: 0;
+  flex: 1;
+  justify-content: flex-start;
+  gap: clamp(0.2rem, 1.2vw, 0.35rem);
+  align-items: center;
+}
+.dolly-rating-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.06rem 0.3rem;
+  border-radius: 2px;
+  font-size: 0.88em;
+  line-height: 1.1;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.01em;
+  border: 1px solid #3e3e48;
+  color: #9898a8;
+  flex-shrink: 1;
+  min-width: 0;
+  white-space: nowrap;
+  max-height: 1.1rem;
+  box-sizing: border-box;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.dolly-rating-pill--good {
+  background: rgba(34, 197, 94, 0.15);
+  color: #4ade80;
+  border-color: rgba(34, 197, 94, 0.3);
+}
+.dolly-rating-pill--bad {
+  background: rgba(239, 68, 68, 0.12);
+  color: #f87171;
+  border-color: rgba(239, 68, 68, 0.35);
+}
+.dolly-rating-pill--none {
+  color: #9ca3af;
+}
+.dolly-nbr--empty {
+  color: #6e6e7e;
+  font-weight: 600;
+  font-size: 1em;
+  flex: 0 0 auto;
+}
+.dolly-header-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: nowrap;
+  flex-shrink: 0;
+  gap: 0.2rem;
+  min-width: 0;
+  max-width: 46%;
+}
+.dolly-header-actions .dolly-add-tile {
+  flex: 0 0 auto;
+}
+.dolly-header-actions .trailer-expand-icon {
+  flex: 0 0 auto;
+}
+.dolly-rate-inline {
+  display: flex;
+  align-items: center;
+  gap: 0.1rem;
+  min-width: 0;
+  flex: 0 1 auto;
+}
+.dolly-rate-inline__lbl {
+  display: none;
+  font-size: 0.58rem;
+  text-transform: uppercase;
+  color: #8a8a98;
+  font-weight: 600;
+  flex-shrink: 0;
+  margin-right: 0.1rem;
+}
+.trip-dolly-star {
+  min-width: 1.9rem;
+  min-height: 1.9rem;
+  font-size: 0.9rem;
+  line-height: 1;
+  border: 1px solid #3a3a44;
+  border-radius: 6px;
+  background: #1a1a20;
+  cursor: pointer;
+  color: #b8b8c8;
+}
+.trip-dolly-star:disabled {
+  cursor: not-allowed;
+  opacity: 0.4;
+}
+.trip-dolly-star.dolly-star--header {
+  min-width: 1.35rem;
+  min-height: 1.35rem;
+  font-size: 0.72rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  flex-shrink: 0;
+  border: 1px solid #3a3a44;
+  border-radius: 6px;
+  background: #1a1a20;
+  cursor: pointer;
+  color: #b8b8c8;
+}
+.trip-dolly-star--on {
+  border-color: #7b4db5;
+  background: rgba(123, 77, 181, 0.25);
+}
+.dolly-add-tile {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.5rem;
+  height: 1.5rem;
+  border-radius: 6px;
+  border: 1px solid rgba(123, 77, 181, 0.4);
+  background: rgba(123, 77, 181, 0.1);
+  color: #c4b5fd;
+  font-size: 1.15rem;
+  font-weight: 700;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0;
+}
+.dolly-add-tile--active {
+  border-color: #5a5a6a;
+  background: #2a2a32;
+  color: #c8c8d2;
+  font-size: 1.05rem;
+}
+.trailer-card-header--dolly-static {
+  cursor: default;
+  pointer-events: auto;
+}
+.trailer-card--dolly .dolly-compact-btn {
+  min-height: 1.9rem;
+  padding: 0.25rem 0.5rem;
+  font-size: 0.8rem;
+}
+.dolly-add-compact {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.45rem 0.5rem;
+  padding: 0.4rem 0.65rem !important;
+}
+.dolly-compact-inp {
+  flex: 1 1 8rem;
+  min-width: 0;
+  min-height: 2.2rem;
+  max-width: 12rem;
+  font-size: 0.95rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.08em;
+  text-align: center;
+  padding: 0.35rem 0.5rem;
+  box-sizing: border-box;
+  border-radius: 6px;
+  border: 1px solid var(--color-border, rgba(255, 255, 255, 0.1));
+  background: var(--color-bg-elevated, #0f0f14);
+  color: var(--color-text-primary, #f4f4f8);
+}
+.dolly-compact-inp::placeholder {
+  color: #6e6e7e;
+  letter-spacing: 0.02em;
+}
+.dolly-compact-inp:focus {
+  outline: none;
+  border-color: #7b4db5;
+  box-shadow: 0 0 0 2px rgba(123, 77, 181, 0.2);
+}
+.trip-dolly-api-block {
+  text-align: left;
+}
+.dolly-api-sub {
+  margin: 0 0 0.45rem;
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #8a8a98;
+  font-weight: 600;
+}
+.trip-details-dl--dolly-api {
+  padding: 0;
+}
 .trip-details-summary {
   cursor: pointer;
   padding: 0.5rem 0.65rem;
@@ -3436,8 +3853,7 @@ button.trailer-nbr.copyable-inline {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .panel,
-  .banner {
+  .panel {
     animation: none;
   }
 

@@ -1,30 +1,13 @@
-import fs from 'node:fs/promises'
-import path from 'node:path'
-import { LOCAL_DIR } from './config.mjs'
-import { requestAsyncLocalStorage } from './request-context.mjs'
-import { getLastActiveAccountKey } from './credentials-store.mjs'
-
-/** Legacy global assignment (before per-account files). */
-const ASSIGNMENT_FILE = path.join(LOCAL_DIR, 'assignment.json')
+import { readKeyJson, writeKeyJson } from './kv-store.mjs'
+import { getDataAccountKey, userScopeKey } from './scope-kv.mjs'
+import { emitLog } from './log-bus.mjs'
+import { appendInAppNotification } from './in-app-notifications-store.mjs'
 
 /**
- * @param {string | null | undefined} accountKey
+ * @returns {string}
  */
-function assignmentFileForAccount(accountKey) {
-  if (accountKey && typeof accountKey === 'string') {
-    return path.join(LOCAL_DIR, 'users', accountKey, 'assignment.json')
-  }
-  return ASSIGNMENT_FILE
-}
-
-function currentAssignmentScopeKey() {
-  const req = requestAsyncLocalStorage.getStore()
-  const fromReq =
-    req && typeof req === 'object' && 'credentialAccountKey' in req
-      ? /** @type {{ credentialAccountKey?: string }} */ (req).credentialAccountKey
-      : null
-  if (fromReq) return fromReq
-  return getLastActiveAccountKey()
+function assignmentKvKey() {
+  return userScopeKey('assignment')
 }
 
 const MAX_SLOTS = 5
@@ -66,6 +49,8 @@ export const PRESETS = {
 
 /** Max ledger entries per user (newest first). */
 const MAX_TRIP_HISTORY = 150
+
+const TRIP_OUTCOMES = new Set(['delivered', 'rejected', 'removed', 'none'])
 
 const DEFAULT_ASSIGNMENT = {
   instructions: '',
@@ -123,98 +108,94 @@ function validateSlots(slots) {
   return null
 }
 
-async function readAssignmentFromFile(file) {
-  try {
-    const raw = await fs.readFile(file, 'utf8')
-    const data = JSON.parse(raw)
-    const err = validateSlots(data.photoSlots || [])
-    if (err) return null
-    const hiddenRaw = data.hiddenDailyTripLegSequences
-    const hiddenDailyTripLegSequences = Array.isArray(hiddenRaw)
-      ? hiddenRaw
-          .map((s) => String(s).trim())
-          .filter((s) => /^\d+$/.test(s))
-      : []
-    const ledgerRaw = data.tripHistoryLedger
-    const tripHistoryLedger = Array.isArray(ledgerRaw)
-      ? ledgerRaw
-          .filter((x) => x && typeof x === 'object' && !Array.isArray(x))
-          .slice(0, MAX_TRIP_HISTORY)
-      : []
-
-    const base = {
-      instructions: typeof data.instructions === 'string' ? data.instructions : '',
-      driverPhone: typeof data.driverPhone === 'string' ? data.driverPhone : '',
-      preset: typeof data.preset === 'string' ? data.preset : 'custom',
-      photoSlots: data.photoSlots,
-      fieldValues:
-        data.fieldValues && typeof data.fieldValues === 'object'
-          ? data.fieldValues
-          : {},
-      hiddenDailyTripLegSequences,
-      tripHistoryLedger,
-      persistedLinehaulTripSnapshot:
-        data.persistedLinehaulTripSnapshot != null &&
-        typeof data.persistedLinehaulTripSnapshot === 'object'
-          ? data.persistedLinehaulTripSnapshot
-          : null,
-      persistedPrePlanTripSnapshot:
-        data.persistedPrePlanTripSnapshot != null &&
-        typeof data.persistedPrePlanTripSnapshot === 'object'
-          ? data.persistedPrePlanTripSnapshot
-          : null,
-      persistedCachedTripSnapshot:
-        data.persistedCachedTripSnapshot != null &&
-        typeof data.persistedCachedTripSnapshot === 'object'
-          ? data.persistedCachedTripSnapshot
-          : null,
-      lastDailyTripLegSequencePersisted:
-        typeof data.lastDailyTripLegSequencePersisted === 'string' &&
-        /^\d+$/.test(data.lastDailyTripLegSequencePersisted)
-          ? data.lastDailyTripLegSequencePersisted
-          : null,
-    }
-    if (!Array.isArray(base.hiddenDailyTripLegSequences)) {
-      base.hiddenDailyTripLegSequences = []
-    }
-    return base
-  } catch {
+function normalizeAssignmentData(data) {
+  if (!data) return null
+  let photoSlots
+  if (data.photoSlots == null) {
+    photoSlots = []
+  } else if (Array.isArray(data.photoSlots)) {
+    photoSlots = data.photoSlots
+  } else {
     return null
   }
+  const err = validateSlots(photoSlots)
+  if (err) return null
+  const hiddenRaw = data.hiddenDailyTripLegSequences
+  const hiddenDailyTripLegSequences = Array.isArray(hiddenRaw)
+    ? hiddenRaw
+        .map((s) => String(s).trim())
+        .filter((s) => /^\d+$/.test(s))
+    : []
+  const ledgerRaw = data.tripHistoryLedger
+  const tripHistoryLedger = Array.isArray(ledgerRaw)
+    ? ledgerRaw
+        .filter((x) => x && typeof x === 'object' && !Array.isArray(x))
+        .slice(0, MAX_TRIP_HISTORY)
+    : []
+
+  const base = {
+    instructions: typeof data.instructions === 'string' ? data.instructions : '',
+    driverPhone: typeof data.driverPhone === 'string' ? data.driverPhone : '',
+    preset: typeof data.preset === 'string' ? data.preset : 'custom',
+    photoSlots,
+    fieldValues:
+      data.fieldValues && typeof data.fieldValues === 'object' ? data.fieldValues : {},
+    hiddenDailyTripLegSequences,
+    tripHistoryLedger,
+    persistedLinehaulTripSnapshot:
+      data.persistedLinehaulTripSnapshot != null &&
+      typeof data.persistedLinehaulTripSnapshot === 'object'
+        ? data.persistedLinehaulTripSnapshot
+        : null,
+    persistedPrePlanTripSnapshot:
+      data.persistedPrePlanTripSnapshot != null &&
+      typeof data.persistedPrePlanTripSnapshot === 'object'
+        ? data.persistedPrePlanTripSnapshot
+        : null,
+    persistedCachedTripSnapshot:
+      data.persistedCachedTripSnapshot != null &&
+      typeof data.persistedCachedTripSnapshot === 'object'
+        ? data.persistedCachedTripSnapshot
+        : null,
+    lastDailyTripLegSequencePersisted:
+      typeof data.lastDailyTripLegSequencePersisted === 'string' &&
+      /^\d+$/.test(data.lastDailyTripLegSequencePersisted)
+        ? data.lastDailyTripLegSequencePersisted
+        : null,
+  }
+  if (!Array.isArray(base.hiddenDailyTripLegSequences)) {
+    base.hiddenDailyTripLegSequences = []
+  }
+  return base
 }
 
 export async function readAssignment() {
-  const ak = currentAssignmentScopeKey()
-  const scoped = assignmentFileForAccount(ak)
-  if (scoped !== ASSIGNMENT_FILE) {
-    const fromScoped = await readAssignmentFromFile(scoped)
-    if (fromScoped) return fromScoped
-    const legacy = await readAssignmentFromFile(ASSIGNMENT_FILE)
-    if (legacy) return legacy
-    return cloneDefault()
-  }
-  const global = await readAssignmentFromFile(ASSIGNMENT_FILE)
-  const g = global ?? cloneDefault()
-  if (!Array.isArray(g.hiddenDailyTripLegSequences)) {
-    g.hiddenDailyTripLegSequences = []
-  }
-  if (!('persistedLinehaulTripSnapshot' in g)) g.persistedLinehaulTripSnapshot = null
-  if (!('persistedPrePlanTripSnapshot' in g)) g.persistedPrePlanTripSnapshot = null
-  if (!('persistedCachedTripSnapshot' in g)) g.persistedCachedTripSnapshot = null
-  if (!('lastDailyTripLegSequencePersisted' in g)) g.lastDailyTripLegSequencePersisted = null
-  if (!Array.isArray(g.tripHistoryLedger)) g.tripHistoryLedger = []
-  return g
+  const key = assignmentKvKey()
+  let raw = await readKeyJson(key, () => null)
+  if (raw == null) raw = {}
+  const n = normalizeAssignmentData(raw)
+  if (!n) return cloneDefault()
+  if (!Array.isArray(n.hiddenDailyTripLegSequences)) n.hiddenDailyTripLegSequences = []
+  if (!('persistedLinehaulTripSnapshot' in n)) n.persistedLinehaulTripSnapshot = null
+  if (!('persistedPrePlanTripSnapshot' in n)) n.persistedPrePlanTripSnapshot = null
+  if (!('persistedCachedTripSnapshot' in n)) n.persistedCachedTripSnapshot = null
+  if (!('lastDailyTripLegSequencePersisted' in n)) n.lastDailyTripLegSequencePersisted = null
+  if (!Array.isArray(n.tripHistoryLedger)) n.tripHistoryLedger = []
+  return n
 }
 
 export async function writeAssignment(body) {
-  const ak = currentAssignmentScopeKey()
-  const targetFile = assignmentFileForAccount(ak)
-  const dir = path.dirname(targetFile)
-  await fs.mkdir(dir, { recursive: true })
+  const key = assignmentKvKey()
 
   const prev = await readAssignment()
 
-  let photoSlots = body.photoSlots ?? prev.photoSlots
+  let photoSlots = Array.isArray(body?.photoSlots)
+    ? body.photoSlots
+    : prev.photoSlots
+  if (!Array.isArray(photoSlots)) {
+    const sealed = getPreset('sealed_dual')
+    photoSlots = sealed ? sealed.photoSlots.map((s) => ({ ...s })) : []
+  }
   let preset = body.preset ?? prev.preset
 
   if (body.applyPreset && PRESETS[body.applyPreset]) {
@@ -308,6 +289,18 @@ export async function writeAssignment(body) {
       tripDetails:
         e.tripDetails && typeof e.tripDetails === 'object' ? e.tripDetails : {},
     }
+    if (source === 'linehaul' || source === 'complete') {
+      if (/^\d+$/.test(seq)) {
+        tripHistoryLedger = tripHistoryLedger.filter(
+          (x) =>
+            String(x?.dailyTripLegSequence) !== seq && !(x && x.id && String(x.id) === id),
+        )
+      } else if (id) {
+        tripHistoryLedger = tripHistoryLedger.filter(
+          (x) => !(x && x.id && String(x.id) === id),
+        )
+      }
+    }
     tripHistoryLedger = [entry, ...tripHistoryLedger].slice(0, MAX_TRIP_HISTORY)
   } else if (body.upsertTripHistoryEntry && typeof body.upsertTripHistoryEntry === 'object') {
     const e = body.upsertTripHistoryEntry
@@ -340,13 +333,39 @@ export async function writeAssignment(body) {
       )
       tripHistoryLedger = [nextEntry, ...rest].slice(0, MAX_TRIP_HISTORY)
     }
+  } else if (body.patchTripHistoryEntry && typeof body.patchTripHistoryEntry === 'object') {
+    const p = body.patchTripHistoryEntry
+    const seq = String(p.dailyTripLegSequence ?? '').trim()
+    const out =
+      typeof p.outcome === 'string' && TRIP_OUTCOMES.has(p.outcome.trim().toLowerCase())
+        ? p.outcome.trim().toLowerCase()
+        : 'none'
+    if (/^\d+$/.test(seq)) {
+      const at =
+        typeof p.touchedAt === 'number' && Number.isFinite(p.touchedAt)
+          ? p.touchedAt
+          : Date.now()
+      tripHistoryLedger = tripHistoryLedger
+        .map((x) => {
+          if (!x || String(x.dailyTripLegSequence) !== seq) return x
+          const o = { ...x, outcome: out, outcomeTouchedAt: at }
+          if (o.dispatchHeader && typeof o.dispatchHeader === 'object') {
+            o.dispatchHeader = { ...o.dispatchHeader, historyOutcome: out, historyOutcomeAt: at }
+          }
+          return o
+        })
+        .slice(0, MAX_TRIP_HISTORY)
+    }
   }
 
+  const instructionsTouched = 'instructions' in body
+  const nextInstructions =
+    typeof body.instructions === 'string' ? body.instructions : prev.instructions
+  const instructionsChanged =
+    instructionsTouched && String(nextInstructions ?? '') !== String(prev.instructions ?? '')
+
   const next = {
-    instructions:
-      typeof body.instructions === 'string'
-        ? body.instructions
-        : prev.instructions,
+    instructions: nextInstructions,
     driverPhone:
       typeof body.driverPhone === 'string' ? body.driverPhone : prev.driverPhone,
     preset,
@@ -360,6 +379,37 @@ export async function writeAssignment(body) {
     tripHistoryLedger,
   }
 
-  await fs.writeFile(targetFile, JSON.stringify(next, null, 2), 'utf8')
+  await writeKeyJson(key, next)
+
+  if (instructionsChanged) {
+    const ak = getDataAccountKey()
+    if (ak) {
+      try {
+        const n = String(nextInstructions ?? '').trim()
+        const r = await appendInAppNotification(ak, {
+          type: 'assignment',
+          message: n
+            ? 'Dispatch instructions were updated'
+            : 'Dispatch instructions were cleared',
+          source: 'dispatch',
+          extra: { hint: n ? n.slice(0, 200) : '' },
+        })
+        if (r?.item) {
+          emitLog('inapp', r.item.message, {
+            id: r.item.id,
+            ntype: r.item.type,
+            source: r.item.source,
+            read: r.item.read,
+            ts: r.item.ts,
+            extra: r.item.extra,
+          })
+        }
+      } catch {
+        /* still emit legacy assignment log for refresh */
+      }
+    }
+    emitLog('assignment', 'Dispatch instructions updated', { source: 'save' })
+  }
+
   return next
 }

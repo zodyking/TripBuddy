@@ -8,6 +8,7 @@ import multipart from '@fastify/multipart'
 import fastifyStatic from '@fastify/static'
 import { API_PORT, UPLOADS_DIR, PERSISTENCE_DATA_ROOT, LOCAL_DIR } from './config.mjs'
 import { runDataMigrationOnStartup } from './data-migration.mjs'
+import { requirePostgresOrThrow } from './kv-pg.mjs'
 import {
   isAuthEnabled,
   createSession,
@@ -96,9 +97,25 @@ import {
   upsertLocation,
   updateLocationPhone,
 } from './locations-directory-store.mjs'
-import { appendAccessEntry, listAccessEntries } from './access-log-store.mjs'
+import {
+  appendLoginAccessFromBody,
+  appendPageVisitLog,
+  listAccessEntries,
+  mergePreLoginAccessToUser,
+} from './access-log-store.mjs'
 import { getClientIp, isPrivateOrLocalIp } from './client-ip.mjs'
 import { readGeoFence, writeGeoFence } from './geo-fence-store.mjs'
+import {
+  readInAppInbox,
+  markInAppRead,
+  markInAppAllRead,
+} from './in-app-notifications-store.mjs'
+import {
+  addOrTouchDolly,
+  readDollyRegistry,
+  setDollyRating,
+  syncDollyFromTrip,
+} from './dolly-store.mjs'
 import {
   getGeoFenceRedirectUrl,
   pointInPolygon,
@@ -276,6 +293,11 @@ app.post('/api/auth/login', async (req, reply) => {
       } catch {
         /* non-fatal */
       }
+      try {
+        await mergePreLoginAccessToUser(username, accountKey)
+      } catch {
+        /* non-fatal */
+      }
       const id = createSession(accountKey)
       reply.setCookie(COOKIE_NAME, id, {
         path: '/',
@@ -303,6 +325,11 @@ app.post('/api/auth/login', async (req, reply) => {
     await runWithCredentialAccountKey(accountKey, () =>
       saveCredentials({ linehaulPollMinutes: 1 }),
     )
+  } catch {
+    /* non-fatal */
+  }
+  try {
+    await mergePreLoginAccessToUser(username, accountKey)
   } catch {
     /* non-fatal */
   }
@@ -344,15 +371,11 @@ app.post('/api/login/access-log', async (req, reply) => {
     const xf = req.headers['x-forwarded-for']
     const forwardedFor = typeof xf === 'string' ? xf.slice(0, 512) : null
     const ua = req.headers['user-agent']
-    const entry = await appendAccessEntry({
+    const entry = await appendLoginAccessFromBody({
+      ...body,
       ip: getClientIp(req),
       forwardedFor,
-      latitude: body.latitude,
-      longitude: body.longitude,
-      accuracyM: body.accuracyM,
-      locationDenied: body.locationDenied === true,
       userAgent: typeof ua === 'string' ? ua : null,
-      source: 'login_ack',
     })
     return { ok: true, id: entry.id }
   } catch (e) {
@@ -366,15 +389,10 @@ app.post('/api/visit', async (req) => {
   const xf = req.headers['x-forwarded-for']
   const forwardedFor = typeof xf === 'string' ? xf.slice(0, 512) : null
   const ua = req.headers['user-agent']
-  const entry = await appendAccessEntry({
+  const entry = await appendPageVisitLog({
     ip: getClientIp(req),
     forwardedFor,
-    latitude: null,
-    longitude: null,
-    accuracyM: null,
-    locationDenied: false,
     userAgent: typeof ua === 'string' ? ua : null,
-    source: 'page_visit',
   })
   return { ok: true, id: entry.id }
 })
@@ -394,7 +412,9 @@ app.get('/api/status', async () => ({
   poll: getPollStatus(),
 }))
 
-app.get('/api/bridges/panynj', async () => getBridgesResponsePayload())
+app.get('/api/bridges/panynj', async () => {
+  return getBridgesResponsePayload()
+})
 
 app.get('/api/events', async (req, reply) => {
   if (!isAuthEnabled()) {
@@ -449,11 +469,93 @@ app.get('/api/assignment', async () => {
 app.put('/api/assignment', async (req, reply) => {
   try {
     const next = await writeAssignment(req.body ?? {})
-    emitLog('assignment', 'Dispatch instructions updated', { source: 'save' })
     return next
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e)
     return reply.code(400).send({ error: msg })
+  }
+})
+
+app.get('/api/notifications', async (req) => {
+  const ak = /** @type {any} */(req).credentialAccountKey
+  if (!ak) {
+    return { ok: true, items: [], unreadCount: 0 }
+  }
+  const d = await readInAppInbox(ak)
+  const list = Array.isArray(d.items) ? d.items : []
+  const unreadCount = list.filter((x) => x && !x.read).length
+  return { ok: true, items: list, unreadCount }
+})
+
+app.post('/api/notifications/read', async (req, reply) => {
+  const ak = /** @type {any} */(req).credentialAccountKey
+  if (!ak) {
+    return reply.code(400).send({ error: 'Not signed in' })
+  }
+  const b = req.body ?? {}
+  const id = b.id
+  if (id && typeof id === 'string' && id.trim()) {
+    const next = await markInAppRead(ak, [id.trim()])
+    const list = next.items || []
+    const u = list.filter((x) => x && !x.read).length
+    return { ok: true, items: list, unreadCount: u }
+  }
+  if (b.all === true) {
+    const next = await markInAppAllRead(ak)
+    return { ok: true, items: next.items, unreadCount: 0 }
+  }
+  return reply.code(400).send({ error: 'Provide { id: string } or { all: true }' })
+})
+
+app.get('/api/dolly', async () => {
+  const d = await readDollyRegistry()
+  return { ok: true, ...d }
+})
+
+app.post('/api/dolly/sync', async (req, reply) => {
+  try {
+    const b = req.body ?? {}
+    const leg =
+      typeof b.legSeq === 'string' && /^\d+$/.test(b.legSeq) ? b.legSeq : ''
+    const trip = b.trip
+    const d = await syncDollyFromTrip(
+      trip,
+      leg || undefined,
+    )
+    return { ok: true, ...d }
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e)
+    return reply.code(400).send({ ok: false, error: msg })
+  }
+})
+
+app.put('/api/dolly', async (req, reply) => {
+  try {
+    const b = req.body ?? {}
+    const d = await addOrTouchDolly(
+      /** @type {any} */ (b).dollyNbr,
+      { legSeq: b.legSeq, manual: true },
+    )
+    return { ok: true, ...d }
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e)
+    return reply.code(400).send({ ok: false, error: msg })
+  }
+})
+
+app.patch('/api/dolly', async (req, reply) => {
+  try {
+    const b = req.body ?? {}
+    const n = b.dollyNbr
+    const r = b.rating
+    if (typeof r !== 'string') {
+      return reply.code(400).send({ error: 'rating required' })
+    }
+    const d = await setDollyRating(/** @type {any} */ (n), /** @type {'none' | 'good' | 'bad'} */ (r))
+    return { ok: true, ...d }
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e)
+    return reply.code(400).send({ ok: false, error: msg })
   }
 })
 
@@ -1227,13 +1329,22 @@ const host = process.env.FEDEX_TOOL_API_HOST ?? '127.0.0.1'
 try {
   await runDataMigrationOnStartup()
 } catch (e) {
-  console.error('[data-migration]', e)
+  console.error('[data-migration]', (e && e.message) || e)
+  process.exit(1)
+}
+try {
+  await requirePostgresOrThrow()
+} catch (e) {
+  console.error('[postgres]', (e && e.message) || e)
+  process.exit(1)
 }
 
 await refreshPanynjCrossingData().catch((e) => {
   console.error('[bridge-panynj] initial', (e && e.message) || e)
 })
-startPanynjBridgePoll()
+startPanynjBridgePoll((e) => {
+  console.error('[bridge-panynj]', (e && e.message) || e)
+})
 
 try {
   await app.listen({ port: API_PORT, host })

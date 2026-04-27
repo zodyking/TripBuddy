@@ -1,9 +1,10 @@
-import fs from 'node:fs/promises'
-import path from 'node:path'
 import { randomUUID } from 'node:crypto'
-import { LOCAL_DIR } from './config.mjs'
+import { readKeyJson, writeKeyJson } from './kv-store.mjs'
+import { userScopeKey } from './scope-kv.mjs'
 
-const AUTOMATIONS_FILE = path.join(LOCAL_DIR, 'automations.json')
+function automationsKey() {
+  return userScopeKey('automations')
+}
 
 /**
  * Block type definitions for the automation builder.
@@ -633,22 +634,19 @@ export function validateAutomation(auto) {
 }
 
 export async function readAutomations() {
-  await fs.mkdir(LOCAL_DIR, { recursive: true })
-  try {
-    const raw = await fs.readFile(AUTOMATIONS_FILE, 'utf8')
-    const parsed = JSON.parse(raw)
-    if (!parsed || typeof parsed !== 'object' || !Array.isArray(parsed.automations)) {
-      return defaultStore()
-    }
-    return parsed
-  } catch {
+  const parsed = await readKeyJson(automationsKey(), defaultStore)
+  if (
+    !parsed ||
+    typeof parsed !== 'object' ||
+    !Array.isArray(/** @type {{ automations?: unknown }} */ (parsed).automations)
+  ) {
     return defaultStore()
   }
+  return /** @type {{ version: number, automations: unknown[] }} */ (parsed)
 }
 
 async function writeStore(store) {
-  await fs.mkdir(LOCAL_DIR, { recursive: true })
-  await fs.writeFile(AUTOMATIONS_FILE, `${JSON.stringify(store, null, 2)}\n`, 'utf8')
+  await writeKeyJson(automationsKey(), store)
 }
 
 export async function getAutomation(id) {

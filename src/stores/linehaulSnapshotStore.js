@@ -8,12 +8,17 @@ import {
   getAssignment,
   putAssignment,
   postLinehaulCaptureBearer,
+  syncDollyFromLinehaul,
 } from '../api.js'
 import { pushLiveLog } from './liveLogStore.js'
 import {
   buildHistoryDispatchHeaderFromBody,
   buildHistoryTripDetailsFromBody,
 } from '../utils/tripHistorySnapshot.js'
+import {
+  extractOriginDest,
+  extractTripDispatchInstructions,
+} from '../utils/tripDetailsDisplay.js'
 
 export const linehaulTractorBody = ref(null)
 export const linehaulDriverBody = ref(null)
@@ -39,103 +44,40 @@ export const hiddenDailyTripLegSequences = ref(/** @type {string[]} */ ([]))
 /** Previous driver availability status to detect ENRT→ACT transition. */
 let prevDriverAvlStat = null
 
-function applyHiddenTripFilter() {
-  const hidden = new Set(
-    hiddenDailyTripLegSequences.value.map((s) => String(s).trim()).filter(Boolean),
-  )
-  if (!hidden.size) return
-  const cur = linehaulTripsBody.value
-  const seqCur = tripBodyDailySeq(cur)
-  if (seqCur && hidden.has(seqCur)) {
-    linehaulTripsBody.value = null
-    linehaulTripsNoActive.value = true
-  }
-  const pre = prePlanTripSnapshot.value
-  const seqPre = tripBodyDailySeq(pre)
-  if (seqPre && hidden.has(seqPre)) {
-    prePlanTripSnapshot.value = null
-  }
-  const c = cachedTripSnapshot.value
-  const seqC = tripBodyDailySeq(c)
-  if (seqC && hidden.has(seqC)) {
-    cachedTripSnapshot.value = null
-  }
-}
-
 /**
- * User completed trip — persist hidden seq, optional history ledger entry, and clear matching UI state.
- * @param {string} dailyTripLegSequence
- * @param {{ dispatchHeader?: Record<string, unknown>, tripDetails?: Record<string, unknown> } | null} [history]
+ * Fingerprint of the last *successful* history upsert for the active leg — avoids
+ * duplicate PUTs on every poll, but still retries after failures and re-syncs when
+ * route / trip data / instructions change.
  */
-export async function markTripLegSequenceCompleted(dailyTripLegSequence, history = null) {
-  const seq = String(dailyTripLegSequence ?? '').trim()
-  if (!/^\d+$/.test(seq)) return
-  /** @type {Record<string, unknown>} */
-  const body = { appendHiddenDailyTripLegSequence: seq }
-  if (
-    history &&
-    typeof history.dispatchHeader === 'object' &&
-    history.dispatchHeader != null &&
-    typeof history.tripDetails === 'object' &&
-    history.tripDetails != null
-  ) {
-    body.appendTripHistoryEntry = {
-      id: `trip-${seq}-${Date.now()}`,
-      source: 'complete',
-      completedAt: Date.now(),
-      dailyTripLegSequence: seq,
-      dispatchHeader: {
-        ...history.dispatchHeader,
-        source: 'complete',
-      },
-      tripDetails: history.tripDetails,
-    }
+let lastHistoryUpsertOkFingerprint = null
+
+/** Clear in-memory trip state (call on sign-out; hidden seq comes from getAssignment on next sign-in). */
+export function resetLinehaulSession() {
+  linehaulTractorBody.value = null
+  linehaulDriverBody.value = null
+  linehaulTractorError.value = null
+  linehaulDriverError.value = null
+  linehaulTripReadyBody.value = null
+  linehaulTripReadyError.value = null
+  linehaulTripsBody.value = null
+  linehaulTripsError.value = null
+  linehaulTripsNoActive.value = false
+  lastDailyTripLegSequence.value = null
+  linehaulLastFetchAt.value = null
+  cachedTripSnapshot.value = null
+  prePlanTripSnapshot.value = null
+  hiddenDailyTripLegSequences.value = []
+  lastHistoryUpsertOkFingerprint = null
+  prevDriverAvlStat = null
+  if (persistTripDebounceTimer) {
+    clearTimeout(persistTripDebounceTimer)
+    persistTripDebounceTimer = null
   }
-  const a = await putAssignment(body)
-  hiddenDailyTripLegSequences.value = Array.isArray(a.hiddenDailyTripLegSequences)
-    ? a.hiddenDailyTripLegSequences.map(String)
-    : []
-  applyHiddenTripFilter()
-  await persistLinehaulTripSnapshotsNow()
 }
 
 /** @type {ReturnType<typeof setTimeout> | null} */
 let persistTripDebounceTimer = null
 const PERSIST_TRIP_DEBOUNCE_MS = 900
-
-/**
- * Hydrate trip UI from server-stored JSON (another device may have saved it).
- * @param {Record<string, unknown>} assign
- */
-function hydrateTripSnapshotsFromAssignment(assign) {
-  if (!assign || typeof assign !== 'object') return
-  const merged = assign.persistedLinehaulTripSnapshot
-  if (merged != null && typeof merged === 'object' && !Array.isArray(merged)) {
-    linehaulTripsBody.value = /** @type {Record<string, unknown>} */ (merged)
-    linehaulTripsNoActive.value = false
-    linehaulTripsError.value = null
-  }
-  const pre = assign.persistedPrePlanTripSnapshot
-  if (pre != null && typeof pre === 'object' && !Array.isArray(pre)) {
-    prePlanTripSnapshot.value = /** @type {Record<string, unknown>} */ (pre)
-  }
-  const c = assign.persistedCachedTripSnapshot
-  if (c != null && typeof c === 'object' && !Array.isArray(c)) {
-    cachedTripSnapshot.value = /** @type {Record<string, unknown>} */ (c)
-  }
-  const lp = assign.lastDailyTripLegSequencePersisted
-  if (typeof lp === 'string' && /^\d+$/.test(lp)) {
-    lastDailyTripLegSequence.value = lp
-  }
-}
-
-function schedulePersistLinehaulTripSnapshots() {
-  if (persistTripDebounceTimer) clearTimeout(persistTripDebounceTimer)
-  persistTripDebounceTimer = setTimeout(() => {
-    persistTripDebounceTimer = null
-    void persistLinehaulTripSnapshotsNow()
-  }, PERSIST_TRIP_DEBOUNCE_MS)
-}
 
 async function persistLinehaulTripSnapshotsNow() {
   try {
@@ -147,6 +89,123 @@ async function persistLinehaulTripSnapshotsNow() {
     })
   } catch {
     /* offline or auth */
+  }
+}
+
+function schedulePersistLinehaulTripSnapshots() {
+  if (persistTripDebounceTimer) clearTimeout(persistTripDebounceTimer)
+  persistTripDebounceTimer = setTimeout(() => {
+    persistTripDebounceTimer = null
+    void persistLinehaulTripSnapshotsNow()
+  }, PERSIST_TRIP_DEBOUNCE_MS)
+}
+
+function applyHiddenTripFilter() {
+  const hidden = new Set(
+    hiddenDailyTripLegSequences.value.map((s) => String(s).trim()).filter(Boolean),
+  )
+  if (!hidden.size) return
+  let needPersist = false
+  const cur = linehaulTripsBody.value
+  const seqCur = tripBodyDailySeq(cur)
+  if (seqCur && hidden.has(seqCur)) {
+    linehaulTripsBody.value = null
+    linehaulTripsNoActive.value = true
+    needPersist = true
+  }
+  const pre = prePlanTripSnapshot.value
+  const seqPre = tripBodyDailySeq(pre)
+  if (seqPre && hidden.has(seqPre)) {
+    prePlanTripSnapshot.value = null
+    needPersist = true
+  }
+  const c = cachedTripSnapshot.value
+  const seqC = tripBodyDailySeq(c)
+  if (seqC && hidden.has(seqC)) {
+    cachedTripSnapshot.value = null
+    needPersist = true
+  }
+  const lp = lastDailyTripLegSequence.value
+  if (lp != null && /^\d+$/.test(String(lp)) && hidden.has(String(lp).trim())) {
+    lastDailyTripLegSequence.value = null
+    needPersist = true
+  }
+  if (needPersist) {
+    void persistLinehaulTripSnapshotsNow()
+  }
+}
+
+/**
+ * User completed trip — persist hidden seq, optional history ledger entry, and clear matching UI state.
+ * @param {string} dailyTripLegSequence
+ * @param {{ dispatchHeader?: Record<string, unknown>, tripDetails?: Record<string, unknown> } | null} [history]
+ */
+export async function markTripLegSequenceCompleted(dailyTripLegSequence) {
+  const seq = String(dailyTripLegSequence ?? '').trim()
+  if (!/^\d+$/.test(seq)) return
+  /** Trip is already in history from the Linehaul poller; this only hides the leg on Home. */
+  const body = { appendHiddenDailyTripLegSequence: seq }
+  const a = await putAssignment(body)
+  hiddenDailyTripLegSequences.value = Array.isArray(a.hiddenDailyTripLegSequences)
+    ? a.hiddenDailyTripLegSequences.map(String)
+    : []
+  applyHiddenTripFilter()
+  await persistLinehaulTripSnapshotsNow()
+}
+
+/**
+ * Hydrate trip UI from server-stored JSON (another device may have saved it).
+ * @param {Record<string, unknown>} assign
+ */
+function hydrateTripSnapshotsFromAssignment(assign) {
+  if (!assign || typeof assign !== 'object') return
+  /** Do not re-apply a snapshot for a leg the user marked complete (DB may still hold stale JSON). */
+  const hidden = new Set(
+    (Array.isArray(assign.hiddenDailyTripLegSequences)
+      ? assign.hiddenDailyTripLegSequences
+      : []
+    )
+      .map((s) => String(s).trim())
+      .filter((s) => /^\d+$/.test(s)),
+  )
+  const merged = assign.persistedLinehaulTripSnapshot
+  if (merged != null && typeof merged === 'object' && !Array.isArray(merged)) {
+    const pSeq = tripBodyDailySeq(merged)
+    if (pSeq && hidden.has(pSeq)) {
+      /* skip */
+    } else {
+      const curSeq = tripBodyDailySeq(linehaulTripsBody.value)
+      const canApply =
+        linehaulTripsBody.value == null ||
+        (Boolean(pSeq) && Boolean(curSeq) && pSeq === curSeq)
+      if (canApply) {
+        linehaulTripsBody.value = /** @type {Record<string, unknown>} */ (merged)
+        linehaulTripsNoActive.value = false
+        linehaulTripsError.value = null
+      }
+    }
+  }
+  const pre = assign.persistedPrePlanTripSnapshot
+  if (pre != null && typeof pre === 'object' && !Array.isArray(pre)) {
+    const s = tripBodyDailySeq(/** @type {Record<string, unknown>} */ (pre))
+    if (s && hidden.has(s)) {
+      prePlanTripSnapshot.value = null
+    } else {
+      prePlanTripSnapshot.value = /** @type {Record<string, unknown>} */ (pre)
+    }
+  }
+  const c = assign.persistedCachedTripSnapshot
+  if (c != null && typeof c === 'object' && !Array.isArray(c)) {
+    const s = tripBodyDailySeq(/** @type {Record<string, unknown>} */ (c))
+    if (s && hidden.has(s)) {
+      cachedTripSnapshot.value = null
+    } else {
+      cachedTripSnapshot.value = /** @type {Record<string, unknown>} */ (c)
+    }
+  }
+  const lp = assign.lastDailyTripLegSequencePersisted
+  if (typeof lp === 'string' && /^\d+$/.test(lp)) {
+    lastDailyTripLegSequence.value = hidden.has(lp) ? null : lp
   }
 }
 
@@ -267,6 +326,24 @@ export function tripBodyDailySeq(body) {
   return /^\d+$/.test(str) ? str : null
 }
 
+/**
+ * Fingerprint for trip-history upserts: changes when O/D, status, or merged instructions
+ * change so we re-save without spamming identical PUTs every poll.
+ * @param {string} dailySeq
+ * @param {string} fromAssign
+ * @param {Record<string, unknown>} body
+ */
+function historyLedgerFingerprint(dailySeq, fromAssign, body) {
+  const status = String(body.tripStatus ?? '').trim()
+  const { origin, destination } = extractOriginDest(body)
+  const fromApi = extractTripDispatchInstructions(body)
+  const merged =
+    fromAssign && fromApi
+      ? `${fromAssign}\n\n${fromApi}`
+      : fromAssign || fromApi
+  return [dailySeq, status, origin, destination, merged].join('|||')
+}
+
 /** Same rule as server getLinehaulDriverId: digits-only username, else employeeNumber. */
 export function linehaulDriverIdFromCredMeta(meta) {
   const u = typeof meta.username === 'string' ? meta.username.trim() : ''
@@ -335,7 +412,7 @@ async function refreshLinehaulApisImpl(attempt) {
     )
     applyHiddenTripFilter()
   } catch {
-    hiddenDailyTripLegSequences.value = []
+    /* getAssignment failed — do not clear hidden list or trip UI (stale is safer than empty). */
   }
 
   linehaulTractorError.value = null
@@ -499,7 +576,9 @@ async function refreshLinehaulApisImpl(attempt) {
       ? /** @type {Record<string, unknown>} */ (cachedTripSnapshot.value)
       : null
 
-  const merged = deepMergeNonEmpty(cached, aprvdBody, dspchBody)
+  // Aprvd list response is canonical for leg ID + O/D; merge cached/dspch first so
+  // APVRD (last) wins for route/destination fields (avoids stuck labels from an old cache).
+  const merged = deepMergeNonEmpty(cached, dspchBody, aprvdBody)
 
   if (merged != null) {
     linehaulTripsBody.value = merged
@@ -541,27 +620,46 @@ async function refreshLinehaulApisImpl(attempt) {
     const seqU = tripBodyDailySeq(linehaulTripsBody.value)
     if (seqU) {
       const fromAssign = String(assignmentInstructions ?? '').trim()
-      const fromApi = extractTripDispatchInstructions(linehaulTripsBody.value)
+      const snapBody = /** @type {Record<string, unknown>} */ (linehaulTripsBody.value)
+      const fromApi = extractTripDispatchInstructions(snapBody)
       const mergedInstr =
         fromAssign && fromApi
           ? `${fromAssign}\n\n${fromApi}`
           : fromAssign || fromApi
-      const snapBody = linehaulTripsBody.value
-      void putAssignment({
-        upsertTripHistoryEntry: {
-          id: `h-${seqU}`,
-          source: 'linehaul',
-          dailyTripLegSequence: seqU,
-          recordedAt: Date.now(),
-          dispatchHeader: buildHistoryDispatchHeaderFromBody(snapBody, {
-            source: 'linehaul',
-            instructions: mergedInstr,
-            instructionsFinal: true,
-          }),
-          tripDetails: buildHistoryTripDetailsFromBody(snapBody),
-        },
-      }).catch(() => {})
+      const fp = historyLedgerFingerprint(seqU, fromAssign, snapBody)
+      if (fp !== lastHistoryUpsertOkFingerprint) {
+        void (async () => {
+          try {
+            await putAssignment({
+              upsertTripHistoryEntry: {
+                id: `h-${seqU}`,
+                source: 'linehaul',
+                dailyTripLegSequence: seqU,
+                recordedAt: Date.now(),
+                dispatchHeader: buildHistoryDispatchHeaderFromBody(snapBody, {
+                  source: 'linehaul',
+                  instructions: mergedInstr,
+                  instructionsFinal: true,
+                }),
+                tripDetails: buildHistoryTripDetailsFromBody(snapBody),
+              },
+            })
+            lastHistoryUpsertOkFingerprint = fp
+          } catch {
+            /* offline / 401: retry on next refresh */
+          }
+        })()
+      }
+    } else {
+      lastHistoryUpsertOkFingerprint = null
     }
+  } else {
+    lastHistoryUpsertOkFingerprint = null
+  }
+
+  if (linehaulTripsBody.value && typeof linehaulTripsBody.value === 'object') {
+    const s = tripBodyDailySeq(linehaulTripsBody.value)
+    void syncDollyFromLinehaul(s || '', linehaulTripsBody.value).catch(() => {})
   }
 
   const authFailed =

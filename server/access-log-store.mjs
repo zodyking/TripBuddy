@@ -1,77 +1,56 @@
-import fs from 'node:fs/promises'
-import path from 'node:path'
-import { fileURLToPath } from 'node:url'
 import crypto from 'node:crypto'
-import { LOCAL_DIR } from './config.mjs'
+import { readKeyJson, writeKeyJson } from './kv-store.mjs'
+import { G, getDataAccountKey, keyForLoginAccessLog, keyForUser, userScopeKey } from './scope-kv.mjs'
+import { accountKeyForUsername } from './account-identity.mjs'
+import { getUsername } from './credentials-store.mjs'
 
-const LOG_FILE = path.join(LOCAL_DIR, 'access-log.json')
-/** When `FEDEX_TOOL_DATA_DIR` points elsewhere, dev logs may still live under `server/.local`. */
-const LEGACY_DEV_LOG_FILE = path.join(
-  path.dirname(fileURLToPath(import.meta.url)),
-  '.local',
-  'access-log.json',
-)
-/** Keep a long history; oldest rows drop only when over cap. */
+const GLOBAL_VISIT_KEY = G('access:log:visit')
+/** Migrated access rows with unknown account (one-time import from pre-PG `access-log.json`) */
+const LEGACY_UNSCOPED_KEY = G('access:log:unscoped-legacy')
 const MAX_ENTRIES = 5000
 
 /**
  * @typedef {Object} AccessLogEntry
  * @property {string} id
- * @property {string} at ISO timestamp
+ * @property {string} at
  * @property {string} ip
- * @property {string|null} forwardedFor raw X-Forwarded-For if present
+ * @property {string|null} forwardedFor
  * @property {number|null} latitude
  * @property {number|null} longitude
  * @property {number|null} accuracyM
- * @property {boolean} locationDenied client reported geolocation unavailable
+ * @property {boolean} locationDenied
  * @property {string|null} userAgent
- * @property {string} source e.g. login_ack
+ * @property {string} source
+ * @property {string|null} [dataAccountId]
  */
 
 /**
- * @param {string} file
+ * @param {string} key
  * @returns {Promise<AccessLogEntry[]>}
  */
-async function readEntriesFromFile(file) {
-  try {
-    const raw = await fs.readFile(file, 'utf8')
-    const data = JSON.parse(raw)
-    if (data && Array.isArray(data.entries)) return data.entries
-  } catch {
-    /* empty */
+async function readList(key) {
+  const doc = await readKeyJson(key, () => ({ entries: [] }))
+  if (!doc || typeof doc !== 'object' || !Array.isArray(/** @type {any} */ (doc).entries)) {
+    return []
   }
-  return []
-}
-
-async function readRaw() {
-  /** Merge primary store with legacy dev file when paths differ (fixes empty Security log in dev). */
-  const paths = new Set([LOG_FILE])
-  if (LEGACY_DEV_LOG_FILE !== LOG_FILE) {
-    paths.add(LEGACY_DEV_LOG_FILE)
-  }
-  /** @type {Map<string, AccessLogEntry>} */
-  const byId = new Map()
-  for (const p of paths) {
-    const chunk = await readEntriesFromFile(p)
-    for (const e of chunk) {
-      if (e && typeof e.id === 'string' && !byId.has(e.id)) {
-        byId.set(e.id, e)
-      }
-    }
-  }
-  return Array.from(byId.values()).sort(
-    (a, b) => new Date(b.at).getTime() - new Date(a.at).getTime(),
-  )
+  return /** @type {AccessLogEntry[]} */ (/** @type {any} */ (doc).entries)
 }
 
 /**
- * @param {Omit<AccessLogEntry, 'id' | 'at'> & { id?: string, at?: string }} row
- * @returns {Promise<AccessLogEntry>}
+ * @param {string} key
+ * @param {AccessLogEntry[]} list
  */
-export async function appendAccessEntry(row) {
-  await fs.mkdir(LOCAL_DIR, { recursive: true })
-  const entries = await readRaw()
-  const entry = {
+async function writeList(key, list) {
+  await writeKeyJson(key, { entries: list.slice(0, MAX_ENTRIES) })
+}
+
+/**
+ * @param {string} key
+ * @param {Omit<AccessLogEntry, 'id' | 'at' | 'source'> & { id?: string, at?: string, source: string, dataAccountId?: string | null }} row
+ */
+export async function appendToAccessKey(key, row) {
+  const list = await readList(key)
+  const entry = /** @type {AccessLogEntry} */ ({
     id: row.id || crypto.randomBytes(8).toString('hex'),
     at: row.at || new Date().toISOString(),
     ip: String(row.ip || ''),
@@ -90,23 +69,97 @@ export async function appendAccessEntry(row) {
         : null,
     locationDenied: row.locationDenied === true,
     userAgent: typeof row.userAgent === 'string' ? row.userAgent.slice(0, 512) : null,
-    source: typeof row.source === 'string' ? row.source.slice(0, 64) : 'login_ack',
+    source: String(row.source || 'event').slice(0, 64),
+  })
+  if (row.dataAccountId !== undefined) {
+    entry.dataAccountId =
+      row.dataAccountId == null
+        ? null
+        : typeof row.dataAccountId === 'string'
+          ? row.dataAccountId
+          : null
+  } else if (getDataAccountKey()) {
+    entry.dataAccountId = getDataAccountKey()
+  } else {
+    entry.dataAccountId = null
   }
-  entries.unshift(entry)
-  const trimmed = entries.slice(0, MAX_ENTRIES)
-  const payload = JSON.stringify({ entries: trimmed }, null, 2)
-  await fs.writeFile(LOG_FILE, payload, 'utf8')
-  /** Mirror to legacy dev path so reads from either file stay in sync (no “disappearing” rows). */
-  if (LEGACY_DEV_LOG_FILE !== LOG_FILE) {
-    await fs.mkdir(path.dirname(LEGACY_DEV_LOG_FILE), { recursive: true })
-    await fs.writeFile(LEGACY_DEV_LOG_FILE, payload, 'utf8')
-  }
+  list.unshift(entry)
+  await writeList(key, list)
   return entry
 }
 
 /**
- * @returns {Promise<AccessLogEntry[]>}
+ * @param {object} body
  */
+export async function appendLoginAccessFromBody(body) {
+  const u = body && typeof body.username === 'string' ? body.username.trim() : ''
+  const { username: _drop, ...rest } =
+    body && typeof body === 'object' && body != null
+      ? /** @type {Record<string, unknown>} */ (body)
+      : {}
+  const key = u ? keyForLoginAccessLog(u) : G('access:log:anonymous')
+  const accId = u ? accountKeyForUsername(u) : null
+  return appendToAccessKey(key, {
+    ...rest,
+    source: 'login_ack',
+    dataAccountId: accId,
+  })
+}
+
+export async function appendPageVisitLog(row) {
+  return appendToAccessKey(GLOBAL_VISIT_KEY, {
+    ...row,
+    source: 'page_visit',
+    dataAccountId: null,
+  })
+}
+
+/**
+ * Merged: per-user in-app log, pre-login rows for same saved username, global visit pings
+ */
+/**
+ * Move rows from pre-login `keyForLoginAccessLog` into the signed-in user’s log (once per login).
+ * @param {string} username
+ * @param {string} dataAccountId
+ */
+export async function mergePreLoginAccessToUser(username, dataAccountId) {
+  const u = String(username || '').trim()
+  if (!u || !dataAccountId) return
+  const fromKey = keyForLoginAccessLog(u)
+  const toKey = keyForUser(dataAccountId, 'access:log')
+  if (fromKey === toKey) return
+  const from = await readList(fromKey)
+  if (!from.length) return
+  const to = await readList(toKey)
+  const byId = new Set(to.map((e) => e && e.id).filter(Boolean))
+  for (let i = from.length - 1; i >= 0; i--) {
+    const e = from[i]
+    if (e && e.id && !byId.has(e.id)) {
+      e.dataAccountId = dataAccountId
+      to.unshift(e)
+      byId.add(e.id)
+    }
+  }
+  await writeList(toKey, to)
+  await writeList(fromKey, [])
+}
+
 export async function listAccessEntries() {
-  return readRaw()
+  const u = (await getUsername()) || ''
+  const kSess = userScopeKey('access:log')
+  const kPre = u.trim() ? keyForLoginAccessLog(u.trim()) : null
+  const a = await readList(kSess)
+  const b =
+    kPre && kPre !== kSess ? await readList(kPre) : []
+  const c = await readList(GLOBAL_VISIT_KEY)
+  const d = await readList(LEGACY_UNSCOPED_KEY)
+  const byId = new Map()
+  for (const e of [...a, ...b, ...c, ...d]) {
+    if (e && e.id && !byId.has(e.id)) {
+      byId.set(e.id, e)
+    }
+  }
+  return Array.from(byId.values()).sort(
+    (x, y) => new Date(y.at).getTime() - new Date(x.at).getTime(),
+  )
 }

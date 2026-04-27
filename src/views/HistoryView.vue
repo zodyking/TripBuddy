@@ -1,6 +1,8 @@
 <script setup>
-import { ref, computed, onMounted, watch } from 'vue'
-import { getAssignment } from '../api.js'
+import { ref, computed, onMounted, onUnmounted, watch, nextTick, Teleport } from 'vue'
+import { getAssignment, getCredentials, patchTripHistoryOutcome } from '../api.js'
+import { monthGridForCalendarMonth } from '../utils/workWeekGroup.js'
+import { shiftDateKeyForEventMs } from '../utils/shiftCalendar.js'
 
 /**
  * @typedef {object} LedgerEntry
@@ -9,54 +11,137 @@ import { getAssignment } from '../api.js'
  * @property {number} displayDate
  * @property {number} completedAt
  * @property {string} dailyTripLegSequence
+ * @property {string} [outcome]
  * @property {Record<string, unknown>} dispatchHeader
  * @property {Record<string, unknown>} tripDetails
  */
+
+const workWeekFromCred = ref({
+  workWeekStartDay: 0,
+  workWeekEndDay: 6,
+  shiftStartMins: 0,
+  shiftEndMins: 1439,
+})
 
 const loading = ref(true)
 const error = ref('')
 /** @type {import('vue').Ref<LedgerEntry[]>} */
 const entries = ref([])
 
-const openId = ref('')
+/** Viewed calendar month (prev/next, no year cap). */
+const viewYear = ref(/** @type {number} */(new Date().getFullYear()))
+const viewMonth0 = ref(/** @type {number} */(new Date().getMonth()))
+/** On first data load, snap calendar to the month of the newest trip. */
+const calendarSyncedToData = ref(false)
+
+const DOUBLE_CLICK_MS = 500
+
+/** YYYY-MM-DD; empty = show all days in selected work week */
+const filterDayKey = ref('')
+const outcomeMenuOpen = ref('')
+const outcomeMenuPos = ref(/** @type {null | { top: number, left: number, minWidth: number }} */ (null))
+const outcomeRowForMenu = ref(/** @type {null | LedgerEntry} */ (null))
+
+const outcomeMenuOpts = [
+  { k: 'none', t: 'None' },
+  { k: 'delivered', t: 'Delivered' },
+  { k: 'rejected', t: 'Rejected' },
+  { k: 'removed', t: 'Removed' },
+]
+
+/**
+ * @param {unknown} x
+ */
+function normalizeOutcome(x) {
+  if (x == null) return ''
+  const t = String(x).trim().toLowerCase()
+  if (t === 'delivered' || t === 'rejected' || t === 'removed' || t === 'none') return t
+  return ''
+}
 
 async function load() {
   loading.value = true
   error.value = ''
   try {
+    const c = await getCredentials()
+    const ws = typeof c.workWeekStartDay === 'number' ? c.workWeekStartDay : 0
+    const we = typeof c.workWeekEndDay === 'number' ? c.workWeekEndDay : 6
+    const ssm =
+      typeof c.shiftStartMins === 'number' && !Number.isNaN(c.shiftStartMins)
+        ? Math.max(0, Math.min(1439, Math.floor(c.shiftStartMins)))
+        : 0
+    const sem =
+      typeof c.shiftEndMins === 'number' && !Number.isNaN(c.shiftEndMins)
+        ? Math.max(0, Math.min(1439, Math.floor(c.shiftEndMins)))
+        : 1439
+    workWeekFromCred.value = {
+      workWeekStartDay: Math.min(6, Math.max(0, Math.floor(ws))),
+      workWeekEndDay: Math.min(6, Math.max(0, Math.floor(we))),
+      shiftStartMins: ssm,
+      shiftEndMins: sem,
+    }
+  } catch {
+    /* use defaults */
+  }
+  try {
     const a = await getAssignment()
     const raw = a?.tripHistoryLedger
-    entries.value = Array.isArray(raw)
-      ? raw
-          .filter((x) => x && typeof x === 'object')
-          .map((x) => {
-            const comp =
-              typeof x.completedAt === 'number' && Number.isFinite(x.completedAt)
-                ? x.completedAt
-                : 0
-            const rec =
-              typeof x.recordedAt === 'number' && Number.isFinite(x.recordedAt)
-                ? x.recordedAt
-                : 0
-            const displayDate = comp || rec
-            return {
-            id: String(x.id ?? ''),
-            source: typeof x.source === 'string' ? x.source : 'complete',
-            displayDate,
-            completedAt: comp,
-            dailyTripLegSequence: String(x.dailyTripLegSequence ?? ''),
-            dispatchHeader:
-              x.dispatchHeader && typeof x.dispatchHeader === 'object'
-                ? /** @type {Record<string, unknown>} */ (x.dispatchHeader)
-                : {},
-            tripDetails:
-              x.tripDetails && typeof x.tripDetails === 'object'
-                ? /** @type {Record<string, unknown>} */ (x.tripDetails)
-                : {},
-          }
-          })
-          .filter((e) => e.id)
-      : []
+    if (!Array.isArray(raw)) {
+      entries.value = []
+    } else {
+      /** @type {Map<string, LedgerEntry>} */
+      const byLeg = new Map()
+      for (const x of raw) {
+        if (!x || typeof x !== 'object') continue
+        const comp =
+          typeof x.completedAt === 'number' && Number.isFinite(x.completedAt)
+            ? x.completedAt
+            : 0
+        const rec =
+          typeof x.recordedAt === 'number' && Number.isFinite(x.recordedAt)
+            ? x.recordedAt
+            : 0
+        const displayDate = comp || rec
+        const seq = String(x.dailyTripLegSequence ?? '').trim()
+        const legKey = /^\d+$/.test(seq) ? seq : ''
+        const oRaw = /** @type {any} */ (x)
+        const rawO =
+          typeof oRaw.outcome === 'string' && oRaw.outcome
+            ? normalizeOutcome(oRaw.outcome)
+            : typeof oRaw.dispatchHeader === 'object' && oRaw.dispatchHeader
+              ? normalizeOutcome(/** @type {any} */ (oRaw.dispatchHeader).historyOutcome)
+              : ''
+        const o = rawO || 'delivered'
+        const e = {
+          id: String(x.id ?? ''),
+          source: typeof x.source === 'string' ? x.source : 'complete',
+          displayDate,
+          completedAt: comp,
+          dailyTripLegSequence: seq,
+          outcome: o,
+          dispatchHeader:
+            x.dispatchHeader && typeof x.dispatchHeader === 'object'
+              ? /** @type {Record<string, unknown>} */ (x.dispatchHeader)
+              : {},
+          tripDetails:
+            x.tripDetails && typeof x.tripDetails === 'object'
+              ? /** @type {Record<string, unknown>} */ (x.tripDetails)
+              : {},
+        }
+        if (!e.id) continue
+        if (!legKey) {
+          byLeg.set(e.id, e)
+          continue
+        }
+        const cur = byLeg.get(legKey)
+        if (!cur || (e.displayDate || 0) > (cur.displayDate || 0)) {
+          byLeg.set(legKey, e)
+        }
+      }
+      entries.value = /** @type {LedgerEntry[]} */ (
+        Array.from(byLeg.values()).filter((e) => e && e.id)
+      )
+    }
   } catch (e) {
     error.value = e instanceof Error ? e.message : String(e)
     entries.value = []
@@ -69,15 +154,138 @@ const sorted = computed(() =>
   [...entries.value].sort((a, b) => b.displayDate - a.displayDate),
 )
 
-watch(
-  sorted,
-  (list) => {
-    if (!list.length) {
-      openId.value = ''
-      return
+/**
+ * @param {number} y
+ * @param {number} m0
+ */
+function monthKey(y, m0) {
+  return `${y}-${String(m0 + 1).padStart(2, '0')}`
+}
+
+/**
+ * @param {number} tMs
+ */
+function monthKeyFromMs(tMs) {
+  const d = new Date(tMs)
+  if (isNaN(d.getTime())) return { y: 1970, m0: 0, key: '1970-01' }
+  const y = d.getFullYear()
+  const m0 = d.getMonth()
+  return { y, m0, key: monthKey(y, m0) }
+}
+
+function prevMonthFrom(y, m0) {
+  if (m0 <= 0) return { y: y - 1, m0: 11 }
+  return { y, m0: m0 - 1 }
+}
+
+function nextMonthFrom(y, m0) {
+  if (m0 >= 11) return { y: y + 1, m0: 0 }
+  return { y, m0: m0 + 1 }
+}
+
+const monthByKey = computed(() => {
+  const list = sorted.value
+  const m = new Map()
+  for (const e of list) {
+    const t = e.displayDate
+    if (typeof t !== 'number' || !Number.isFinite(t) || t <= 0) {
+      if (!m.has('unknown')) {
+        m.set('unknown', { key: 'unknown', y: 0, m0: 0, groupLabel: 'No date', items: [] })
+      }
+      m.get('unknown').items.push(e)
+      continue
     }
-    if (!list.some((e) => e.id === openId.value)) {
-      openId.value = list[0].id
+    const { y, m0, key } = monthKeyFromMs(t)
+    if (!m.has(key)) {
+      const d0 = new Date(y, m0, 1, 12, 0, 0, 0)
+      const groupLabel = d0.toLocaleString('en-US', { month: 'long', year: 'numeric' })
+      m.set(key, { key, y, m0, groupLabel, items: [] })
+    }
+    m.get(key).items.push(e)
+  }
+  for (const g of m.values()) {
+    g.items.sort((a, b) => b.displayDate - a.displayDate)
+  }
+  return m
+})
+
+const viewMonthInfo = computed(() => {
+  const y = viewYear.value
+  const m0 = viewMonth0.value
+  const k = monthKey(y, m0)
+  const g = monthByKey.value.get(k)
+  const d0 = new Date(y, m0, 1, 12, 0, 0, 0)
+  const longTitle = d0.toLocaleString('en-US', { month: 'long', year: 'numeric' })
+  return {
+    key: k,
+    y,
+    m0,
+    groupLabel: longTitle,
+    weekStartMs: d0.getTime(),
+    items: g?.items && Array.isArray(g.items) ? g.items : [],
+  }
+})
+
+const weekFilteredItems = computed(() => {
+  const w = viewMonthInfo.value
+  if (!filterDayKey.value) return w.items
+  return w.items.filter((e) => {
+    if (!e.displayDate) return false
+    const t = /** @type {number} */(e.displayDate)
+    const k2 = shiftDateKeyForEventMs(
+      t,
+      workWeekFromCred.value.shiftStartMins,
+      workWeekFromCred.value.shiftEndMins,
+    )
+    return k2 === filterDayKey.value
+  })
+})
+
+const viewMonthGrid = computed(() => {
+  const g = viewMonthInfo.value
+  if (g == null) {
+    return { year: 0, monthIndex0: 0, monthLabel: '', headers: ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'], cells: [] }
+  }
+  const counts = {}
+  for (const e of g.items) {
+    if (!e.displayDate) continue
+    const k = shiftDateKeyForEventMs(
+      /** @type {number} */(e.displayDate),
+      workWeekFromCred.value.shiftStartMins,
+      workWeekFromCred.value.shiftEndMins,
+    )
+    if (!k) continue
+    counts[k] = (counts[k] || 0) + 1
+  }
+  return monthGridForCalendarMonth(/** @type {number} */(g.y), g.m0, counts, {
+    shiftStartMins: workWeekFromCred.value.shiftStartMins,
+    shiftEndMins: workWeekFromCred.value.shiftEndMins,
+  })
+})
+
+function goPrevViewMonth() {
+  filterDayKey.value = ''
+  const p = prevMonthFrom(viewYear.value, viewMonth0.value)
+  viewYear.value = p.y
+  viewMonth0.value = p.m0
+}
+
+function goNextViewMonth() {
+  filterDayKey.value = ''
+  const p = nextMonthFrom(viewYear.value, viewMonth0.value)
+  viewYear.value = p.y
+  viewMonth0.value = p.m0
+}
+
+watch(
+  () => (sorted.value[0] ? sorted.value[0].displayDate : 0),
+  (d) => {
+    if (calendarSyncedToData.value) return
+    if (typeof d === 'number' && Number.isFinite(d) && d > 0) {
+      const m = monthKeyFromMs(d)
+      viewYear.value = m.y
+      viewMonth0.value = m.m0
+      calendarSyncedToData.value = true
     }
   },
   { immediate: true },
@@ -103,8 +311,185 @@ function sourceLabel(src) {
   return 'Saved'
 }
 
+const outcomeLabel = (o) => {
+  const t = str(o)
+  if (t === 'delivered') return 'Delivered'
+  if (t === 'rejected') return 'Rejected'
+  if (t === 'removed') return 'Removed'
+  if (t === 'none') return 'None'
+  return ''
+}
+
+/**
+ * @param {LedgerEntry} e
+ * @returns {'none' | 'delivered' | 'rejected' | 'removed'}
+ */
+function outcomeSelectValue(e) {
+  const t = (e.outcome && String(e.outcome).trim().toLowerCase()) || 'delivered'
+  if (t === 'delivered' || t === 'rejected' || t === 'removed' || t === 'none') return t
+  return 'delivered'
+}
+
+const historySavingId = ref('')
+
+async function setOutcome(legSeq, o) {
+  if (!/^\d+$/.test(legSeq)) return
+  historySavingId.value = `seq-${legSeq}`
+  try {
+    await patchTripHistoryOutcome({ dailyTripLegSequence: legSeq, outcome: o })
+    const idx = entries.value.findIndex((e) => e.dailyTripLegSequence === legSeq)
+    if (idx >= 0) {
+      const e = { ...entries.value[idx], outcome: o }
+      if (e.dispatchHeader && typeof e.dispatchHeader === 'object') {
+        e.dispatchHeader = { ...e.dispatchHeader, historyOutcome: o, historyOutcomeAt: Date.now() }
+      } else {
+        e.dispatchHeader = { historyOutcome: o, historyOutcomeAt: Date.now() }
+      }
+      entries.value[idx] = e
+    } else {
+      void load()
+    }
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : String(err)
+  } finally {
+    historySavingId.value = ''
+  }
+}
+
+function closeOutcomeMenu() {
+  outcomeMenuOpen.value = ''
+  outcomeRowForMenu.value = null
+  outcomeMenuPos.value = null
+}
+
+/**
+ * @param {LedgerEntry} row
+ * @param {string} id
+ * @param {Event} [ev]
+ */
+function toggleOutcomeMenu(row, id, ev) {
+  ev?.stopPropagation()
+  if (!/^\d+$/.test(row.dailyTripLegSequence)) return
+  if (outcomeMenuOpen.value === id) {
+    closeOutcomeMenu()
+    return
+  }
+  outcomeMenuOpen.value = id
+  outcomeRowForMenu.value = row
+  if (typeof document === 'undefined' || !ev?.currentTarget) return
+  const place = () => {
+    const el = /** @type {HTMLElement} */(ev.currentTarget)
+    if (!el?.getBoundingClientRect) return
+    const r = el.getBoundingClientRect()
+    const w = 180
+    let left = Math.min(
+      r.left,
+      (typeof window !== 'undefined' ? window.innerWidth : 400) - w - 8,
+    )
+    left = Math.max(8, left)
+    outcomeMenuPos.value = {
+      top: r.bottom + 6,
+      left,
+      minWidth: Math.max(140, Math.min(w, r.width)),
+    }
+  }
+  place()
+  if (typeof window !== 'undefined') {
+    window.requestAnimationFrame(place)
+  }
+}
+
+/**
+ * @param {LedgerEntry} e
+ * @param {string} o
+ * @param {Event} [ev]
+ */
+function pickOutcomeFromMenu(e, o, ev) {
+  ev?.stopPropagation()
+  if (!/^\d+$/.test(e.dailyTripLegSequence)) return
+  if (o === 'none' || o === 'delivered' || o === 'rejected' || o === 'removed') {
+    void setOutcome(e.dailyTripLegSequence, o)
+  }
+  nextTick(() => {
+    closeOutcomeMenu()
+  })
+}
+
+let lastDblT = 0
+let lastDblSeq = ''
+
+/**
+ * @param {LedgerEntry} e
+ */
+function onRowDoubleClick(e) {
+  if (!/^\d+$/.test(e.dailyTripLegSequence)) return
+  const now = Date.now()
+  if (
+    lastDblT &&
+    now - lastDblT < DOUBLE_CLICK_MS &&
+    lastDblSeq === e.dailyTripLegSequence
+  ) {
+    lastDblT = 0
+    lastDblSeq = ''
+    void cycleOutcome(e)
+    return
+  }
+  lastDblT = now
+  lastDblSeq = e.dailyTripLegSequence
+}
+
+/**
+ * @param {LedgerEntry} e
+ */
+function cycleOutcome(e) {
+  const s = e.dailyTripLegSequence
+  if (!/^\d+$/.test(s)) return
+  const cur = outcomeSelectValue(e)
+  const next =
+    cur === 'none'
+      ? 'delivered'
+      : cur === 'delivered'
+        ? 'rejected'
+        : cur === 'rejected'
+          ? 'removed'
+          : cur === 'removed'
+            ? 'none'
+            : 'none'
+  void setOutcome(s, next)
+}
+
+let docClickOutcome = (/** @type {Event} */ e) => {
+  const t = e.target
+  if (t && typeof t === 'object' && 'closest' in /** @type {any} */ (t)) {
+    if (/** @type {Element} */ (t).closest('.history-outcome-wrap')) return
+    if (/** @type {Element} */ (t).closest('.history-outcome-pop-layer')) return
+  }
+  closeOutcomeMenu()
+}
+
+function onOutcomeMenuViewport() {
+  if (outcomeMenuOpen.value) closeOutcomeMenu()
+}
+
 onMounted(() => {
+  if (typeof document !== 'undefined') {
+    document.addEventListener('click', docClickOutcome, true)
+  }
+  if (typeof window !== 'undefined') {
+    window.addEventListener('scroll', onOutcomeMenuViewport, true)
+    window.addEventListener('resize', onOutcomeMenuViewport, true)
+  }
   void load()
+})
+
+onUnmounted(() => {
+  if (typeof document !== 'undefined') {
+    document.removeEventListener('click', docClickOutcome, true)
+  }
+  if (typeof window !== 'undefined') {
+    window.removeEventListener('scroll', onOutcomeMenuViewport, true)
+    window.removeEventListener('resize', onOutcomeMenuViewport, true)
+  }
 })
 </script>
 
@@ -112,38 +497,110 @@ onMounted(() => {
   <div class="history-view">
     <header class="history-head">
       <h1 class="history-title">History</h1>
-      <p class="history-sub">
-        Trip snapshots from the Linehaul API (updated on refresh) and entries when you mark a trip complete.
-      </p>
-      <button type="button" class="history-refresh tap" :disabled="loading" @click="load">
-        {{ loading ? 'Loading…' : 'Refresh' }}
+      <button
+        type="button"
+        class="btn secondary history-refresh tap"
+        :disabled="loading"
+        @click="load"
+      >
+        {{ loading ? 'Loading' : 'Refresh' }}
       </button>
     </header>
 
     <p v-if="error" class="history-err">{{ error }}</p>
-    <p v-else-if="!loading && sorted.length === 0" class="history-empty">
-      No history yet. History fills when we receive trip data from the API, or when you mark a trip complete.
-    </p>
-
-    <ul v-else class="history-list" aria-label="Trip history">
-      <li
-        v-for="e in sorted"
-        :id="`history-card-${e.id}`"
-        :key="e.id"
-        class="history-card"
-      >
-        <details
-          :open="openId === e.id"
-          class="history-drop"
-          @toggle="
-            (ev) => {
-              const d = /** @type {HTMLDetailsElement} */ (ev.target)
-              if (d.open) openId = e.id
-              else if (openId === e.id) openId = ''
-            }
-          "
+    <div
+      v-else
+      v-show="!loading"
+      class="history-content"
+    >
+      <p v-if="!sorted.length" class="history-empty">No trips</p>
+      <div class="history-month-body">
+      <div class="history-month-nav" role="group" aria-label="Month">
+        <button
+          type="button"
+          class="history-mnav tap"
+          title="Previous month"
+          :disabled="loading"
+          @click="goPrevViewMonth"
         >
-          <summary class="history-card-summary">
+          ←
+        </button>
+        <h2 class="history-month-h2">{{ viewMonthInfo.groupLabel }}</h2>
+        <button
+          type="button"
+          class="history-mnav tap"
+          title="Next month"
+          :disabled="loading"
+          @click="goNextViewMonth"
+        >
+          →
+        </button>
+      </div>
+      <div
+        v-if="viewMonthGrid.cells.length"
+        class="history-cal-surface"
+        :aria-label="`Month grid ${viewMonthInfo.groupLabel}`"
+      >
+        <div class="history-month-grid" role="grid" :aria-colcount="7" :aria-rowcount="6">
+          <div class="history-month-dow" role="row" aria-label="Weekdays">
+            <div
+              v-for="(h, hi) in viewMonthGrid.headers"
+              :key="`h-mgrid-${hi}`"
+              class="history-dow"
+              role="columnheader"
+            >{{ h }}</div>
+          </div>
+          <div class="history-month-cells" role="row">
+            <button
+              v-for="c in viewMonthGrid.cells"
+              :key="`d-${c.key}`"
+              type="button"
+              class="history-day-cell tap"
+              :class="{
+                'history-day-cell--in-ww': c.inMonth,
+                'history-day-cell--on': c.inMonth && filterDayKey === c.key,
+                'history-day-cell--empty': c.inMonth && !c.tripCount,
+                'history-day-cell--has': c.tripCount > 0,
+                'history-day-cell--today': c.isToday,
+                'history-day-cell--faint': !c.inMonth,
+              }"
+              :title="`Trips: ${c.tripCount}`"
+              :aria-pressed="c.inMonth && filterDayKey === c.key"
+              :disabled="!c.inMonth"
+              @click="c.inMonth && (filterDayKey = filterDayKey === c.key ? '' : c.key)"
+            >
+              <span class="history-day-num">{{ c.dayNum }}</span>
+              <span
+                v-if="c.tripCount > 0"
+                class="history-day-badge"
+                aria-hidden="true"
+              >{{ c.tripCount > 9 ? '9+' : c.tripCount }}</span
+              >
+            </button>
+          </div>
+        </div>
+        <p v-if="filterDayKey" class="history-cal-filt">Day <strong>{{ filterDayKey }}</strong> &nbsp;·&nbsp; <button type="button" class="history-link tap" @click="filterDayKey = ''">Reset</button></p>
+      </div>
+      <h2 v-if="weekFilteredItems.length" class="history-trips-h2">Trips</h2>
+      <p v-else class="history-no-month">No trips this month</p>
+      <ul
+        v-if="weekFilteredItems.length"
+        class="history-list history-list--nested"
+        aria-label="Month trips"
+      >
+        <li
+          v-for="e in weekFilteredItems"
+          :id="`history-card-${e.id}`"
+          :key="e.id"
+          class="history-card"
+        >
+        <details
+          class="history-drop"
+        >
+          <summary
+            class="history-card-summary"
+            @dblclick.stop.prevent="onRowDoubleClick(e)"
+          >
             <span class="history-od-lane">
               <span class="history-od-compact" :title="str(e.dispatchHeader?.origin) || '—'">
                 <span class="summary-tag">O</span>
@@ -155,12 +612,34 @@ onMounted(() => {
                 {{ str(e.dispatchHeader?.destination) || '—' }}
               </span>
             </span>
+            <div class="history-row-tr">
             <time
               class="history-date"
               :datetime="new Date(e.displayDate).toISOString()"
               >{{ formatWhen(e.displayDate) }}</time
             >
-            <span class="history-seq" v-if="e.dailyTripLegSequence"
+            <div v-if="e.dailyTripLegSequence" class="history-top-actions" @click.stop>
+              <div class="history-outcome-wrap" @click.stop>
+                <button
+                  type="button"
+                  class="history-outcome-pill tap"
+                  :class="`history-outcome--${outcomeSelectValue(e)}`"
+                  :disabled="historySavingId === `seq-${e.dailyTripLegSequence}`"
+                  :title="'Tap to change: ' + outcomeLabel(outcomeSelectValue(e))"
+                  :aria-expanded="outcomeMenuOpen === e.id"
+                  aria-haspopup="listbox"
+                  @click="toggleOutcomeMenu(e, e.id, $event)"
+                >
+                  <span class="history-outcome-pill__txt">{{ outcomeLabel(outcomeSelectValue(e)) }}</span>
+                  <span class="history-outcome-pill__chev" aria-hidden="true">▾</span>
+                </button>
+              </div>
+            </div>
+            </div>
+            <span
+              v-if="e.dailyTripLegSequence"
+              class="history-seq"
+              :title="`Double-tap header: cycle status · Leg #${e.dailyTripLegSequence}`"
               >Leg #{{ e.dailyTripLegSequence }} ·
               {{ sourceLabel((str(e.dispatchHeader?.source) || e.source) || '') }}</span
             >
@@ -230,9 +709,44 @@ onMounted(() => {
             </div>
           </div>
         </div>
-        </details>
-      </li>
-    </ul>
+            </details>
+            </li>
+          </ul>
+    </div>
+    </div>
+    <Teleport to="body">
+      <ul
+        v-if="outcomeRowForMenu && outcomeMenuPos && outcomeMenuOpen"
+        class="history-outcome-pop history-outcome-pop--fixed history-outcome-pop-layer"
+        role="listbox"
+        :style="{
+          top: outcomeMenuPos.top + 'px',
+          left: outcomeMenuPos.left + 'px',
+          minWidth: outcomeMenuPos.minWidth + 'px',
+        }"
+        @click.stop
+        @pointerdown.stop
+      >
+        <li
+          v-for="opt in outcomeMenuOpts"
+          :key="opt.k"
+          role="option"
+          :aria-selected="outcomeSelectValue(outcomeRowForMenu) === opt.k"
+        >
+          <button
+            type="button"
+            class="history-outcome-mi"
+            :disabled="historySavingId === 'seq-' + (outcomeRowForMenu.dailyTripLegSequence || '')"
+            :class="{
+              'history-outcome-mi--on': outcomeSelectValue(outcomeRowForMenu) === opt.k,
+            }"
+            @click="pickOutcomeFromMenu(outcomeRowForMenu, opt.k, $event)"
+          >
+            {{ opt.t }}
+          </button>
+        </li>
+      </ul>
+    </Teleport>
   </div>
 </template>
 
@@ -246,21 +760,77 @@ onMounted(() => {
 }
 
 .history-head {
-  margin-bottom: var(--space-4, 1rem);
+  margin-bottom: var(--space-3, 0.75rem);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem 0.75rem;
+}
+
+.history-content {
+  display: block;
+  width: 100%;
+  border-radius: 14px;
+  border: 1px solid #26262e;
+  background: #0c0c10;
+  padding: 0.5rem 0.45rem 0.75rem;
+  box-sizing: border-box;
 }
 
 .history-title {
-  margin: 0 0 0.35rem;
+  margin: 0;
   font-size: var(--text-xl, 1.25rem);
   font-weight: 600;
   color: var(--color-text-primary, #f4f4f8);
 }
 
-.history-sub {
-  margin: 0 0 var(--space-3, 0.75rem);
-  font-size: var(--text-sm, 0.8125rem);
-  color: var(--color-text-secondary, #a8a8b8);
-  line-height: 1.45;
+.history-month-nav {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-bottom: 0.5rem;
+}
+
+.history-mnav {
+  flex: 0 0 auto;
+  min-width: 2.4rem;
+  min-height: 2.4rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  border: 1px solid #3a3a46;
+  background: #1c1c24;
+  color: #e0e0ee;
+  font-size: 1rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.history-mnav:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.history-month-h2 {
+  margin: 0;
+  font-size: 0.9rem;
+  font-weight: 700;
+  color: var(--color-text-primary, #f0f0f8);
+  line-height: 1.2;
+  text-align: center;
+  flex: 1;
+  min-width: 0;
+  padding: 0 0.2rem;
+}
+
+.history-month-body {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
 }
 
 .history-refresh {
@@ -280,6 +850,18 @@ onMounted(() => {
   opacity: 0.6;
   cursor: not-allowed;
 }
+.history-refresh.btn.secondary,
+.btn.secondary.history-refresh {
+  min-height: 2.25rem;
+  padding: 0.4rem 1rem;
+  background: var(--color-bg-surface, #16161d);
+  border: 1px solid var(--color-border, rgba(255, 255, 255, 0.12));
+  color: var(--color-text-primary, #e8e8f0);
+}
+.btn.secondary.history-refresh:hover:not(:disabled) {
+  background: var(--color-hover, rgba(255, 255, 255, 0.04));
+  border-color: var(--color-accent-purple, #7b4db5);
+}
 
 .history-err {
   color: #f87171;
@@ -290,6 +872,136 @@ onMounted(() => {
   color: var(--color-text-tertiary, #6e6e7e);
   font-size: var(--text-sm, 0.8125rem);
   line-height: 1.5;
+  margin: 0 0 0.5rem;
+}
+.history-no-month {
+  margin: 0.35rem 0 0.5rem;
+  font-size: 0.8rem;
+  color: #7a7a8a;
+}
+
+.history-cal-surface {
+  margin: 0 0 0.5rem;
+  padding: 0.5rem 0.45rem 0.4rem;
+  border-radius: 12px;
+  background: #14141a;
+  border: 1px solid #2a2a32;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.2);
+}
+.history-month-grid {
+  user-select: none;
+}
+.history-month-dow {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 0.15rem;
+  margin-bottom: 0.2rem;
+}
+.history-dow {
+  text-align: center;
+  font-size: 0.5rem;
+  font-weight: 800;
+  color: #5a5a6a;
+  text-transform: uppercase;
+  padding: 0.1rem 0;
+}
+.history-month-cells {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 0.2rem;
+}
+.history-day-cell {
+  position: relative;
+  min-height: 2.1rem;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 0.15rem 0.1rem 0.25rem;
+  border-radius: 7px;
+  border: 1px solid #2a2a32;
+  background: #0f0f12;
+  color: #3a3a4a;
+  font-size: 0.6rem;
+  line-height: 1;
+  cursor: default;
+  font-variant-numeric: tabular-nums;
+}
+.history-day-cell:disabled {
+  cursor: not-allowed;
+  opacity: 0.4;
+  border-color: #1e1e20;
+  background: #0a0a0c;
+}
+.history-day-cell--in-ww:not(:disabled) {
+  color: #9a9ab0;
+  background: #15151a;
+  border-color: #3a3a48;
+  cursor: pointer;
+  opacity: 1;
+}
+.history-day-cell--in-ww:hover:not(:disabled) {
+  border-color: #7b4db5;
+  background: rgba(123, 77, 181, 0.1);
+}
+.history-day-cell--on {
+  border-color: #a78bfa !important;
+  background: rgba(123, 77, 181, 0.2) !important;
+  color: #f0e6ff;
+}
+.history-day-cell--empty {
+  opacity: 0.85;
+}
+.history-day-cell--has .history-day-num {
+  color: #e0e0f0;
+  font-weight: 800;
+}
+.history-day-cell--today:not(.history-day-cell--on) {
+  box-shadow: 0 0 0 1px rgba(34, 197, 94, 0.45);
+}
+.history-day-num {
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+.history-day-badge {
+  position: absolute;
+  right: 2px;
+  bottom: 2px;
+  min-width: 0.85rem;
+  padding: 0.05rem 0.2rem;
+  font-size: 0.5rem;
+  font-weight: 800;
+  border-radius: 4px;
+  background: #14532d;
+  color: #86efac;
+  border: 1px solid #166534;
+  line-height: 1.1;
+}
+.history-cal-filt {
+  margin: 0.45rem 0 0;
+  font-size: 0.62rem;
+  color: #6a6a7a;
+}
+.history-cal-filt .history-link {
+  background: none;
+  border: none;
+  color: #a78bfa;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+  font-size: inherit;
+  font-weight: 600;
+  padding: 0;
+  margin: 0;
+}
+.history-trips-h2 {
+  margin: 0.65rem 0 0.4rem;
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #8a8a98;
 }
 
 .history-list {
@@ -301,11 +1013,20 @@ onMounted(() => {
   gap: var(--space-4, 1rem);
 }
 
+.history-list--nested {
+  margin: 0;
+  padding: 0.4rem 0.25rem 0.5rem;
+  gap: 0.5rem;
+  background: transparent;
+  border: none;
+  border-radius: 0;
+}
+
 .history-card {
   border: 1px solid #34343e;
   border-radius: 12px;
   background: #1a1a22;
-  overflow: hidden;
+  overflow: visible;
 }
 
 .history-drop {
@@ -397,11 +1118,201 @@ onMounted(() => {
   font-variant-numeric: tabular-nums;
   align-self: flex-start;
 }
+.history-row-tr {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.35rem 0.4rem;
+  min-width: 0;
+  width: 100%;
+  justify-content: space-between;
+}
+.history-top-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  min-width: 0;
+  flex: 1 1 auto;
+  justify-content: flex-end;
+}
+.history-outcome-wrap {
+  position: relative;
+  flex: 0 0 auto;
+  max-width: min(10rem, 100%);
+}
+.history-outcome-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.25rem;
+  width: 100%;
+  min-height: 1.65rem;
+  min-width: 0;
+  padding: 0.1rem 0.35rem 0.1rem 0.4rem;
+  line-height: 1.1;
+  border: 1px solid;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.04);
+  color: #a8a8b8;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.history-outcome-pill:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.history-outcome-pill__txt {
+  font-size: 0.58rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  text-align: left;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.history-outcome-pill__chev {
+  font-size: 0.5rem;
+  line-height: 1;
+  opacity: 0.7;
+  flex-shrink: 0;
+}
+.history-outcome-pop {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 4px);
+  z-index: 10090;
+  min-width: 7.5rem;
+  max-width: 12rem;
+  margin: 0;
+  padding: 0.2rem;
+  list-style: none;
+  border: 1px solid #3f3f4c;
+  border-radius: 8px;
+  background: #1a1a22;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+}
+.history-outcome-pop--fixed {
+  position: fixed;
+  right: auto;
+  top: auto;
+  z-index: 10090;
+  max-width: min(12rem, calc(100vw - 16px));
+}
+.history-day-cell--faint {
+  opacity: 0.35;
+}
+.history-day-cell--faint:disabled {
+  pointer-events: none;
+}
+.history-outcome-pop li {
+  margin: 0;
+  padding: 0;
+}
+.history-outcome-mi {
+  width: 100%;
+  text-align: left;
+  font-size: 0.7rem;
+  font-weight: 600;
+  padding: 0.4rem 0.55rem;
+  border: none;
+  background: transparent;
+  color: #d8d8e6;
+  border-radius: 4px;
+  cursor: pointer;
+  line-height: 1.25;
+}
+.history-outcome-mi:hover:not(:disabled) {
+  background: #2a2a32;
+}
+.history-outcome-mi:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.history-outcome-mi--on {
+  color: #c4b5fd;
+  background: rgba(123, 77, 181, 0.2);
+}
+.history-outcome-pill.history-outcome--none {
+  border-color: #3f3f4a;
+  color: #7a7a8a;
+  background: rgba(0, 0, 0, 0.15);
+}
+.history-outcome-pill.history-outcome--delivered {
+  border-color: #166534;
+  color: #86efac;
+  background: rgba(22, 101, 52, 0.25);
+}
+.history-outcome-pill.history-outcome--rejected {
+  border-color: #991b1b;
+  color: #fecaca;
+  background: rgba(127, 29, 29, 0.35);
+}
+.history-outcome-pill.history-outcome--removed {
+  border-color: #52525b;
+  color: #d4d4d8;
+  background: rgba(63, 63, 70, 0.4);
+}
 
 .history-seq {
   font-size: 0.65rem;
   color: var(--color-text-tertiary, #6e6e7e);
   line-height: 1.3;
+}
+
+
+.history-outcome--none {
+  display: none;
+}
+
+.history-outcome-row {
+  padding: 0.4rem 0.75rem 0.5rem;
+  background: #1a1a22;
+  border-bottom: 1px solid #2e2e36;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.history-dbl-hint {
+  margin: 0;
+  font-size: 0.6rem;
+  line-height: 1.3;
+  color: #5c5c6a;
+}
+
+.history-outcome-btns {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem 0.35rem;
+  align-items: center;
+}
+
+.history-o-btn {
+  font-size: 0.6rem;
+  font-weight: 600;
+  padding: 0.25rem 0.4rem;
+  border-radius: 5px;
+  border: 1px solid #3a3a46;
+  background: #1f1f28;
+  color: #b4b4c0;
+  cursor: pointer;
+}
+
+.history-o-btn:hover {
+  background: #25252e;
+  border-color: #4a4a58;
+}
+
+.history-o-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.history-o-btn--active {
+  border-color: #7b4db5;
+  color: #e4d4ff;
+  background: rgba(123, 77, 181, 0.2);
 }
 
 .history-dispatch {

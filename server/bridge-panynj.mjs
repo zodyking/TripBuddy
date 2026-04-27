@@ -1,17 +1,17 @@
-import fs from 'node:fs/promises'
-import path from 'node:path'
-import { LOCAL_DIR } from './config.mjs'
+import { readKeyJson, writeKeyJson } from './kv-store.mjs'
+import { G } from './scope-kv.mjs'
 
+const KEY = G('bridge:panynj:series')
 const PA_URL =
   'https://www.panynj.gov/bin/portauthority/crossingtimesapi.json'
 const POLL_MS = 5 * 60 * 1000
-const SERIES_FILE = path.join(LOCAL_DIR, 'bridge-panynj-series.json')
-const MAX_PER_ROUTE = 400
+const MAX_POINTS_PER_ROUTE = 500
 
 let pollTimer = null
-let lastLive = /** @type {unknown[] | null} */ (null)
+let lastFetchError = null
 let lastFetchAt = 0
-let lastError = /** @type {string | null} */ (null)
+/** @type {unknown[]|null} */
+let lastLiveArray = null
 
 /**
  * @param {unknown} x
@@ -21,43 +21,59 @@ function isOb(x) {
   return x != null && typeof x === 'object' && !Array.isArray(x)
 }
 
-async function readSeriesState() {
-  try {
-    const raw = await fs.readFile(SERIES_FILE, 'utf8')
-    const d = JSON.parse(raw)
-    if (d && typeof d === 'object' && d.pointsByRoute && typeof d.pointsByRoute === 'object') {
-      return d
-    }
-  } catch {
-    /* first run */
-  }
-  return { lastAppendTs: 0, pointsByRoute: {} }
-}
-
-async function writeSeriesState(st) {
-  await fs.mkdir(LOCAL_DIR, { recursive: true })
-  await fs.writeFile(SERIES_FILE, JSON.stringify(st), 'utf8')
-}
-
+/**
+ * @returns {Promise<unknown[]>}
+ */
 export async function fetchPanynjCrossingJson() {
-  const r = await fetch(PA_URL, { headers: { accept: 'application/json' } })
-  if (!r.ok) throw new Error(`Port Authority: HTTP ${r.status}`)
-  return r.json()
+  const r = await fetch(PA_URL, {
+    headers: { accept: 'application/json' },
+  })
+  if (!r.ok) {
+    throw new Error(`Port Authority: HTTP ${r.status}`)
+  }
+  return /** @type {unknown} */ (await r.json())
 }
 
-export async function refreshPanynjCrossingData() {
-  const j = await fetchPanynjCrossingJson()
-  const live = Array.isArray(j) ? j : []
-  if (live.length === 0) throw new Error('Empty response')
-  lastLive = live
-  lastFetchAt = Date.now()
-  lastError = null
+/**
+ * @typedef {{ lastAppendTs: number, pointsByRoute: Record<string, { t: number, m: number, s: number }[]> }} SeriesState
+ */
 
-  const st = await readSeriesState()
+/**
+ * @returns {Promise<SeriesState>}
+ */
+async function readState() {
+  return readKeyJson(KEY, () => ({
+    lastAppendTs: 0,
+    pointsByRoute: {},
+  }))
+}
+
+/**
+ * @param {SeriesState} st
+ */
+function trimRoutePoints(st) {
+  for (const k of Object.keys(st.pointsByRoute)) {
+    const a = st.pointsByRoute[k]
+    if (Array.isArray(a) && a.length > MAX_POINTS_PER_ROUTE) {
+      st.pointsByRoute[k] = a.slice(a.length - MAX_POINTS_PER_ROUTE)
+    }
+  }
+}
+
+/**
+ * Append one sample from live API array.
+ * @param {unknown[]} live
+ */
+export async function appendPanynjSnapshotFromLive(live) {
+  const st = await readState()
   const now = Date.now()
   for (const row of live) {
-    if (!isOb(row) || row.routeId == null) continue
-    const key = String(row.routeId)
+    if (!isOb(row)) continue
+    const id = row.routeId
+    if (id == null || (typeof id !== 'number' && typeof id !== 'string')) {
+      continue
+    }
+    const key = String(id)
     const m =
       typeof row.routeTravelTime === 'number' && Number.isFinite(row.routeTravelTime)
         ? row.routeTravelTime
@@ -68,30 +84,69 @@ export async function refreshPanynjCrossingData() {
         : 0
     if (!st.pointsByRoute[key]) st.pointsByRoute[key] = []
     st.pointsByRoute[key].push({ t: now, m, s })
-    const a = st.pointsByRoute[key]
-    if (a.length > MAX_PER_ROUTE) st.pointsByRoute[key] = a.slice(a.length - MAX_PER_ROUTE)
   }
   st.lastAppendTs = now
-  await writeSeriesState(st)
+  trimRoutePoints(st)
+  await writeKeyJson(KEY, st)
   return st
 }
 
-function trendFromPoints(a) {
+/**
+ * One Port Authority pull + store.
+ */
+export async function refreshPanynjCrossingData() {
+  const j = await fetchPanynjCrossingJson()
+  const live = Array.isArray(j) ? j : []
+  if (live.length === 0) {
+    throw new Error('Empty or invalid response')
+  }
+  lastLiveArray = live
+  lastFetchAt = Date.now()
+  lastFetchError = null
+  return appendPanynjSnapshotFromLive(live)
+}
+
+export function getLastPanynjLive() {
+  return {
+    live: lastLiveArray,
+    fetchedAt: lastFetchAt,
+    fetchError: lastFetchError,
+  }
+}
+
+/**
+ * @param {(e: unknown) => void} [onErr]
+ */
+export function startPanynjBridgePoll(onErr) {
+  if (pollTimer) return
+  const tick = () => {
+    void refreshPanynjCrossingData().catch((e) => {
+      lastFetchError = e instanceof Error ? e.message : String(e)
+      onErr?.(e)
+    })
+  }
+  pollTimer = setInterval(tick, POLL_MS)
+}
+
+/**
+ * Worse = higher travel time (minutes) vs the prior stored sample.
+ * @param {Array<{ t: number, m: number, s: number }>} a
+ * @returns {'better' | 'worse' | 'neutral' | 'unknown'}
+ */
+function trendFromSeries(a) {
   if (!Array.isArray(a) || a.length < 2) return 'unknown'
-  const d = a[a.length - 1].m - a[a.length - 2].m
+  const p = a[a.length - 2].m
+  const c = a[a.length - 1].m
+  const d = c - p
   if (Math.abs(d) < 0.75) return 'neutral'
   if (d > 0) return 'worse'
   return 'better'
 }
 
-export function getPanynjSnapshot() {
-  return { live: lastLive, fetchedAt: lastFetchAt, fetchError: lastError, source: PA_URL, pollIntervalMs: POLL_MS }
-}
-
 export async function getBridgesResponsePayload() {
-  const { live, fetchedAt, fetchError, source, pollIntervalMs } = getPanynjSnapshot()
-  const st = await readSeriesState()
-  /** @type {Record<string, { trend: string, series: { t: number, m: number, s: number }[] }>} */
+  const { live, fetchedAt, fetchError } = getLastPanynjLive()
+  const st = await readState()
+  /** @type {Record<string, { trend: 'better' | 'worse' | 'neutral' | 'unknown', series: { t: number, m: number, s: number }[] }>} */
   const byRoute = {}
   if (Array.isArray(live)) {
     for (const row of live) {
@@ -103,30 +158,20 @@ export async function getBridgesResponsePayload() {
         byRoute[id] = { trend: 'unknown', series: [] }
         continue
       }
-      byRoute[id] = { trend: trendFromPoints(a), series: a.slice(-144) }
+      const full = a.slice(-288)
+      byRoute[id] = { trend: trendFromSeries(a), series: full }
     }
   }
   return {
     ok: true,
-    source,
-    pollIntervalMs,
+    source: PA_URL,
+    pollIntervalMs: POLL_MS,
     fetchedAt,
     fetchError: fetchError || null,
     lastStoredTs: st.lastAppendTs,
     live: live || [],
     byRoute,
   }
-}
-
-export function startPanynjBridgePoll() {
-  if (pollTimer) return
-  const tick = () => {
-    void refreshPanynjCrossingData().catch((e) => {
-      lastError = e instanceof Error ? e.message : String(e)
-    })
-  }
-  void tick()
-  pollTimer = setInterval(tick, POLL_MS)
 }
 
 export { PA_URL, POLL_MS }

@@ -1,256 +1,239 @@
 <script setup>
-import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
+import { ref, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
 import { getBridgesPanynj } from '../api.js'
-import { getAnchorByKey } from '../bridges/bridgeRouteAnchors.js'
+import { getBridgeAnchorForRouteId } from '../bridges/bridgeRouteAnchors.js'
 import BridgesMap from '../components/BridgesMap.vue'
 
 defineOptions({ name: 'BridgesView' })
 
 const POLL_MS = 5 * 60 * 1000
-const MAX_SPARK = 20
+const MAX_SPARK_POINTS = 20
 
-/** @typedef {'ToNY' | 'ToNJ'} D */
-/** @type {import('vue').Ref<D>} */
+/** @typedef {'ToNY' | 'ToNJ'} TravelDir */
+/** @type {import('vue').Ref<TravelDir>} */
 const direction = ref('ToNY')
 
 const loading = ref(true)
 const error = ref('')
-/** @type {import('vue').Ref<Record<string, unknown> | null>} */
+
+/** @type {import('vue').Ref<any | null>} */
 const payload = ref(null)
-const highlightKey = ref('')
 
 let tick = 0
 /** @type {ReturnType<typeof setInterval> | null} */
 let intervalId = null
 
-const isSplit = ref(false)
-let mql = /** @type {MediaQueryList | null} */(null)
-function updateSplit() {
-  if (typeof window === 'undefined') return
-  isSplit.value = window.matchMedia('(min-width: 900px) and (orientation: landscape)').matches
-}
-function onMql() {
-  updateSplit()
+function fmtTime(ts) {
+  if (typeof ts !== 'number' || !Number.isFinite(ts) || ts <= 0) return '—'
+  try {
+    return new Date(ts).toLocaleTimeString(undefined, {
+      hour: 'numeric',
+      minute: '2-digit',
+    })
+  } catch {
+    return '—'
+  }
 }
 
 /**
+ * PANYNJ JSON usually uses "ToNY" / "ToNJ" but normalize in case of spacing/casing drift.
  * @param {unknown} v
+ * @returns {'ToNY' | 'ToNJ' | ''}
  */
-function normDir(v) {
+function normalizeApiTravelDir(v) {
   const s = String(v ?? '')
     .replace(/\s+/g, '')
     .replace(/[–—-]/g, '')
     .toUpperCase()
-  if (s === 'TONY' || s === 'TOWARDNY' || s.includes('TONY')) return 'ToNY'
-  if (s === 'TONJ' || s === 'TOWARDNJ' || s.includes('TONJ')) return 'ToNJ'
+  if (s === 'TONY' || s === 'TOWARDNY' || s === 'TONYC') return 'ToNY'
+  if (s === 'TONJ' || s === 'TOWARDNJ' || s === 'TONJE') return 'ToNJ'
+  if (s.includes('TO') && s.includes('NY') && !s.includes('NJ')) return 'ToNY'
+  if (s.includes('TO') && s.includes('NJ') && !s.includes('NY')) return 'ToNJ'
   return ''
 }
 
 /**
  * @param {unknown} row
- * @param {D} d
+ * @param {string} d
  */
 function matchDir(row, d) {
-  if (!row || typeof row !== 'object' || !('travelDirection' in row)) return false
-  return normDir(/** @type {Record<string, unknown>} */(row).travelDirection) === d
-}
-
-function isTunnelName(n) {
-  return /\btunnel\b/i.test(String(n || ''))
+  if (row == null || typeof row !== 'object' || !('travelDirection' in row)) {
+    return false
+  }
+  const raw = /** @type {Record<string, unknown>} */(row).travelDirection
+  return normalizeApiTravelDir(raw) === d
 }
 
 /**
- * GWB: single card — use upper vs lower (by route) for the chosen direction, keep both times in sublabel.
- * @param {Record<string, unknown>[]} live
- * @param {D} d
+ * Tunnels (Holland, Lincoln) — not shown on this page.
+ * @param {unknown} row
  */
-function gwbRowsOf(live, d) {
-  const gwb = live.filter(
-    (r) =>
-      r &&
-      typeof r === 'object' &&
-      /george washington bridge/i.test(
-        String(/** @type {Record<string, unknown>} */(r).crossingDisplayName || ''),
-      ),
+function isTunnelRow(row) {
+  if (row == null || typeof row !== 'object') return false
+  const n = String(
+    (/** @type {Record<string, unknown>} */(row)).crossingDisplayName || '',
   )
-  const upperRid = d === 'ToNY' ? 211 : 12
-  const lowerRid = d === 'ToNY' ? 212 : 11
-  const upper = gwb.find((r) => {
-    const o = /** @type {Record<string, unknown>} */(r)
-    return Number(o.routeId) === upperRid && matchDir(r, d)
-  })
-  const lower = gwb.find((r) => {
-    const o = /** @type {Record<string, unknown>} */(r)
-    return Number(o.routeId) === lowerRid && matchDir(r, d)
-  })
-  return { upper, lower, upperRid, lowerRid }
+  return /\btunnel\b/i.test(n)
 }
 
 /**
  * @param {unknown} row
  */
-function travelMin(row) {
-  if (!row || typeof row !== 'object') return null
-  const t = /** @type {Record<string, unknown>} */(row).routeTravelTime
-  if (typeof t === 'number' && Number.isFinite(t)) return t
-  if (t != null && t !== '') {
-    const n = Number(t)
+function isClosedRow(row) {
+  return (
+    row != null &&
+    typeof row === 'object' &&
+    /** @type {any} */(row).isCrossingClosed === true
+  )
+}
+
+/**
+ * @param {unknown} row
+ */
+function travelMinutes(row) {
+  if (row == null || typeof row !== 'object') return Number.POSITIVE_INFINITY
+  const m = (/** @type {Record<string, unknown>} */(row)).routeTravelTime
+  if (typeof m === 'number' && Number.isFinite(m)) return m
+  if (typeof m === 'string' && m !== '') {
+    const n = Number(m)
     if (Number.isFinite(n)) return n
   }
-  return null
+  return Number.POSITIVE_INFINITY
 }
 
 /**
- * @param {D} d
+ * GWB: API returns 4 route rows; show only the pair for the current toggle (2 markers), not all four.
+ * @param {unknown} row
  */
-function buildCrossingsForDirection(d) {
-  const rawLive = Array.isArray(payload.value?.live) ? payload.value?.live : []
-  const live = /** @type {Record<string, unknown>[]} */ (rawLive)
-  /** @type {Array<{
-   *  k: string, title: string, routeId: string, sublabel?: string, liveRow: unknown
-   * }>} */
-  const out = []
-  if (!live.length) return out
-
-  for (const r of live) {
-    if (!r || typeof r !== 'object' || isTunnelName((/** @type {any} */(r).crossingDisplayName))) {
-      continue
-    }
-    if (!matchDir(r, d)) continue
-    if (/george washington bridge/i.test(String(/** @type {any} */(r).crossingDisplayName))) {
-      continue
-    }
-    const o = /** @type {Record<string, unknown>} */(r)
-    out.push({
-      k: `r${o.routeId}`,
-      title: (() => {
-        const n = String(o.crossingDisplayName || 'Crossing')
-        const mod = String(o.facilityModifier || '').trim()
-        return mod ? `${n} — ${mod}` : n
-      })(),
-      routeId: o.routeId != null ? String(o.routeId) : '',
-      liveRow: r,
-    })
-  }
-
-  const g = gwbRowsOf(live, d)
-  if (g.upper || g.lower) {
-    const uM = g.upper != null ? travelMin(g.upper) : null
-    const lM = g.lower != null ? travelMin(g.lower) : null
-    const parts = []
-    if (uM != null) parts.push(`U ${uM}`)
-    if (lM != null) parts.push(`L ${lM}`)
-    out.push({
-      k: 'gwb',
-      title: 'George Washington Bridge',
-      routeId: '',
-      sublabel: parts.length ? parts.join(' · ') : undefined,
-      liveRow: (() => {
-        const candidates = [g.upper, g.lower].filter(Boolean)
-        let best = /** @type {unknown} */(null)
-        let bestM = Number.POSITIVE_INFINITY
-        for (const c of candidates) {
-          const m = travelMin(c)
-          if (m == null) continue
-          if (m < bestM) {
-            bestM = m
-            best = c
-          }
-        }
-        return best
-      })(),
-    })
-  }
-
-  out.sort((a, b) => {
-    const cA = a.liveRow && /** @type {any} */(a.liveRow).isCrossingClosed === true
-    const cB = b.liveRow && /** @type {any} */(b.liveRow).isCrossingClosed === true
-    if (cA !== cB) return cA ? 1 : -1
-    const mA = travelMin(a.liveRow) ?? 9999
-    const mB = travelMin(b.liveRow) ?? 9999
-    return mA - mB
-  })
-  return out
+function isGwbRow(row) {
+  return (
+    row != null &&
+    typeof row === 'object' &&
+    /george washington bridge/i.test(
+      String(/** @type {Record<string, unknown>} */(row).crossingDisplayName || ''),
+    )
+  )
 }
 
-const crossings = computed(() => {
-  if (!payload.value) return []
-  return buildCrossingsForDirection(direction.value)
-})
-
-const mapPins = computed(() => {
-  const p = payload.value
-  if (!p?.byRoute) return []
-  const list = crossings.value
-  const pins = []
-  for (let i = 0; i < list.length; i++) {
-    const it = list[i]
-    const key = it.k
-    let pos = null
-    if (key === 'gwb') pos = getAnchorByKey('gwb')
-    else {
-      const rid = it.routeId
-      const num = Number(rid)
-      if (num === 217) pos = getAnchorByKey('bay217')
-      else if (num === 222) pos = getAnchorByKey('bay222')
-      else if (num === 87) pos = getAnchorByKey('goe87')
-      else if (num === 86) pos = getAnchorByKey('goe86')
-      else if (num === 260) pos = getAnchorByKey('out260')
-      else if (num === 2520) pos = getAnchorByKey('out2520')
-    }
-    if (!pos) continue
-    const r = it.liveRow
-    const tmin = r ? travelMin(r) : null
-    const mStr = tmin == null || (r && /** @type {any} */(r).isCrossingClosed) ? '—' : String(Math.round(tmin))
-    const ridForTrend = r && /** @type {any} */(r).routeId != null ? String(/** @type {any} */(r).routeId) : it.routeId
-    const tr = ridForTrend && p.byRoute?.[ridForTrend]?.trend
-    const trendKey =
-      tr === 'worse' ? 'worse' : tr === 'better' ? 'better' : tr === 'neutral' ? 'neutral' : 'unk'
-    const trendIcon = trendKey === 'worse' ? '▲' : trendKey === 'better' ? '▼' : trendKey === 'neutral' ? '—' : '·'
-    const trendFull = 'vs prior 5 min sample'
-    pins.push({
-      id: key,
-      lat: pos[0],
-      lng: pos[1],
-      title: (it.sublabel ? `${it.title}` : it.title).slice(0, 32),
-      minutes: mStr,
-      trendKey,
-      trendIcon,
-      trendFull,
-      isPick: i === 0,
-      isClosed: !!(r && /** @type {any} */(r).isCrossingClosed),
-      rank: i + 1,
-    })
+/**
+ * @param {unknown} row
+ * @param {'ToNY' | 'ToNJ'} d
+ */
+function gwbMatchRouteForToggle(row, d) {
+  const o = /** @type {Record<string, unknown>} */(row)
+  const rid = o.routeId
+  const n = typeof rid === 'number' ? rid : Number(rid)
+  if (d === 'ToNY') {
+    return n === 211 || n === 212
   }
-  return pins
+  return n === 12 || n === 11
+}
+
+const rankedRows = computed(() => {
+  const live = payload.value?.live
+  if (!Array.isArray(live)) return []
+  const d = direction.value
+  const out = live.filter((r) => {
+    if (isTunnelRow(r)) return false
+    if (!matchDir(r, d)) return false
+    if (isGwbRow(r) && !gwbMatchRouteForToggle(r, d)) return false
+    return true
+  })
+  return out.sort((a, b) => {
+    const ac = isClosedRow(a) ? 1 : 0
+    const bc = isClosedRow(b) ? 1 : 0
+    if (ac !== bc) return ac - bc
+    return travelMinutes(a) - travelMinutes(b)
+  })
 })
 
 /**
  * @param {unknown} row
  */
-function seriesFor(row) {
-  if (!row || typeof row !== 'object' || !payload.value?.byRoute) return []
-  const id = String(/** @type {any} */(row).routeId)
-  if (!id) return []
-  const s = /** @type {any} */(payload.value).byRoute[id]?.series
+function rowRouteId(row) {
+  if (row == null || typeof row !== 'object') return ''
+  const o = /** @type {Record<string, unknown>} */(row)
+  if (o.routeId == null) return ''
+  return String(o.routeId)
+}
+
+/**
+ * @param {unknown} row
+ */
+function displayTitle(row) {
+  if (row == null || typeof row !== 'object') return '—'
+  const o = /** @type {Record<string, unknown>} */(row)
+  const name =
+    typeof o.crossingDisplayName === 'string' ? o.crossingDisplayName : 'Bridge'
+  const mod = typeof o.facilityModifier === 'string' ? o.facilityModifier.trim() : ''
+  if (mod) return `${name} — ${mod}`
+  return name
+}
+
+/**
+ * @param {unknown} row
+ */
+function trendInfo(row) {
+  const id = rowRouteId(row)
+  if (!id || !payload.value?.byRoute) {
+    return { short: '·', cls: 't--unk', full: 'Not enough data yet' }
+  }
+  const b = payload.value.byRoute[id]
+  if (!b || !b.trend) {
+    return { short: '·', cls: 't--unk', full: 'Not enough data yet' }
+  }
+  const t = b.trend
+  if (t === 'worse') {
+    return { short: '▲', cls: 't--worse', full: 'Slower than last check' }
+  }
+  if (t === 'better') {
+    return { short: '▼', cls: 't--better', full: 'Faster than last check' }
+  }
+  if (t === 'neutral') {
+    return { short: '—', cls: 't--neutral', full: 'About the same' }
+  }
+  return { short: '·', cls: 't--unk', full: 'Not enough data yet' }
+}
+
+/**
+ * @param {unknown} row
+ */
+function seriesForRow(row) {
+  const id = rowRouteId(row)
+  if (!id || !payload.value?.byRoute?.[id]) return []
+  const s = payload.value.byRoute[id].series
   return Array.isArray(s) ? s : []
 }
 
 /**
- * @param {Array<{ m: number }>} points
+ * @param {Array<{ t: number, m: number, s: number }>} points
+ * @param {number} [maxN]
  */
-function sparkPathD(points) {
-  if (!Array.isArray(points) || points.length < 1) return ''
-  const n0 = points.length
-  const maxN = Math.min(MAX_SPARK, n0)
-  const p = []
+function downsampleTimeSeries(points, maxN = MAX_SPARK_POINTS) {
+  if (!Array.isArray(points) || points.length === 0) return []
+  if (points.length <= maxN) return points
+  const out = []
+  const last = maxN - 1
   for (let k = 0; k < maxN; k++) {
-    p.push(
-      points[Math.min(n0 - 1, Math.round((k * (n0 - 1)) / Math.max(1, maxN - 1)))],
+    const i = Math.min(
+      points.length - 1,
+      Math.round((k * (points.length - 1)) / last),
     )
+    out.push(points[i])
   }
+  return out
+}
+
+/**
+ * Simple spark: few points, thick line, no axes text.
+ * @param {Array<{ t: number, m: number, s: number }>} points
+ */
+function sparklinePathD(points) {
+  if (!Array.isArray(points) || points.length < 1) return ''
+  const p = downsampleTimeSeries(points, MAX_SPARK_POINTS)
+  if (p.length < 1) return ''
   const w = 100
-  const h = 20
+  const h = 22
   const pad = 2
   const vals = p.map((x) => x.m)
   const minV = Math.min(...vals, 0)
@@ -266,424 +249,769 @@ function sparkPathD(points) {
     .join(' ')
 }
 
-function fmtTime(ts) {
-  if (typeof ts !== 'number' || !Number.isFinite(ts) || ts <= 0) return '—'
-  try {
-    return new Date(ts).toLocaleTimeString(undefined, {
-      hour: 'numeric',
-      minute: '2-digit',
-    })
-  } catch {
-    return '—'
-  }
+/**
+ * @param {unknown} row
+ */
+function rowKey(row) {
+  if (row == null || typeof row !== 'object') return 'x'
+  const o = /** @type {Record<string, unknown>} */(row)
+  return [o.routeId, o.facilityModifier, o.cardinalDirection, o.travelDirection].join(
+    ':',
+  )
 }
 
+/**
+ * @param {unknown} row
+ */
+function sparkPathD(row) {
+  return sparklinePathD(seriesForRow(row))
+}
+
+/**
+ * @param {unknown} row
+ * @param {number} i
+ */
+function isBestPick(i, row) {
+  if (i !== 0 || isClosedRow(row)) return false
+  return Number.isFinite(travelMinutes(row))
+}
+
+/** Current route id shown as selected (map + list) */
+const highlightId = ref('')
+
+/**
+ * @param {unknown} row
+ */
+function trendKeyForRow(row) {
+  const id = rowRouteId(row)
+  const t = id && payload.value?.byRoute?.[id]?.trend
+  if (t === 'worse') return /** @type {const} */('worse')
+  if (t === 'better') return /** @type {const} */('better')
+  if (t === 'neutral') return /** @type {const} */('neutral')
+  return /** @type {const} */('unk')
+}
+
+/**
+ * @param {unknown} row
+ */
+function displayTitleShort(row) {
+  const t = displayTitle(row)
+  if (t.length <= 22) return t
+  return `${t.slice(0, 21)}…`
+}
+
+const mapPins = computed(() => {
+  const rows = rankedRows.value
+  const out = []
+  for (let i = 0; i < rows.length; i++) {
+    const row = rows[i]
+    const id = rowRouteId(row)
+    if (!id) continue
+    const pos = getBridgeAnchorForRouteId(id, direction.value)
+    if (!pos) continue
+    const ti = trendInfo(row)
+    out.push({
+      id,
+      lat: pos[0],
+      lng: pos[1],
+      title: displayTitleShort(row),
+      minutes: isClosedRow(row) ? '—' : (() => {
+        const m = travelMinutes(row)
+        return Number.isFinite(m) ? String(Math.round(m)) : '—'
+      })(),
+      trendIcon: ti.short,
+      trendKey: trendKeyForRow(row),
+      trendFull: ti.full,
+      isPick: isBestPick(i, row),
+      isClosed: isClosedRow(row),
+      rank: i + 1,
+    })
+  }
+  return out
+})
+
+const isLandscapeSplit = ref(false)
+let splitMql = /** @type {MediaQueryList | null} */(null)
+function updateLandscapeSplit() {
+  if (typeof window === 'undefined') return
+  isLandscapeSplit.value = window.matchMedia(
+    '(orientation: landscape) and (min-width: 700px)',
+  ).matches
+}
+function onSplitMqlChange() {
+  updateLandscapeSplit()
+}
+
+/**
+ * @param {string} id routeId
+ */
+function onMapSelect(id) {
+  const k = String(id)
+  highlightId.value = k
+  void nextTick(() => {
+    const el = document.getElementById(`bridge-tile-${k}`)
+    el?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
+  })
+}
+
+/**
+ * @param {unknown} row
+ */
+function onListTileClick(row) {
+  const id = rowRouteId(row)
+  if (id) highlightId.value = id
+}
+
+/**
+ * @param {unknown} row
+ * @param {string} [id] routeId
+ */
+function isHighlighted(row, id) {
+  return highlightId.value && (id || rowRouteId(row)) === highlightId.value
+}
+
+watch(direction, () => {
+  highlightId.value = ''
+})
+watch(rankedRows, () => {
+  const h = highlightId.value
+  if (h && !rankedRows.value.some((r) => rowRouteId(r) === h)) {
+    highlightId.value = ''
+  }
+})
+
 async function load() {
-  const gen = ++tick
   error.value = ''
-  if (!payload.value) loading.value = true
+  const gen = ++tick
+  const first = !payload.value
+  if (first) loading.value = true
   try {
-    const data = await getBridgesPanynj()
-    if (gen === tick) payload.value = data
+    const p = await getBridgesPanynj()
+    if (gen === tick) payload.value = p
   } catch (e) {
     if (gen === tick) {
-      error.value = e instanceof Error ? e.message : 'Failed to load'
+      error.value = e instanceof Error ? e.message : 'Failed to load bridges'
     }
   } finally {
     if (gen === tick) loading.value = false
   }
 }
 
-/**
- * @param {string} id
- */
-function onMapPick(id) {
-  highlightKey.value = id
-  void nextTick(() => {
-    document.getElementById(`bx-${id}`)?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
-  })
+function setDir(d) {
+  direction.value = d
 }
 
-watch(direction, () => {
-  highlightKey.value = ''
-})
-watch(
-  () => highlightKey.value,
-  (h) => {
-    if (h && !mapPins.value.some((p) => p.id === h)) highlightKey.value = ''
-  },
-)
-
 onMounted(() => {
-  updateSplit()
+  updateLandscapeSplit()
   if (typeof window !== 'undefined' && window.matchMedia) {
-    mql = window.matchMedia('(min-width: 900px) and (orientation: landscape)')
-    mql.addEventListener('change', onMql)
+    splitMql = window.matchMedia('(orientation: landscape) and (min-width: 700px)')
+    splitMql.addEventListener('change', onSplitMqlChange)
   }
   void load()
   intervalId = setInterval(() => {
     void load()
   }, POLL_MS)
 })
+
 onUnmounted(() => {
-  if (mql) mql.removeEventListener('change', onMql)
-  if (intervalId) clearInterval(intervalId)
+  if (splitMql) {
+    splitMql.removeEventListener('change', onSplitMqlChange)
+  }
+  if (intervalId) {
+    clearInterval(intervalId)
+    intervalId = null
+  }
 })
 </script>
 
 <template>
-  <div class="bpg" :class="{ 'bpg--split': isSplit }">
-    <section v-if="!isSplit" class="bpg-map" aria-label="Map">
-      <BridgesMap
-        v-if="payload"
-        :pins="mapPins"
-        :highlight-id="highlightKey"
-        :fill-height="false"
-        :travel-direction="direction"
-        @select="onMapPick"
-      />
-      <div v-else class="bpg-map-ph">Loading map…</div>
-    </section>
-    <div class="bpg-main">
-      <header class="bpg-head">
-        <h1 class="bpg-title">Bridges</h1>
-        <p v-if="payload?.fetchError" class="bpg-warn" role="status">{{ payload.fetchError }}</p>
-        <p v-else class="bpg-sub">
-          <span>Fastest first</span>
-          <span v-if="payload?.fetchedAt" class="bpg-sub-muted"> · {{ fmtTime(payload.fetchedAt) }}</span>
-        </p>
-        <div class="bpg-tog" role="group" aria-label="Direction">
-          <button
-            type="button"
-            class="bpg-btn tap"
-            :class="{ 'bpg-btn--on': direction === 'ToNY' }"
-            @click="direction = 'ToNY'"
-          >To NY</button>
-          <button
-            type="button"
-            class="bpg-btn tap"
-            :class="{ 'bpg-btn--on': direction === 'ToNJ' }"
-            @click="direction = 'ToNJ'"
-          >To NJ</button>
-        </div>
-      </header>
-      <p v-if="error" class="bpg-err">{{ error }}</p>
-      <div v-if="loading && !payload" class="bpg-skel" aria-busy="true">Loading…</div>
-      <div v-else class="bpg-panel">
-        <h2 v-if="crossings.length" class="bpg-h2">Crossings</h2>
-        <p v-else class="bpg-empty">No crossings</p>
-        <ul class="bpg-list" aria-label="Bridge times">
-          <li
-            v-for="(it, idx) in crossings"
-            :id="`bx-${it.k}`"
-            :key="it.k"
-            class="bpg-card"
-            :class="{
-              'bpg-card--hi': highlightKey === it.k,
-              'bpg-card--best': idx === 0,
-            }"
-            @click="onMapPick(it.k)"
-          >
-            <div class="bpg-card-t">
-              <span class="bpg-rank" aria-hidden="true">{{ idx + 1 }}</span>
-              <div class="bpg-titles">
-                <h3 class="bpg-h3">{{ it.title }}</h3>
-                <p v-if="it.sublabel" class="bpg-sublab">{{ it.sublabel }} min (upper / lower)</p>
-              </div>
-            </div>
-            <div class="bpg-card-m">
-              <span v-if="it.liveRow && /** @type {any} */(it.liveRow).isCrossingClosed" class="bpg-mins bpg-mins--na">—</span>
-              <span v-else class="bpg-mins">
-                {{ travelMin(it.liveRow) != null ? String(Math.round(/** @type {number} */(travelMin(it.liveRow)))) : '—' }}
-                <span class="bpg-mu">min</span>
-              </span>
-              <span
-                v-if="it.liveRow && /** @type {any} */(it.liveRow).routeSpeed != null"
-                class="bpg-mph"
-              >{{ (/** @type {any} */(it.liveRow)).routeSpeed }} mph</span>
-            </div>
-            <div v-if="it.liveRow && seriesFor(it.liveRow).length" class="bpg-spark">
-              <svg
-                class="bpg-spark-svg"
-                viewBox="0 0 100 20"
-                width="100%"
-                height="20"
-                preserveAspectRatio="none"
-                aria-hidden="true"
-              >
-                <path
-                  v-if="sparkPathD(seriesFor(it.liveRow))"
-                  :d="sparkPathD(seriesFor(it.liveRow))"
-                  fill="none"
-                  stroke="rgba(167,139,250,0.55)"
-                  stroke-width="1.5"
-                />
-              </svg>
-            </div>
-          </li>
-        </ul>
+  <div class="bridges-page" :class="{ 'is-split': isLandscapeSplit }">
+    <div class="bridges-map-column">
+      <div class="bridges-map-shell" :class="{ 'is-tall': isLandscapeSplit }">
+        <BridgesMap
+          v-if="!loading && payload"
+          :pins="mapPins"
+          :travel-direction="direction"
+          :highlight-id="highlightId"
+          :fill-height="isLandscapeSplit"
+          @select="onMapSelect"
+        />
+        <div
+          v-else
+          class="bridges-map-placeholder"
+          role="status"
+        >Map loading…</div>
       </div>
     </div>
-    <section v-if="isSplit" class="bpg-map bpg-map--right" aria-label="Map">
-      <BridgesMap
-        v-if="payload"
-        :pins="mapPins"
-        :highlight-id="highlightKey"
-        :fill-height="true"
-        :travel-direction="direction"
-        @select="onMapPick"
-      />
-      <div v-else class="bpg-map-ph">Loading map…</div>
-    </section>
+
+    <div
+      class="bridges-list-column"
+      :class="{ 'is-scroll-pane': isLandscapeSplit }"
+    >
+      <div
+        class="bridges-list-inner"
+        :class="{ 'is-scroll-pane': isLandscapeSplit }"
+      >
+        <div class="bridges-bar">
+          <div class="bridges-bar-top">
+            <h1 class="bridges-h1">Bridges</h1>
+            <p v-if="payload?.fetchError" class="bridges-warn" role="status">
+              Data may be stale · {{ payload.fetchError }}
+            </p>
+            <p v-else class="bridges-pill">
+              <span>Fastest first</span>
+              <span v-if="payload?.fetchedAt" class="bridges-time"
+              >· {{ fmtTime(payload.fetchedAt) }}</span>
+              <span class="bridges-note">· Tunnels off</span>
+            </p>
+          </div>
+
+          <div class="bridges-toggle" role="group" aria-label="Direction">
+            <button
+              type="button"
+              class="dir-btn tap"
+              :class="{ 'is-on': direction === 'ToNY' }"
+              @click="setDir('ToNY')"
+            >
+              To NY
+            </button>
+            <button
+              type="button"
+              class="dir-btn tap"
+              :class="{ 'is-on': direction === 'ToNJ' }"
+              @click="setDir('ToNJ')"
+            >
+              To NJ
+            </button>
+          </div>
+        </div>
+
+        <p v-if="error" class="bridges-err">{{ error }}</p>
+        <div v-if="loading && !payload" class="bridges-skel" aria-busy="true">Loading…</div>
+
+        <div
+          v-else
+          class="bridges-content-panel"
+          aria-label="Crossing times list"
+        >
+          <h2 v-if="rankedRows.length" class="bridges-trips-h2">Crossings</h2>
+          <ul
+            v-if="rankedRows.length"
+            class="bridge-grid"
+            aria-label="Bridges, fastest first"
+          >
+            <li
+              v-for="(row, idx) in rankedRows"
+              :id="`bridge-tile-${rowRouteId(row)}`"
+              :key="rowKey(row)"
+              class="bridge-tile"
+              :class="{
+                'is-closed': isClosedRow(row),
+                'is-pick': isBestPick(idx, row),
+                'is-hi': isHighlighted(row),
+              }"
+              @click="onListTileClick(row)"
+            >
+              <div class="bridge-tile-inner">
+                <div class="bridge-tile-top">
+                  <div class="bridge-rank" aria-hidden="true">{{ idx + 1 }}</div>
+                  <div class="bridge-name-block">
+                    <h2 class="bridge-title">{{ displayTitle(row) }}</h2>
+                  </div>
+                  <div
+                    class="bridge-trend ico"
+                    :class="trendInfo(row).cls"
+                    :title="trendInfo(row).full"
+                  >{{ trendInfo(row).short }}</div>
+                </div>
+                <div class="bridge-mid">
+                  <div class="bridge-min-block">
+                    <span class="bridge-min-num">
+                      <template
+                        v-if="row && typeof row === 'object' && (/** @type {any} */(row)).isCrossingClosed"
+                      >—</template>
+                      <template
+                        v-else-if="row && typeof row === 'object' && (/** @type {any} */(row)).routeTravelTime != null"
+                      >{{ String((/** @type {any} */(row)).routeTravelTime) }}</template>
+                      <template v-else>—</template>
+                    </span>
+                    <span class="bridge-min-suf">min</span>
+                  </div>
+                  <div
+                    v-if="row && typeof row === 'object' && (/** @type {any} */(row)).routeSpeed != null"
+                    class="bridge-mph"
+                  >{{ (/** @type {any} */(row)).routeSpeed }}&nbsp;mph</div>
+                </div>
+                <div v-if="seriesForRow(row).length > 0" class="sparkline-wrap">
+                  <svg
+                    class="spark-svg"
+                    viewBox="0 0 100 22"
+                    preserveAspectRatio="none"
+                    width="100%"
+                    height="22"
+                    :aria-label="`Recent travel time for ${displayTitle(row)}`"
+                  >
+                    <line
+                      x1="0"
+                      y1="20"
+                      x2="100"
+                      y2="20"
+                      stroke="rgba(255,255,255,0.06)"
+                      stroke-width="1"
+                    />
+                    <path
+                      v-if="sparkPathD(row)"
+                      :d="sparkPathD(row)"
+                      fill="none"
+                      stroke="var(--b-spark, #9d7ed8)"
+                      stroke-width="2.25"
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                      vector-effect="non-scaling-stroke"
+                    />
+                  </svg>
+                </div>
+              </div>
+            </li>
+          </ul>
+          <p v-else class="bridges-no-crossings">No bridge data for this direction</p>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
 <style scoped>
-.bpg {
+.bridges-page {
+  width: 100%;
   display: flex;
   flex-direction: column;
   flex: 1 1 auto;
-  min-height: 0;
   min-width: 0;
-  color: #f0eef7;
-  padding-bottom: calc(var(--nav-height, 4rem) + env(safe-area-inset-bottom, 0));
+  min-height: 0;
+  color: var(--color-text-primary, #f4f4f8);
+  --b-spark: #a78bfa;
+  --b-pick: rgba(52, 211, 153, 0.5);
   box-sizing: border-box;
+  padding-bottom: calc(var(--nav-height, 4rem) + env(safe-area-inset-bottom, 0));
 }
-.bpg--split {
+
+.bridges-page:not(.is-split) {
+  padding-left: max(env(safe-area-inset-left, 0px), var(--space-2, 0.5rem));
+  padding-right: max(env(safe-area-inset-right, 0px), var(--space-2, 0.5rem));
+  padding-top: 0.5rem;
+}
+
+/* Landscape: map left, list right (scrolls) — same model as directory */
+.bridges-page.is-split {
+  flex: 1;
+  min-height: 0;
   flex-direction: row;
   align-items: stretch;
+  padding-left: 0;
+  padding-right: 0;
+  padding-top: 0;
+  padding-bottom: calc(var(--nav-height, 4rem) + env(safe-area-inset-bottom, 0));
 }
-.bpg--split .bpg-main {
-  flex: 1 1 24rem;
+
+.bridges-map-column {
+  display: flex;
+  flex-direction: column;
   min-width: 0;
-  max-width: 28rem;
-  overflow-y: auto;
-  border-right: 1px solid #26262e;
+  min-height: 0;
 }
-.bpg--split .bpg-map--right {
-  flex: 1.2 1 0;
+
+.bridges-page.is-split .bridges-map-column {
+  flex: 1.25 1 0;
+  border-right: 1px solid var(--color-border, rgba(255, 255, 255, 0.08));
+}
+
+.bridges-map-shell {
+  min-height: min(42vh, 19rem);
+  display: flex;
+  flex-direction: column;
+  flex: 0 0 auto;
+}
+
+.bridges-map-shell.is-tall {
+  flex: 1 1 0;
+  min-height: 0;
+  height: 100%;
+}
+
+.bridges-map-placeholder {
+  min-height: min(42vh, 19rem);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #6e6e80;
+  font-size: 0.9rem;
+  background: #0a0a0f;
+  border-bottom: 1px solid var(--color-border, rgba(255, 255, 255, 0.1));
+}
+
+.bridges-list-column {
+  flex: 1 1 auto;
   min-width: 0;
   min-height: 0;
   display: flex;
   flex-direction: column;
 }
-.bpg-map :deep(.bmap) {
-  min-height: min(38vh, 16rem);
-  flex: 0 0 auto;
-}
-.bpg--split .bpg-map--right :deep(.bmap) {
+
+.bridges-list-inner {
+  padding: 0.65rem min(1.25rem, 3.5vw) 0.85rem;
+  flex: 1 1 auto;
   min-height: 0;
-  flex: 1;
-  height: 100%;
 }
-.bpg-map-ph {
-  min-height: 11rem;
+
+.bridges-list-inner.is-scroll-pane {
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+}
+
+.bridges-page.is-split .bridges-list-inner {
+  padding-top: 0.65rem;
+  padding-left: var(--space-3, 0.75rem);
+  padding-right: max(env(safe-area-inset-right, 0px), var(--space-3, 0.75rem));
+}
+
+.bridges-bar {
   display: flex;
-  align-items: center;
-  justify-content: center;
-  background: #0a0a0e;
-  color: #6e6e7e;
-  font-size: 0.9rem;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin-bottom: 0.6rem;
 }
-.bpg:not(.bpg--split) {
-  padding-left: max(0.5rem, env(safe-area-inset-left));
-  padding-right: max(0.5rem, env(safe-area-inset-right));
-  padding-top: 0.5rem;
+
+.bridges-bar-top {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
 }
-.bpg-main {
-  max-width: 40rem;
-  width: 100%;
-  margin-inline: auto;
-  box-sizing: border-box;
-  padding: 0 0.65rem 0.75rem;
-  flex: 0 0 auto;
-}
-.bpg-head {
-  margin-bottom: 0.5rem;
-}
-.bpg-title {
-  margin: 0 0 0.2rem 0;
-  font-size: 1.25rem;
+
+.bridges-h1 {
+  margin: 0;
+  font-size: var(--text-xl, 1.25rem);
   font-weight: 600;
-  color: #f4f4f8;
+  color: var(--color-text-primary, #f4f4f8);
 }
-.bpg-warn {
+
+.bridges-warn {
+  font-size: 0.68rem;
   color: #fbbf24;
-  font-size: 0.7rem;
-  margin: 0 0 0.25rem;
+  margin: 0;
+  line-height: 1.3;
+  font-weight: 600;
 }
-.bpg-sub {
-  margin: 0 0 0.4rem;
-  font-size: 0.6rem;
+
+.bridges-pill {
+  margin: 0;
+  font-size: 0.7rem;
   text-transform: uppercase;
   letter-spacing: 0.1em;
   color: #7a7a8c;
   font-weight: 700;
 }
-.bpg-sub-muted {
+
+.bridges-time {
   color: #5a5a6a;
   font-weight: 600;
-}
-.bpg-tog {
-  display: flex;
-  gap: 0.4rem;
-}
-.bpg-btn {
-  flex: 1;
-  min-height: 2.6rem;
-  border-radius: 0.75rem;
-  border: 1px solid rgba(123, 77, 181, 0.4);
-  background: rgba(0, 0, 0, 0.4);
-  color: #8e8e9c;
-  font-size: 0.85rem;
-  font-weight: 800;
-  text-transform: uppercase;
   letter-spacing: 0.04em;
 }
-.bpg-btn--on {
-  background: linear-gradient(160deg, rgba(123, 77, 181, 0.5), rgba(50, 30, 100, 0.45));
-  color: #faf5ff;
-  border-color: rgba(199, 168, 255, 0.5);
+.bridges-note {
+  color: #4a4a5c;
+  font-weight: 600;
 }
-.bpg-err {
+
+.bridges-toggle {
+  display: flex;
+  gap: 0.45rem;
+  width: 100%;
+}
+
+.dir-btn {
+  flex: 1;
+  min-height: 2.75rem;
+  min-width: 0;
+  font-size: clamp(0.85rem, 2.8vw, 1rem);
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  border-radius: 0.8rem;
+  border: 2px solid rgba(123, 77, 181, 0.35);
+  background: rgba(0, 0, 0, 0.4);
+  color: #9a9aac;
+  cursor: pointer;
+  transition: background 0.12s, border-color 0.12s, color 0.12s;
+  -webkit-tap-highlight-color: transparent;
+}
+.dir-btn.is-on {
+  background: linear-gradient(
+    160deg,
+    rgba(123, 77, 181, 0.55),
+    rgba(60, 35, 110, 0.4)
+  );
+  border-color: rgba(199, 168, 255, 0.6);
+  color: #f8f4ff;
+  box-shadow: 0 0 0 1px rgba(167, 139, 250, 0.2);
+}
+
+.bridges-err {
   color: #f87171;
   font-size: 0.8rem;
-  margin: 0 0 0.4rem;
+  margin: 0 0 0.5rem;
+  font-weight: 600;
 }
-.bpg-skel {
-  color: #8b8b9a;
-  padding: 0.5rem 0;
+
+.bridges-skel {
+  padding: 1.2rem 0;
+  color: #9a9ab0;
+  font-size: 0.9rem;
 }
-.bpg-panel {
-  border: 1px solid #26262e;
+
+.bridges-content-panel {
+  display: block;
+  width: 100%;
   border-radius: 14px;
+  border: 1px solid #26262e;
   background: #0c0c10;
-  padding: 0.5rem 0.45rem 0.6rem;
+  padding: 0.5rem 0.45rem 0.75rem;
+  box-sizing: border-box;
+  margin-top: 0.25rem;
 }
-.bpg-h2 {
-  font-size: 0.6rem;
-  text-transform: uppercase;
-  letter-spacing: 0.1em;
-  color: #6e6e7e;
-  margin: 0 0 0.4rem 0.2rem;
+
+.bridges-trips-h2 {
+  margin: 0 0 0.4rem 0.15rem;
+  font-size: 0.65rem;
   font-weight: 800;
-}
-.bpg-empty {
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
   color: #6e6e7e;
-  font-size: 0.8rem;
-  margin: 0.25rem 0.2rem 0.15rem;
 }
-.bpg-list {
+
+.bridges-no-crossings {
+  margin: 0.5rem 0.25rem 0.35rem;
+  font-size: 0.8rem;
+  color: #7a7a8c;
+}
+
+/* Responsive grid: one column on narrow phones, two from ~480px, three on large tablets/desktop */
+.bridge-grid {
   list-style: none;
   margin: 0;
   padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 0.45rem;
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 0.55rem;
+  align-items: stretch;
 }
-.bpg-card {
-  border-radius: 10px;
-  border: 1px solid #2a2a32;
-  background: linear-gradient(180deg, #12121a, #0d0d11);
-  padding: 0.5rem 0.55rem;
+
+@media (min-width: 480px) {
+  .bridge-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.65rem;
+  }
+}
+
+@media (min-width: 900px) {
+  .bridges-page:not(.is-split) .bridge-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 0.75rem;
+  }
+}
+
+/* Split view: one column, easier to scan with map on the side */
+.bridges-page.is-split .bridge-grid {
+  grid-template-columns: 1fr;
+  gap: 0.5rem;
+  max-width: 30rem;
+}
+
+.bridge-tile {
+  min-width: 0;
+  border-radius: 14px;
+  position: relative;
+  background: linear-gradient(150deg, #181822 0%, #0b0b0f 100%);
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.35);
   cursor: pointer;
   -webkit-tap-highlight-color: transparent;
   transition: border-color 0.12s, box-shadow 0.12s;
 }
-.bpg-card--best {
-  border-color: rgba(52, 211, 153, 0.4);
-  box-shadow: 0 0 0 1px rgba(52, 211, 153, 0.1);
+
+.bridge-tile.is-hi {
+  border-color: rgba(199, 168, 255, 0.55);
+  box-shadow: 0 0 0 1px rgba(199, 168, 255, 0.25);
 }
-.bpg-card--hi {
-  border-color: rgba(167, 139, 250, 0.5);
-  box-shadow: 0 0 0 1px rgba(167, 139, 250, 0.2);
+
+.bridge-tile.is-pick {
+  border-color: var(--b-pick);
+  box-shadow: 0 0 0 1px var(--b-pick), 0 8px 24px rgba(0, 0, 0, 0.45);
 }
-.bpg-card-t {
+
+.bridge-tile.is-closed {
+  opacity: 0.7;
+  border-color: rgba(248, 113, 113, 0.3);
+}
+
+.bridge-tile-inner {
+  padding: 0.5rem 0.65rem 0.4rem;
+  min-height: 0;
   display: flex;
-  align-items: flex-start;
-  gap: 0.4rem;
-  margin-bottom: 0.2rem;
+  flex-direction: column;
+  gap: 0.15rem;
 }
-.bpg-rank {
-  min-width: 1.1rem;
-  text-align: center;
-  font-size: 0.6rem;
-  font-weight: 800;
+
+.bridge-tile-top {
+  display: grid;
+  grid-template-columns: 1.35rem 1fr auto;
+  grid-template-areas: 'rank name trend' 'bdg bdg bdg';
+  align-items: start;
+  column-gap: 0.4rem;
+  row-gap: 0.1rem;
+  min-height: 2.5rem;
+  position: relative;
+}
+
+@media (min-width: 480px) {
+  .bridge-tile-top {
+    min-height: 2.6rem;
+  }
+}
+
+.bridge-rank {
+  grid-area: rank;
+  font-size: 0.65rem;
+  font-weight: 900;
+  line-height: 1;
   color: #5c5c6c;
-  background: #18181e;
-  border: 1px solid #2e2e36;
-  border-radius: 4px;
-  line-height: 1.2;
-  padding: 0.1rem 0.15rem;
+  padding-top: 0.15rem;
+  text-align: center;
+  width: 1.35rem;
+  height: 1.35rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.35);
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.06);
 }
-.bpg-card--best .bpg-rank {
+
+.bridge-tile.is-pick .bridge-rank {
   color: #6ee7b7;
-  border-color: rgba(52, 211, 153, 0.3);
+  border-color: rgba(52, 211, 153, 0.35);
 }
-.bpg-titles {
+
+.bridge-name-block {
+  grid-area: name;
   min-width: 0;
-  flex: 1;
 }
-.bpg-h3 {
+
+.bridge-title {
   margin: 0;
-  font-size: 0.8rem;
+  font-size: clamp(0.78rem, 2.1vw, 0.92rem);
   font-weight: 800;
-  line-height: 1.25;
-  color: #ebe6f2;
-  word-wrap: break-word;
-}
-.bpg-sublab {
-  margin: 0.1rem 0 0 0;
-  font-size: 0.6rem;
-  color: #8a8a9a;
   line-height: 1.2;
-  font-weight: 600;
+  color: #f2eef9;
+  letter-spacing: 0.01em;
+  word-break: break-word;
+  hyphens: auto;
 }
-.bpg-card-m {
+
+.bridge-trend {
+  grid-area: trend;
+  width: 1.65rem;
+  height: 1.65rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.9rem;
+  line-height: 1;
+  font-weight: 900;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: #7a7a8c;
+  background: rgba(0, 0, 0, 0.35);
+  flex-shrink: 0;
+}
+
+.t--worse {
+  color: #fecdd3;
+  background: rgba(127, 29, 29, 0.45);
+  border-color: rgba(248, 113, 113, 0.4);
+}
+.t--better {
+  color: #a7f3d0;
+  background: rgba(6, 78, 59, 0.4);
+  border-color: rgba(52, 211, 153, 0.45);
+}
+.t--neutral {
+  color: #fde68a;
+  background: rgba(100, 80, 0, 0.35);
+  border-color: rgba(250, 204, 21, 0.3);
+}
+.t--unk {
+  color: #6a6a78;
+}
+
+.bridge-mid {
   display: flex;
   align-items: baseline;
   justify-content: space-between;
-  gap: 0.5rem;
-  padding-top: 0.05rem;
+  gap: 0.4rem;
+  margin-top: 0.1rem;
+  min-height: 2.4rem;
 }
-.bpg-mins {
-  font-size: 1.65rem;
+
+.bridge-min-block {
+  display: flex;
+  align-items: baseline;
+  gap: 0.15rem;
+  flex: 0 0 auto;
+}
+
+.bridge-min-num {
+  font-size: clamp(1.8rem, 5.5vw, 2.35rem);
   font-weight: 900;
-  color: #e0d8f8;
-  line-height: 1;
-  letter-spacing: -0.02em;
+  line-height: 0.9;
+  letter-spacing: -0.03em;
+  color: #e9e4ff;
+  text-shadow: 0 1px 0 rgba(0, 0, 0, 0.5);
   font-variant-numeric: tabular-nums;
 }
-.bpg-mins--na {
-  color: #6b6b78;
-}
-.bpg-card--best .bpg-mins:not(.bpg-mins--na) {
+
+.bridge-tile.is-pick .bridge-min-num {
   color: #c4f4dd;
 }
-.bpg-mu {
-  font-size: 0.5rem;
-  text-transform: uppercase;
-  color: #7a7a88;
-  margin-left: 0.15rem;
+
+.bridge-min-suf {
+  font-size: 0.75rem;
   font-weight: 800;
+  text-transform: uppercase;
+  color: #8a8a9a;
   letter-spacing: 0.06em;
-  vertical-align: 0.15em;
 }
-.bpg-mph {
-  font-size: 0.65rem;
-  color: #5e5e6e;
+
+.bridge-mph {
+  font-size: 0.72rem;
   font-weight: 700;
+  color: #6e6e80;
   font-variant-numeric: tabular-nums;
+  text-align: right;
+  line-height: 1.1;
+  max-width: 4rem;
   flex-shrink: 0;
 }
-.bpg-spark {
-  margin-top: 0.25rem;
-  opacity: 0.9;
-  border-top: 1px solid #1e1e25;
+
+.sparkline-wrap {
+  margin-top: 0.15rem;
   padding-top: 0.2rem;
+  border-top: 1px solid rgba(255, 255, 255, 0.05);
+  opacity: 0.9;
 }
-.bpg-spark-svg {
+.spark-svg {
   display: block;
   max-width: 100%;
+  min-height: 1.1rem;
 }
 </style>

@@ -142,7 +142,7 @@ export async function getHealth() {
   return handleJson(r)
 }
 
-/** Port Authority bridge/tunnel times + series for charts (server-cached). */
+/** Port Authority bridge/tunnel times + stored series for trend charts. */
 export async function getBridgesPanynj() {
   const r = await apiFetch('/api/bridges/panynj')
   return handleJson(r)
@@ -158,6 +158,74 @@ export async function putAssignment(body) {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
+  })
+  return handleJson(r)
+}
+
+/**
+ * @param {{ dailyTripLegSequence: string, outcome: 'delivered' | 'rejected' | 'removed' | 'none' }} p
+ */
+export async function patchTripHistoryOutcome(p) {
+  return putAssignment({
+    patchTripHistoryEntry: {
+      dailyTripLegSequence: String(p.dailyTripLegSequence),
+      outcome: p.outcome,
+      touchedAt: Date.now(),
+    },
+  })
+}
+
+export async function getInAppNotifications() {
+  const r = await apiFetch('/api/notifications')
+  return handleJson(r)
+}
+
+/**
+ * @param {{ id?: string, all?: boolean }} body
+ */
+export async function postInAppMarkRead(body) {
+  const r = await apiFetch('/api/notifications/read', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+  return handleJson(r)
+}
+
+export async function getDollyRegistry() {
+  const r = await apiFetch('/api/dolly')
+  return handleJson(r)
+}
+
+/**
+ * @param {string} [legSeq]
+ * @param {unknown} trip
+ */
+export async function syncDollyFromLinehaul(legSeq, trip) {
+  const r = await apiFetch('/api/dolly/sync', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ legSeq: legSeq || '', trip: trip ?? null }),
+  })
+  return handleJson(r)
+}
+
+/** @param {{ dollyNbr: string, legSeq?: string }} p */
+export async function putDollyNumber(p) {
+  const r = await apiFetch('/api/dolly', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(p),
+  })
+  return handleJson(r)
+}
+
+/** @param {{ dollyNbr: string, rating: 'none' | 'good' | 'bad' }} p */
+export async function patchDollyRating(p) {
+  const r = await apiFetch('/api/dolly', {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(p),
   })
   return handleJson(r)
 }

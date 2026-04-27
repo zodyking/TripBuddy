@@ -28,7 +28,6 @@ import {
   liveLogEntries,
   pushLiveLog,
   clearLiveLog,
-  registerAssignmentListener,
   reconnectLiveLogStream,
 } from '../stores/liveLogStore.js'
 import SettingsSection from '../components/settings/SettingsSection.vue'
@@ -270,14 +269,27 @@ function closeAutomationEditor() {
   editingAutomationId.value = null
 }
 
-const assignmentAlert = ref(null)
 let unregisterRecover = () => {}
-let unregisterAssignment = () => {}
 
 const credUser = ref('')
 const credTractor = ref('')
+/** 0=Sun..6=Sat; History groups by your rolling 7-day work week starting on this day */
+const workWeekStartDay = ref(0)
+const workWeekEndDay = ref(6)
+/** History calendar "shift day" — overnight (e.g. 19:00–07:00) uses the date the shift started. */
+const shiftStartTime = ref('00:00')
+const shiftEndTime = ref('23:59')
 const credLinehaulToken = ref('')
 const credPollMinutes = ref(0)
+const weekDayOptions = [
+  { v: 0, label: 'Sunday' },
+  { v: 1, label: 'Monday' },
+  { v: 2, label: 'Tuesday' },
+  { v: 3, label: 'Wednesday' },
+  { v: 4, label: 'Thursday' },
+  { v: 5, label: 'Friday' },
+  { v: 6, label: 'Saturday' },
+]
 /** Linehaul home refresh slider: 0 = manual only, max 60 min (1 min steps). */
 const LINEHAUL_POLL_MAX = 60
 const linehaulPollTickValues = Array.from(
@@ -383,6 +395,30 @@ async function loadCredentials() {
         Math.min(LINEHAUL_POLL_MAX, Math.floor(raw)),
       )
     }
+    {
+      const ws =
+        typeof credMeta.value.workWeekStartDay === 'number' ? credMeta.value.workWeekStartDay : 0
+      workWeekStartDay.value = Math.min(6, Math.max(0, Math.floor(ws)))
+    }
+    {
+      const we =
+        typeof credMeta.value.workWeekEndDay === 'number' ? credMeta.value.workWeekEndDay : 6
+      workWeekEndDay.value = Math.min(6, Math.max(0, Math.floor(we)))
+    }
+    {
+      const mToStr = (m) => {
+        const n = Math.max(0, Math.min(1439, Math.floor(Number(m) || 0)))
+        return `${String(Math.floor(n / 60)).padStart(2, '0')}:${String(n % 60).padStart(2, '0')}`
+      }
+      shiftStartTime.value =
+        typeof credMeta.value.shiftStartMins === 'number'
+          ? mToStr(credMeta.value.shiftStartMins)
+          : '00:00'
+      shiftEndTime.value =
+        typeof credMeta.value.shiftEndMins === 'number'
+          ? mToStr(credMeta.value.shiftEndMins)
+          : '23:59'
+    }
     credLinehaulToken.value =
       typeof credMeta.value.fedexLinehaulBearer === 'string'
         ? credMeta.value.fedexLinehaulBearer
@@ -399,10 +435,24 @@ async function saveCredentials() {
   credMsg.value = null
   try {
     const hasBearerInput = credLinehaulToken.value.trim().length > 0
+    const tToM = (s) => {
+      const t = String(s).trim()
+      if (!/^\d{1,2}:\d{2}$/.test(t)) return 0
+      const [a, b] = t.split(':')
+      const h = Math.min(23, Math.max(0, parseInt(a, 10) || 0))
+      const mi = Math.min(59, Math.max(0, parseInt(b, 10) || 0))
+      return h * 60 + mi
+    }
+    const ssm = tToM(shiftStartTime.value)
+    const sem = tToM(shiftEndTime.value)
     const body = {
       username: credUser.value,
       password: credPass.value || undefined,
       tractorNumber: credTractor.value,
+      workWeekStartDay: workWeekStartDay.value,
+      workWeekEndDay: workWeekEndDay.value,
+      shiftStartMins: ssm,
+      shiftEndMins: sem,
       linehaulPollMinutes: Math.max(
         0,
         Math.min(LINEHAUL_POLL_MAX, Math.floor(Number(credPollMinutes.value) || 0)),
@@ -652,19 +702,8 @@ async function runLinehaulTest() {
   }
 }
 
-function clearAssignmentAlert() {
-  assignmentAlert.value = null
-}
-
 onMounted(() => {
   tripAlertMode.value = getTripAlertMode()
-  unregisterAssignment = registerAssignmentListener((data) => {
-    assignmentAlert.value = {
-      ts: data.ts,
-      message: data.message || 'Assignment change detected',
-      detail: data.current ?? data,
-    }
-  })
   unregisterRecover = registerApiRecover(reconnectLiveLogStream)
   loadCredentials()
   loadAssignmentState()
@@ -688,7 +727,6 @@ watch(settingsTab, (tab) => {
 })
 
 onUnmounted(() => {
-  unregisterAssignment()
   unregisterRecover()
 })
 
@@ -696,12 +734,6 @@ onUnmounted(() => {
 
 <template>
   <div class="shell">
-    <div v-if="assignmentAlert" class="alert" role="status">
-      <strong>New activity</strong>
-      <p>{{ assignmentAlert.message }}</p>
-      <button type="button" class="btn ghost tap" @click="clearAssignmentAlert">Dismiss</button>
-    </div>
-
     <div class="settings-tabs" role="tablist" aria-label="Settings sections">
       <button
         type="button"
@@ -768,6 +800,53 @@ onUnmounted(() => {
           maxlength="6"
           @input="onCredTractorInput"
         />
+        <p class="cred-hint">History uses your work week below. Shift times set which <strong>calendar day</strong> a trip belongs to (e.g. 7:00 PM–7:00 AM: a trip at 1:00 AM still counts on the <strong>previous</strong> calendar day, when your shift started).</p>
+        <div class="work-week-row work-week-row--3">
+          <div>
+            <label class="lbl" for="shift-start">Shift start (local)</label>
+            <input
+              id="shift-start"
+              v-model="shiftStartTime"
+              class="inp tap"
+              type="time"
+            />
+          </div>
+          <div>
+            <label class="lbl" for="shift-end">Shift end (local)</label>
+            <input
+              id="shift-end"
+              v-model="shiftEndTime"
+              class="inp tap"
+              type="time"
+            />
+          </div>
+        </div>
+        <div class="work-week-row">
+          <div>
+            <label class="lbl" for="work-week-start">Work week starts</label>
+            <select
+              id="work-week-start"
+              v-model.number="workWeekStartDay"
+              class="inp tap"
+            >
+              <option v-for="o in weekDayOptions" :key="`ws-${o.v}`" :value="o.v">
+                {{ o.label }}
+              </option>
+            </select>
+          </div>
+          <div>
+            <label class="lbl" for="work-week-end">Work week ends (label)</label>
+            <select
+              id="work-week-end"
+              v-model.number="workWeekEndDay"
+              class="inp tap"
+            >
+              <option v-for="o in weekDayOptions" :key="`we-${o.v}`" :value="o.v">
+                {{ o.label }}
+              </option>
+            </select>
+          </div>
+        </div>
         <label class="lbl">Phone number</label>
         <input
           :value="phoneDisplay"
@@ -1241,6 +1320,27 @@ onUnmounted(() => {
 </template>
 
 <style scoped>
+.cred-hint {
+  font-size: var(--text-xs, 0.6875rem);
+  line-height: 1.4;
+  color: var(--color-text-tertiary, #6e6e7e);
+  margin: 0 0 0.5rem;
+  max-width: 36rem;
+}
+.work-week-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-3, 0.75rem);
+  margin-bottom: var(--space-3, 0.75rem);
+}
+.work-week-row--3 {
+  grid-template-columns: 1fr 1fr;
+}
+@media (max-width: 500px) {
+  .work-week-row {
+    grid-template-columns: 1fr;
+  }
+}
 .shell {
   min-height: 100vh;
   min-height: 100dvh;
@@ -1591,14 +1691,6 @@ onUnmounted(() => {
 }
 .cred-msg--error {
   color: var(--color-error, #ef4444);
-}
-.alert {
-  background: var(--color-warning-muted, rgba(245, 158, 11, 0.15));
-  border: 1px solid var(--color-warning-border, rgba(245, 158, 11, 0.3));
-  padding: var(--space-4, 1rem);
-  border-radius: var(--radius-lg, 0.75rem);
-  margin-bottom: var(--space-4, 1rem);
-  animation: slide-up var(--duration-normal, 200ms) var(--ease-out);
 }
 .stack {
   display: flex;
@@ -1992,7 +2084,6 @@ code {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .alert,
   .btn.primary:hover {
     animation: none;
     transform: none;
