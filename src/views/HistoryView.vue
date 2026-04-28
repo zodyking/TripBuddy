@@ -171,13 +171,34 @@ function billableMilesForPayEstimate(paidMi) {
 }
 
 /**
+ * Leading numeric location id from dispatch labels like "84 · LINDEN".
+ * @param {unknown} v
+ */
+function leadingLocationId(v) {
+  const s = String(str(v) || '').trim()
+  const m = s.match(/^\s*(\d+)/)
+  return m ? m[1] : ''
+}
+
+/**
+ * Origin → destination using location ids only (for pay breakdown rows).
  * @param {LedgerEntry} e
  */
-function tripOdShortLabel(e) {
-  const o = String(str(e.dispatchHeader?.origin) || '').trim() || '—'
-  const d = String(str(e.dispatchHeader?.destination) || '').trim() || '—'
-  const clip = (s, n) => (s.length > n ? `${s.slice(0, n - 1)}…` : s)
-  return `${clip(o, 18)} → ${clip(d, 18)}`
+function tripOdIdsOnly(e) {
+  const o = leadingLocationId(e.dispatchHeader?.origin)
+  const d = leadingLocationId(e.dispatchHeader?.destination)
+  return `${o || '—'} → ${d || '—'}`
+}
+
+/**
+ * Dispatched time plus trip leg when present (pay breakdown detail lines).
+ * @param {LedgerEntry} e
+ */
+function tripPayWhenWithLeg(e) {
+  const when = formatWhen(e.displayDate)
+  const seq = String(e.dailyTripLegSequence || '').trim()
+  if (/^\d+$/.test(seq)) return `${when} · Leg #${seq}`
+  return when
 }
 
 /**
@@ -195,8 +216,8 @@ function computeWeekPayEstimate(items) {
     sumBillable += billableMi
     rows.push({
       id: e.id,
-      od: tripOdShortLabel(e),
-      when: formatWhen(e.displayDate),
+      od: tripOdIdsOnly(e),
+      when: tripPayWhenWithLeg(e),
       paidMi,
       billableMi,
       rounded: base >= PAY_ROUND_THRESHOLD_MI,
@@ -1000,9 +1021,14 @@ onUnmounted(() => {
             <summary class="history-ww-head history-fold__summary">
               <div class="history-ww-head-row">
                 <h3 class="history-ww-title">{{ wg.groupLabel }}</h3>
-                <span class="history-mile-pill">{{
-                  mileageHeaderLine(wg.mileageSum, wg.tripsWithMileage, wg.tripCount)
-                }}</span>
+                <div class="history-head-metrics">
+                  <span class="history-mile-pill">{{
+                    mileageHeaderLine(wg.mileageSum, wg.tripsWithMileage, wg.tripCount)
+                  }}</span>
+                  <span class="history-pay-head-pill">{{
+                    formatUsdWhole((weekPayEstimateByKey[wg.key] || { estimateUsd: 0 }).estimateUsd)
+                  }}</span>
+                </div>
               </div>
             </summary>
 
@@ -1017,9 +1043,14 @@ onUnmounted(() => {
                 <summary class="history-day-head history-fold__summary">
                   <div class="history-day-head-row">
                     <h4 class="history-day-title">{{ dg.dayLabel }}</h4>
-                    <span class="history-mile-pill history-mile-pill--sm">{{
-                      mileageHeaderLine(dg.mileageSum, dg.tripsWithMileage, dg.tripCount)
-                    }}</span>
+                    <div class="history-head-metrics">
+                      <span class="history-mile-pill history-mile-pill--sm">{{
+                        mileageHeaderLine(dg.mileageSum, dg.tripsWithMileage, dg.tripCount)
+                      }}</span>
+                      <span class="history-pay-head-pill history-pay-head-pill--sm">{{
+                        formatUsdWhole(dayPayEstimateFor(wg.key, dg.shiftDayKey).estimateUsd)
+                      }}</span>
+                    </div>
                   </div>
                 </summary>
 
@@ -1179,33 +1210,12 @@ onUnmounted(() => {
                 </li>
                 </ul>
 
-                <details class="history-day-earn-fold history-fold">
-                  <summary class="history-day-earn-fold__summary history-fold__summary">
-                    <span class="history-day-earn-fold__title">Estimated earning</span>
-                    <span class="history-day-earn-fold__pill">{{
-                      formatUsdWhole(dayPayEstimateFor(wg.key, dg.shiftDayKey).estimateUsd)
-                    }}</span>
-                  </summary>
-                  <div class="history-day-earn-body">
-                    <p class="history-day-earn-line">
-                      <span>Estimate for this shift day</span>
-                      <strong>{{ formatUsdWhole(dayPayEstimateFor(wg.key, dg.shiftDayKey).estimateUsd) }}</strong>
-                    </p>
-                    <p class="history-day-earn-note">
-                      Same rules as week pay breakdown ($1/mi billable; ≥{{ PAY_ROUND_THRESHOLD_MI }} mi paid →
-                      {{ PAY_ROUND_TO_MI }} mi).
-                    </p>
-                  </div>
-                </details>
               </details>
             </div>
 
             <details class="history-pay-fold history-fold">
               <summary class="history-pay-fold__summary history-fold__summary">
                 <span class="history-pay-fold__title">Pay breakdown estimate</span>
-                <span class="history-pay-fold__pill">{{
-                  formatUsdWhole((weekPayEstimateByKey[wg.key] || { estimateUsd: 0 }).estimateUsd)
-                }}</span>
               </summary>
               <div class="history-pay-body">
                 <p class="history-pay-rules">
@@ -1575,6 +1585,33 @@ onUnmounted(() => {
   min-width: 0;
 }
 
+.history-head-metrics {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  flex-shrink: 0;
+}
+
+.history-pay-head-pill {
+  flex-shrink: 0;
+  padding: 0.18rem 0.42rem;
+  border-radius: 999px;
+  font-size: 0.58rem;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  background: rgba(34, 197, 94, 0.12);
+  border: 1px solid rgba(34, 197, 94, 0.38);
+  color: #bbf7d0;
+  white-space: nowrap;
+}
+
+.history-pay-head-pill--sm {
+  font-size: 0.54rem;
+  padding: 0.14rem 0.34rem;
+}
+
 .history-ww-title {
   margin: 0;
   flex: 1;
@@ -1639,7 +1676,7 @@ onUnmounted(() => {
 .history-pay-fold > .history-pay-fold__summary {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-start;
   gap: 0.5rem;
   padding: 0.42rem 0.55rem;
   background: rgba(255, 255, 255, 0.03);
@@ -1652,18 +1689,6 @@ onUnmounted(() => {
   letter-spacing: 0.03em;
   text-transform: uppercase;
   color: #a8a8b8;
-}
-
-.history-pay-fold__pill {
-  flex-shrink: 0;
-  padding: 0.18rem 0.45rem;
-  border-radius: 999px;
-  font-size: 0.62rem;
-  font-weight: 800;
-  font-variant-numeric: tabular-nums;
-  background: rgba(34, 197, 94, 0.12);
-  border: 1px solid rgba(34, 197, 94, 0.35);
-  color: #bbf7d0;
 }
 
 .history-pay-body {
@@ -1764,72 +1789,6 @@ onUnmounted(() => {
   font-weight: 800;
   font-variant-numeric: tabular-nums;
   color: #f4f4fa;
-}
-
-.history-day-earn-fold {
-  margin: 0.45rem 0.35rem 0.35rem;
-  border-radius: 10px;
-  border: 1px solid #2f2f3a;
-  background: rgba(0, 0, 0, 0.18);
-  overflow: hidden;
-}
-
-.history-day-earn-fold > .history-day-earn-fold__summary {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.5rem;
-  padding: 0.38rem 0.5rem;
-  background: rgba(255, 255, 255, 0.03);
-  border-bottom: 1px solid #2a2a32;
-}
-
-.history-day-earn-fold__title {
-  font-size: 0.62rem;
-  font-weight: 700;
-  letter-spacing: 0.03em;
-  text-transform: uppercase;
-  color: #9a9aaa;
-}
-
-.history-day-earn-fold__pill {
-  flex-shrink: 0;
-  padding: 0.16rem 0.4rem;
-  border-radius: 999px;
-  font-size: 0.58rem;
-  font-weight: 800;
-  font-variant-numeric: tabular-nums;
-  background: rgba(34, 197, 94, 0.1);
-  border: 1px solid rgba(34, 197, 94, 0.32);
-  color: #bbf7d0;
-}
-
-.history-day-earn-body {
-  padding: 0.45rem 0.5rem 0.5rem;
-}
-
-.history-day-earn-line {
-  margin: 0 0 0.35rem;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.5rem;
-  font-size: 0.68rem;
-  color: #b8b8c8;
-}
-
-.history-day-earn-line strong {
-  font-size: 0.82rem;
-  font-weight: 800;
-  font-variant-numeric: tabular-nums;
-  color: #f0f0f8;
-}
-
-.history-day-earn-note {
-  margin: 0;
-  font-size: 0.58rem;
-  line-height: 1.4;
-  color: #6e6e7e;
 }
 
 .history-list--day {
