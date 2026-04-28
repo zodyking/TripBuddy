@@ -73,7 +73,7 @@ function sync() {
         title: label || '',
       })
       if (label) {
-        mk.bindTooltip(label, { direction: 'top', offset: [0, -34], opacity: 0.95 })
+        mk.bindTooltip(label, { direction: 'top', offset: [0, -42], opacity: 0.95 })
       }
       mk.addTo(markerLayer)
     }

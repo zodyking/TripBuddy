@@ -168,7 +168,7 @@ function syncMarkers() {
       icon,
       title: `Location ${id}`,
     })
-    marker.bindTooltip(`Location ${id}`, { direction: 'top', offset: [0, -44] })
+    marker.bindTooltip(`Location ${id}`, { direction: 'top', offset: [0, -52] })
     marker.on('click', () => {
       emit('select', id)
     })
