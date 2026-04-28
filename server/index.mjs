@@ -79,6 +79,7 @@ import {
   getUsernameForAccountKey,
   setLastActiveAccountKey,
   writeUserMeta,
+  getEmployeeNumber,
 } from './credentials-store.mjs'
 import {
   captureAndSaveLinehaulBearer,
@@ -89,6 +90,7 @@ import {
   linehaulTripStatusByReferenceId,
   linehaulTripsGet,
   linehaulTransportationNetworkLocationGet,
+  linehaulViewTripInfoDetailsGet,
 } from './fedex-linehaul-api.mjs'
 import { TOOL_SECRET_HINT } from './config.mjs'
 import { maybeUpdateAssignmentFromContext } from './assignment-logic.mjs'
@@ -913,6 +915,62 @@ app.get('/api/fedex/linehaul/trips', async (req, reply) => {
     })
   }
 
+  return reply.code(result.status).send({
+    ok: result.ok,
+    status: result.status,
+    body: result.body,
+  })
+})
+
+app.get('/api/fedex/linehaul/view-trip-info-details', async (req, reply) => {
+  const q = req.query ?? {}
+  const orgOrigin =
+    typeof q.orgIdOrigin === 'string' && q.orgIdOrigin.trim()
+      ? q.orgIdOrigin.trim()
+      : ''
+  const orgDest =
+    typeof q.orgIdDest === 'string' && q.orgIdDest.trim()
+      ? q.orgIdDest.trim()
+      : ''
+  if (!DIGITS_RE.test(orgOrigin) || !DIGITS_RE.test(orgDest)) {
+    return reply.code(400).send({
+      error: 'Pass orgIdOrigin and orgIdDest (digits only).',
+    })
+  }
+  const bearer = await getDecryptedLinehaulBearer()
+  if (!bearer) {
+    return reply.code(401).send({
+      error:
+        'No FedEx Linehaul bearer token on file. Use Settings → Capture Linehaul token, or save a token under Driver Credentials.',
+    })
+  }
+
+  let originIdHeader =
+    typeof q.originId === 'string' && q.originId.trim() ? q.originId.trim() : ''
+  if (!originIdHeader) {
+    const tractorNbr = await getTractorNumber()
+    if (tractorNbr && DIGITS_RE.test(String(tractorNbr).trim())) {
+      const tr = await linehaulGet('tractor', String(tractorNbr).trim(), bearer)
+      const lid = tr.body?.locationId
+      if (lid != null && String(lid).trim() !== '') {
+        originIdHeader = String(lid).trim()
+      }
+    }
+  }
+
+  const emp = (await getEmployeeNumber()) || ''
+  const pad = (n) => String(n).padStart(2, '0')
+  const now = new Date()
+  const ts = `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`
+  const correlationId =
+    emp && DIGITS_RE.test(emp)
+      ? `MTA_${emp}_${ts}`
+      : `MTA_${ts}`
+
+  const result = await linehaulViewTripInfoDetailsGet(orgOrigin, orgDest, bearer, {
+    originIdHeader: originIdHeader || orgOrigin,
+    correlationId,
+  })
   return reply.code(result.status).send({
     ok: result.ok,
     status: result.status,

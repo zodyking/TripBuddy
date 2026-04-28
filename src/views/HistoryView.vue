@@ -58,6 +58,44 @@ function normalizeOutcome(x) {
   return ''
 }
 
+/**
+ * Planned route mileage from Linehaul `viewTripInfoDetails` (stored under tripDetails.mileage).
+ * @param {LedgerEntry} e
+ */
+function mileageBlock(e) {
+  const m = e?.tripDetails?.mileage
+  if (!m || typeof m !== 'object' || Array.isArray(m)) return null
+  const mo = /** @type {Record<string, unknown>} */ (m)
+  const total = typeof mo.totalMiles === 'string' ? mo.totalMiles.trim() : ''
+  const run =
+    typeof mo.runTimeHours === 'number' && Number.isFinite(mo.runTimeHours)
+      ? mo.runTimeHours
+      : null
+  const dl = Array.isArray(mo.directionList) ? mo.directionList : []
+  if (!total && !dl.length && run == null) return null
+  return { total, run, directionList: dl }
+}
+
+/**
+ * @param {unknown} row
+ */
+function stateMilesLabel(row) {
+  if (!row || typeof row !== 'object') return ''
+  const o = /** @type {Record<string, unknown>} */ (row)
+  const st = o.state != null ? String(o.state) : ''
+  const mp = o.mileagePerState
+  const mi =
+    typeof mp === 'number' && Number.isFinite(mp)
+      ? String(mp)
+      : mp != null
+        ? String(mp)
+        : ''
+  if (!st && !mi) return ''
+  if (!mi) return st
+  if (!st) return `${mi} mi`
+  return `${st}: ${mi} mi`
+}
+
 async function load() {
   loading.value = true
   error.value = ''
@@ -728,6 +766,22 @@ onUnmounted(() => {
           </p>
         </div>
         <div class="history-body">
+          <template v-for="mb in [mileageBlock(e)]" :key="e.id + '-mileage'">
+            <div v-if="mb" class="history-mileage">
+              <span class="history-body-label">Trip mileage</span>
+              <p v-if="mb.total || mb.run != null" class="history-mileage-total">
+                <template v-if="mb.total">{{ mb.total }} mi planned</template>
+                <template v-if="mb.run != null">
+                  <template v-if="mb.total">&nbsp;·&nbsp;</template>~{{ mb.run }} h run time
+                </template>
+              </p>
+              <ul v-if="mb.directionList.length" class="history-mileage-by-state">
+                <li v-for="(row, mi) in mb.directionList" :key="mi">
+                  {{ stateMilesLabel(row) }}
+                </li>
+              </ul>
+            </div>
+          </template>
           <p
             v-if="str(e.tripDetails?.tripStatus) || str(e.tripDetails?.tractorNumber)"
             class="history-trip-meta"
@@ -1485,6 +1539,29 @@ onUnmounted(() => {
 
 .history-body {
   padding: 0.75rem 0.85rem 0.85rem;
+}
+
+.history-mileage {
+  margin-bottom: 0.75rem;
+  padding: 0.55rem 0.65rem;
+  border-radius: 8px;
+  background: rgba(124, 92, 255, 0.06);
+  border: 1px solid rgba(124, 92, 255, 0.22);
+}
+
+.history-mileage-total {
+  margin: 0 0 0.45rem;
+  font-size: 0.84rem;
+  font-weight: 600;
+  color: var(--color-text-primary, #f0f0f8);
+}
+
+.history-mileage-by-state {
+  margin: 0;
+  padding-left: 1.1rem;
+  font-size: 0.74rem;
+  line-height: 1.45;
+  color: var(--color-text-secondary, #b8b8c8);
 }
 
 .history-trip-meta {

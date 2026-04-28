@@ -161,3 +161,65 @@ export async function linehaulTransportationNetworkLocationGet(
     body,
   }
 }
+
+/**
+ * Planned trip mileage / routing by origin and destination org ids (matches mobile “View trip info”).
+ * `GET …/trip/v1/viewTripInfoDetails?orgIdOrigin=…&orgIdDest=…`
+ * @param {string} orgIdOrigin digits
+ * @param {string} orgIdDest digits
+ * @param {string} bearerToken raw JWT
+ * @param {{
+ *   originIdHeader?: string,
+ *   correlationId?: string,
+ *   timeoutMs?: string | number,
+ * }} [opts]
+ */
+export async function linehaulViewTripInfoDetailsGet(
+  orgIdOrigin,
+  orgIdDest,
+  bearerToken,
+  opts = {},
+) {
+  const oo = String(orgIdOrigin ?? '').trim()
+  const od = String(orgIdDest ?? '').trim()
+  const path = `${LINEHAUL_TRIP_BASE}/viewTripInfoDetails?${new URLSearchParams({
+    orgIdOrigin: oo,
+    orgIdDest: od,
+  }).toString()}`
+  /** @type {Record<string, string>} */
+  const headers = {
+    Accept: 'application/json, text/plain, */*',
+    Authorization: `Bearer ${bearerToken}`,
+    Origin: ORIGIN,
+    Referer: `${ORIGIN}/`,
+    clientDeviceVendor: 'Apple',
+    clientDeviceModel: 'iPhone',
+    clientOSVersion: '18.7',
+    clientOS: 'iOS',
+    clientDeviceType: 'mobile',
+    Timeout:
+      opts.timeoutMs != null && opts.timeoutMs !== ''
+        ? String(opts.timeoutMs)
+        : '7500',
+  }
+  if (opts.originIdHeader != null && String(opts.originIdHeader).trim() !== '') {
+    headers.originId = String(opts.originIdHeader).trim()
+  }
+  if (opts.correlationId != null && String(opts.correlationId).trim() !== '') {
+    headers.CorrelationId = String(opts.correlationId).trim()
+  }
+  const res = await fetch(path, { method: 'GET', headers })
+  const text = await res.text()
+  let body
+  try {
+    body = text ? JSON.parse(text) : null
+  } catch {
+    body = { raw: text }
+  }
+  return {
+    ok: res.ok,
+    status: res.status,
+    headers: Object.fromEntries(res.headers.entries()),
+    body,
+  }
+}

@@ -48,6 +48,29 @@ export function extractOriginDest(body) {
 }
 
 /**
+ * Org ids for mileage API (`orgIdOrigin`, `orgIdDest`) — digits from trip payload.
+ * @param {unknown} body
+ * @returns {{ originId: string | null, destinationId: string | null }}
+ */
+export function extractTripOrgIds(body) {
+  if (body == null || typeof body !== 'object' || Array.isArray(body)) {
+    return { originId: null, destinationId: null }
+  }
+  const o = /** @type {Record<string, unknown>} */ (body)
+  const rawO = o.currentLocationNumber ?? o.originLocation
+  const rawD = o.tripDestNumber
+  const originId =
+    rawO != null && String(rawO).trim() !== ''
+      ? String(rawO).replace(/\D/g, '').slice(0, 12) || null
+      : null
+  const destinationId =
+    rawD != null && String(rawD).trim() !== ''
+      ? String(rawD).replace(/\D/g, '').slice(0, 12) || null
+      : null
+  return { originId, destinationId }
+}
+
+/**
  * True when trip details include both origin and destination (not placeholders).
  * @param {unknown} body
  */

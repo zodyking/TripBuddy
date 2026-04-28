@@ -398,6 +398,48 @@ export async function fetchFedexLinehaulTripStatus(opts = {}) {
 }
 
 /**
+ * Planned mileage / routing for origin→destination org ids (`viewTripInfoDetails`).
+ * Never throws.
+ * @param {{ orgIdOrigin: string, orgIdDest: string, originId?: string }} opts
+ * @returns {{ ok: boolean, status: number, body?: unknown, error?: string }}
+ */
+export async function fetchFedexLinehaulViewTripInfoDetails(opts = {}) {
+  const q = new URLSearchParams()
+  if (opts.orgIdOrigin) q.set('orgIdOrigin', String(opts.orgIdOrigin).trim())
+  if (opts.orgIdDest) q.set('orgIdDest', String(opts.orgIdDest).trim())
+  if (opts.originId) q.set('originId', String(opts.originId).trim())
+  const qs = q.toString()
+  const r = await apiFetch(
+    `/api/fedex/linehaul/view-trip-info-details${qs ? `?${qs}` : ''}`,
+  )
+  const text = await r.text()
+  let parsed = {}
+  try {
+    parsed = text ? JSON.parse(text) : {}
+  } catch {
+    parsed = { raw: text }
+  }
+  if (!r.ok) {
+    return {
+      ok: false,
+      status: r.status,
+      body: parsed.body,
+      error:
+        typeof parsed.error === 'string'
+          ? parsed.error
+          : `HTTP ${r.status}`,
+    }
+  }
+  return {
+    ok: parsed.ok !== false,
+    status: parsed.status ?? r.status,
+    body: parsed.body,
+    error:
+      typeof parsed.error === 'string' ? parsed.error : undefined,
+  }
+}
+
+/**
  * Current trip details (`GET …/trips`) — never throws.
  * Omit opts to use server defaults (driver, tractor, location from tractor API).
  * Pass `dailyTripLegSequence` (digits) to use dispatch-era query only (`alreadyCalled` forwarded).

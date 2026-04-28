@@ -9,6 +9,7 @@ import {
   putAssignment,
   postLinehaulCaptureBearer,
   syncDollyFromLinehaul,
+  fetchFedexLinehaulViewTripInfoDetails,
 } from '../api.js'
 import { pushLiveLog } from './liveLogStore.js'
 import {
@@ -18,6 +19,7 @@ import {
 import {
   extractOriginDest,
   extractTripDispatchInstructions,
+  extractTripOrgIds,
 } from '../utils/tripDetailsDisplay.js'
 
 export const linehaulTractorBody = ref(null)
@@ -51,6 +53,9 @@ let prevDriverAvlStat = null
  */
 let lastHistoryUpsertOkFingerprint = null
 
+/** Last successful mileage fetch per active leg (avoid duplicate Apigee calls). */
+let lastTripMileageOkKey = ''
+
 /** Clear in-memory trip state (call on sign-out; hidden seq comes from getAssignment on next sign-in). */
 export function resetLinehaulSession() {
   linehaulTractorBody.value = null
@@ -69,6 +74,7 @@ export function resetLinehaulSession() {
   hiddenDailyTripLegSequences.value = []
   lastHistoryUpsertOkFingerprint = null
   prevDriverAvlStat = null
+  lastTripMileageOkKey = ''
   if (persistTripDebounceTimer) {
     clearTimeout(persistTripDebounceTimer)
     persistTripDebounceTimer = null
@@ -662,6 +668,8 @@ async function refreshLinehaulApisImpl(attempt) {
     void syncDollyFromLinehaul(s || '', linehaulTripsBody.value).catch(() => {})
   }
 
+  void maybeFetchTripMileageAfterDispatched()
+
   const authFailed =
     attempt === 0 &&
     (isAuthFailure(tr) ||
@@ -701,4 +709,50 @@ async function refreshLinehaulApisImpl(attempt) {
 
   applyHiddenTripFilter()
   schedulePersistLinehaulTripSnapshots()
+}
+
+/**
+ * After dispatch (ENRT/DSPCH), fetch planned mileage once per leg from Linehaul
+ * `viewTripInfoDetails` and persist for this leg + matching O/D history rows.
+ */
+async function maybeFetchTripMileageAfterDispatched() {
+  if (tripPhase.value !== 'dispatched') return
+  const snapBody = linehaulTripsBody.value
+  if (snapBody == null || typeof snapBody !== 'object' || Array.isArray(snapBody)) {
+    return
+  }
+  const seq = tripBodyDailySeq(snapBody)
+  const { originId, destinationId } = extractTripOrgIds(snapBody)
+  if (!seq || !originId || !destinationId) return
+  const fetchKey = `${seq}|${originId}|${destinationId}`
+  if (lastTripMileageOkKey === fetchKey) return
+
+  const tractorBody = linehaulTractorBody.value
+  const originHeader =
+    tractorBody &&
+    typeof tractorBody === 'object' &&
+    tractorBody.locationId != null &&
+    String(tractorBody.locationId).trim() !== ''
+      ? String(tractorBody.locationId).trim()
+      : originId
+
+  const res = await fetchFedexLinehaulViewTripInfoDetails({
+    orgIdOrigin: originId,
+    orgIdDest: destinationId,
+    originId: originHeader,
+  })
+  if (!res.ok || res.body == null || typeof res.body !== 'object') return
+
+  try {
+    await putAssignment({
+      applyOdMileageFromFetch: {
+        originId,
+        destinationId,
+        body: res.body,
+      },
+    })
+    lastTripMileageOkKey = fetchKey
+  } catch {
+    /* offline — retry next poll */
+  }
 }
