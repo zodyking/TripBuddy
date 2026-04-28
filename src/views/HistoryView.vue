@@ -48,6 +48,22 @@ const outcomeMenuOpts = [
   { k: 'removed', t: 'Removed' },
 ]
 
+const HISTORY_VIEW_STORAGE = 'historyViewMode'
+
+/** @type {import('vue').Ref<'calendar' | 'week'>} */
+const historyViewMode = ref(
+  typeof sessionStorage !== 'undefined' &&
+    sessionStorage.getItem(HISTORY_VIEW_STORAGE) === 'week'
+    ? 'week'
+    : 'calendar',
+)
+
+watch(historyViewMode, (v) => {
+  if (typeof sessionStorage !== 'undefined') {
+    sessionStorage.setItem(HISTORY_VIEW_STORAGE, v)
+  }
+})
+
 /**
  * @param {unknown} x
  */
@@ -114,6 +130,48 @@ function formatMilesSum(n) {
   if (!Number.isFinite(n)) return '—'
   const r = Math.round(n * 10) / 10
   return Number.isInteger(r) ? String(r) : r.toFixed(1)
+}
+
+/**
+ * @param {string} shiftDayKey YYYY-MM-DD
+ */
+function formatShiftDayHeading(shiftDayKey) {
+  const parts = shiftDayKey.split('-').map((x) => parseInt(x, 10))
+  if (parts.length !== 3 || parts.some((n) => !Number.isFinite(n))) return shiftDayKey
+  const [y, mo, d] = parts
+  const dt = new Date(y, mo - 1, d, 12, 0, 0, 0)
+  if (isNaN(dt.getTime())) return shiftDayKey
+  return dt.toLocaleDateString(undefined, {
+    weekday: 'long',
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+  })
+}
+
+/**
+ * One-line mileage for headers (planned mi only).
+ * @param {number} sum
+ * @param {number} withMi
+ * @param {number} totalTrips
+ */
+function mileageHeaderLine(sum, withMi, totalTrips) {
+  if (withMi > 0) {
+    return `${formatMilesSum(sum)} mi · ${withMi}/${totalTrips} trips`
+  }
+  return `No mi · ${totalTrips} ${totalTrips === 1 ? 'trip' : 'trips'}`
+}
+
+/**
+ * Short trip mileage for collapsed card header.
+ * @param {LedgerEntry} e
+ */
+function tripHeaderMileageText(e) {
+  const mb = mileageBlock(e)
+  if (!mb?.total) return ''
+  const parts = [`${mb.total} mi`]
+  if (mb.run != null) parts.push(`~${mb.run}h`)
+  return parts.join(' · ')
 }
 
 async function load() {
@@ -338,6 +396,17 @@ const weekFilteredItems = computed(() => {
 
 /**
  * @typedef {{
+ *   shiftDayKey: string,
+ *   dayLabel: string,
+ *   items: LedgerEntry[],
+ *   tripCount: number,
+ *   tripsWithMileage: number,
+ *   mileageSum: number,
+ * }} HistoryDayGroup
+ */
+
+/**
+ * @typedef {{
  *   key: string,
  *   groupLabel: string,
  *   weekStartMs: number,
@@ -345,10 +414,11 @@ const weekFilteredItems = computed(() => {
  *   tripCount: number,
  *   tripsWithMileage: number,
  *   mileageSum: number,
+ *   days: HistoryDayGroup[],
  * }} HistoryWeekGroup
  */
 
-/** Month list grouped by configured work week, newest week first; includes week mileage totals. */
+/** Month list grouped by configured work week → shift days; newest week first. */
 const tripsByWorkWeek = computed(() => {
   /** @type {HistoryWeekGroup[]} */
   const out = []
@@ -386,15 +456,64 @@ const tripsByWorkWeek = computed(() => {
   )
 
   for (const [key, g] of ordered) {
+    /** @type {Map<string, LedgerEntry[]>} */
+    const byDay = new Map()
+    for (const e of g.items) {
+      const t = e.displayDate
+      const dk =
+        typeof t === 'number' && Number.isFinite(t) && t > 0
+          ? shiftDateKeyForEventMs(
+              t,
+              workWeekFromCred.value.shiftStartMins,
+              workWeekFromCred.value.shiftEndMins,
+            )
+          : ''
+      const dayKey = dk || '_unknown'
+      const arr = byDay.get(dayKey) || []
+      arr.push(e)
+      byDay.set(dayKey, arr)
+    }
+    for (const arr of byDay.values()) {
+      arr.sort((a, b) => b.displayDate - a.displayDate)
+    }
+
+    const dayKeysSorted = Array.from(byDay.keys()).sort((a, b) => {
+      if (a === '_unknown') return 1
+      if (b === '_unknown') return -1
+      return b.localeCompare(a)
+    })
+
+    /** @type {HistoryDayGroup[]} */
+    const days = []
     let mileageSum = 0
     let tripsWithMileage = 0
-    for (const e of g.items) {
-      const mi = tripPlannedMiles(e)
-      if (mi != null) {
-        mileageSum += mi
-        tripsWithMileage += 1
+
+    for (const dk of dayKeysSorted) {
+      const dayItems = byDay.get(dk) || []
+      let dSum = 0
+      let dWith = 0
+      for (const e of dayItems) {
+        const mi = tripPlannedMiles(e)
+        if (mi != null) {
+          dSum += mi
+          dWith += 1
+        }
       }
+      mileageSum += dSum
+      tripsWithMileage += dWith
+      days.push({
+        shiftDayKey: dk === '_unknown' ? '' : dk,
+        dayLabel:
+          dk === '_unknown'
+            ? 'Unknown day'
+            : formatShiftDayHeading(dk),
+        items: dayItems,
+        tripCount: dayItems.length,
+        tripsWithMileage: dWith,
+        mileageSum: dSum,
+      })
     }
+
     out.push({
       key,
       groupLabel: g.meta.groupLabel,
@@ -403,6 +522,7 @@ const tripsByWorkWeek = computed(() => {
       tripCount: g.items.length,
       tripsWithMileage,
       mileageSum,
+      days,
     })
   }
   return out
@@ -713,6 +833,28 @@ onUnmounted(() => {
     >
       <p v-if="!sorted.length" class="history-empty">No trips</p>
       <div class="history-month-body">
+      <div class="history-view-tabs" role="tablist" aria-label="History layout">
+        <button
+          type="button"
+          role="tab"
+          class="history-view-tab tap"
+          :class="{ 'history-view-tab--on': historyViewMode === 'calendar' }"
+          :aria-selected="historyViewMode === 'calendar'"
+          @click="historyViewMode = 'calendar'"
+        >
+          Calendar
+        </button>
+        <button
+          type="button"
+          role="tab"
+          class="history-view-tab tap"
+          :class="{ 'history-view-tab--on': historyViewMode === 'week' }"
+          :aria-selected="historyViewMode === 'week'"
+          @click="historyViewMode = 'week'"
+        >
+          Week view
+        </button>
+      </div>
       <div class="history-month-nav" role="group" aria-label="Month">
         <button
           type="button"
@@ -744,7 +886,7 @@ onUnmounted(() => {
         </button>
       </div>
       <div
-        v-if="viewMonthGrid.cells.length"
+        v-if="historyViewMode === 'calendar' && viewMonthGrid.cells.length"
         class="history-cal-surface"
         :aria-label="`Month grid ${viewMonthInfo.groupLabel}`"
       >
@@ -799,6 +941,7 @@ onUnmounted(() => {
         v-if="
           weekFilteredItems.length &&
           !filterDayKey &&
+          historyViewMode === 'calendar' &&
           monthPlannedMilesTotal.count > 0
         "
         class="history-month-mile-sum"
@@ -807,7 +950,14 @@ onUnmounted(() => {
         {{ monthPlannedMilesTotal.count === 1 ? 'trip' : 'trips' }}):
         <strong>{{ formatMilesSum(monthPlannedMilesTotal.sum) }} mi</strong>
       </p>
-      <p v-else-if="weekFilteredItems.length && !filterDayKey" class="history-month-mile-sum history-month-mile-sum--muted">
+      <p
+        v-else-if="
+          weekFilteredItems.length &&
+          !filterDayKey &&
+          historyViewMode === 'calendar'
+        "
+        class="history-month-mile-sum history-month-mile-sum--muted"
+      >
         No planned mileage saved for trips this month yet (dispatched trips populate from Linehaul).
       </p>
       <p v-else-if="filterDayKey && !weekFilteredItems.length" class="history-no-month">
@@ -822,165 +972,183 @@ onUnmounted(() => {
           :aria-label="wg.groupLabel"
         >
           <header class="history-ww-head">
-            <h3 class="history-ww-title">{{ wg.groupLabel }}</h3>
-            <p v-if="wg.tripsWithMileage > 0" class="history-ww-mile">
-              Week total (planned):
-              <strong>{{ formatMilesSum(wg.mileageSum) }} mi</strong>
-              <span class="history-ww-mile-sub">· {{ wg.tripsWithMileage }} of {{ wg.tripCount }} trips</span>
-            </p>
-            <p v-else class="history-ww-mile history-ww-mile--muted">
-              No planned mileage for this week’s trips yet.
-            </p>
+            <div class="history-ww-head-row">
+              <h3 class="history-ww-title">{{ wg.groupLabel }}</h3>
+              <span
+                class="history-mile-pill"
+                :class="{ 'history-mile-pill--muted': wg.tripsWithMileage === 0 }"
+              >
+                {{ mileageHeaderLine(wg.mileageSum, wg.tripsWithMileage, wg.tripCount) }}
+              </span>
+            </div>
           </header>
-          <ul
-            class="history-list history-list--nested"
-            :aria-label="`${wg.groupLabel} trips`"
-          >
-        <li
-          v-for="e in wg.items"
-          :id="`history-card-${e.id}`"
-          :key="e.id"
-          class="history-card"
-        >
-        <details
-          class="history-drop"
-        >
-          <summary
-            class="history-card-summary"
-            @dblclick.stop.prevent="onRowDoubleClick(e)"
-          >
-            <span class="history-od-lane">
-              <span class="history-od-compact" :title="str(e.dispatchHeader?.origin) || '—'">
-                <span class="summary-tag">O</span>
-                {{ str(e.dispatchHeader?.origin) || '—' }}
-              </span>
-              <span class="history-od-mid" aria-hidden="true">→</span>
-              <span class="history-od-compact" :title="str(e.dispatchHeader?.destination) || '—'">
-                <span class="summary-tag">D</span>
-                {{ str(e.dispatchHeader?.destination) || '—' }}
-              </span>
-            </span>
-            <div class="history-row-tr">
-            <div class="history-time-block">
-              <span class="history-time-lab">{{
-                e.source === 'linehaul' ? 'Dispatched' : 'Time'
-              }}</span>
-              <time
-                class="history-date"
-                :datetime="new Date(e.displayDate).toISOString()"
-                >{{ formatWhen(e.displayDate) }}</time
-              >
-            </div>
-            <div v-if="e.dailyTripLegSequence" class="history-top-actions" @click.stop>
-              <div class="history-outcome-wrap" @click.stop>
-                <button
-                  type="button"
-                  class="history-outcome-pill tap"
-                  :class="`history-outcome--${outcomeSelectValue(e)}`"
-                  :disabled="historySavingId === `seq-${e.dailyTripLegSequence}`"
-                  :title="'Tap to change: ' + outcomeLabel(outcomeSelectValue(e))"
-                  :aria-expanded="outcomeMenuOpen === e.id"
-                  aria-haspopup="listbox"
-                  @click="toggleOutcomeMenu(e, e.id, $event)"
+
+          <div class="history-day-stack">
+            <section
+              v-for="dg in wg.days"
+              :key="`${wg.key}-${dg.shiftDayKey || 'unk'}`"
+              class="history-day-card"
+            >
+              <header class="history-day-head">
+                <div class="history-day-head-row">
+                  <h4 class="history-day-title">{{ dg.dayLabel }}</h4>
+                  <span
+                    class="history-mile-pill history-mile-pill--sm"
+                    :class="{ 'history-mile-pill--muted': dg.tripsWithMileage === 0 }"
+                  >
+                    {{ mileageHeaderLine(dg.mileageSum, dg.tripsWithMileage, dg.tripCount) }}
+                  </span>
+                </div>
+              </header>
+
+              <ul class="history-list history-list--nested history-list--day" :aria-label="`${dg.dayLabel} trips`">
+                <li
+                  v-for="e in dg.items"
+                  :id="`history-card-${e.id}`"
+                  :key="e.id"
+                  class="history-card"
                 >
-                  <span class="history-outcome-pill__txt">{{ outcomeLabel(outcomeSelectValue(e)) }}</span>
-                  <span class="history-outcome-pill__chev" aria-hidden="true">▾</span>
-                </button>
-              </div>
-            </div>
-            </div>
-            <span
-              v-if="e.dailyTripLegSequence"
-              class="history-seq"
-              :title="`Double-tap header: cycle status · Leg #${e.dailyTripLegSequence}`"
-              >Leg #{{ e.dailyTripLegSequence }} ·
-              {{ sourceLabel((str(e.dispatchHeader?.source) || e.source) || '') }}</span
-            >
-          </summary>
-        <div class="history-dispatch">
-          <p v-if="str(e.dispatchHeader?.tripStatusText)" class="history-meta">
-            Status: {{ str(e.dispatchHeader.tripStatusText) }}
-          </p>
-          <p v-if="str(e.dispatchHeader?.instructions)" class="history-instr">
-            {{ str(e.dispatchHeader.instructions) }}
-          </p>
-        </div>
-        <div class="history-body">
-          <template v-for="mb in [mileageBlock(e)]" :key="e.id + '-mileage'">
-            <div v-if="mb" class="history-mileage">
-              <span class="history-body-label">Trip mileage</span>
-              <p v-if="mb.total || mb.run != null" class="history-mileage-total">
-                <template v-if="mb.total">{{ mb.total }} mi planned</template>
-                <template v-if="mb.run != null">
-                  <template v-if="mb.total">&nbsp;·&nbsp;</template>~{{ mb.run }} h run time
-                </template>
-              </p>
-              <ul v-if="mb.directionList.length" class="history-mileage-by-state">
-                <li v-for="(row, mi) in mb.directionList" :key="mi">
-                  {{ stateMilesLabel(row) }}
+                  <details class="history-drop">
+                    <summary class="history-card-summary" @dblclick.stop.prevent="onRowDoubleClick(e)">
+                      <span class="history-od-lane">
+                        <span class="history-od-compact" :title="str(e.dispatchHeader?.origin) || '—'">
+                          <span class="summary-tag">O</span>
+                          {{ str(e.dispatchHeader?.origin) || '—' }}
+                        </span>
+                        <span class="history-od-mid" aria-hidden="true">→</span>
+                        <span class="history-od-compact" :title="str(e.dispatchHeader?.destination) || '—'">
+                          <span class="summary-tag">D</span>
+                          {{ str(e.dispatchHeader?.destination) || '—' }}
+                        </span>
+                      </span>
+                      <div class="history-row-tr">
+                        <div class="history-time-block">
+                          <span class="history-time-lab">{{
+                            e.source === 'linehaul' ? 'Dispatched' : 'Time'
+                          }}</span>
+                          <time
+                            class="history-date"
+                            :datetime="new Date(e.displayDate).toISOString()"
+                            >{{ formatWhen(e.displayDate) }}</time
+                          >
+                        </div>
+                        <div class="history-summary-right">
+                          <span v-if="tripHeaderMileageText(e)" class="history-trip-mi-pill">{{
+                            tripHeaderMileageText(e)
+                          }}</span>
+                          <div v-if="e.dailyTripLegSequence" class="history-top-actions" @click.stop>
+                            <div class="history-outcome-wrap" @click.stop>
+                              <button
+                                type="button"
+                                class="history-outcome-pill tap"
+                                :class="`history-outcome--${outcomeSelectValue(e)}`"
+                                :disabled="historySavingId === `seq-${e.dailyTripLegSequence}`"
+                                :title="'Tap to change: ' + outcomeLabel(outcomeSelectValue(e))"
+                                :aria-expanded="outcomeMenuOpen === e.id"
+                                aria-haspopup="listbox"
+                                @click="toggleOutcomeMenu(e, e.id, $event)"
+                              >
+                                <span class="history-outcome-pill__txt">{{ outcomeLabel(outcomeSelectValue(e)) }}</span>
+                                <span class="history-outcome-pill__chev" aria-hidden="true">▾</span>
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                      <span
+                        v-if="e.dailyTripLegSequence"
+                        class="history-seq"
+                        :title="`Double-tap header: cycle status · Leg #${e.dailyTripLegSequence}`"
+                        >Leg #{{ e.dailyTripLegSequence }} ·
+                        {{ sourceLabel((str(e.dispatchHeader?.source) || e.source) || '') }}</span
+                      >
+                    </summary>
+                    <div class="history-dispatch">
+                      <p v-if="str(e.dispatchHeader?.tripStatusText)" class="history-meta">
+                        Status: {{ str(e.dispatchHeader.tripStatusText) }}
+                      </p>
+                      <p v-if="str(e.dispatchHeader?.instructions)" class="history-instr">
+                        {{ str(e.dispatchHeader.instructions) }}
+                      </p>
+                    </div>
+                    <div class="history-body">
+                      <template v-for="mb in [mileageBlock(e)]" :key="e.id + '-mileage'">
+                        <div v-if="mb" class="history-mileage">
+                          <span class="history-body-label">Trip mileage</span>
+                          <p v-if="mb.total || mb.run != null" class="history-mileage-total">
+                            <template v-if="mb.total">{{ mb.total }} mi planned</template>
+                            <template v-if="mb.run != null">
+                              <template v-if="mb.total">&nbsp;·&nbsp;</template>~{{ mb.run }} h run time
+                            </template>
+                          </p>
+                          <ul v-if="mb.directionList.length" class="history-mileage-by-state">
+                            <li v-for="(row, mi) in mb.directionList" :key="mi">
+                              {{ stateMilesLabel(row) }}
+                            </li>
+                          </ul>
+                        </div>
+                      </template>
+                      <p
+                        v-if="str(e.tripDetails?.tripStatus) || str(e.tripDetails?.tractorNumber)"
+                        class="history-trip-meta"
+                      >
+                        <template v-if="str(e.tripDetails?.tripStatus)">
+                          Trip status: {{ str(e.tripDetails.tripStatus) }}
+                        </template>
+                        <template v-if="str(e.tripDetails?.tractorNumber)">
+                          <span v-if="str(e.tripDetails?.tripStatus)"> · </span>
+                          Tractor {{ str(e.tripDetails.tractorNumber) }}
+                        </template>
+                      </p>
+                      <div
+                        v-if="
+                          e.tripDetails?.dolly &&
+                          Array.isArray(e.tripDetails.dolly.rows) &&
+                          e.tripDetails.dolly.rows.length
+                        "
+                        class="history-dolly"
+                      >
+                        <span class="history-body-label">Dolly</span>
+                        <dl class="history-mini-dl">
+                          <template v-for="(row, idx) in e.tripDetails.dolly.rows" :key="idx">
+                            <dt>{{ row.label }}</dt>
+                            <dd>{{ row.value }}</dd>
+                          </template>
+                        </dl>
+                      </div>
+                      <div
+                        v-if="Array.isArray(e.tripDetails?.trailers) && e.tripDetails.trailers.length"
+                        class="history-trailers"
+                      >
+                        <div
+                          v-for="(t, ti) in e.tripDetails.trailers"
+                          :key="ti"
+                          class="history-trailer-block"
+                        >
+                          <div class="history-trailer-line">
+                            <span class="history-trailer-title">Trailer {{ t.order }}</span>
+                            <span v-if="t.trlrNbr" class="history-trailer-nbr">#{{ t.trlrNbr }}</span>
+                            <span class="history-badge">{{ t.size }}</span>
+                            <span class="history-badge history-badge--muted">{{ t.statusLabel }}</span>
+                            <span class="history-badge history-badge--load">{{ t.loadType }}</span>
+                          </div>
+                          <ul
+                            v-if="Array.isArray(t.summaryRows) && t.summaryRows.length"
+                            class="history-trailer-rows"
+                          >
+                            <li v-for="(sr, si) in t.summaryRows" :key="si">
+                              <span class="sr-label">{{ sr.label }}</span>
+                              <span class="sr-val">{{ sr.value }}</span>
+                            </li>
+                          </ul>
+                        </div>
+                      </div>
+                    </div>
+                  </details>
                 </li>
               </ul>
-            </div>
-          </template>
-          <p
-            v-if="str(e.tripDetails?.tripStatus) || str(e.tripDetails?.tractorNumber)"
-            class="history-trip-meta"
-          >
-            <template v-if="str(e.tripDetails?.tripStatus)">
-              Trip status: {{ str(e.tripDetails.tripStatus) }}
-            </template>
-            <template v-if="str(e.tripDetails?.tractorNumber)">
-              <span v-if="str(e.tripDetails?.tripStatus)"> · </span>
-              Tractor {{ str(e.tripDetails.tractorNumber) }}
-            </template>
-          </p>
-          <div
-            v-if="
-              e.tripDetails?.dolly &&
-              Array.isArray(e.tripDetails.dolly.rows) &&
-              e.tripDetails.dolly.rows.length
-            "
-            class="history-dolly"
-          >
-            <span class="history-body-label">Dolly</span>
-            <dl class="history-mini-dl">
-              <template v-for="(row, idx) in e.tripDetails.dolly.rows" :key="idx">
-                <dt>{{ row.label }}</dt>
-                <dd>{{ row.value }}</dd>
-              </template>
-            </dl>
+            </section>
           </div>
-          <div
-            v-if="Array.isArray(e.tripDetails?.trailers) && e.tripDetails.trailers.length"
-            class="history-trailers"
-          >
-            <div
-              v-for="(t, ti) in e.tripDetails.trailers"
-              :key="ti"
-              class="history-trailer-block"
-            >
-              <div class="history-trailer-line">
-                <span class="history-trailer-title">Trailer {{ t.order }}</span>
-                <span v-if="t.trlrNbr" class="history-trailer-nbr">#{{ t.trlrNbr }}</span>
-                <span class="history-badge">{{ t.size }}</span>
-                <span class="history-badge history-badge--muted">{{ t.statusLabel }}</span>
-                <span class="history-badge history-badge--load">{{ t.loadType }}</span>
-              </div>
-              <ul
-                v-if="Array.isArray(t.summaryRows) && t.summaryRows.length"
-                class="history-trailer-rows"
-              >
-                <li v-for="(sr, si) in t.summaryRows" :key="si">
-                  <span class="sr-label">{{ sr.label }}</span>
-                  <span class="sr-val">{{ sr.value }}</span>
-                </li>
-              </ul>
-            </div>
-          </div>
-        </div>
-            </details>
-            </li>
-          </ul>
         </section>
       </template>
       </div>
@@ -1081,6 +1249,43 @@ onUnmounted(() => {
   justify-content: space-between;
   gap: 0.5rem;
   margin-bottom: 0.5rem;
+}
+
+.history-view-tabs {
+  display: flex;
+  gap: 0.35rem;
+  margin-bottom: 0.55rem;
+  padding: 0.2rem;
+  border-radius: 10px;
+  background: #12121a;
+  border: 1px solid #2a2a34;
+}
+
+.history-view-tab {
+  flex: 1;
+  min-height: 2.35rem;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: #8e8e9e;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+  transition:
+    background 0.15s,
+    color 0.15s;
+}
+
+.history-view-tab:hover:not(.history-view-tab--on) {
+  background: rgba(255, 255, 255, 0.04);
+  color: #c8c8d8;
+}
+
+.history-view-tab--on {
+  background: rgba(123, 77, 181, 0.35);
+  color: #f0e8ff;
+  box-shadow: inset 0 0 0 1px rgba(167, 139, 250, 0.35);
 }
 
 .history-mnav {
@@ -1322,7 +1527,7 @@ onUnmounted(() => {
 }
 
 .history-ww-section {
-  margin-bottom: 1.15rem;
+  margin-bottom: 1rem;
 }
 
 .history-ww-section:last-child {
@@ -1330,42 +1535,124 @@ onUnmounted(() => {
 }
 
 .history-ww-head {
-  margin: 0 0 0.5rem;
-  padding: 0.55rem 0.65rem;
-  border-radius: 10px;
-  background: rgba(124, 92, 255, 0.06);
-  border: 1px solid rgba(124, 92, 255, 0.18);
+  margin: 0 0 0.45rem;
+  padding: 0;
+}
+
+.history-ww-head-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.5rem 0.65rem;
+  flex-wrap: wrap;
 }
 
 .history-ww-title {
-  margin: 0 0 0.35rem;
-  font-size: 0.78rem;
+  margin: 0;
+  flex: 1 1 10rem;
+  min-width: 0;
+  font-size: 0.74rem;
   font-weight: 700;
   line-height: 1.35;
   color: var(--color-text-primary, #ececf4);
 }
 
-.history-ww-mile {
-  margin: 0;
-  font-size: 0.72rem;
-  color: var(--color-text-secondary, #b8b8c8);
-}
-
-.history-ww-mile strong {
-  color: #c4b5fd;
+.history-mile-pill {
+  flex: 0 0 auto;
+  max-width: 100%;
+  padding: 0.22rem 0.45rem;
+  border-radius: 999px;
+  font-size: 0.62rem;
   font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.25;
+  background: rgba(124, 92, 255, 0.14);
+  border: 1px solid rgba(167, 139, 250, 0.35);
+  color: #ddd6fe;
+  white-space: nowrap;
 }
 
-.history-ww-mile-sub {
-  margin-left: 0.15rem;
-  font-weight: 500;
-  color: var(--color-text-tertiary, #8e8e9e);
-  font-size: 0.68rem;
+.history-mile-pill--sm {
+  font-size: 0.58rem;
+  padding: 0.18rem 0.4rem;
 }
 
-.history-ww-mile--muted {
+.history-mile-pill--muted {
+  background: rgba(255, 255, 255, 0.04);
+  border-color: #363648;
+  color: #7c7c8c;
+  font-weight: 600;
+}
+
+.history-day-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+}
+
+.history-day-card {
+  border-radius: 12px;
+  border: 1px solid #2c2c38;
+  background: linear-gradient(180deg, #14141c 0%, #111118 100%);
+  overflow: hidden;
+}
+
+.history-day-head {
+  padding: 0.45rem 0.55rem 0.35rem;
+  border-bottom: 1px solid #25252f;
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.history-day-head-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.45rem 0.55rem;
+  flex-wrap: wrap;
+}
+
+.history-day-title {
+  margin: 0;
+  flex: 1 1 8rem;
+  min-width: 0;
   font-size: 0.68rem;
-  color: var(--color-text-tertiary, #7a7a8a);
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: #c4c4d4;
+}
+
+.history-list--day {
+  padding: 0.45rem 0.45rem 0.55rem !important;
+  gap: 0.45rem !important;
+}
+
+.history-day-card .history-card {
+  border-color: #2f2f3a;
+  background: #16161e;
+}
+
+.history-summary-right {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  flex: 1 1 auto;
+  min-width: 0;
+  justify-content: flex-end;
+}
+
+.history-trip-mi-pill {
+  font-size: 0.58rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: #c4b5fd;
+  padding: 0.12rem 0.38rem;
+  border-radius: 6px;
+  background: rgba(124, 92, 255, 0.12);
+  border: 1px solid rgba(167, 139, 250, 0.22);
+  white-space: nowrap;
+  max-width: 9rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .history-list {
