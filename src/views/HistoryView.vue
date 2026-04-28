@@ -1071,14 +1071,18 @@ onUnmounted(() => {
                       >
                         <div class="history-trip-summary-grid">
                           <div class="history-trip-area history-trip-area--od history-od-lane history-od-lane--trip">
-                            <span class="history-od-compact" :title="str(e.dispatchHeader?.origin) || '—'">
-                              <span class="summary-tag">O</span>
-                              {{ str(e.dispatchHeader?.origin) || '—' }}
+                            <span
+                              class="history-od-compact history-od-compact--ids"
+                              :title="str(e.dispatchHeader?.origin) || '—'"
+                            >
+                              <span class="summary-tag">O</span>{{ leadingLocationId(e.dispatchHeader?.origin) || '—' }}
                             </span>
                             <span class="history-od-mid" aria-hidden="true">→</span>
-                            <span class="history-od-compact" :title="str(e.dispatchHeader?.destination) || '—'">
-                              <span class="summary-tag">D</span>
-                              {{ str(e.dispatchHeader?.destination) || '—' }}
+                            <span
+                              class="history-od-compact history-od-compact--ids"
+                              :title="str(e.dispatchHeader?.destination) || '—'"
+                            >
+                              <span class="summary-tag">D</span>{{ leadingLocationId(e.dispatchHeader?.destination) || '—' }}
                             </span>
                           </div>
                           <div
@@ -1809,16 +1813,22 @@ onUnmounted(() => {
 }
 
 .history-trip-mi-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  min-height: 1.75rem;
+  box-sizing: border-box;
   font-size: 0.56rem;
   font-weight: 700;
   font-variant-numeric: tabular-nums;
   color: #c4b5fd;
-  padding: 0.1rem 0.34rem;
+  padding: 0 0.42rem;
   border-radius: 6px;
   background: rgba(124, 92, 255, 0.12);
-  border: 1px solid rgba(167, 139, 250, 0.22);
+  border: 1px solid rgba(167, 139, 250, 0.28);
   white-space: nowrap;
   text-align: right;
+  line-height: 1.15;
 }
 
 .history-list {
@@ -1869,8 +1879,8 @@ onUnmounted(() => {
   grid-template-areas:
     'od time outstack'
     'seq seq seq';
-  gap: 0.35rem 0.45rem;
-  align-items: start;
+  gap: 0.35rem 0.55rem;
+  align-items: center;
   width: 100%;
 }
 
@@ -1889,9 +1899,10 @@ onUnmounted(() => {
   display: flex;
   flex-direction: column;
   align-items: flex-end;
-  gap: 0.28rem;
+  justify-content: center;
+  gap: 0.35rem;
   justify-self: end;
-  min-width: 0;
+  min-width: 7rem;
 }
 
 .history-trip-area--out {
@@ -1909,30 +1920,71 @@ onUnmounted(() => {
 .history-od-lane--trip {
   display: flex;
   flex-direction: row;
-  align-items: flex-start;
-  gap: 0.2rem 0.28rem;
+  align-items: center;
+  flex-wrap: nowrap;
+  gap: 0.32rem 0.35rem;
+  width: 100%;
+  min-width: 0;
+  padding-right: 0;
+}
+
+.history-od-compact--ids {
+  flex: 0 1 auto;
+  min-width: 0;
+  font-size: 0.72rem;
+  font-weight: 700;
+  line-height: 1.2;
+  letter-spacing: 0.03em;
+  font-variant-numeric: tabular-nums;
+  color: var(--color-text-primary, #ececf4);
+  white-space: nowrap;
+}
+
+.history-od-lane--trip .history-od-mid {
+  font-size: 0.75rem;
+  color: #8b8b98;
+  padding: 0 0.06rem;
 }
 
 .history-time-block--trip {
   align-items: flex-end;
   text-align: right;
+  justify-content: center;
+  gap: 0.18rem;
+  min-height: 2.5rem;
+}
+
+.history-time-block--trip .history-time-lab {
+  font-size: 0.52rem;
+  font-weight: 800;
+  letter-spacing: 0.07em;
+}
+
+.history-time-block--trip .history-date {
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: #e4dff8;
+}
+
+.history-outcome-slot .history-outcome-pill {
+  width: auto;
+  min-width: 5rem;
+  min-height: 1.75rem;
+  padding: 0 0.45rem 0 0.48rem;
 }
 
 .history-outcome-slot {
   display: flex;
   justify-content: flex-end;
-  min-width: 0;
-}
-
-.history-outcome-slot .history-outcome-pill {
-  width: auto;
-  min-width: 4.25rem;
+  width: 100%;
 }
 
 .history-seq {
-  font-size: 0.58rem;
-  color: #7c7c8c;
+  font-size: 0.6rem;
+  color: var(--color-text-tertiary, #6e6e7e);
   font-weight: 600;
+  line-height: 1.35;
+  letter-spacing: 0.02em;
 }
 
 .history-card-summary {
@@ -2087,10 +2139,10 @@ onUnmounted(() => {
   justify-content: space-between;
   gap: 0.25rem;
   width: 100%;
-  min-height: 1.65rem;
+  min-height: 1.75rem;
   min-width: 0;
-  padding: 0.1rem 0.35rem 0.1rem 0.4rem;
-  line-height: 1.1;
+  padding: 0 0.45rem 0 0.48rem;
+  line-height: 1.15;
   border: 1px solid;
   border-radius: 6px;
   background: rgba(255, 255, 255, 0.04);
@@ -2193,12 +2245,6 @@ onUnmounted(() => {
   border-color: #52525b;
   color: #d4d4d8;
   background: rgba(63, 63, 70, 0.4);
-}
-
-.history-seq {
-  font-size: 0.65rem;
-  color: var(--color-text-tertiary, #6e6e7e);
-  line-height: 1.3;
 }
 
 
