@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed, onMounted, onUnmounted, watch, nextTick, Teleport } from 'vue'
+import { ref, computed, onMounted, onUnmounted, nextTick, Teleport } from 'vue'
 import { getAssignment, getCredentials, patchTripHistoryOutcome } from '../api.js'
 import { monthGridForCalendarMonth, workWeekGroupMeta } from '../utils/workWeekGroup.js'
 import { shiftDateKeyForEventMs } from '../utils/shiftCalendar.js'
@@ -47,22 +47,6 @@ const outcomeMenuOpts = [
   { k: 'rejected', t: 'Rejected' },
   { k: 'removed', t: 'Removed' },
 ]
-
-const HISTORY_VIEW_STORAGE = 'historyViewMode'
-
-/** @type {import('vue').Ref<'calendar' | 'week'>} */
-const historyViewMode = ref(
-  typeof sessionStorage !== 'undefined' &&
-    sessionStorage.getItem(HISTORY_VIEW_STORAGE) === 'week'
-    ? 'week'
-    : 'calendar',
-)
-
-watch(historyViewMode, (v) => {
-  if (typeof sessionStorage !== 'undefined') {
-    sessionStorage.setItem(HISTORY_VIEW_STORAGE, v)
-  }
-})
 
 /**
  * @param {unknown} x
@@ -806,28 +790,6 @@ onUnmounted(() => {
     >
       <p v-if="!sorted.length" class="history-empty">No trips</p>
       <div class="history-month-body">
-      <div class="history-view-tabs" role="tablist" aria-label="History layout">
-        <button
-          type="button"
-          role="tab"
-          class="history-view-tab tap"
-          :class="{ 'history-view-tab--on': historyViewMode === 'calendar' }"
-          :aria-selected="historyViewMode === 'calendar'"
-          @click="historyViewMode = 'calendar'"
-        >
-          Calendar
-        </button>
-        <button
-          type="button"
-          role="tab"
-          class="history-view-tab tap"
-          :class="{ 'history-view-tab--on': historyViewMode === 'week' }"
-          :aria-selected="historyViewMode === 'week'"
-          @click="historyViewMode = 'week'"
-        >
-          Week view
-        </button>
-      </div>
       <div class="history-month-nav" role="group" aria-label="Month">
         <button
           type="button"
@@ -850,7 +812,7 @@ onUnmounted(() => {
         </button>
       </div>
       <div
-        v-if="historyViewMode === 'calendar' && viewMonthGrid.cells.length"
+        v-if="viewMonthGrid.cells.length"
         class="history-cal-surface"
         :aria-label="`Month grid ${viewMonthInfo.groupLabel}`"
       >
@@ -900,11 +862,7 @@ onUnmounted(() => {
       </div>
       <h2 v-if="weekFilteredItems.length" class="history-trips-h2">Trips</h2>
       <p
-        v-if="
-          weekFilteredItems.length &&
-          !filterDayKey &&
-          historyViewMode === 'calendar'
-        "
+        v-if="weekFilteredItems.length && !filterDayKey"
         class="history-month-mile-sum"
       >
         Planned miles this month ({{ monthPlannedMilesTotal.count }}
@@ -916,70 +874,81 @@ onUnmounted(() => {
       </p>
       <p v-else-if="!weekFilteredItems.length" class="history-no-month">No trips this month</p>
       <template v-if="tripsByWorkWeek.length">
-        <section
-          v-for="wg in tripsByWorkWeek"
-          :key="wg.key"
-          class="history-ww-section"
-          :aria-label="wg.groupLabel"
-        >
-          <header class="history-ww-head">
-            <div class="history-ww-head-row">
-              <h3 class="history-ww-title">{{ wg.groupLabel }}</h3>
-              <span class="history-mile-pill">
-                {{ mileageHeaderLine(wg.mileageSum, wg.tripsWithMileage, wg.tripCount) }}
-              </span>
-            </div>
-          </header>
+        <div class="history-hierarchy">
+          <details
+            v-for="wg in tripsByWorkWeek"
+            :key="wg.key"
+            class="history-ww-section history-fold"
+            :aria-label="wg.groupLabel"
+          >
+            <summary class="history-ww-head history-fold__summary">
+              <div class="history-ww-head-row">
+                <h3 class="history-ww-title">{{ wg.groupLabel }}</h3>
+                <span class="history-mile-pill">{{
+                  mileageHeaderLine(wg.mileageSum, wg.tripsWithMileage, wg.tripCount)
+                }}</span>
+              </div>
+            </summary>
 
-          <div class="history-day-stack">
-            <section
-              v-for="dg in wg.days"
-              :key="`${wg.key}-${dg.shiftDayKey || 'unk'}`"
-              class="history-day-card"
-            >
-              <header class="history-day-head">
-                <div class="history-day-head-row">
-                  <h4 class="history-day-title">{{ dg.dayLabel }}</h4>
-              <span class="history-mile-pill history-mile-pill--sm">
-                    {{ mileageHeaderLine(dg.mileageSum, dg.tripsWithMileage, dg.tripCount) }}
-                  </span>
-                </div>
-              </header>
+            <div class="history-day-stack">
+              <details
+                v-for="dg in wg.days"
+                :key="`${wg.key}-${dg.shiftDayKey || 'unk'}`"
+                class="history-day-card history-fold"
+              >
+                <summary class="history-day-head history-fold__summary">
+                  <div class="history-day-head-row">
+                    <h4 class="history-day-title">{{ dg.dayLabel }}</h4>
+                    <span class="history-mile-pill history-mile-pill--sm">{{
+                      mileageHeaderLine(dg.mileageSum, dg.tripsWithMileage, dg.tripCount)
+                    }}</span>
+                  </div>
+                </summary>
 
-              <ul class="history-list history-list--nested history-list--day" :aria-label="`${dg.dayLabel} trips`">
-                <li
-                  v-for="e in dg.items"
-                  :id="`history-card-${e.id}`"
-                  :key="e.id"
-                  class="history-card"
-                >
-                  <details class="history-drop">
-                    <summary class="history-card-summary" @dblclick.stop.prevent="onRowDoubleClick(e)">
-                      <span class="history-od-lane">
-                        <span class="history-od-compact" :title="str(e.dispatchHeader?.origin) || '—'">
-                          <span class="summary-tag">O</span>
-                          {{ str(e.dispatchHeader?.origin) || '—' }}
-                        </span>
-                        <span class="history-od-mid" aria-hidden="true">→</span>
-                        <span class="history-od-compact" :title="str(e.dispatchHeader?.destination) || '—'">
-                          <span class="summary-tag">D</span>
-                          {{ str(e.dispatchHeader?.destination) || '—' }}
-                        </span>
-                      </span>
-                      <div class="history-row-tr">
-                        <div class="history-time-block">
-                          <span class="history-time-lab">{{
-                            e.source === 'linehaul' ? 'Dispatched' : 'Time'
-                          }}</span>
-                          <time
-                            class="history-date"
-                            :datetime="new Date(e.displayDate).toISOString()"
-                            >{{ formatWhen(e.displayDate) }}</time
+                <ul class="history-list history-list--nested history-list--day" :aria-label="`${dg.dayLabel} trips`">
+                  <li
+                    v-for="e in dg.items"
+                    :id="`history-card-${e.id}`"
+                    :key="e.id"
+                    class="history-card"
+                  >
+                    <details class="history-drop history-trip-fold">
+                      <summary
+                        class="history-card-summary history-trip-summary history-fold__summary"
+                        @dblclick.stop.prevent="onRowDoubleClick(e)"
+                      >
+                        <div class="history-trip-summary-grid">
+                          <div class="history-trip-area history-trip-area--od history-od-lane history-od-lane--trip">
+                            <span class="history-od-compact" :title="str(e.dispatchHeader?.origin) || '—'">
+                              <span class="summary-tag">O</span>
+                              {{ str(e.dispatchHeader?.origin) || '—' }}
+                            </span>
+                            <span class="history-od-mid" aria-hidden="true">→</span>
+                            <span class="history-od-compact" :title="str(e.dispatchHeader?.destination) || '—'">
+                              <span class="summary-tag">D</span>
+                              {{ str(e.dispatchHeader?.destination) || '—' }}
+                            </span>
+                          </div>
+                          <div
+                            class="history-trip-area history-trip-area--time history-time-block history-time-block--trip"
                           >
-                        </div>
-                        <div class="history-summary-right">
-                          <span class="history-trip-mi-pill">{{ tripHeaderMileageDisplay(e) }}</span>
-                          <div v-if="e.dailyTripLegSequence" class="history-top-actions" @click.stop>
+                            <span class="history-time-lab">{{
+                              e.source === 'linehaul' ? 'Dispatched' : 'Time'
+                            }}</span>
+                            <time
+                              class="history-date"
+                              :datetime="new Date(e.displayDate).toISOString()"
+                              >{{ formatWhen(e.displayDate) }}</time
+                            >
+                          </div>
+                          <span class="history-trip-area history-trip-area--mi history-trip-mi-pill">{{
+                            tripHeaderMileageDisplay(e)
+                          }}</span>
+                          <div
+                            v-if="e.dailyTripLegSequence"
+                            class="history-trip-area history-trip-area--out history-outcome-slot"
+                            @click.stop
+                          >
                             <div class="history-outcome-wrap" @click.stop>
                               <button
                                 type="button"
@@ -996,16 +965,15 @@ onUnmounted(() => {
                               </button>
                             </div>
                           </div>
+                          <span
+                            v-if="e.dailyTripLegSequence"
+                            class="history-trip-area history-trip-area--seq history-seq"
+                            :title="`Double-tap header: cycle status · Leg #${e.dailyTripLegSequence}`"
+                            >Leg #{{ e.dailyTripLegSequence }} ·
+                            {{ sourceLabel((str(e.dispatchHeader?.source) || e.source) || '') }}</span
+                          >
                         </div>
-                      </div>
-                      <span
-                        v-if="e.dailyTripLegSequence"
-                        class="history-seq"
-                        :title="`Double-tap header: cycle status · Leg #${e.dailyTripLegSequence}`"
-                        >Leg #{{ e.dailyTripLegSequence }} ·
-                        {{ sourceLabel((str(e.dispatchHeader?.source) || e.source) || '') }}</span
-                      >
-                    </summary>
+                      </summary>
                     <div class="history-dispatch">
                       <p v-if="str(e.dispatchHeader?.tripStatusText)" class="history-meta">
                         Status: {{ str(e.dispatchHeader.tripStatusText) }}
@@ -1092,9 +1060,10 @@ onUnmounted(() => {
                   </details>
                 </li>
               </ul>
-            </section>
-          </div>
-        </section>
+              </details>
+            </div>
+          </details>
+        </div>
       </template>
       </div>
     </div>
@@ -1196,44 +1165,7 @@ onUnmounted(() => {
   margin-bottom: 0.5rem;
 }
 
-.history-view-tabs {
-  display: flex;
-  gap: 0.35rem;
-  margin-bottom: 0.55rem;
-  padding: 0.2rem;
-  border-radius: 10px;
-  background: #12121a;
-  border: 1px solid #2a2a34;
-}
-
-.history-view-tab {
-  flex: 1;
-  min-height: 2.35rem;
-  border: none;
-  border-radius: 8px;
-  background: transparent;
-  color: #8e8e9e;
-  font-size: 0.72rem;
-  font-weight: 700;
-  letter-spacing: 0.02em;
-  cursor: pointer;
-  transition:
-    background 0.15s,
-    color 0.15s;
-}
-
-.history-view-tab:hover:not(.history-view-tab--on) {
-  background: rgba(255, 255, 255, 0.04);
-  color: #c8c8d8;
-}
-
-.history-view-tab--on {
-  background: rgba(123, 77, 181, 0.35);
-  color: #f0e8ff;
-  box-shadow: inset 0 0 0 1px rgba(167, 139, 250, 0.35);
-}
-
-.history-mnav {
+.history-month-nav {
   flex: 0 0 auto;
   min-width: 2.4rem;
   min-height: 2.4rem;
@@ -1461,46 +1393,100 @@ onUnmounted(() => {
   color: var(--color-text-tertiary, #7a7a8a);
 }
 
-.history-ww-section {
-  margin-bottom: 1rem;
+.history-hierarchy {
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
 }
 
-.history-ww-section:last-child {
-  margin-bottom: 0;
+.history-fold {
+  border-radius: 12px;
+  border: 1px solid #2c2c38;
+  background: linear-gradient(180deg, #16161e 0%, #121218 100%);
+  overflow: hidden;
 }
 
-.history-ww-head {
-  margin: 0 0 0.45rem;
-  padding: 0;
+.history-fold > summary.history-fold__summary {
+  list-style: none;
+  cursor: pointer;
+  user-select: none;
 }
 
-.history-ww-head-row {
+.history-fold > summary.history-fold__summary::-webkit-details-marker {
+  display: none;
+}
+
+.history-fold > summary.history-fold__summary::after {
+  content: '▾';
+  flex-shrink: 0;
+  margin-left: 0.35rem;
+  font-size: 0.65rem;
+  color: #9a9aaa;
+  line-height: 1;
+}
+
+.history-fold[open] > summary.history-fold__summary::after {
+  content: '▴';
+}
+
+.history-ww-section.history-fold > .history-fold__summary {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  gap: 0.5rem 0.65rem;
-  flex-wrap: wrap;
+  gap: 0.5rem;
+  padding: 0.5rem 0.6rem;
+  background: rgba(124, 92, 255, 0.06);
+  border-bottom: 1px solid #2a2a34;
+}
+
+.history-day-card.history-fold > .history-fold__summary {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.45rem;
+  padding: 0.42rem 0.5rem;
+  background: rgba(255, 255, 255, 0.03);
+  border-bottom: 1px solid #25252f;
+}
+
+.history-ww-head-row,
+.history-day-head-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.45rem 0.55rem;
+  flex: 1;
+  min-width: 0;
 }
 
 .history-ww-title {
   margin: 0;
-  flex: 1 1 10rem;
+  flex: 1;
   min-width: 0;
-  font-size: 0.74rem;
+  font-size: 0.72rem;
   font-weight: 700;
-  line-height: 1.35;
+  line-height: 1.3;
   color: var(--color-text-primary, #ececf4);
 }
 
+.history-day-title {
+  margin: 0;
+  flex: 1;
+  min-width: 0;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: #c8c8d8;
+}
+
 .history-mile-pill {
-  flex: 0 0 auto;
-  max-width: 100%;
-  padding: 0.22rem 0.45rem;
+  flex-shrink: 0;
+  padding: 0.2rem 0.42rem;
   border-radius: 999px;
-  font-size: 0.62rem;
+  font-size: 0.6rem;
   font-weight: 700;
   font-variant-numeric: tabular-nums;
-  line-height: 1.25;
+  line-height: 1.2;
   background: rgba(124, 92, 255, 0.14);
   border: 1px solid rgba(167, 139, 250, 0.35);
   color: #ddd6fe;
@@ -1508,8 +1494,8 @@ onUnmounted(() => {
 }
 
 .history-mile-pill--sm {
-  font-size: 0.58rem;
-  padding: 0.18rem 0.4rem;
+  font-size: 0.56rem;
+  padding: 0.16rem 0.36rem;
 }
 
 .history-mile-pill--muted {
@@ -1522,72 +1508,32 @@ onUnmounted(() => {
 .history-day-stack {
   display: flex;
   flex-direction: column;
-  gap: 0.65rem;
-}
-
-.history-day-card {
-  border-radius: 12px;
-  border: 1px solid #2c2c38;
-  background: linear-gradient(180deg, #14141c 0%, #111118 100%);
-  overflow: hidden;
-}
-
-.history-day-head {
-  padding: 0.45rem 0.55rem 0.35rem;
-  border-bottom: 1px solid #25252f;
-  background: rgba(255, 255, 255, 0.02);
-}
-
-.history-day-head-row {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 0.45rem 0.55rem;
-  flex-wrap: wrap;
-}
-
-.history-day-title {
-  margin: 0;
-  flex: 1 1 8rem;
-  min-width: 0;
-  font-size: 0.68rem;
-  font-weight: 700;
-  letter-spacing: 0.02em;
-  color: #c4c4d4;
+  gap: 0.5rem;
+  padding: 0.45rem 0.45rem 0.55rem;
 }
 
 .history-list--day {
-  padding: 0.45rem 0.45rem 0.55rem !important;
+  padding: 0 !important;
   gap: 0.45rem !important;
 }
 
 .history-day-card .history-card {
-  border-color: #2f2f3a;
-  background: #16161e;
-}
-
-.history-summary-right {
-  display: flex;
-  align-items: center;
-  gap: 0.35rem;
-  flex: 1 1 auto;
-  min-width: 0;
-  justify-content: flex-end;
+  border-color: #32323c;
+  background: #181820;
 }
 
 .history-trip-mi-pill {
-  font-size: 0.58rem;
+  font-size: 0.56rem;
   font-weight: 700;
   font-variant-numeric: tabular-nums;
   color: #c4b5fd;
-  padding: 0.12rem 0.38rem;
+  padding: 0.1rem 0.34rem;
   border-radius: 6px;
   background: rgba(124, 92, 255, 0.12);
   border: 1px solid rgba(167, 139, 250, 0.22);
   white-space: nowrap;
-  max-width: 9rem;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  justify-self: end;
+  text-align: right;
 }
 
 .history-list {
@@ -1619,14 +1565,85 @@ onUnmounted(() => {
   list-style: none;
 }
 
+.history-trip-fold {
+  position: relative;
+}
+
+.history-trip-summary.history-fold__summary {
+  display: block;
+  padding: 0.5rem 2rem 0.42rem 0.55rem;
+}
+
+.history-trip-summary.history-fold__summary::after {
+  top: 0.62rem;
+}
+
+.history-trip-summary-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto auto;
+  grid-template-areas:
+    'od time mi out'
+    'seq seq seq seq';
+  gap: 0.35rem 0.45rem;
+  align-items: center;
+  width: 100%;
+}
+
+.history-trip-area--od {
+  grid-area: od;
+  min-width: 0;
+}
+
+.history-trip-area--time {
+  grid-area: time;
+  align-self: center;
+}
+
+.history-trip-area--mi {
+  grid-area: mi;
+}
+
+.history-trip-area--out {
+  grid-area: out;
+  justify-self: end;
+}
+
+.history-trip-area--seq {
+  grid-area: seq;
+}
+
+.history-od-lane--trip {
+  display: flex;
+  flex-direction: row;
+  align-items: flex-start;
+  gap: 0.2rem 0.28rem;
+}
+
+.history-time-block--trip {
+  align-items: flex-end;
+  text-align: right;
+}
+
+.history-outcome-slot {
+  display: flex;
+  justify-content: flex-end;
+  min-width: 0;
+}
+
+.history-outcome-slot .history-outcome-pill {
+  width: auto;
+  min-width: 4.25rem;
+}
+
+.history-seq {
+  font-size: 0.58rem;
+  color: #7c7c8c;
+  font-weight: 600;
+}
+
 .history-card-summary {
   list-style: none;
   position: relative;
-  display: flex;
-  flex-direction: column;
-  align-items: stretch;
-  gap: 0.4rem;
-  padding: 0.65rem 0.75rem 0.55rem;
   background: #22222c;
   border-bottom: 1px solid #2e2e38;
   cursor: pointer;
@@ -1637,10 +1654,22 @@ onUnmounted(() => {
   display: none;
 }
 
-.history-card-summary::after {
+.history-drop {
+  list-style: none;
+}
+
+.history-drop:not(.history-trip-fold) .history-card-summary {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.4rem;
+  padding: 0.65rem 0.75rem 0.55rem;
+}
+
+.history-drop:not(.history-trip-fold) .history-card-summary::after {
   content: '▾';
   position: absolute;
-  right: 0.9rem;
+  right: 0.75rem;
   top: 50%;
   transform: translateY(-50%);
   font-size: 0.7rem;
@@ -1648,12 +1677,27 @@ onUnmounted(() => {
   pointer-events: none;
 }
 
-.history-drop[open] .history-card-summary::after {
+.history-drop:not(.history-trip-fold)[open] .history-card-summary::after {
   content: '▴';
 }
 
-.history-drop {
+.history-drop:not(.history-trip-fold) {
   position: relative;
+}
+
+.history-trip-fold .history-card-summary::after {
+  content: '▾';
+  position: absolute;
+  right: 0.65rem;
+  top: 0.58rem;
+  transform: none;
+  font-size: 0.68rem;
+  color: #9a9aaa;
+  pointer-events: none;
+}
+
+.history-trip-fold[open] .history-card-summary::after {
+  content: '▴';
 }
 
 .history-od-lane {
