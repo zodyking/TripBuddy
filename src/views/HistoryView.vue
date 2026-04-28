@@ -1070,20 +1070,17 @@ onUnmounted(() => {
                         @dblclick.stop.prevent="onRowDoubleClick(e)"
                       >
                         <div class="history-trip-summary-grid">
-                          <div class="history-trip-area history-trip-area--od history-od-lane history-od-lane--trip">
-                            <span
-                              class="history-od-compact history-od-compact--ids"
-                              :title="str(e.dispatchHeader?.origin) || '—'"
+                          <div class="history-trip-area history-trip-area--od history-trip-od-inline-wrap">
+                            <p
+                              class="history-trip-od-inline"
+                              :title="`${str(e.dispatchHeader?.origin) || '—'} → ${str(e.dispatchHeader?.destination) || '—'}`"
                             >
-                              <span class="summary-tag">O</span>{{ leadingLocationId(e.dispatchHeader?.origin) || '—' }}
-                            </span>
-                            <span class="history-od-mid" aria-hidden="true">→</span>
-                            <span
-                              class="history-od-compact history-od-compact--ids"
-                              :title="str(e.dispatchHeader?.destination) || '—'"
-                            >
-                              <span class="summary-tag">D</span>{{ leadingLocationId(e.dispatchHeader?.destination) || '—' }}
-                            </span>
+                              <span class="history-od-lab">Origin:</span>
+                              <span class="history-od-id">{{ leadingLocationId(e.dispatchHeader?.origin) || '—' }}</span>
+                              <span class="history-od-arrow" aria-hidden="true">→</span>
+                              <span class="history-od-lab">Destination:</span>
+                              <span class="history-od-id">{{ leadingLocationId(e.dispatchHeader?.destination) || '—' }}</span>
+                            </p>
                           </div>
                           <div
                             class="history-trip-area history-trip-area--time history-time-block history-time-block--trip"
@@ -1605,13 +1602,40 @@ onUnmounted(() => {
   flex-shrink: 0;
 }
 
+.history-mile-pill {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  min-height: 1.65rem;
+  padding: 0.18rem 0.42rem;
+  border-radius: 999px;
+  font-size: 0.6rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.15;
+  background: rgba(124, 92, 255, 0.14);
+  border: 1px solid rgba(167, 139, 250, 0.35);
+  color: #ddd6fe;
+  white-space: nowrap;
+}
+
+.history-mile-pill--sm {
+  font-size: 0.56rem;
+  padding: 0.14rem 0.36rem;
+  min-height: 1.55rem;
+}
+
 .history-pay-head-pill {
   flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  min-height: 1.65rem;
   padding: 0.18rem 0.42rem;
   border-radius: 999px;
   font-size: 0.58rem;
   font-weight: 800;
   font-variant-numeric: tabular-nums;
+  line-height: 1.15;
   background: rgba(34, 197, 94, 0.12);
   border: 1px solid rgba(34, 197, 94, 0.38);
   color: #bbf7d0;
@@ -1621,6 +1645,7 @@ onUnmounted(() => {
 .history-pay-head-pill--sm {
   font-size: 0.54rem;
   padding: 0.14rem 0.34rem;
+  min-height: 1.55rem;
 }
 
 .history-ww-title {
@@ -1641,25 +1666,6 @@ onUnmounted(() => {
   font-weight: 700;
   letter-spacing: 0.02em;
   color: #c8c8d8;
-}
-
-.history-mile-pill {
-  flex-shrink: 0;
-  padding: 0.2rem 0.42rem;
-  border-radius: 999px;
-  font-size: 0.6rem;
-  font-weight: 700;
-  font-variant-numeric: tabular-nums;
-  line-height: 1.2;
-  background: rgba(124, 92, 255, 0.14);
-  border: 1px solid rgba(167, 139, 250, 0.35);
-  color: #ddd6fe;
-  white-space: nowrap;
-}
-
-.history-mile-pill--sm {
-  font-size: 0.56rem;
-  padding: 0.16rem 0.36rem;
 }
 
 .history-mile-pill--muted {
@@ -1816,19 +1822,19 @@ onUnmounted(() => {
   display: inline-flex;
   align-items: center;
   justify-content: flex-end;
-  min-height: 1.75rem;
+  min-height: 0;
   box-sizing: border-box;
-  font-size: 0.56rem;
+  font-size: 0.54rem;
   font-weight: 700;
   font-variant-numeric: tabular-nums;
   color: #c4b5fd;
-  padding: 0 0.42rem;
+  padding: 0.1rem 0.34rem;
   border-radius: 6px;
   background: rgba(124, 92, 255, 0.12);
   border: 1px solid rgba(167, 139, 250, 0.28);
   white-space: nowrap;
   text-align: right;
-  line-height: 1.15;
+  line-height: 1.2;
 }
 
 .history-list {
@@ -1866,11 +1872,11 @@ onUnmounted(() => {
 
 .history-trip-summary.history-fold__summary {
   display: block;
-  padding: 0.5rem 2rem 0.42rem 0.55rem;
+  padding: 0.38rem 1.85rem 0.34rem 0.48rem;
 }
 
 .history-trip-summary.history-fold__summary::after {
-  top: 0.62rem;
+  top: 0.55rem;
 }
 
 .history-trip-summary-grid {
@@ -1879,7 +1885,7 @@ onUnmounted(() => {
   grid-template-areas:
     'od time outstack'
     'seq seq seq';
-  gap: 0.35rem 0.55rem;
+  gap: 0.28rem 0.45rem;
   align-items: center;
   width: 100%;
 }
@@ -1887,6 +1893,42 @@ onUnmounted(() => {
 .history-trip-area--od {
   grid-area: od;
   min-width: 0;
+}
+
+.history-trip-od-inline-wrap {
+  min-width: 0;
+}
+
+.history-trip-od-inline {
+  margin: 0;
+  font-size: 0.65rem;
+  font-weight: 600;
+  line-height: 1.28;
+  color: var(--color-text-primary, #ececf4);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.15rem 0.28rem;
+}
+
+.history-od-lab {
+  font-size: 0.56rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: #8b8b98;
+  flex: 0 0 auto;
+}
+
+.history-od-id {
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: #f0f0f8;
+}
+
+.history-od-arrow {
+  color: #6b6b78;
+  font-weight: 700;
+  padding: 0 0.05rem;
 }
 
 .history-trip-area--time {
@@ -1900,9 +1942,9 @@ onUnmounted(() => {
   flex-direction: column;
   align-items: flex-end;
   justify-content: center;
-  gap: 0.35rem;
+  gap: 0.22rem;
   justify-self: end;
-  min-width: 7rem;
+  min-width: 0;
 }
 
 .history-trip-area--out {
@@ -1917,60 +1959,29 @@ onUnmounted(() => {
   align-self: flex-end;
 }
 
-.history-od-lane--trip {
-  display: flex;
-  flex-direction: row;
-  align-items: center;
-  flex-wrap: nowrap;
-  gap: 0.32rem 0.35rem;
-  width: 100%;
-  min-width: 0;
-  padding-right: 0;
-}
-
-.history-od-compact--ids {
-  flex: 0 1 auto;
-  min-width: 0;
-  font-size: 0.72rem;
-  font-weight: 700;
-  line-height: 1.2;
-  letter-spacing: 0.03em;
-  font-variant-numeric: tabular-nums;
-  color: var(--color-text-primary, #ececf4);
-  white-space: nowrap;
-}
-
-.history-od-lane--trip .history-od-mid {
-  font-size: 0.75rem;
-  color: #8b8b98;
-  padding: 0 0.06rem;
-}
-
 .history-time-block--trip {
   align-items: flex-end;
   text-align: right;
-  justify-content: center;
-  gap: 0.18rem;
-  min-height: 2.5rem;
+  gap: 0.06rem;
 }
 
 .history-time-block--trip .history-time-lab {
-  font-size: 0.52rem;
+  font-size: 0.48rem;
   font-weight: 800;
-  letter-spacing: 0.07em;
+  letter-spacing: 0.06em;
 }
 
 .history-time-block--trip .history-date {
-  font-size: 0.72rem;
+  font-size: 0.65rem;
   font-weight: 700;
   color: #e4dff8;
 }
 
 .history-outcome-slot .history-outcome-pill {
   width: auto;
-  min-width: 5rem;
-  min-height: 1.75rem;
-  padding: 0 0.45rem 0 0.48rem;
+  min-width: 4.35rem;
+  min-height: 0;
+  padding: 0.12rem 0.35rem 0.12rem 0.38rem;
 }
 
 .history-outcome-slot {
@@ -1980,10 +1991,10 @@ onUnmounted(() => {
 }
 
 .history-seq {
-  font-size: 0.6rem;
+  font-size: 0.58rem;
   color: var(--color-text-tertiary, #6e6e7e);
   font-weight: 600;
-  line-height: 1.35;
+  line-height: 1.25;
   letter-spacing: 0.02em;
 }
 
@@ -2035,7 +2046,7 @@ onUnmounted(() => {
   content: '▾';
   position: absolute;
   right: 0.65rem;
-  top: 0.58rem;
+  top: 0.5rem;
   transform: none;
   font-size: 0.68rem;
   color: #9a9aaa;
@@ -2139,9 +2150,9 @@ onUnmounted(() => {
   justify-content: space-between;
   gap: 0.25rem;
   width: 100%;
-  min-height: 1.75rem;
+  min-height: 1.45rem;
   min-width: 0;
-  padding: 0 0.45rem 0 0.48rem;
+  padding: 0.08rem 0.35rem 0.08rem 0.38rem;
   line-height: 1.15;
   border: 1px solid;
   border-radius: 6px;
