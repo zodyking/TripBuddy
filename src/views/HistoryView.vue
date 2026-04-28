@@ -157,17 +157,20 @@ function tripHeaderMileageDisplay(e) {
   return parts.join(' · ')
 }
 
-/** Trips at or above this paid mileage count as {@link PAY_ROUND_TO_MI} mi for pay estimate. */
-const PAY_ROUND_THRESHOLD_MI = 34
+/** Paid miles in [PAY_ROUND_BAND_MIN, PAY_ROUND_BAND_MAX] count as {@link PAY_ROUND_TO_MI} mi for pay estimate. */
+const PAY_ROUND_BAND_MIN = 34
+const PAY_ROUND_BAND_MAX = 50
 const PAY_ROUND_TO_MI = 50
 
 /**
  * Billable miles for the pay estimate ($1 / mi rule).
+ * Only 34–50 mi paid bands up to 50; below 34 unchanged; above 50 unchanged.
  * @param {number} paidMi
  */
 function billableMilesForPayEstimate(paidMi) {
   if (!Number.isFinite(paidMi)) return 0
-  return paidMi >= PAY_ROUND_THRESHOLD_MI ? PAY_ROUND_TO_MI : paidMi
+  if (paidMi >= PAY_ROUND_BAND_MIN && paidMi <= PAY_ROUND_BAND_MAX) return PAY_ROUND_TO_MI
+  return paidMi
 }
 
 /**
@@ -220,7 +223,7 @@ function computeWeekPayEstimate(items) {
       when: tripPayWhenWithLeg(e),
       paidMi,
       billableMi,
-      rounded: base >= PAY_ROUND_THRESHOLD_MI,
+      rounded: base >= PAY_ROUND_BAND_MIN && base <= PAY_ROUND_BAND_MAX,
     })
   }
   return {
@@ -1090,29 +1093,31 @@ onUnmounted(() => {
                               >{{ formatWhen(e.displayDate) }}</time
                             >
                           </div>
-                          <span class="history-trip-area history-trip-area--mi history-trip-mi-pill">{{
-                            tripHeaderMileageDisplay(e)
-                          }}</span>
-                          <div
-                            v-if="e.dailyTripLegSequence"
-                            class="history-trip-area history-trip-area--out history-outcome-slot"
-                            @click.stop
-                          >
-                            <div class="history-outcome-wrap" @click.stop>
-                              <button
-                                type="button"
-                                class="history-outcome-pill tap"
-                                :class="`history-outcome--${outcomeSelectValue(e)}`"
-                                :disabled="historySavingId === `seq-${e.dailyTripLegSequence}`"
-                                :title="'Tap to change: ' + outcomeLabel(outcomeSelectValue(e))"
-                                :aria-expanded="outcomeMenuOpen === e.id"
-                                aria-haspopup="listbox"
-                                @click="toggleOutcomeMenu(e, e.id, $event)"
-                              >
-                                <span class="history-outcome-pill__txt">{{ outcomeLabel(outcomeSelectValue(e)) }}</span>
-                                <span class="history-outcome-pill__chev" aria-hidden="true">▾</span>
-                              </button>
+                          <div class="history-trip-out-stack">
+                            <div
+                              v-if="e.dailyTripLegSequence"
+                              class="history-trip-area history-trip-area--out history-outcome-slot"
+                              @click.stop
+                            >
+                              <div class="history-outcome-wrap" @click.stop>
+                                <button
+                                  type="button"
+                                  class="history-outcome-pill tap"
+                                  :class="`history-outcome--${outcomeSelectValue(e)}`"
+                                  :disabled="historySavingId === `seq-${e.dailyTripLegSequence}`"
+                                  :title="'Tap to change: ' + outcomeLabel(outcomeSelectValue(e))"
+                                  :aria-expanded="outcomeMenuOpen === e.id"
+                                  aria-haspopup="listbox"
+                                  @click="toggleOutcomeMenu(e, e.id, $event)"
+                                >
+                                  <span class="history-outcome-pill__txt">{{ outcomeLabel(outcomeSelectValue(e)) }}</span>
+                                  <span class="history-outcome-pill__chev" aria-hidden="true">▾</span>
+                                </button>
+                              </div>
                             </div>
+                            <span class="history-trip-mi-pill history-trip-mi-pill--under-outcome">{{
+                              tripHeaderMileageDisplay(e)
+                            }}</span>
                           </div>
                           <span
                             v-if="e.dailyTripLegSequence"
@@ -1219,8 +1224,8 @@ onUnmounted(() => {
               </summary>
               <div class="history-pay-body">
                 <p class="history-pay-rules">
-                  $1 per billable mile (trips ≥ {{ PAY_ROUND_THRESHOLD_MI }} mi count as {{ PAY_ROUND_TO_MI }} mi). Missing
-                  mileage counts as 0 mi.
+                  $1 per billable mile (paid miles from {{ PAY_ROUND_BAND_MIN }}–{{ PAY_ROUND_BAND_MAX }} mi count as
+                  {{ PAY_ROUND_TO_MI }} mi). Missing mileage counts as 0 mi.
                 </p>
                 <ul class="history-pay-list" aria-label="Pay estimate by trip">
                   <li
@@ -1234,7 +1239,9 @@ onUnmounted(() => {
                     </span>
                     <span class="history-pay-row__nums">
                       <span class="history-pay-row__bill">{{ row.billableMi }} mi → {{ formatUsdWhole(row.billableMi) }}</span>
-                      <span v-if="row.rounded" class="history-pay-row__note">≥{{ PAY_ROUND_THRESHOLD_MI }} mi → {{ PAY_ROUND_TO_MI }} mi</span>
+                      <span v-if="row.rounded" class="history-pay-row__note"
+                        >{{ PAY_ROUND_BAND_MIN }}–{{ PAY_ROUND_BAND_MAX }} mi → {{ PAY_ROUND_TO_MI }} mi</span
+                      >
                       <span v-else-if="row.paidMi == null" class="history-pay-row__note">no paid mi</span>
                     </span>
                   </li>
@@ -1811,7 +1818,6 @@ onUnmounted(() => {
   background: rgba(124, 92, 255, 0.12);
   border: 1px solid rgba(167, 139, 250, 0.22);
   white-space: nowrap;
-  justify-self: end;
   text-align: right;
 }
 
@@ -1859,12 +1865,12 @@ onUnmounted(() => {
 
 .history-trip-summary-grid {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto auto auto;
+  grid-template-columns: minmax(0, 1fr) auto max-content;
   grid-template-areas:
-    'od time mi out'
-    'seq seq seq seq';
+    'od time outstack'
+    'seq seq seq';
   gap: 0.35rem 0.45rem;
-  align-items: center;
+  align-items: start;
   width: 100%;
 }
 
@@ -1878,17 +1884,26 @@ onUnmounted(() => {
   align-self: center;
 }
 
-.history-trip-area--mi {
-  grid-area: mi;
+.history-trip-out-stack {
+  grid-area: outstack;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0.28rem;
+  justify-self: end;
+  min-width: 0;
 }
 
 .history-trip-area--out {
-  grid-area: out;
   justify-self: end;
 }
 
 .history-trip-area--seq {
   grid-area: seq;
+}
+
+.history-trip-mi-pill--under-outcome {
+  align-self: flex-end;
 }
 
 .history-od-lane--trip {
