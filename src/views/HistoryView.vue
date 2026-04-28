@@ -157,6 +157,67 @@ function tripHeaderMileageDisplay(e) {
   return parts.join(' · ')
 }
 
+/** Trips at or above this paid mileage count as {@link PAY_ROUND_TO_MI} mi for pay estimate. */
+const PAY_ROUND_THRESHOLD_MI = 34
+const PAY_ROUND_TO_MI = 50
+
+/**
+ * Billable miles for the pay estimate ($1 / mi rule).
+ * @param {number} paidMi
+ */
+function billableMilesForPayEstimate(paidMi) {
+  if (!Number.isFinite(paidMi)) return 0
+  return paidMi >= PAY_ROUND_THRESHOLD_MI ? PAY_ROUND_TO_MI : paidMi
+}
+
+/**
+ * @param {LedgerEntry} e
+ */
+function tripOdShortLabel(e) {
+  const o = String(str(e.dispatchHeader?.origin) || '').trim() || '—'
+  const d = String(str(e.dispatchHeader?.destination) || '').trim() || '—'
+  const clip = (s, n) => (s.length > n ? `${s.slice(0, n - 1)}…` : s)
+  return `${clip(o, 18)} → ${clip(d, 18)}`
+}
+
+/**
+ * @param {LedgerEntry[]} items
+ */
+function computeWeekPayEstimate(items) {
+  const sorted = [...items].sort((a, b) => b.displayDate - a.displayDate)
+  let sumBillable = 0
+  /** @type {{ id: string, od: string, when: string, paidMi: number | null, billableMi: number, rounded: boolean }[]} */
+  const rows = []
+  for (const e of sorted) {
+    const paidMi = tripPaidMiles(e)
+    const base = paidMi ?? 0
+    const billableMi = billableMilesForPayEstimate(base)
+    sumBillable += billableMi
+    rows.push({
+      id: e.id,
+      od: tripOdShortLabel(e),
+      when: formatWhen(e.displayDate),
+      paidMi,
+      billableMi,
+      rounded: base >= PAY_ROUND_THRESHOLD_MI,
+    })
+  }
+  return {
+    rows,
+    sumBillable,
+    estimateUsd: sumBillable,
+  }
+}
+
+/**
+ * @param {number} n
+ */
+function formatUsdWhole(n) {
+  if (!Number.isFinite(n)) return '$0'
+  const r = Math.round(n)
+  return `$${r.toLocaleString(undefined)}`
+}
+
 async function load() {
   loading.value = true
   error.value = ''
@@ -516,6 +577,16 @@ const monthPaidMilesTotal = computed(() => {
     count += w.tripsWithMileage
   }
   return { sum, count }
+})
+
+/** Per work-week pay estimate ($1 / billable mi); keyed like {@link tripsByWorkWeek}. */
+const weekPayEstimateByKey = computed(() => {
+  /** @type {Record<string, ReturnType<typeof computeWeekPayEstimate>>} */
+  const out = {}
+  for (const wg of tripsByWorkWeek.value) {
+    out[wg.key] = computeWeekPayEstimate(wg.items)
+  }
+  return out
 })
 
 /** Expand week/day `<details>` when user picks a calendar shift day. */
@@ -1087,6 +1158,44 @@ onUnmounted(() => {
               </ul>
               </details>
             </div>
+
+            <details class="history-pay-fold history-fold">
+              <summary class="history-pay-fold__summary history-fold__summary">
+                <span class="history-pay-fold__title">Pay breakdown estimate</span>
+                <span class="history-pay-fold__pill">{{
+                  formatUsdWhole((weekPayEstimateByKey[wg.key] || { estimateUsd: 0 }).estimateUsd)
+                }}</span>
+              </summary>
+              <div class="history-pay-body">
+                <p class="history-pay-rules">
+                  $1 per billable mile (trips ≥ {{ PAY_ROUND_THRESHOLD_MI }} mi count as {{ PAY_ROUND_TO_MI }} mi). Missing
+                  mileage counts as 0 mi.
+                </p>
+                <ul class="history-pay-list" aria-label="Pay estimate by trip">
+                  <li
+                    v-for="row in (weekPayEstimateByKey[wg.key] || { rows: [] }).rows"
+                    :key="row.id"
+                    class="history-pay-row"
+                  >
+                    <span class="history-pay-row__main">
+                      <span class="history-pay-row__od">{{ row.od }}</span>
+                      <span class="history-pay-row__when">{{ row.when }}</span>
+                    </span>
+                    <span class="history-pay-row__nums">
+                      <span class="history-pay-row__bill">{{ row.billableMi }} mi → {{ formatUsdWhole(row.billableMi) }}</span>
+                      <span v-if="row.rounded" class="history-pay-row__note">≥{{ PAY_ROUND_THRESHOLD_MI }} mi → {{ PAY_ROUND_TO_MI }} mi</span>
+                      <span v-else-if="row.paidMi == null" class="history-pay-row__note">no paid mi</span>
+                    </span>
+                  </li>
+                </ul>
+                <div class="history-pay-total">
+                  <span>Estimated total</span>
+                  <strong>{{
+                    formatUsdWhole((weekPayEstimateByKey[wg.key] || { estimateUsd: 0 }).estimateUsd)
+                  }}</strong>
+                </div>
+              </div>
+            </details>
           </details>
         </div>
       </template>
@@ -1271,22 +1380,22 @@ onUnmounted(() => {
   background: #0a0a0c;
 }
 .history-day-cell--in-ww:not(:disabled) {
-  color: #d4c9f5;
-  background: rgba(68, 42, 108, 0.35);
-  border-color: rgba(139, 92, 246, 0.35);
+  color: #e0e0f0;
+  background: rgba(34, 197, 94, 0.08);
+  border-color: rgba(34, 197, 94, 0.28);
   cursor: pointer;
   opacity: 1;
 }
 
 .history-day-cell--in-ww:hover:not(:disabled) {
-  border-color: rgba(196, 181, 253, 0.55);
-  background: rgba(109, 71, 165, 0.38);
+  border-color: rgba(52, 211, 153, 0.55);
+  background: rgba(34, 197, 94, 0.12);
 }
 .history-day-cell--on {
-  border-color: rgba(196, 181, 253, 0.75) !important;
-  background: rgba(109, 71, 165, 0.42) !important;
-  color: #faf5ff !important;
-  box-shadow: 0 0 0 1px rgba(167, 139, 250, 0.35);
+  border-color: rgba(52, 211, 153, 0.85) !important;
+  background: rgba(34, 197, 94, 0.18) !important;
+  color: #f0fdf4 !important;
+  box-shadow: 0 0 0 1px rgba(34, 197, 94, 0.38);
 }
 .history-day-cell--empty {
   opacity: 0.85;
@@ -1476,6 +1585,140 @@ onUnmounted(() => {
   flex-direction: column;
   gap: 0.5rem;
   padding: 0.45rem 0.45rem 0.55rem;
+}
+
+.history-pay-fold {
+  margin: 0 0.45rem 0.55rem;
+  border-radius: 10px;
+  border: 1px solid #2f2f3a;
+  background: rgba(0, 0, 0, 0.22);
+  overflow: hidden;
+}
+
+.history-pay-fold > .history-pay-fold__summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.42rem 0.55rem;
+  background: rgba(255, 255, 255, 0.03);
+  border-bottom: 1px solid #2a2a32;
+}
+
+.history-pay-fold__title {
+  font-size: 0.66rem;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: #a8a8b8;
+}
+
+.history-pay-fold__pill {
+  flex-shrink: 0;
+  padding: 0.18rem 0.45rem;
+  border-radius: 999px;
+  font-size: 0.62rem;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  background: rgba(34, 197, 94, 0.12);
+  border: 1px solid rgba(34, 197, 94, 0.35);
+  color: #bbf7d0;
+}
+
+.history-pay-body {
+  padding: 0.45rem 0.55rem 0.55rem;
+}
+
+.history-pay-rules {
+  margin: 0 0 0.45rem;
+  font-size: 0.62rem;
+  line-height: 1.45;
+  color: #7a7a8a;
+}
+
+.history-pay-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.history-pay-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.55rem;
+  padding: 0.38rem 0.42rem;
+  border-radius: 8px;
+  border: 1px solid #2a2a34;
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.history-pay-row__main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.12rem;
+}
+
+.history-pay-row__od {
+  font-size: 0.65rem;
+  font-weight: 650;
+  color: #d8d8e6;
+  line-height: 1.25;
+  word-break: break-word;
+}
+
+.history-pay-row__when {
+  font-size: 0.58rem;
+  font-variant-numeric: tabular-nums;
+  color: #7c7c8c;
+}
+
+.history-pay-row__nums {
+  flex-shrink: 0;
+  text-align: right;
+  display: flex;
+  flex-direction: column;
+  gap: 0.12rem;
+  align-items: flex-end;
+}
+
+.history-pay-row__bill {
+  font-size: 0.62rem;
+  font-weight: 750;
+  font-variant-numeric: tabular-nums;
+  color: #e8e8f2;
+  white-space: nowrap;
+}
+
+.history-pay-row__note {
+  font-size: 0.54rem;
+  font-weight: 600;
+  color: #8b8b9b;
+  max-width: 11rem;
+}
+
+.history-pay-total {
+  margin-top: 0.45rem;
+  padding-top: 0.45rem;
+  border-top: 1px solid #2c2c38;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  font-size: 0.68rem;
+  color: #9a9aaa;
+}
+
+.history-pay-total strong {
+  font-size: 0.78rem;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  color: #f4f4fa;
 }
 
 .history-list--day {
