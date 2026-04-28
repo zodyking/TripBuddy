@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed, onMounted, onUnmounted, nextTick, Teleport } from 'vue'
+import { ref, computed, watch, onMounted, onUnmounted, nextTick, Teleport } from 'vue'
 import { getAssignment, getCredentials, patchTripHistoryOutcome } from '../api.js'
 import { monthGridForCalendarMonth, workWeekGroupMeta } from '../utils/workWeekGroup.js'
 import { shiftDateKeyForEventMs } from '../utils/shiftCalendar.js'
@@ -59,7 +59,7 @@ function normalizeOutcome(x) {
 }
 
 /**
- * Planned route mileage from Linehaul `viewTripInfoDetails` (stored under tripDetails.mileage).
+ * Paid mileage from Linehaul `viewTripInfoDetails` (stored under tripDetails.mileage).
  * @param {LedgerEntry} e
  */
 function mileageBlock(e) {
@@ -100,7 +100,7 @@ function stateMilesLabel(row) {
  * @param {LedgerEntry} e
  * @returns {number | null}
  */
-function tripPlannedMiles(e) {
+function tripPaidMiles(e) {
   const mb = mileageBlock(e)
   if (!mb?.total) return null
   const n = parseFloat(String(mb.total).replace(/,/g, '').trim())
@@ -134,7 +134,7 @@ function formatShiftDayHeading(shiftDayKey) {
 }
 
 /**
- * One-line mileage for headers (planned mi only).
+ * One-line mileage for headers (paid mi).
  * @param {number} sum
  * @param {number} withMi
  * @param {number} totalTrips
@@ -145,11 +145,11 @@ function mileageHeaderLine(sum, withMi, totalTrips) {
 }
 
 /**
- * Always show planned miles on collapsed trip header (0 when unknown).
+ * Always show paid miles on collapsed trip header (0 when unknown).
  * @param {LedgerEntry} e
  */
 function tripHeaderMileageDisplay(e) {
-  const n = tripPlannedMiles(e)
+  const n = tripPaidMiles(e)
   const mi = n != null ? formatMilesSum(n) : '0'
   const mb = mileageBlock(e)
   const parts = [`${mi} mi`]
@@ -472,7 +472,7 @@ const tripsByWorkWeek = computed(() => {
       let dSum = 0
       let dWith = 0
       for (const e of dayItems) {
-        const mi = tripPlannedMiles(e)
+        const mi = tripPaidMiles(e)
         if (mi != null) {
           dSum += mi
           dWith += 1
@@ -507,8 +507,8 @@ const tripsByWorkWeek = computed(() => {
   return out
 })
 
-/** Sum of planned miles for the visible month list (only trips with mileage data). */
-const monthPlannedMilesTotal = computed(() => {
+/** Sum of paid miles for the visible month list. */
+const monthPaidMilesTotal = computed(() => {
   let sum = 0
   let count = 0
   for (const w of tripsByWorkWeek.value) {
@@ -516,6 +516,46 @@ const monthPlannedMilesTotal = computed(() => {
     count += w.tripsWithMileage
   }
   return { sum, count }
+})
+
+/** Expand week/day `<details>` when user picks a calendar shift day. */
+const wwDetailsElByKey = /** @type {Record<string, HTMLDetailsElement | undefined>} */ ({})
+const dayDetailsElByKey = /** @type {Record<string, HTMLDetailsElement | undefined>} */ ({})
+
+function bindWwDetailsEl(weekKey) {
+  return (/** @type {unknown} */ el) => {
+    const k = String(weekKey)
+    if (el instanceof HTMLDetailsElement) wwDetailsElByKey[k] = el
+    else delete wwDetailsElByKey[k]
+  }
+}
+
+function bindDayDetailsEl(weekKey, shiftDayKey) {
+  const dk = shiftDayKey ? String(shiftDayKey) : 'unk'
+  const mapKey = `${String(weekKey)}|${dk}`
+  return (/** @type {unknown} */ el) => {
+    if (el instanceof HTMLDetailsElement) dayDetailsElByKey[mapKey] = el
+    else delete dayDetailsElByKey[mapKey]
+  }
+}
+
+watch(filterDayKey, async (k) => {
+  const dayKey = String(k || '').trim()
+  if (!dayKey) return
+  await nextTick()
+  for (const wg of tripsByWorkWeek.value) {
+    const dg = wg.days.find((d) => d.shiftDayKey === dayKey)
+    if (!dg) continue
+    const wwEl = wwDetailsElByKey[wg.key]
+    const dayMapKey = `${wg.key}|${dg.shiftDayKey ? String(dg.shiftDayKey) : 'unk'}`
+    const dayEl = dayDetailsElByKey[dayMapKey]
+    if (wwEl) wwEl.open = true
+    if (dayEl) {
+      dayEl.open = true
+      dayEl.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
+    }
+    break
+  }
 })
 
 const viewMonthGrid = computed(() => {
@@ -764,24 +804,6 @@ onUnmounted(() => {
 
 <template>
   <div class="history-view">
-    <header class="history-head">
-      <div class="history-head-top">
-        <h1 class="history-title">History</h1>
-        <button
-          type="button"
-          class="btn secondary history-refresh tap"
-          :disabled="loading"
-          @click="load"
-        >
-          {{ loading ? 'Loading' : 'Refresh' }}
-        </button>
-      </div>
-      <p class="history-sub">
-        List time is <strong>dispatch</strong> (first Linehaul save) or
-        <strong>when you marked complete</strong> — it does not change when status updates.
-      </p>
-    </header>
-
     <p v-if="error" class="history-err">{{ error }}</p>
     <div
       v-else
@@ -865,9 +887,9 @@ onUnmounted(() => {
         v-if="weekFilteredItems.length && !filterDayKey"
         class="history-month-mile-sum"
       >
-        Planned miles this month ({{ monthPlannedMilesTotal.count }}
-        {{ monthPlannedMilesTotal.count === 1 ? 'trip' : 'trips' }} with data):
-        <strong>{{ formatMilesSum(monthPlannedMilesTotal.sum) }} mi</strong>
+        Paid miles this month ({{ monthPaidMilesTotal.count }}
+        {{ monthPaidMilesTotal.count === 1 ? 'trip' : 'trips' }} with data):
+        <strong>{{ formatMilesSum(monthPaidMilesTotal.sum) }} mi</strong>
       </p>
       <p v-else-if="filterDayKey && !weekFilteredItems.length" class="history-no-month">
         No trips on this shift day.
@@ -878,6 +900,7 @@ onUnmounted(() => {
           <details
             v-for="wg in tripsByWorkWeek"
             :key="wg.key"
+            :ref="bindWwDetailsEl(wg.key)"
             class="history-ww-section history-fold"
             :aria-label="wg.groupLabel"
           >
@@ -894,7 +917,9 @@ onUnmounted(() => {
               <details
                 v-for="dg in wg.days"
                 :key="`${wg.key}-${dg.shiftDayKey || 'unk'}`"
+                :ref="bindDayDetailsEl(wg.key, dg.shiftDayKey)"
                 class="history-day-card history-fold"
+                :data-shift-day="dg.shiftDayKey || ''"
               >
                 <summary class="history-day-head history-fold__summary">
                   <div class="history-day-head-row">
@@ -985,10 +1010,10 @@ onUnmounted(() => {
                     <div class="history-body">
                       <template v-for="mb in [mileageBlock(e)]" :key="e.id + '-mileage'">
                         <div class="history-mileage">
-                          <span class="history-body-label">Trip mileage</span>
+                          <span class="history-body-label">Paid mileage</span>
                           <p class="history-mileage-total">
-                            <template v-if="mb && mb.total">{{ mb.total }} mi planned</template>
-                            <template v-else>0 mi planned</template>
+                            <template v-if="mb && mb.total">{{ mb.total }} mi paid</template>
+                            <template v-else>0 mi paid</template>
                             <template v-if="mb && mb.run != null"> &nbsp;·&nbsp;~{{ mb.run }} h run time</template>
                           </p>
                           <ul
@@ -1112,22 +1137,6 @@ onUnmounted(() => {
   box-sizing: border-box;
 }
 
-.history-head {
-  margin-bottom: var(--space-3, 0.75rem);
-  display: flex;
-  flex-direction: column;
-  align-items: stretch;
-  gap: 0.45rem;
-}
-
-.history-head-top {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.5rem 0.75rem;
-}
-
 .history-content {
   display: block;
   width: 100%;
@@ -1138,31 +1147,17 @@ onUnmounted(() => {
   box-sizing: border-box;
 }
 
-.history-title {
-  margin: 0;
-  font-size: var(--text-xl, 1.25rem);
-  font-weight: 600;
-  color: var(--color-text-primary, #f4f4f8);
+.history-err {
+  color: #f87171;
+  font-size: var(--text-sm, 0.8125rem);
+  margin: 0 0 0.5rem;
 }
 
-.history-sub {
-  margin: 0;
-  font-size: 0.75rem;
-  line-height: 1.45;
-  color: var(--color-text-tertiary, #8a8a9a);
-}
-
-.history-sub strong {
-  color: #c4b5fd;
-  font-weight: 700;
-}
-
-.history-month-nav {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.5rem;
-  margin-bottom: 0.5rem;
+.history-empty {
+  color: var(--color-text-tertiary, #6e6e7e);
+  font-size: var(--text-sm, 0.8125rem);
+  line-height: 1.5;
+  margin: 0 0 0.5rem;
 }
 
 .history-month-nav {
@@ -1173,12 +1168,22 @@ onUnmounted(() => {
   align-items: center;
   justify-content: center;
   border-radius: 8px;
-  border: 1px solid #3a3a46;
-  background: #1c1c24;
-  color: #e0e0ee;
+  border: 1px solid rgba(167, 139, 250, 0.35);
+  background: linear-gradient(180deg, rgba(88, 52, 140, 0.55) 0%, rgba(42, 26, 72, 0.95) 100%);
+  color: #eee8ff;
   font-size: 1rem;
   line-height: 1;
   cursor: pointer;
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.06) inset;
+}
+
+.history-mnav:hover:not(:disabled) {
+  border-color: rgba(196, 181, 253, 0.55);
+  background: linear-gradient(180deg, rgba(109, 71, 165, 0.65) 0%, rgba(52, 32, 88, 0.98) 100%);
+}
+
+.history-mnav:active:not(:disabled) {
+  transform: translateY(1px);
 }
 
 .history-mnav:disabled {
@@ -1205,47 +1210,6 @@ onUnmounted(() => {
   gap: 0.25rem;
 }
 
-.history-refresh {
-  padding: 0.4rem 0.85rem;
-  border-radius: var(--radius-md, 0.5rem);
-  border: 1px solid var(--color-border, rgba(255, 255, 255, 0.12));
-  background: rgba(255, 255, 255, 0.06);
-  color: var(--color-text-primary, #f4f4f8);
-  font-size: var(--text-xs, 0.6875rem);
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  cursor: pointer;
-}
-
-.history-refresh:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
-}
-.history-refresh.btn.secondary,
-.btn.secondary.history-refresh {
-  min-height: 2.25rem;
-  padding: 0.4rem 1rem;
-  background: var(--color-bg-surface, #16161d);
-  border: 1px solid var(--color-border, rgba(255, 255, 255, 0.12));
-  color: var(--color-text-primary, #e8e8f0);
-}
-.btn.secondary.history-refresh:hover:not(:disabled) {
-  background: var(--color-hover, rgba(255, 255, 255, 0.04));
-  border-color: var(--color-accent-purple, #7b4db5);
-}
-
-.history-err {
-  color: #f87171;
-  font-size: var(--text-sm, 0.8125rem);
-}
-
-.history-empty {
-  color: var(--color-text-tertiary, #6e6e7e);
-  font-size: var(--text-sm, 0.8125rem);
-  line-height: 1.5;
-  margin: 0 0 0.5rem;
-}
 .history-no-month {
   margin: 0.35rem 0 0.5rem;
   font-size: 0.8rem;
@@ -1307,20 +1271,22 @@ onUnmounted(() => {
   background: #0a0a0c;
 }
 .history-day-cell--in-ww:not(:disabled) {
-  color: #9a9ab0;
-  background: #15151a;
-  border-color: #3a3a48;
+  color: #d4c9f5;
+  background: rgba(68, 42, 108, 0.35);
+  border-color: rgba(139, 92, 246, 0.35);
   cursor: pointer;
   opacity: 1;
 }
+
 .history-day-cell--in-ww:hover:not(:disabled) {
-  border-color: #7b4db5;
-  background: rgba(123, 77, 181, 0.1);
+  border-color: rgba(196, 181, 253, 0.55);
+  background: rgba(109, 71, 165, 0.38);
 }
 .history-day-cell--on {
-  border-color: #a78bfa !important;
-  background: rgba(123, 77, 181, 0.2) !important;
-  color: #f0e6ff;
+  border-color: rgba(196, 181, 253, 0.75) !important;
+  background: rgba(109, 71, 165, 0.42) !important;
+  color: #faf5ff !important;
+  box-shadow: 0 0 0 1px rgba(167, 139, 250, 0.35);
 }
 .history-day-cell--empty {
   opacity: 0.85;
