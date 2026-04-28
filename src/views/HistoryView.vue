@@ -589,6 +589,28 @@ const weekPayEstimateByKey = computed(() => {
   return out
 })
 
+/** Per shift-day pay estimate: key `${weekKey}|${shiftDayKey || 'unk'}`. */
+const dayPayEstimateByWeekDayKey = computed(() => {
+  /** @type {Record<string, ReturnType<typeof computeWeekPayEstimate>>} */
+  const out = {}
+  for (const wg of tripsByWorkWeek.value) {
+    for (const dg of wg.days) {
+      const dk = dg.shiftDayKey ? String(dg.shiftDayKey) : 'unk'
+      out[`${wg.key}|${dk}`] = computeWeekPayEstimate(dg.items)
+    }
+  }
+  return out
+})
+
+/**
+ * @param {string} weekKey
+ * @param {string} [shiftDayKey]
+ */
+function dayPayEstimateFor(weekKey, shiftDayKey) {
+  const dk = shiftDayKey ? String(shiftDayKey) : 'unk'
+  return dayPayEstimateByWeekDayKey.value[`${String(weekKey)}|${dk}`] || { estimateUsd: 0 }
+}
+
 /** Expand week/day `<details>` when user picks a calendar shift day. */
 const wwDetailsElByKey = /** @type {Record<string, HTMLDetailsElement | undefined>} */ ({})
 const dayDetailsElByKey = /** @type {Record<string, HTMLDetailsElement | undefined>} */ ({})
@@ -1155,7 +1177,26 @@ onUnmounted(() => {
                     </div>
                   </details>
                 </li>
-              </ul>
+                </ul>
+
+                <details class="history-day-earn-fold history-fold">
+                  <summary class="history-day-earn-fold__summary history-fold__summary">
+                    <span class="history-day-earn-fold__title">Estimated earning</span>
+                    <span class="history-day-earn-fold__pill">{{
+                      formatUsdWhole(dayPayEstimateFor(wg.key, dg.shiftDayKey).estimateUsd)
+                    }}</span>
+                  </summary>
+                  <div class="history-day-earn-body">
+                    <p class="history-day-earn-line">
+                      <span>Estimate for this shift day</span>
+                      <strong>{{ formatUsdWhole(dayPayEstimateFor(wg.key, dg.shiftDayKey).estimateUsd) }}</strong>
+                    </p>
+                    <p class="history-day-earn-note">
+                      Same rules as week pay breakdown ($1/mi billable; ≥{{ PAY_ROUND_THRESHOLD_MI }} mi paid →
+                      {{ PAY_ROUND_TO_MI }} mi).
+                    </p>
+                  </div>
+                </details>
               </details>
             </div>
 
@@ -1642,7 +1683,8 @@ onUnmounted(() => {
   padding: 0;
   display: flex;
   flex-direction: column;
-  gap: 0.35rem;
+  gap: 0;
+  border-top: 1px solid #2c2c38;
 }
 
 .history-pay-row {
@@ -1650,10 +1692,13 @@ onUnmounted(() => {
   align-items: flex-start;
   justify-content: space-between;
   gap: 0.55rem;
-  padding: 0.38rem 0.42rem;
-  border-radius: 8px;
-  border: 1px solid #2a2a34;
-  background: rgba(255, 255, 255, 0.02);
+  padding: 0.42rem 0;
+  border-bottom: 1px solid #2a2a34;
+  background: transparent;
+}
+
+.history-pay-row:last-child {
+  border-bottom: none;
 }
 
 .history-pay-row__main {
@@ -1719,6 +1764,72 @@ onUnmounted(() => {
   font-weight: 800;
   font-variant-numeric: tabular-nums;
   color: #f4f4fa;
+}
+
+.history-day-earn-fold {
+  margin: 0.45rem 0.35rem 0.35rem;
+  border-radius: 10px;
+  border: 1px solid #2f2f3a;
+  background: rgba(0, 0, 0, 0.18);
+  overflow: hidden;
+}
+
+.history-day-earn-fold > .history-day-earn-fold__summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.38rem 0.5rem;
+  background: rgba(255, 255, 255, 0.03);
+  border-bottom: 1px solid #2a2a32;
+}
+
+.history-day-earn-fold__title {
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: #9a9aaa;
+}
+
+.history-day-earn-fold__pill {
+  flex-shrink: 0;
+  padding: 0.16rem 0.4rem;
+  border-radius: 999px;
+  font-size: 0.58rem;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  background: rgba(34, 197, 94, 0.1);
+  border: 1px solid rgba(34, 197, 94, 0.32);
+  color: #bbf7d0;
+}
+
+.history-day-earn-body {
+  padding: 0.45rem 0.5rem 0.5rem;
+}
+
+.history-day-earn-line {
+  margin: 0 0 0.35rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  font-size: 0.68rem;
+  color: #b8b8c8;
+}
+
+.history-day-earn-line strong {
+  font-size: 0.82rem;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  color: #f0f0f8;
+}
+
+.history-day-earn-note {
+  margin: 0;
+  font-size: 0.58rem;
+  line-height: 1.4;
+  color: #6e6e7e;
 }
 
 .history-list--day {
