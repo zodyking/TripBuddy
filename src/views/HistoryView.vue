@@ -1,7 +1,7 @@
 <script setup>
 import { ref, computed, onMounted, onUnmounted, watch, nextTick, Teleport } from 'vue'
 import { getAssignment, getCredentials, patchTripHistoryOutcome } from '../api.js'
-import { monthGridForCalendarMonth } from '../utils/workWeekGroup.js'
+import { monthGridForCalendarMonth, workWeekGroupMeta } from '../utils/workWeekGroup.js'
 import { shiftDateKeyForEventMs } from '../utils/shiftCalendar.js'
 
 /**
@@ -94,6 +94,26 @@ function stateMilesLabel(row) {
   if (!mi) return st
   if (!st) return `${mi} mi`
   return `${st}: ${mi} mi`
+}
+
+/**
+ * @param {LedgerEntry} e
+ * @returns {number | null}
+ */
+function tripPlannedMiles(e) {
+  const mb = mileageBlock(e)
+  if (!mb?.total) return null
+  const n = parseFloat(String(mb.total).replace(/,/g, '').trim())
+  return Number.isFinite(n) ? n : null
+}
+
+/**
+ * @param {number} n
+ */
+function formatMilesSum(n) {
+  if (!Number.isFinite(n)) return '—'
+  const r = Math.round(n * 10) / 10
+  return Number.isInteger(r) ? String(r) : r.toFixed(1)
 }
 
 async function load() {
@@ -314,6 +334,91 @@ const weekFilteredItems = computed(() => {
     )
     return k2 === filterDayKey.value
   })
+})
+
+/**
+ * @typedef {{
+ *   key: string,
+ *   groupLabel: string,
+ *   weekStartMs: number,
+ *   items: LedgerEntry[],
+ *   tripCount: number,
+ *   tripsWithMileage: number,
+ *   mileageSum: number,
+ * }} HistoryWeekGroup
+ */
+
+/** Month list grouped by configured work week, newest week first; includes week mileage totals. */
+const tripsByWorkWeek = computed(() => {
+  /** @type {HistoryWeekGroup[]} */
+  const out = []
+  const items = weekFilteredItems.value
+  if (!items.length) return out
+
+  const wwOpts = {
+    workWeekStartDay: workWeekFromCred.value.workWeekStartDay,
+    workWeekEndDay: workWeekFromCred.value.workWeekEndDay,
+    shiftStartMins: workWeekFromCred.value.shiftStartMins,
+    shiftEndMins: workWeekFromCred.value.shiftEndMins,
+  }
+
+  /** @type {Map<string, { meta: NonNullable<ReturnType<typeof workWeekGroupMeta>>, items: LedgerEntry[] }>} */
+  const map = new Map()
+  for (const e of items) {
+    const t = e.displayDate
+    if (typeof t !== 'number' || !Number.isFinite(t) || t <= 0) continue
+    const meta = workWeekGroupMeta(t, wwOpts)
+    if (!meta) continue
+    let g = map.get(meta.key)
+    if (!g) {
+      g = { meta, items: [] }
+      map.set(meta.key, g)
+    }
+    g.items.push(e)
+  }
+
+  for (const g of map.values()) {
+    g.items.sort((a, b) => b.displayDate - a.displayDate)
+  }
+
+  const ordered = Array.from(map.entries()).sort(
+    (a, b) => b[1].meta.weekStart - a[1].meta.weekStart,
+  )
+
+  for (const [key, g] of ordered) {
+    let mileageSum = 0
+    let tripsWithMileage = 0
+    for (const e of g.items) {
+      const mi = tripPlannedMiles(e)
+      if (mi != null) {
+        mileageSum += mi
+        tripsWithMileage += 1
+      }
+    }
+    out.push({
+      key,
+      groupLabel: g.meta.groupLabel,
+      weekStartMs: g.meta.weekStart,
+      items: g.items,
+      tripCount: g.items.length,
+      tripsWithMileage,
+      mileageSum,
+    })
+  }
+  return out
+})
+
+/** Sum of planned miles for the visible month list (only trips with mileage data). */
+const monthPlannedMilesTotal = computed(() => {
+  let sum = 0
+  let count = 0
+  for (const w of tripsByWorkWeek.value) {
+    if (w.tripsWithMileage > 0) {
+      sum += w.mileageSum
+      count += w.tripsWithMileage
+    }
+  }
+  return { sum, count }
 })
 
 const viewMonthGrid = computed(() => {
@@ -690,14 +795,49 @@ onUnmounted(() => {
         </p>
       </div>
       <h2 v-if="weekFilteredItems.length" class="history-trips-h2">Trips</h2>
-      <p v-else class="history-no-month">No trips this month</p>
-      <ul
-        v-if="weekFilteredItems.length"
-        class="history-list history-list--nested"
-        aria-label="Month trips"
+      <p
+        v-if="
+          weekFilteredItems.length &&
+          !filterDayKey &&
+          monthPlannedMilesTotal.count > 0
+        "
+        class="history-month-mile-sum"
       >
+        Planned miles this month ({{ monthPlannedMilesTotal.count }}
+        {{ monthPlannedMilesTotal.count === 1 ? 'trip' : 'trips' }}):
+        <strong>{{ formatMilesSum(monthPlannedMilesTotal.sum) }} mi</strong>
+      </p>
+      <p v-else-if="weekFilteredItems.length && !filterDayKey" class="history-month-mile-sum history-month-mile-sum--muted">
+        No planned mileage saved for trips this month yet (dispatched trips populate from Linehaul).
+      </p>
+      <p v-else-if="filterDayKey && !weekFilteredItems.length" class="history-no-month">
+        No trips on this shift day.
+      </p>
+      <p v-else-if="!weekFilteredItems.length" class="history-no-month">No trips this month</p>
+      <template v-if="tripsByWorkWeek.length">
+        <section
+          v-for="wg in tripsByWorkWeek"
+          :key="wg.key"
+          class="history-ww-section"
+          :aria-label="wg.groupLabel"
+        >
+          <header class="history-ww-head">
+            <h3 class="history-ww-title">{{ wg.groupLabel }}</h3>
+            <p v-if="wg.tripsWithMileage > 0" class="history-ww-mile">
+              Week total (planned):
+              <strong>{{ formatMilesSum(wg.mileageSum) }} mi</strong>
+              <span class="history-ww-mile-sub">· {{ wg.tripsWithMileage }} of {{ wg.tripCount }} trips</span>
+            </p>
+            <p v-else class="history-ww-mile history-ww-mile--muted">
+              No planned mileage for this week’s trips yet.
+            </p>
+          </header>
+          <ul
+            class="history-list history-list--nested"
+            :aria-label="`${wg.groupLabel} trips`"
+          >
         <li
-          v-for="e in weekFilteredItems"
+          v-for="e in wg.items"
           :id="`history-card-${e.id}`"
           :key="e.id"
           class="history-card"
@@ -841,7 +981,9 @@ onUnmounted(() => {
             </details>
             </li>
           </ul>
-    </div>
+        </section>
+      </template>
+      </div>
     </div>
     <Teleport to="body">
       <ul
@@ -1160,6 +1302,70 @@ onUnmounted(() => {
   text-transform: uppercase;
   letter-spacing: 0.04em;
   color: #8a8a98;
+}
+
+.history-month-mile-sum {
+  margin: 0 0 0.55rem;
+  font-size: 0.78rem;
+  line-height: 1.45;
+  color: var(--color-text-secondary, #b8b8c8);
+}
+
+.history-month-mile-sum strong {
+  color: var(--color-text-primary, #f0f0f8);
+  font-weight: 700;
+}
+
+.history-month-mile-sum--muted {
+  font-size: 0.72rem;
+  color: var(--color-text-tertiary, #7a7a8a);
+}
+
+.history-ww-section {
+  margin-bottom: 1.15rem;
+}
+
+.history-ww-section:last-child {
+  margin-bottom: 0;
+}
+
+.history-ww-head {
+  margin: 0 0 0.5rem;
+  padding: 0.55rem 0.65rem;
+  border-radius: 10px;
+  background: rgba(124, 92, 255, 0.06);
+  border: 1px solid rgba(124, 92, 255, 0.18);
+}
+
+.history-ww-title {
+  margin: 0 0 0.35rem;
+  font-size: 0.78rem;
+  font-weight: 700;
+  line-height: 1.35;
+  color: var(--color-text-primary, #ececf4);
+}
+
+.history-ww-mile {
+  margin: 0;
+  font-size: 0.72rem;
+  color: var(--color-text-secondary, #b8b8c8);
+}
+
+.history-ww-mile strong {
+  color: #c4b5fd;
+  font-weight: 700;
+}
+
+.history-ww-mile-sub {
+  margin-left: 0.15rem;
+  font-weight: 500;
+  color: var(--color-text-tertiary, #8e8e9e);
+  font-size: 0.68rem;
+}
+
+.history-ww-mile--muted {
+  font-size: 0.68rem;
+  color: var(--color-text-tertiary, #7a7a8a);
 }
 
 .history-list {
