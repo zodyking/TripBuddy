@@ -50,9 +50,6 @@ export const PRESETS = {
 /** Max ledger entries per user (newest first). */
 const MAX_TRIP_HISTORY = 150
 
-/** Max cached O/D mileage rows (FIFO-ish when trimming). */
-const MAX_OD_MILEAGE_CACHE = 80
-
 const TRIP_OUTCOMES = new Set(['delivered', 'rejected', 'removed', 'none'])
 
 /**
@@ -133,7 +130,7 @@ function ledgerEntryMatchesOd(entry, o, d) {
 }
 
 /**
- * Fill tripDetails.mileage from odMileageCache when ledger rows lack mileage.
+ * Legacy migration: copy mileage from deprecated `odMileageCache` into ledger rows (same DB blob).
  * @param {unknown[]} ledger
  * @param {Record<string, unknown>} odCache
  */
@@ -214,8 +211,6 @@ const DEFAULT_ASSIGNMENT = {
   lastDailyTripLegSequencePersisted: null,
   /** Completed trips ledger: { id, completedAt, dailyTripLegSequence, dispatchHeader, tripDetails } */
   tripHistoryLedger: [],
-  /** Cached Linehaul viewTripInfoDetails by `originId|destId` (org ids). */
-  odMileageCache: {},
 }
 
 function cloneDefault() {
@@ -282,12 +277,6 @@ function normalizeAssignmentData(data) {
         .slice(0, MAX_TRIP_HISTORY)
     : []
 
-  const cacheRaw = data.odMileageCache
-  const odMileageCache =
-    cacheRaw && typeof cacheRaw === 'object' && !Array.isArray(cacheRaw)
-      ? /** @type {Record<string, unknown>} */ ({ ...cacheRaw })
-      : {}
-
   const base = {
     instructions: typeof data.instructions === 'string' ? data.instructions : '',
     driverPhone: typeof data.driverPhone === 'string' ? data.driverPhone : '',
@@ -297,7 +286,6 @@ function normalizeAssignmentData(data) {
       data.fieldValues && typeof data.fieldValues === 'object' ? data.fieldValues : {},
     hiddenDailyTripLegSequences,
     tripHistoryLedger,
-    odMileageCache,
     persistedLinehaulTripSnapshot:
       data.persistedLinehaulTripSnapshot != null &&
       typeof data.persistedLinehaulTripSnapshot === 'object'
@@ -337,13 +325,20 @@ export async function readAssignment() {
   if (!('persistedCachedTripSnapshot' in n)) n.persistedCachedTripSnapshot = null
   if (!('lastDailyTripLegSequencePersisted' in n)) n.lastDailyTripLegSequencePersisted = null
   if (!Array.isArray(n.tripHistoryLedger)) n.tripHistoryLedger = []
-  if (!n.odMileageCache || typeof n.odMileageCache !== 'object' || Array.isArray(n.odMileageCache)) {
-    n.odMileageCache = {}
+  /** @type {Record<string, unknown> | null} */
+  const legacyOdCache =
+    raw &&
+    typeof raw === 'object' &&
+    !Array.isArray(raw) &&
+    raw.odMileageCache &&
+    typeof raw.odMileageCache === 'object' &&
+    !Array.isArray(raw.odMileageCache)
+      ? /** @type {Record<string, unknown>} */ (raw.odMileageCache)
+      : null
+  if (legacyOdCache && Object.keys(legacyOdCache).length > 0) {
+    n.tripHistoryLedger = applyOdCacheToLedger(n.tripHistoryLedger, legacyOdCache)
+    await writeKeyJson(key, n)
   }
-  n.tripHistoryLedger = applyOdCacheToLedger(
-    n.tripHistoryLedger,
-    /** @type {Record<string, unknown>} */ (n.odMileageCache),
-  )
   return n
 }
 
@@ -424,12 +419,6 @@ export async function writeAssignment(body) {
   let tripHistoryLedger = Array.isArray(prev.tripHistoryLedger)
     ? prev.tripHistoryLedger
     : []
-  let odMileageCache =
-    prev.odMileageCache &&
-    typeof prev.odMileageCache === 'object' &&
-    !Array.isArray(prev.odMileageCache)
-      ? /** @type {Record<string, unknown>} */ ({ ...prev.odMileageCache })
-      : {}
   if (Array.isArray(body.tripHistoryLedger)) {
     tripHistoryLedger = body.tripHistoryLedger
       .filter((x) => x && typeof x === 'object' && !Array.isArray(x))
@@ -540,30 +529,6 @@ export async function writeAssignment(body) {
     const rawBody = p.body
     const mileageObj = mileagePayloadFromApiBody(rawBody)
     if (pk && mileageObj) {
-      odMileageCache = {
-        ...odMileageCache,
-        [pk]: mileageObj,
-      }
-      const keys = Object.keys(odMileageCache)
-      if (keys.length > MAX_OD_MILEAGE_CACHE) {
-        /** @type {{ k: string, t: number }[]} */
-        const scored = []
-        for (const k of keys) {
-          const v = odMileageCache[k]
-          const t =
-            v &&
-            typeof v === 'object' &&
-            !Array.isArray(v) &&
-            typeof /** @type {Record<string, unknown>} */ (v).fetchedAt === 'number'
-              ? /** @type {number} */ (/** @type {Record<string, unknown>} */ (v).fetchedAt)
-              : 0
-          scored.push({ k, t })
-        }
-        scored.sort((a, b) => a.t - b.t)
-        const drop = scored.slice(0, keys.length - MAX_OD_MILEAGE_CACHE)
-        odMileageCache = { ...odMileageCache }
-        for (const { k } of drop) delete odMileageCache[k]
-      }
       tripHistoryLedger = applyOdMileageToLedgerByPair(
         tripHistoryLedger,
         oid,
@@ -615,7 +580,6 @@ export async function writeAssignment(body) {
     persistedCachedTripSnapshot,
     lastDailyTripLegSequencePersisted,
     tripHistoryLedger,
-    odMileageCache,
   }
 
   await writeKeyJson(key, next)
