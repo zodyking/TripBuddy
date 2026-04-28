@@ -33,10 +33,10 @@ const viewYear = ref(/** @type {number} */(new Date().getFullYear()))
 const viewMonth0 = ref(/** @type {number} */(new Date().getMonth()))
 const DOUBLE_CLICK_MS = 500
 
-/** YYYY-MM-DD; empty = show all days in selected work week */
+/** YYYY-MM-DD; empty = show all days in the month / full weeks */
 const filterDayKey = ref('')
-/** First successful load: pin calendar + day filter to "today" (shift-aware). */
-const dayFilterInitDone = ref(false)
+/** First load: open calendar on month of most recent trip (not "today" filter). */
+const calendarMonthInitDone = ref(false)
 const outcomeMenuOpen = ref('')
 const outcomeMenuPos = ref(/** @type {null | { top: number, left: number, minWidth: number }} */ (null))
 const outcomeRowForMenu = ref(/** @type {null | LedgerEntry} */ (null))
@@ -156,21 +156,20 @@ function formatShiftDayHeading(shiftDayKey) {
  * @param {number} totalTrips
  */
 function mileageHeaderLine(sum, withMi, totalTrips) {
-  if (withMi > 0) {
-    return `${formatMilesSum(sum)} mi · ${withMi}/${totalTrips} trips`
-  }
-  return `No mi · ${totalTrips} ${totalTrips === 1 ? 'trip' : 'trips'}`
+  const s = Number.isFinite(sum) ? sum : 0
+  return `${formatMilesSum(s)} mi · ${withMi}/${totalTrips} trips`
 }
 
 /**
- * Short trip mileage for collapsed card header.
+ * Always show planned miles on collapsed trip header (0 when unknown).
  * @param {LedgerEntry} e
  */
-function tripHeaderMileageText(e) {
+function tripHeaderMileageDisplay(e) {
+  const n = tripPlannedMiles(e)
+  const mi = n != null ? formatMilesSum(n) : '0'
   const mb = mileageBlock(e)
-  if (!mb?.total) return ''
-  const parts = [`${mb.total} mi`]
-  if (mb.run != null) parts.push(`~${mb.run}h`)
+  const parts = [`${mi} mi`]
+  if (mb?.run != null) parts.push(`~${mb.run}h`)
   return parts.join(' · ')
 }
 
@@ -275,25 +274,21 @@ async function load() {
     error.value = e instanceof Error ? e.message : String(e)
     entries.value = []
   } finally {
-    if (!dayFilterInitDone.value) {
-      const k = shiftDateKeyForEventMs(
-        Date.now(),
-        workWeekFromCred.value.shiftStartMins,
-        workWeekFromCred.value.shiftEndMins,
+    if (!calendarMonthInitDone.value) {
+      const list = entries.value.filter(
+        (e) => typeof e.displayDate === 'number' && e.displayDate > 0,
       )
-      if (k) {
-        filterDayKey.value = k
-        const ymd = k.split('-')
-        if (ymd.length === 3) {
-          const y = Number(ymd[0])
-          const mo = Number(ymd[1])
-          if (Number.isFinite(y) && Number.isFinite(mo) && mo >= 1 && mo <= 12) {
-            viewYear.value = y
-            viewMonth0.value = mo - 1
-          }
+      if (list.length > 0) {
+        let best = list[0].displayDate
+        for (let i = 1; i < list.length; i += 1) {
+          const t = list[i].displayDate
+          if (typeof t === 'number' && t > best) best = t
         }
+        const { y, m0 } = monthKeyFromMs(best)
+        viewYear.value = y
+        viewMonth0.value = m0
       }
-      dayFilterInitDone.value = true
+      calendarMonthInitDone.value = true
     }
     loading.value = false
   }
@@ -533,10 +528,8 @@ const monthPlannedMilesTotal = computed(() => {
   let sum = 0
   let count = 0
   for (const w of tripsByWorkWeek.value) {
-    if (w.tripsWithMileage > 0) {
-      sum += w.mileageSum
-      count += w.tripsWithMileage
-    }
+    sum += w.mileageSum
+    count += w.tripsWithMileage
   }
   return { sum, count }
 })
@@ -575,26 +568,6 @@ function goNextViewMonth() {
   const p = nextMonthFrom(viewYear.value, viewMonth0.value)
   viewYear.value = p.y
   viewMonth0.value = p.m0
-}
-
-function goToToday() {
-  const k = shiftDateKeyForEventMs(
-    Date.now(),
-    workWeekFromCred.value.shiftStartMins,
-    workWeekFromCred.value.shiftEndMins,
-  )
-  if (k) {
-    const parts = k.split('-')
-    if (parts.length === 3) {
-      const y = Number(parts[0])
-      const m = Number(parts[1])
-      if (Number.isFinite(y) && Number.isFinite(m) && m >= 1 && m <= 12) {
-        viewYear.value = y
-        viewMonth0.value = m - 1
-      }
-    }
-    filterDayKey.value = k
-  }
 }
 
 function formatWhen(ts) {
@@ -875,15 +848,6 @@ onUnmounted(() => {
         >
           →
         </button>
-        <button
-          type="button"
-          class="btn secondary history-today tap"
-          title="Jump to today and filter to this shift day"
-          :disabled="loading"
-          @click="goToToday"
-        >
-          Today
-        </button>
       </div>
       <div
         v-if="historyViewMode === 'calendar' && viewMonthGrid.cells.length"
@@ -931,8 +895,6 @@ onUnmounted(() => {
         <p v-if="filterDayKey" class="history-cal-filt">
           Day <strong>{{ filterDayKey }}</strong>
           &nbsp;·&nbsp;
-          <button type="button" class="history-link tap" @click="goToToday">Today</button>
-          &nbsp;·&nbsp;
           <button type="button" class="history-link tap" @click="filterDayKey = ''">Show month</button>
         </p>
       </div>
@@ -941,24 +903,13 @@ onUnmounted(() => {
         v-if="
           weekFilteredItems.length &&
           !filterDayKey &&
-          historyViewMode === 'calendar' &&
-          monthPlannedMilesTotal.count > 0
+          historyViewMode === 'calendar'
         "
         class="history-month-mile-sum"
       >
         Planned miles this month ({{ monthPlannedMilesTotal.count }}
-        {{ monthPlannedMilesTotal.count === 1 ? 'trip' : 'trips' }}):
+        {{ monthPlannedMilesTotal.count === 1 ? 'trip' : 'trips' }} with data):
         <strong>{{ formatMilesSum(monthPlannedMilesTotal.sum) }} mi</strong>
-      </p>
-      <p
-        v-else-if="
-          weekFilteredItems.length &&
-          !filterDayKey &&
-          historyViewMode === 'calendar'
-        "
-        class="history-month-mile-sum history-month-mile-sum--muted"
-      >
-        No planned mileage saved for trips this month yet (dispatched trips populate from Linehaul).
       </p>
       <p v-else-if="filterDayKey && !weekFilteredItems.length" class="history-no-month">
         No trips on this shift day.
@@ -974,10 +925,7 @@ onUnmounted(() => {
           <header class="history-ww-head">
             <div class="history-ww-head-row">
               <h3 class="history-ww-title">{{ wg.groupLabel }}</h3>
-              <span
-                class="history-mile-pill"
-                :class="{ 'history-mile-pill--muted': wg.tripsWithMileage === 0 }"
-              >
+              <span class="history-mile-pill">
                 {{ mileageHeaderLine(wg.mileageSum, wg.tripsWithMileage, wg.tripCount) }}
               </span>
             </div>
@@ -992,10 +940,7 @@ onUnmounted(() => {
               <header class="history-day-head">
                 <div class="history-day-head-row">
                   <h4 class="history-day-title">{{ dg.dayLabel }}</h4>
-                  <span
-                    class="history-mile-pill history-mile-pill--sm"
-                    :class="{ 'history-mile-pill--muted': dg.tripsWithMileage === 0 }"
-                  >
+              <span class="history-mile-pill history-mile-pill--sm">
                     {{ mileageHeaderLine(dg.mileageSum, dg.tripsWithMileage, dg.tripCount) }}
                   </span>
                 </div>
@@ -1033,9 +978,7 @@ onUnmounted(() => {
                           >
                         </div>
                         <div class="history-summary-right">
-                          <span v-if="tripHeaderMileageText(e)" class="history-trip-mi-pill">{{
-                            tripHeaderMileageText(e)
-                          }}</span>
+                          <span class="history-trip-mi-pill">{{ tripHeaderMileageDisplay(e) }}</span>
                           <div v-if="e.dailyTripLegSequence" class="history-top-actions" @click.stop>
                             <div class="history-outcome-wrap" @click.stop>
                               <button
@@ -1073,15 +1016,17 @@ onUnmounted(() => {
                     </div>
                     <div class="history-body">
                       <template v-for="mb in [mileageBlock(e)]" :key="e.id + '-mileage'">
-                        <div v-if="mb" class="history-mileage">
+                        <div class="history-mileage">
                           <span class="history-body-label">Trip mileage</span>
-                          <p v-if="mb.total || mb.run != null" class="history-mileage-total">
-                            <template v-if="mb.total">{{ mb.total }} mi planned</template>
-                            <template v-if="mb.run != null">
-                              <template v-if="mb.total">&nbsp;·&nbsp;</template>~{{ mb.run }} h run time
-                            </template>
+                          <p class="history-mileage-total">
+                            <template v-if="mb && mb.total">{{ mb.total }} mi planned</template>
+                            <template v-else>0 mi planned</template>
+                            <template v-if="mb && mb.run != null"> &nbsp;·&nbsp;~{{ mb.run }} h run time</template>
                           </p>
-                          <ul v-if="mb.directionList.length" class="history-mileage-by-state">
+                          <ul
+                            v-if="mb && mb.directionList && mb.directionList.length"
+                            class="history-mileage-by-state"
+                          >
                             <li v-for="(row, mi) in mb.directionList" :key="mi">
                               {{ stateMilesLabel(row) }}
                             </li>
@@ -1319,16 +1264,6 @@ onUnmounted(() => {
   flex: 1;
   min-width: 0;
   padding: 0 0.2rem;
-}
-
-.history-today {
-  flex: 0 0 auto;
-  min-height: 2.4rem;
-  font-size: 0.65rem;
-  font-weight: 800;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  padding: 0.35rem 0.55rem;
 }
 
 .history-month-body {
