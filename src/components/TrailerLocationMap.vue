@@ -9,6 +9,7 @@ import {
 } from 'vue'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
+import { trailerAssetIcon } from '../utils/mapMarkers.js'
 
 const props = defineProps({
   lat: { type: Number, required: true },
@@ -42,6 +43,7 @@ let map = null
 let streetLayer = null
 /** @type {L.TileLayer | null} */
 let satelliteLayer = null
+const activeBaseLayer = ref(/** @type {'street' | 'satellite'} */ ('street'))
 /** @type {L.LayerGroup | null} */
 let overlayLayer = null
 /** @type {L.LayerGroup | null} */
@@ -71,13 +73,23 @@ function trailerLatLng() {
 }
 
 function makeTrailerIcon() {
-  return L.divIcon({
-    className: 'trailer-loc-div-icon',
-    html: '<div class="trailer-loc-pin-ui"><div class="trailer-loc-pin-inner is-trailer" aria-hidden="true"></div><div class="trailer-loc-pin-stem" aria-hidden="true"></div></div>',
-    iconSize: [36, 44],
-    iconAnchor: [18, 44],
-    popupAnchor: [0, -40],
-  })
+  return trailerAssetIcon()
+}
+
+function setBaseLayer(mode) {
+  if (!map || !streetLayer || !satelliteLayer) return
+  activeBaseLayer.value = mode
+  if (mode === 'satellite') {
+    map.removeLayer(streetLayer)
+    satelliteLayer.addTo(map)
+  } else {
+    map.removeLayer(satelliteLayer)
+    streetLayer.addTo(map)
+  }
+}
+
+function toggleSatellite() {
+  setBaseLayer(activeBaseLayer.value === 'street' ? 'satellite' : 'street')
 }
 
 function scheduleFitBounds() {
@@ -282,17 +294,7 @@ function initMap() {
   )
 
   streetLayer.addTo(map)
-
-  L.control
-    .layers(
-      {
-        Street: streetLayer,
-        Satellite: satelliteLayer,
-      },
-      null,
-      { collapsed: true },
-    )
-    .addTo(map)
+  activeBaseLayer.value = 'street'
 
   overlayLayer = L.layerGroup().addTo(map)
   userLayer = L.layerGroup().addTo(map)
@@ -379,6 +381,23 @@ watch(
 <template>
   <div class="trailer-loc-root" role="region" aria-label="Trailer and your location map">
     <div ref="containerRef" class="trailer-loc-el" />
+    <div class="map-controls-stack trailer-loc-controls">
+      <button
+        type="button"
+        class="map-control-btn map-control-btn--sat tap"
+        :class="{ 'is-on': activeBaseLayer === 'satellite' }"
+        :aria-pressed="activeBaseLayer === 'satellite'"
+        title="Satellite imagery"
+        @click="toggleSatellite"
+      >
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+          <circle cx="12" cy="12" r="9" />
+          <ellipse cx="12" cy="12" rx="9" ry="4" />
+          <path d="M3 12h18" />
+        </svg>
+        <span class="sr-only">Toggle satellite view</span>
+      </button>
+    </div>
     <div class="trailer-loc-legend" aria-hidden="true">
       <span class="trailer-loc-legend-item">
         <span class="trailer-loc-dot is-trailer" />
@@ -423,6 +442,22 @@ watch(
   width: 100%;
   height: 100%;
   min-height: inherit;
+}
+
+.trailer-loc-controls {
+  max-width: min(14rem, calc(100% - 1.5rem));
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
 }
 
 .trailer-loc-legend {
@@ -494,67 +529,6 @@ watch(
 :deep(.leaflet-container) {
   font-family: inherit;
   background: #cbd5e1;
-}
-
-:deep(.trailer-loc-div-icon) {
-  background: transparent;
-  border: none;
-}
-
-:deep(.trailer-loc-pin-ui) {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  width: 36px;
-  height: 44px;
-  pointer-events: auto;
-}
-
-:deep(.trailer-loc-pin-inner) {
-  width: 28px;
-  height: 28px;
-  border-radius: 50% 50% 50% 0;
-  transform: rotate(-45deg);
-  border: 3px solid #fff;
-  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.35);
-}
-
-:deep(.trailer-loc-pin-inner.is-trailer) {
-  background: #ea580c;
-}
-
-:deep(.trailer-loc-pin-stem) {
-  width: 0;
-  height: 0;
-  margin-top: -2px;
-  border-left: 5px solid transparent;
-  border-right: 5px solid transparent;
-  border-top: 7px solid #c2410c;
-  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.3));
-}
-
-:deep(.leaflet-marker-icon.trailer-loc-div-icon) {
-  margin-left: 0 !important;
-  margin-top: 0 !important;
-}
-
-:deep(.leaflet-control-layers) {
-  border-radius: 8px;
-  background: rgba(255, 255, 255, 0.96);
-  border: 1px solid rgba(0, 0, 0, 0.1);
-  color: #1e293b;
-}
-
-:deep(.leaflet-control-layers-list) {
-  font-size: 0.8rem;
-}
-
-:deep(.leaflet-control-layers-base label) {
-  display: flex;
-  align-items: center;
-  gap: 0.35rem;
-  margin: 0.2rem 0;
-  cursor: pointer;
 }
 
 :deep(.leaflet-control-zoom a) {

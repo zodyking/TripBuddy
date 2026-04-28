@@ -2,6 +2,7 @@
 import { ref, watch, onBeforeUnmount, nextTick, useId } from 'vue'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
+import { mapPinPreviewIcon } from '../utils/mapMarkers.js'
 
 const props = defineProps({
   open: { type: Boolean, default: false },
@@ -36,6 +37,10 @@ function destroyMap() {
   }
 }
 
+function pinIcon() {
+  return mapPinPreviewIcon()
+}
+
 function sync() {
   if (!map) return
   if (markerLayer) {
@@ -62,19 +67,15 @@ function sync() {
       if (!Number.isFinite(la) || !Number.isFinite(ln)) continue
       const ll = L.latLng(la, ln)
       latlngs.push(ll)
-      const cm = L.circleMarker(ll, {
-        radius: 7,
-        stroke: true,
-        color: '#a78bfa',
-        weight: 2,
-        fillColor: '#7b4db5',
-        fillOpacity: 0.95,
-      })
       const label = typeof p.label === 'string' ? p.label.trim() : ''
+      const mk = L.marker(ll, {
+        icon: pinIcon(),
+        title: label || '',
+      })
       if (label) {
-        cm.bindTooltip(label, { direction: 'top', opacity: 0.95 })
+        mk.bindTooltip(label, { direction: 'top', offset: [0, -34], opacity: 0.95 })
       }
-      cm.addTo(markerLayer)
+      mk.addTo(markerLayer)
     }
     if (latlngs.length === 1) {
       map.setView(latlngs[0], props.zoom, { animate: false })
@@ -91,14 +92,7 @@ function sync() {
   if (!Number.isFinite(props.lat) || !Number.isFinite(props.lng)) return
   const ll = L.latLng(props.lat, props.lng)
   markerLayer = L.layerGroup().addTo(map)
-  L.circleMarker(ll, {
-    radius: 8,
-    stroke: true,
-    color: '#a78bfa',
-    weight: 2,
-    fillColor: '#7b4db5',
-    fillOpacity: 0.95,
-  }).addTo(markerLayer)
+  L.marker(ll, { icon: pinIcon() }).addTo(markerLayer)
   map.setView(ll, props.zoom, { animate: false })
 }
 

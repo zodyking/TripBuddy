@@ -213,6 +213,12 @@ onMounted(() => {
   --nav-height: 4rem;
   --touch-target: 2.75rem; /* 44px */
 
+  /* Floating controls on Leaflet maps (satellite, locate, traffic, …) */
+  --map-controls-offset-x: var(--space-3, 0.75rem);
+  --map-controls-offset-y: var(--space-3, 0.75rem);
+  --map-controls-gap: var(--space-2, 0.5rem);
+  --map-controls-z: 900;
+
   /* ─── Legacy Compatibility (mapped to new tokens) ───────────────────────── */
   --bg: var(--color-bg-base);
   --card: var(--color-bg-surface);
@@ -308,6 +314,115 @@ body {
 .tap:focus-visible {
   outline: 2px solid var(--color-accent-purple);
   outline-offset: 2px;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   MAP OVERLAY CONTROLS (Leaflet) — shared placement + chrome
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.map-controls-stack {
+  position: absolute;
+  z-index: var(--map-controls-z, 900);
+  right: var(--map-controls-offset-x);
+  bottom: var(--map-controls-offset-y);
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: var(--map-controls-gap);
+  pointer-events: none;
+}
+
+.map-controls-stack > * {
+  pointer-events: auto;
+}
+
+.map-control-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--touch-target);
+  height: var(--touch-target);
+  padding: 0;
+  border-radius: var(--radius-full);
+  border: 1px solid rgba(167, 139, 250, 0.38);
+  background: rgba(18, 18, 26, 0.94);
+  color: var(--color-text-primary, #f4f4f8);
+  box-shadow: var(--shadow-md, 0 4px 12px rgba(0, 0, 0, 0.35));
+  cursor: pointer;
+  transition:
+    background var(--duration-fast) var(--ease-out),
+    border-color var(--duration-fast) var(--ease-out),
+    color var(--duration-fast) var(--ease-out);
+  -webkit-tap-highlight-color: transparent;
+}
+
+.map-control-btn:hover:not(:disabled) {
+  background: rgba(40, 40, 52, 0.96);
+  border-color: rgba(196, 181, 253, 0.5);
+}
+
+.map-control-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.map-control-btn svg {
+  width: 1.25rem;
+  height: 1.25rem;
+  flex-shrink: 0;
+}
+
+.map-control-btn--traffic.is-on {
+  color: #bfdbfe;
+  border-color: rgba(96, 165, 250, 0.55);
+  background: rgba(59, 130, 246, 0.28);
+  box-shadow:
+    0 0 0 1px rgba(96, 165, 250, 0.28),
+    var(--shadow-md, 0 4px 12px rgba(0, 0, 0, 0.35));
+}
+
+.map-control-btn--sat.is-on,
+.map-control-btn--traffic.is-on {
+  color: #c4b5fd;
+  border-color: rgba(167, 139, 250, 0.55);
+  background: rgba(123, 77, 181, 0.28);
+  box-shadow:
+    0 0 0 1px rgba(167, 139, 250, 0.25),
+    var(--shadow-md, 0 4px 12px rgba(0, 0, 0, 0.35));
+}
+
+.map-control-btn--loc.is-on {
+  color: #38bdf8;
+  border-color: rgba(56, 189, 248, 0.45);
+  background: rgba(14, 116, 144, 0.22);
+}
+
+.map-control-btn--loc.is-denied {
+  color: #f87171;
+  border-color: rgba(248, 113, 113, 0.35);
+}
+
+.map-control-btn--traffic.is-missing {
+  color: #6e6e7e;
+  border-color: rgba(255, 255, 255, 0.1);
+  opacity: 0.65;
+}
+
+.map-control-btn--pill {
+  width: auto;
+  min-width: var(--touch-target);
+  padding: 0 0.55rem;
+  border-radius: var(--radius-lg);
+  font-size: 0.5625rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  line-height: 1.1;
+  font-variant-numeric: tabular-nums;
+}
+
+.map-marker-img-icon {
+  display: block;
 }
 
 /* Focus ring */

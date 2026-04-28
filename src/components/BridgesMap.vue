@@ -6,6 +6,7 @@ import 'leaflet.markercluster/dist/leaflet.markercluster-src.js'
 import 'leaflet.markercluster/dist/MarkerCluster.css'
 import 'leaflet.markercluster/dist/MarkerCluster.Default.css'
 import { tomtomKeyEffective } from '../stores/trafficTileKey.js'
+import { bridgesCrossingIcon } from '../utils/mapMarkers.js'
 
 const DEFAULT_CENTER = Object.freeze([40.64, -74.18])
 const DEFAULT_ZOOM = 9
@@ -50,7 +51,7 @@ const activeBaseLayer = ref(/** @type {'street' | 'satellite'} */ ('street'))
 const trafficOn = ref(tomtomKeyEffective.value.length > 0)
 /**
  * @type {L.MarkerClusterGroup | L.LayerGroup | null}
- * Clustering prevents oversized HTML markers from stacking on the same view (e.g. GWB upper/lower).
+ * Clustering groups nearby pins until zoomed in (e.g. GWB upper-deck vs nearby routes).
  */
 let markerLayer = null
 /** @type {L.LayerGroup | null} */
@@ -92,27 +93,28 @@ function esc(s) {
 
 /**
  * @param {import('vue').UnwrapRef<typeof props>['pins'][0]} p
- * @param {boolean} selected
  */
-function pinHtml(p, selected) {
+function bridgePopupHtml(p) {
   const tk = p.trendKey || 'unk'
-  const cls = [
-    'bridge-mrk',
-    p.isPick ? 'bridge-mrk--best' : '',
-    p.isClosed ? 'is-closed' : '',
-    selected ? 'is-selected' : '',
-    tk === 'worse' ? 't-worse' : tk === 'better' ? 't-better' : tk === 'neutral' ? 't-neut' : 't-unk',
-  ]
-    .filter(Boolean)
-    .join(' ')
-  return `<div class="${cls}">
-  <div class="bridge-mrk__row1">
-    <span class="bridge-mrk__rank" aria-hidden="true">${p.rank}</span>
-    <span class="bridge-mrk__t" title="${esc(p.trendFull)}">${esc(p.trendIcon || '·')}</span>
+  const trendCls =
+    tk === 'worse' ? 'is-worse' : tk === 'better' ? 'is-better' : tk === 'neutral' ? 'is-neut' : 'is-unk'
+  const rank = esc(String(p.rank ?? ''))
+  const trendIcon = esc(p.trendIcon || '·')
+  const trendFull = esc(p.trendFull || '')
+  const minutes = esc(p.minutes ?? '—')
+  const title = esc(p.title ?? '')
+  const cls = ['bridge-popup']
+  if (p.isPick) cls.push('bridge-popup--best')
+  if (p.isClosed) cls.push('bridge-popup--closed')
+  cls.push(trendCls)
+  return `<div class="${cls.join(' ')}">
+  <div class="bridge-popup__row">
+    <span class="bridge-popup__rank">#${rank}</span>
+    <span class="bridge-popup__trend" title="${trendFull}">${trendIcon}</span>
   </div>
-  <div class="bridge-mrk__time"><span class="bridge-mrk__min">${esc(p.minutes)}</span><span class="bridge-mrk__suf">m</span></div>
-  <div class="bridge-mrk__name">${esc(p.title)}</div>
-</div><div class="bridge-mrk__stem" aria-hidden="true"></div>`
+  <div class="bridge-popup__time"><span class="bridge-popup__min">${minutes}</span><span class="bridge-popup__suf">m</span></div>
+  <div class="bridge-popup__name">${title}</div>
+</div>`
 }
 
 function getStructureKey() {
@@ -319,11 +321,11 @@ function toggleMyLocation() {
  * @param {boolean} selected
  */
 function makeIcon(p, selected) {
-  return L.divIcon({
-    className: 'bridge-map-div-icon',
-    html: pinHtml(p, selected),
-    iconSize: [100, 72],
-    iconAnchor: [50, 80],
+  return bridgesCrossingIcon({
+    trendKey: /** @type {'worse' | 'better' | 'neutral' | 'unk'} */(p.trendKey || 'unk'),
+    isPick: !!p.isPick,
+    isClosed: !!p.isClosed,
+    selected,
   })
 }
 
@@ -344,8 +346,8 @@ function clusterIcon(cluster) {
 function createMarkerCluster() {
   return L.markerClusterGroup({
     maxClusterRadius: 52,
-    /** Show individual bridge cards (large HTML icons) at street level */
-    disableClusteringAtZoom: 15,
+    /** Bridge glyphs are small image icons — cluster until fairly zoomed in */
+    disableClusteringAtZoom: 14,
     spiderfyOnMaxZoom: true,
     showCoverageOnHover: false,
     removeOutsideVisibleBounds: true,
@@ -378,6 +380,10 @@ function syncMarkers() {
     const existing = markersById.get(id)
     if (structChanged) {
       const marker = L.marker(ll, { icon, title: p.title })
+      marker.bindPopup(bridgePopupHtml(/** @type {any} */(p)), {
+        maxWidth: 280,
+        className: 'bridge-map-popup',
+      })
       marker.on('click', () => emit('select', id))
       marker.addTo(markerLayer)
       markersById.set(id, marker)
@@ -386,8 +392,13 @@ function syncMarkers() {
         existing.setLatLng(ll)
       }
       existing.setIcon(icon)
+      existing.setPopupContent(bridgePopupHtml(/** @type {any} */(p)))
     } else {
       const marker = L.marker(ll, { icon, title: p.title })
+      marker.bindPopup(bridgePopupHtml(/** @type {any} */(p)), {
+        maxWidth: 280,
+        className: 'bridge-map-popup',
+      })
       marker.on('click', () => emit('select', id))
       marker.addTo(markerLayer)
       markersById.set(id, marker)
@@ -542,44 +553,54 @@ watch(tomtomKeyEffective, () => {
     aria-label="Bridge times map"
   >
     <div ref="containerRef" class="bridge-map-el" />
-    <div class="bridge-map-controls">
+    <div class="map-controls-stack bridge-map-controls">
       <button
         type="button"
-        class="bridge-map-traffic tap"
-        :class="{ 'is-on': trafficOn, 'is-missing-key': !hasTomtomTraffic }"
+        class="map-control-btn map-control-btn--traffic map-control-btn--pill tap"
+        :class="{ 'is-on': trafficOn, 'is-missing': !hasTomtomTraffic }"
         :aria-pressed="trafficOn"
         :disabled="activeBaseLayer === 'satellite' || !hasTomtomTraffic"
         :title="!hasTomtomTraffic
           ? 'Add TomTom key in Settings (free developer tier) or VITE_TOMTOM_KEY in .env'
           : (activeBaseLayer === 'satellite' ? 'Traffic (street only)' : 'Live traffic (TomTom)')"
         @click="toggleTraffic"
-      >Traff</button>
+      >
+        Traff
+      </button>
       <button
         type="button"
-        class="bridge-map-layer tap"
-        :class="{ 'is-sat': activeBaseLayer === 'satellite' }"
+        class="map-control-btn map-control-btn--sat tap"
+        :class="{ 'is-on': activeBaseLayer === 'satellite' }"
         :aria-pressed="activeBaseLayer === 'satellite'"
-        title="Satellite"
+        title="Satellite imagery"
         @click="setBaseLayer(activeBaseLayer === 'satellite' ? 'street' : 'satellite')"
-      >Sat</button>
+      >
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+          <circle cx="12" cy="12" r="9" />
+          <ellipse cx="12" cy="12" rx="9" ry="4" />
+          <path d="M3 12h18" />
+        </svg>
+        <span class="sr-only">Toggle satellite view</span>
+      </button>
       <button
         type="button"
-        class="bridge-map-loc tap"
-        :class="{ 'is-on': geoTracking }"
+        class="map-control-btn map-control-btn--loc tap"
+        :class="{ 'is-on': geoTracking, 'is-denied': geoDenied }"
         :aria-pressed="geoTracking"
-        title="My location"
+        :title="
+          geoDenied
+            ? 'Location blocked — enable location in browser settings'
+            : geoTracking
+              ? 'Stop showing my location'
+              : 'Show my live location'
+        "
         @click="toggleMyLocation"
       >
-        <svg
-          class="ico"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          stroke-width="2"
-        >
-          <path d="M12 2v3M12 19v3M2 12h3M19 12h3" />
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
           <circle cx="12" cy="12" r="3" />
+          <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41" />
         </svg>
+        <span class="sr-only">My location</span>
       </button>
     </div>
     <p v-if="!hasTomtomTraffic" class="bridge-map-footnote" role="note"
@@ -623,71 +644,21 @@ watch(tomtomKeyEffective, () => {
 }
 
 .bridge-map-controls {
+  max-width: min(14rem, calc(100% - 1.5rem));
+}
+
+.sr-only {
   position: absolute;
-  right: 0.5rem;
-  top: 0.5rem;
-  z-index: 700;
-  display: flex;
-  flex-direction: column;
-  gap: 0.35rem;
-  pointer-events: none;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
 }
-.bridge-map-traffic,
-.bridge-map-layer,
-.bridge-map-loc {
-  pointer-events: auto;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 2.25rem;
-  min-height: 2.1rem;
-  border-radius: 0.5rem;
-  border: 1px solid rgba(59, 130, 246, 0.45);
-  background: rgba(8, 8, 12, 0.85);
-  color: #93c5fd;
-  font-size: 0.48rem;
-  font-weight: 800;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  line-height: 1.1;
-  cursor: pointer;
-  -webkit-tap-highlight-color: transparent;
-}
-.bridge-map-traffic:disabled {
-  opacity: 0.45;
-  cursor: not-allowed;
-}
-.bridge-map-traffic.is-missing-key {
-  border-color: #3f3f4c;
-  color: #5c5c6c;
-  opacity: 0.6;
-}
-.bridge-map-traffic.is-on {
-  background: rgba(59, 130, 246, 0.3);
-  box-shadow: 0 0 0 1px rgba(96, 165, 250, 0.4);
-  color: #bfdbfe;
-}
-.bridge-map-layer,
-.bridge-map-loc {
-  border: 1px solid rgba(123, 77, 181, 0.45);
-  color: #c4b5fd;
-  font-size: 0.5rem;
-  font-weight: 800;
-  min-height: 2.25rem;
-}
-.bridge-map-loc {
-  color: #6ee7b7;
-  border-color: rgba(52, 211, 153, 0.45);
-}
-.bridge-map-layer.is-sat,
-.bridge-map-loc.is-on {
-  background: rgba(123, 77, 181, 0.3);
-  box-shadow: 0 0 0 1px rgba(167, 139, 250, 0.3);
-}
-.bridge-map-loc .ico {
-  width: 1.1rem;
-  height: 1.1rem;
-}
+
 .bridge-map-hint,
 .bridge-map-footnote {
   position: absolute;
@@ -734,13 +705,86 @@ watch(tomtomKeyEffective, () => {
   font-family: inherit;
   background: #0a0a0f;
 }
-:deep(.bridge-map-div-icon) {
-  z-index: 500 !important;
-  border: none;
-  background: none;
-  margin: 0 !important;
-  transform-origin: center bottom;
-  pointer-events: auto;
+:deep(.leaflet-popup-content-wrapper.bridge-map-popup) {
+  border-radius: 10px;
+  border: 1px solid rgba(167, 139, 250, 0.35);
+  background: rgba(14, 14, 20, 0.96);
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.55);
+}
+:deep(.leaflet-popup-tip.bridge-map-popup) {
+  background: rgba(14, 14, 20, 0.96);
+  border: 1px solid rgba(167, 139, 250, 0.25);
+}
+:deep(.leaflet-popup-content-wrapper.bridge-map-popup .leaflet-popup-content) {
+  margin: 0.45rem 0.55rem;
+  line-height: 1.2;
+}
+:deep(.bridge-popup) {
+  color: #e8e2ff;
+  text-align: center;
+  min-width: 7.5rem;
+}
+:deep(.bridge-popup--best) {
+  filter: none;
+}
+:deep(.bridge-popup--closed) {
+  opacity: 0.75;
+}
+:deep(.bridge-popup__row) {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.15rem;
+  font-size: 0.65rem;
+  font-weight: 800;
+}
+:deep(.bridge-popup__rank) {
+  color: #8a8a9a;
+  font-variant-numeric: tabular-nums;
+}
+:deep(.bridge-popup--best .bridge-popup__rank) {
+  color: #6ee7b7;
+}
+:deep(.bridge-popup__trend) {
+  font-size: 0.75rem;
+}
+:deep(.bridge-popup.is-worse .bridge-popup__trend) {
+  color: #fca5a5;
+}
+:deep(.bridge-popup.is-better .bridge-popup__trend) {
+  color: #86efac;
+}
+:deep(.bridge-popup.is-neut .bridge-popup__trend) {
+  color: #fde68a;
+}
+:deep(.bridge-popup__time) {
+  font-size: 1.35rem;
+  font-weight: 900;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.03em;
+  color: #ddd6fe;
+  line-height: 1;
+}
+:deep(.bridge-popup--best .bridge-popup__time) {
+  color: #a7f3d0;
+}
+:deep(.bridge-popup__suf) {
+  font-size: 0.55rem;
+  font-weight: 800;
+  color: #8a8a9a;
+  margin-left: 0.06rem;
+}
+:deep(.bridge-popup__name) {
+  margin-top: 0.15rem;
+  font-size: 0.55rem;
+  font-weight: 800;
+  color: #9a9aac;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 11rem;
 }
 :deep(.bclus-ico) {
   background: none !important;
@@ -772,107 +816,5 @@ watch(tomtomKeyEffective, () => {
 :deep(.leaflet-cluster-anim .leaflet-marker-icon) {
   -webkit-backface-visibility: hidden;
   backface-visibility: hidden;
-}
-:deep(.bridge-mrk) {
-  width: 100px;
-  padding: 0.2rem 0.35rem 0.1rem;
-  text-align: center;
-  color: #f0eef7;
-  border-radius: 0.5rem 0.5rem 0.1rem 0.5rem;
-  background: linear-gradient(150deg, rgba(28, 22, 44, 0.96) 0%, rgba(8, 8, 12, 0.96) 100%);
-  border: 1px solid rgba(167, 139, 250, 0.4);
-  box-shadow:
-    0 4px 20px rgba(0, 0, 0, 0.55),
-    0 0 0 1px rgba(255, 255, 255, 0.04) inset,
-    0 0 20px rgba(123, 77, 181, 0.15);
-  line-height: 1.1;
-  transition: transform 0.12s;
-}
-:deep(.bridge-mrk--best) {
-  border-color: rgba(52, 211, 153, 0.65);
-  box-shadow:
-    0 4px 18px rgba(0, 0, 0, 0.5),
-    0 0 0 1px rgba(52, 211, 153, 0.3),
-    0 0 22px rgba(16, 185, 129, 0.35);
-}
-:deep(.bridge-mrk.t-worse) {
-  border-color: rgba(248, 113, 113, 0.45);
-}
-:deep(.bridge-mrk.t-better) {
-  border-color: rgba(52, 211, 153, 0.4);
-}
-:deep(.bridge-mrk.is-closed) {
-  opacity: 0.6;
-  filter: grayscale(0.5);
-}
-:deep(.bridge-mrk.is-selected) {
-  z-index: 2;
-  transform: scale(1.06);
-}
-:deep(.bridge-mrk__row1) {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 0.1rem;
-}
-:deep(.bridge-mrk__rank) {
-  font-size: 0.45rem;
-  font-weight: 900;
-  color: #6e6e80;
-  min-width: 0.7rem;
-}
-:deep(.bridge-mrk--best .bridge-mrk__rank) {
-  color: #6ee7b7;
-}
-:deep(.bridge-mrk__t) {
-  font-size: 0.6rem;
-  line-height: 1;
-  font-weight: 900;
-}
-:deep(.bridge-mrk__time) {
-  font-size: 1.35rem;
-  font-weight: 900;
-  line-height: 0.95;
-  letter-spacing: -0.03em;
-  color: #e8e2ff;
-  text-shadow: 0 0 20px rgba(123, 77, 181, 0.45);
-  font-variant-numeric: tabular-nums;
-}
-:deep(.bridge-mrk--best .bridge-mrk__time) {
-  color: #c4f4dd;
-  text-shadow: 0 0 18px rgba(52, 211, 129, 0.4);
-}
-:deep(.bridge-mrk__suf) {
-  font-size: 0.55rem;
-  font-weight: 800;
-  color: #8a8a9a;
-  margin-left: 0.05rem;
-  vertical-align: 0.15em;
-}
-:deep(.bridge-mrk__name) {
-  font-size: 0.5rem;
-  font-weight: 800;
-  color: #9a9aac;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  max-width: 6.2rem;
-  margin: 0.05rem auto 0;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-}
-:deep(.bridge-mrk__stem) {
-  width: 0;
-  height: 0;
-  margin: -0.1rem auto 0;
-  border-left: 6px solid transparent;
-  border-right: 6px solid transparent;
-  border-top: 9px solid rgba(167, 139, 250, 0.4);
-  filter: drop-shadow(0 2px 2px rgba(0, 0, 0, 0.4));
-}
-@media (prefers-reduced-motion: reduce) {
-  :deep(.bridge-mrk.is-selected) {
-    transform: none;
-  }
 }
 </style>

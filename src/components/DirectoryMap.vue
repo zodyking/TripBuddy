@@ -9,6 +9,7 @@ import {
 } from 'vue'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
+import { directoryBuildingIcon } from '../utils/mapMarkers.js'
 
 /** Default view when there are no directory pins (Manhattan). */
 const DEFAULT_CENTER = Object.freeze([40.7128, -74.006])
@@ -95,16 +96,6 @@ const hasUserFix = computed(() => {
   )
 })
 
-function pinHtml(locationId, selected) {
-  const esc = String(locationId)
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-  const sel = selected ? ' is-selected' : ''
-  return `<div class="directory-map-marker-ui"><div class="directory-map-pin-inner${sel}"><span class="directory-map-pin-label">${esc}</span></div><div class="directory-map-pin-stem" aria-hidden="true"></div></div>`
-}
-
 function allBoundsLatLngs() {
   /** @type {L.LatLng[]} */
   const pts = []
@@ -171,19 +162,13 @@ function syncMarkers() {
 
     const id = String(p.locationId)
     const selected = props.highlightId === id
-    const icon = L.divIcon({
-      className: 'directory-map-div-icon',
-      html: pinHtml(id, selected),
-      iconSize: [88, 56],
-      /* Tip of stem sits on coordinates */
-      iconAnchor: [44, 56],
-      popupAnchor: [0, -56],
-    })
+    const icon = directoryBuildingIcon(selected)
 
     const marker = L.marker([lat, lng], {
       icon,
       title: `Location ${id}`,
     })
+    marker.bindTooltip(`Location ${id}`, { direction: 'top', offset: [0, -44] })
     marker.on('click', () => {
       emit('select', id)
     })
@@ -490,11 +475,11 @@ watch(
     aria-label="Map of saved locations"
   >
     <div ref="containerRef" class="directory-map-el" />
-    <div class="directory-map-locate-wrap">
+    <div class="map-controls-stack directory-map-controls">
       <button
         type="button"
-        class="directory-map-layer-btn tap"
-        :class="{ 'is-satellite': activeBaseLayer === 'satellite' }"
+        class="map-control-btn map-control-btn--sat tap"
+        :class="{ 'is-on': activeBaseLayer === 'satellite' }"
         :aria-pressed="activeBaseLayer === 'satellite'"
         title="Satellite imagery"
         @click="toggleSatellite"
@@ -508,8 +493,8 @@ watch(
       </button>
       <button
         type="button"
-        class="directory-map-locate-btn tap"
-        :class="{ 'is-active': geoTracking, 'is-denied': geoDenied }"
+        class="map-control-btn map-control-btn--loc tap"
+        :class="{ 'is-on': geoTracking, 'is-denied': geoDenied }"
         :aria-pressed="geoTracking"
         :title="
           geoDenied
@@ -578,89 +563,8 @@ watch(
   border: 0;
 }
 
-.directory-map-layer-btn {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 2.75rem;
-  height: 2.75rem;
-  border-radius: 999px;
-  border: 1px solid var(--color-border, rgba(255, 255, 255, 0.14));
-  background: rgba(18, 18, 26, 0.92);
-  color: var(--color-text-primary, #f4f4f8);
-  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.35);
-  cursor: pointer;
-  transition:
-    background 0.15s ease,
-    border-color 0.15s ease,
-    color 0.15s ease;
-}
-
-.directory-map-layer-btn:hover {
-  background: rgba(40, 40, 52, 0.96);
-}
-
-.directory-map-layer-btn.is-satellite {
-  color: #a78bfa;
-  border-color: rgba(167, 139, 250, 0.45);
-}
-
-.directory-map-layer-btn svg {
-  width: 1.2rem;
-  height: 1.2rem;
-}
-
-.directory-map-locate-wrap {
-  position: absolute;
-  z-index: 450;
-  right: var(--space-3, 0.75rem);
-  bottom: var(--space-10, 2.75rem);
-  display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: var(--space-2, 0.5rem);
+.directory-map-controls {
   max-width: min(14rem, calc(100% - 1.5rem));
-  pointer-events: none;
-}
-
-.directory-map-locate-wrap > * {
-  pointer-events: auto;
-}
-
-.directory-map-locate-btn {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 2.75rem;
-  height: 2.75rem;
-  border-radius: 999px;
-  border: 1px solid var(--color-border, rgba(255, 255, 255, 0.14));
-  background: rgba(18, 18, 26, 0.92);
-  color: var(--color-text-primary, #f4f4f8);
-  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.35);
-  cursor: pointer;
-  transition:
-    background 0.15s ease,
-    border-color 0.15s ease,
-    color 0.15s ease;
-}
-
-.directory-map-locate-btn:hover {
-  background: rgba(40, 40, 52, 0.96);
-}
-
-.directory-map-locate-btn.is-active {
-  color: #38bdf8;
-  border-color: rgba(56, 189, 248, 0.45);
-}
-
-.directory-map-locate-btn.is-denied {
-  color: #f87171;
-}
-
-.directory-map-locate-btn svg {
-  width: 1.25rem;
-  height: 1.25rem;
 }
 
 .directory-map-locate-hint {
@@ -718,71 +622,4 @@ watch(
 :deep(.leaflet-control-attribution a) {
   color: var(--color-accent-purple, #7b4db5);
 }
-</style>
-
-<style>
-/* Unscoped: Leaflet divIcon content lives outside Vue scope */
-.directory-map-div-icon {
-  background: transparent !important;
-  border: none !important;
-}
-
-.directory-map-marker-ui {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  width: 88px;
-  height: 56px;
-  pointer-events: auto;
-}
-
-.directory-map-pin-inner {
-  position: relative;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  padding: 0.25rem 0.5rem;
-  min-width: 2rem;
-  border-radius: var(--radius-md, 0.5rem);
-  background: linear-gradient(
-    145deg,
-    rgba(123, 77, 181, 0.95),
-    rgba(90, 50, 140, 0.98)
-  );
-  border: 1px solid rgba(255, 255, 255, 0.2);
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.45);
-  margin-bottom: 2px;
-}
-
-.directory-map-pin-inner.is-selected {
-  border-color: rgba(255, 255, 255, 0.45);
-  box-shadow:
-    0 0 0 2px rgba(123, 77, 181, 0.5),
-    0 4px 12px rgba(0, 0, 0, 0.5);
-}
-
-.directory-map-pin-label {
-  font-size: 0.6875rem;
-  font-weight: 700;
-  letter-spacing: 0.02em;
-  color: #f4f4f8;
-  line-height: 1.2;
-  white-space: nowrap;
-}
-
-.directory-map-pin-stem {
-  flex-shrink: 0;
-  width: 0;
-  height: 0;
-  border-left: 6px solid transparent;
-  border-right: 6px solid transparent;
-  border-top: 8px solid rgba(90, 50, 140, 0.98);
-  filter: drop-shadow(0 2px 2px rgba(0, 0, 0, 0.35));
-}
-
-.leaflet-marker-icon.directory-map-div-icon {
-  margin-left: 0 !important;
-  margin-top: 0 !important;
-}
-
 </style>
