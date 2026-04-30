@@ -1069,10 +1069,10 @@ onUnmounted(() => {
                         class="history-card-summary history-trip-summary history-fold__summary"
                         @dblclick.stop.prevent="onRowDoubleClick(e)"
                       >
-                        <div class="history-trip-summary-grid">
-                          <div class="history-trip-area history-trip-area--od history-trip-od-inline-wrap">
+                        <div class="history-trip-head">
+                          <div class="history-trip-head__main">
                             <p
-                              class="history-trip-od-inline"
+                              class="history-trip-od-line"
                               :title="`${str(e.dispatchHeader?.origin) || '—'} → ${str(e.dispatchHeader?.destination) || '—'}`"
                             >
                               <span class="history-od-lab">Origin:</span>
@@ -1081,52 +1081,51 @@ onUnmounted(() => {
                               <span class="history-od-lab">Destination:</span>
                               <span class="history-od-id">{{ leadingLocationId(e.dispatchHeader?.destination) || '—' }}</span>
                             </p>
-                          </div>
-                          <div
-                            class="history-trip-area history-trip-area--time history-time-block history-time-block--trip"
-                          >
-                            <span class="history-time-lab">{{
-                              e.source === 'linehaul' ? 'Dispatched' : 'Time'
-                            }}</span>
-                            <time
-                              class="history-date"
-                              :datetime="new Date(e.displayDate).toISOString()"
-                              >{{ formatWhen(e.displayDate) }}</time
-                            >
-                          </div>
-                          <div class="history-trip-out-stack">
-                            <div
-                              v-if="e.dailyTripLegSequence"
-                              class="history-trip-area history-trip-area--out history-outcome-slot"
-                              @click.stop
-                            >
-                              <div class="history-outcome-wrap" @click.stop>
-                                <button
-                                  type="button"
-                                  class="history-outcome-pill tap"
-                                  :class="`history-outcome--${outcomeSelectValue(e)}`"
-                                  :disabled="historySavingId === `seq-${e.dailyTripLegSequence}`"
-                                  :title="'Tap to change: ' + outcomeLabel(outcomeSelectValue(e))"
-                                  :aria-expanded="outcomeMenuOpen === e.id"
-                                  aria-haspopup="listbox"
-                                  @click="toggleOutcomeMenu(e, e.id, $event)"
-                                >
-                                  <span class="history-outcome-pill__txt">{{ outcomeLabel(outcomeSelectValue(e)) }}</span>
-                                  <span class="history-outcome-pill__chev" aria-hidden="true">▾</span>
-                                </button>
-                              </div>
+                            <div class="history-trip-dispatch">
+                              <span class="history-trip-dispatch__lab">{{
+                                e.source === 'linehaul' ? 'Dispatched' : 'Time'
+                              }}</span>
+                              <time
+                                class="history-trip-dispatch__when"
+                                :datetime="new Date(e.displayDate).toISOString()"
+                                >{{ formatWhen(e.displayDate) }}</time
+                              >
                             </div>
-                            <span class="history-trip-mi-pill history-trip-mi-pill--under-outcome">{{
-                              tripHeaderMileageDisplay(e)
-                            }}</span>
+                            <div class="history-trip-actions">
+                              <div
+                                v-if="e.dailyTripLegSequence"
+                                class="history-outcome-slot"
+                                @click.stop
+                              >
+                                <div class="history-outcome-wrap" @click.stop>
+                                  <button
+                                    type="button"
+                                    class="history-outcome-pill history-outcome-pill--trip tap"
+                                    :class="`history-outcome--${outcomeSelectValue(e)}`"
+                                    :disabled="historySavingId === `seq-${e.dailyTripLegSequence}`"
+                                    :title="'Tap to change: ' + outcomeLabel(outcomeSelectValue(e))"
+                                    :aria-expanded="outcomeMenuOpen === e.id"
+                                    aria-haspopup="listbox"
+                                    @click="toggleOutcomeMenu(e, e.id, $event)"
+                                  >
+                                    <span class="history-outcome-pill__txt">{{ outcomeLabel(outcomeSelectValue(e)) }}</span>
+                                    <span class="history-outcome-pill__chev" aria-hidden="true">▾</span>
+                                  </button>
+                                </div>
+                              </div>
+                              <span class="history-trip-mi-pill history-trip-mi-pill--trip">{{
+                                tripHeaderMileageDisplay(e)
+                              }}</span>
+                            </div>
                           </div>
-                          <span
+                          <p
                             v-if="e.dailyTripLegSequence"
-                            class="history-trip-area history-trip-area--seq history-seq"
+                            class="history-trip-legline"
                             :title="`Double-tap header: cycle status · Leg #${e.dailyTripLegSequence}`"
-                            >Leg #{{ e.dailyTripLegSequence }} ·
-                            {{ sourceLabel((str(e.dispatchHeader?.source) || e.source) || '') }}</span
                           >
+                            Leg #{{ e.dailyTripLegSequence }} ·
+                            {{ sourceLabel((str(e.dispatchHeader?.source) || e.source) || '') }}
+                          </p>
                         </div>
                       </summary>
                     <div class="history-dispatch">
@@ -1872,47 +1871,116 @@ onUnmounted(() => {
 
 .history-trip-summary.history-fold__summary {
   display: block;
-  padding: 0.38rem 1.85rem 0.34rem 0.48rem;
+  padding: 0.32rem 1.75rem 0.28rem 0.44rem;
 }
 
 .history-trip-summary.history-fold__summary::after {
-  top: 0.55rem;
+  top: 50%;
+  transform: translateY(-50%);
 }
 
-.history-trip-summary-grid {
+.history-trip-head {
+  display: flex;
+  flex-direction: column;
+  gap: 0.22rem;
+  width: 100%;
+}
+
+.history-trip-head__main {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto max-content;
-  grid-template-areas:
-    'od time outstack'
-    'seq seq seq';
-  gap: 0.28rem 0.45rem;
+  grid-template-columns: minmax(0, 1fr) auto minmax(6.5rem, max-content);
+  gap: 0.35rem 0.5rem;
   align-items: center;
   width: 100%;
 }
 
-.history-trip-area--od {
-  grid-area: od;
-  min-width: 0;
-}
-
-.history-trip-od-inline-wrap {
-  min-width: 0;
-}
-
-.history-trip-od-inline {
+.history-trip-od-line {
   margin: 0;
+  min-width: 0;
   font-size: 0.65rem;
   font-weight: 600;
-  line-height: 1.28;
+  line-height: 1.22;
   color: var(--color-text-primary, #ececf4);
   display: flex;
   flex-wrap: wrap;
-  align-items: baseline;
-  gap: 0.15rem 0.28rem;
+  align-items: center;
+  gap: 0.12rem 0.28rem;
+}
+
+.history-trip-dispatch {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  justify-content: center;
+  gap: 0.04rem;
+  text-align: right;
+  min-width: 7.5rem;
+}
+
+.history-trip-dispatch__lab {
+  font-size: 0.48rem;
+  font-weight: 800;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: #7a7a88;
+  line-height: 1.1;
+}
+
+.history-trip-dispatch__when {
+  font-size: 0.64rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: #e4dff8;
+  line-height: 1.15;
+}
+
+.history-trip-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: center;
+  gap: 0.22rem;
+  min-width: 5.75rem;
+}
+
+.history-trip-actions .history-outcome-slot {
+  width: 100%;
+}
+
+.history-trip-actions .history-outcome-wrap {
+  width: 100%;
+}
+
+.history-outcome-pill--trip {
+  width: 100%;
+  min-height: 1.38rem;
+  padding: 0.06rem 0.32rem 0.06rem 0.34rem;
+  border-radius: 6px;
+}
+
+.history-trip-mi-pill--trip {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  min-height: 1.38rem;
+  padding: 0.06rem 0.28rem;
+  font-size: 0.54rem;
+  box-sizing: border-box;
+}
+
+.history-trip-legline {
+  margin: 0;
+  padding-top: 0.06rem;
+  font-size: 0.56rem;
+  font-weight: 600;
+  color: var(--color-text-tertiary, #6e6e7e);
+  line-height: 1.2;
+  letter-spacing: 0.02em;
 }
 
 .history-od-lab {
-  font-size: 0.56rem;
+  font-size: 0.54rem;
   font-weight: 700;
   letter-spacing: 0.02em;
   color: #8b8b98;
@@ -1929,73 +1997,6 @@ onUnmounted(() => {
   color: #6b6b78;
   font-weight: 700;
   padding: 0 0.05rem;
-}
-
-.history-trip-area--time {
-  grid-area: time;
-  align-self: center;
-}
-
-.history-trip-out-stack {
-  grid-area: outstack;
-  display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  justify-content: center;
-  gap: 0.22rem;
-  justify-self: end;
-  min-width: 0;
-}
-
-.history-trip-area--out {
-  justify-self: end;
-}
-
-.history-trip-area--seq {
-  grid-area: seq;
-}
-
-.history-trip-mi-pill--under-outcome {
-  align-self: flex-end;
-}
-
-.history-time-block--trip {
-  align-items: flex-end;
-  text-align: right;
-  gap: 0.06rem;
-}
-
-.history-time-block--trip .history-time-lab {
-  font-size: 0.48rem;
-  font-weight: 800;
-  letter-spacing: 0.06em;
-}
-
-.history-time-block--trip .history-date {
-  font-size: 0.65rem;
-  font-weight: 700;
-  color: #e4dff8;
-}
-
-.history-outcome-slot .history-outcome-pill {
-  width: auto;
-  min-width: 4.35rem;
-  min-height: 0;
-  padding: 0.12rem 0.35rem 0.12rem 0.38rem;
-}
-
-.history-outcome-slot {
-  display: flex;
-  justify-content: flex-end;
-  width: 100%;
-}
-
-.history-seq {
-  font-size: 0.58rem;
-  color: var(--color-text-tertiary, #6e6e7e);
-  font-weight: 600;
-  line-height: 1.25;
-  letter-spacing: 0.02em;
 }
 
 .history-card-summary {
