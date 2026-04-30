@@ -275,6 +275,64 @@ function computeWeekPayEstimate(items) {
   }
 }
 
+/** FedEx Ground-style pay period: local Sun 00:00 → Sat 23:59:59.999 (paycheck Fri covers prior completed period). */
+function fedExPayPeriodContaining(ms) {
+  if (typeof ms !== 'number' || !Number.isFinite(ms) || ms <= 0) return null
+  const d = new Date(ms)
+  if (isNaN(d.getTime())) return null
+  const dow = d.getDay()
+  const daysBackToSunday = dow
+  const start = new Date(d.getFullYear(), d.getMonth(), d.getDate() - daysBackToSunday, 0, 0, 0, 0)
+  const end = new Date(start.getTime() + 7 * 24 * 60 * 60 * 1000 - 1)
+  const sk = `${start.getFullYear()}-${String(start.getMonth() + 1).padStart(2, '0')}-${String(start.getDate()).padStart(2, '0')}`
+  return {
+    periodStartMs: start.getTime(),
+    periodEndMs: end.getTime(),
+    key: `fedex-pp-${sk}`,
+    labelShort: `${start.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} – ${end.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}`,
+  }
+}
+
+/** Friday paycheck date for work completed in pay period ending `periodEndMs` (first Friday after Sat night). */
+function fedExPaycheckFridayMs(periodEndMs) {
+  if (typeof periodEndMs !== 'number' || !Number.isFinite(periodEndMs)) return null
+  let d = new Date(periodEndMs + 1)
+  if (isNaN(d.getTime())) return null
+  while (d.getDay() !== 5) {
+    d = new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1, 12, 0, 0, 0)
+  }
+  return d.getTime()
+}
+
+/**
+ * Group ledger entries by FedEx pay period (each trip counted once by dispatch time).
+ * @param {LedgerEntry[]} items
+ */
+function entriesByFedExPayPeriod(items) {
+  /** @type {Map<string, { meta: NonNullable<ReturnType<typeof fedExPayPeriodContaining>>, items: LedgerEntry[] }>} */
+  const map = new Map()
+  for (const e of items) {
+    const p = fedExPayPeriodContaining(e.displayDate)
+    if (!p) continue
+    const cur = map.get(p.key)
+    if (!cur) map.set(p.key, { meta: p, items: [e] })
+    else cur.items.push(e)
+  }
+  const list = Array.from(map.values()).sort((a, b) => b.meta.periodStartMs - a.meta.periodStartMs)
+  for (const g of list) {
+    g.items.sort((a, b) => b.displayDate - a.displayDate)
+  }
+  return list
+}
+
+/** Billable miles line for week/day headers ($1/mi rule). */
+function billableMilesLine(sumBillable, tripCount) {
+  const s = Number.isFinite(sumBillable) ? sumBillable : 0
+  const r = Math.round(s * 10) / 10
+  const txt = Number.isInteger(r) ? String(r) : r.toFixed(1)
+  return `${txt} mi billable · ${tripCount} ${tripCount === 1 ? 'trip' : 'trips'}`
+}
+
 /**
  * @param {number} n
  */
@@ -645,6 +703,40 @@ const monthPaidMilesTotal = computed(() => {
   return { sum, count }
 })
 
+/** Per work-week FedEx pay-period buckets for Estimate pay (trips partitioned by Sun–Sat). */
+const fedExEstimatePayRowsForWeek = computed(() => {
+  /** @type {Record<string, { paycheckLabel: string, periodLabel: string, splitNote: string | null, estimateUsd: number, rows: ReturnType<typeof computeWeekPayEstimate>['rows'] }[]>} */
+  const out = {}
+  for (const wg of tripsByWorkWeek.value) {
+    const periods = entriesByFedExPayPeriod(wg.items)
+    const ws = wg.weekStartMs
+    const we = ws + 7 * 24 * 60 * 60 * 1000 - 1
+    out[wg.key] = periods.map((g) => {
+      const est = computeWeekPayEstimate(g.items)
+      const fri = fedExPaycheckFridayMs(g.meta.periodEndMs)
+      const paycheckLabel = fri
+        ? `Paycheck ${new Date(fri).toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })}`
+        : 'Paycheck —'
+      let splitNote = null
+      if (g.meta.periodStartMs < ws) {
+        splitNote =
+          'This FedEx pay period began before this work week — trips from the prior week are listed here (each trip counted once).'
+      } else if (g.meta.periodEndMs > we) {
+        splitNote =
+          'This FedEx pay period continues after this work week — additional trips appear under the next work week (each trip counted once).'
+      }
+      return {
+        paycheckLabel,
+        periodLabel: `Period ${g.meta.labelShort}`,
+        splitNote,
+        estimateUsd: est.estimateUsd,
+        rows: est.rows,
+      }
+    })
+  }
+  return out
+})
+
 /** Per work-week pay estimate ($1 / billable mi); keyed like {@link tripsByWorkWeek}. */
 const weekPayEstimateByKey = computed(() => {
   /** @type {Record<string, ReturnType<typeof computeWeekPayEstimate>>} */
@@ -674,7 +766,11 @@ const dayPayEstimateByWeekDayKey = computed(() => {
  */
 function dayPayEstimateFor(weekKey, shiftDayKey) {
   const dk = shiftDayKey ? String(shiftDayKey) : 'unk'
-  return dayPayEstimateByWeekDayKey.value[`${String(weekKey)}|${dk}`] || { estimateUsd: 0 }
+  return dayPayEstimateByWeekDayKey.value[`${String(weekKey)}|${dk}`] || {
+    estimateUsd: 0,
+    sumBillable: 0,
+    rows: [],
+  }
 }
 
 /** Expand week/day `<details>` when user picks a calendar shift day. */
@@ -1066,8 +1162,11 @@ onUnmounted(() => {
                   <span class="history-mile-pill">{{
                     mileageHeaderLine(wg.mileageSum, wg.tripsWithMileage, wg.tripCount)
                   }}</span>
-                  <span class="history-pay-head-pill">{{
-                    formatUsdWhole((weekPayEstimateByKey[wg.key] || { estimateUsd: 0 }).estimateUsd)
+                  <span class="history-billable-head-pill">{{
+                    billableMilesLine(
+                      (weekPayEstimateByKey[wg.key] || { sumBillable: 0 }).sumBillable,
+                      wg.tripCount,
+                    )
                   }}</span>
                 </div>
               </div>
@@ -1088,8 +1187,11 @@ onUnmounted(() => {
                       <span class="history-mile-pill history-mile-pill--sm">{{
                         mileageHeaderLine(dg.mileageSum, dg.tripsWithMileage, dg.tripCount)
                       }}</span>
-                      <span class="history-pay-head-pill history-pay-head-pill--sm">{{
-                        formatUsdWhole(dayPayEstimateFor(wg.key, dg.shiftDayKey).estimateUsd)
+                      <span class="history-billable-head-pill history-billable-head-pill--sm">{{
+                        billableMilesLine(
+                          (dayPayEstimateFor(wg.key, dg.shiftDayKey).sumBillable),
+                          dg.tripCount,
+                        )
                       }}</span>
                     </div>
                   </div>
@@ -1282,14 +1384,14 @@ onUnmounted(() => {
 
             <details class="history-pay-fold history-fold">
               <summary class="history-pay-fold__summary history-fold__summary">
-                <span class="history-pay-fold__title">Pay breakdown estimate</span>
+                <span class="history-pay-fold__title">Week totals</span>
               </summary>
               <div class="history-pay-body">
                 <p class="history-pay-rules">
-                  $1 per billable mile (paid miles from {{ PAY_ROUND_BAND_MIN }}–{{ PAY_ROUND_BAND_MAX }} mi count as
-                  {{ PAY_ROUND_TO_MI }} mi). Missing mileage counts as 0 mi.
+                  Paid miles and billable miles for trips in this work week (same rounding rules as estimate pay:
+                  {{ PAY_ROUND_BAND_MIN }}–{{ PAY_ROUND_BAND_MAX }} mi → {{ PAY_ROUND_TO_MI }} mi billable). Missing mileage counts as 0 mi.
                 </p>
-                <ul class="history-pay-list" aria-label="Pay estimate by trip">
+                <ul class="history-pay-list" aria-label="Week mileage by trip">
                   <li
                     v-for="row in (weekPayEstimateByKey[wg.key] || { rows: [] }).rows"
                     :key="row.id"
@@ -1300,7 +1402,9 @@ onUnmounted(() => {
                       <span class="history-pay-row__when">{{ row.when }}</span>
                     </span>
                     <span class="history-pay-row__nums">
-                      <span class="history-pay-row__bill">{{ row.billableMi }} mi → {{ formatUsdWhole(row.billableMi) }}</span>
+                      <span class="history-pay-row__bill"
+                        >{{ row.paidMi != null ? formatMilesSum(row.paidMi) : '—' }} mi paid · {{ formatMilesSum(row.billableMi) }} mi billable</span
+                      >
                       <span v-if="row.rounded" class="history-pay-row__note"
                         >{{ PAY_ROUND_BAND_MIN }}–{{ PAY_ROUND_BAND_MAX }} mi → {{ PAY_ROUND_TO_MI }} mi</span
                       >
@@ -1308,12 +1412,60 @@ onUnmounted(() => {
                     </span>
                   </li>
                 </ul>
-                <div class="history-pay-total">
-                  <span>Estimated total</span>
-                  <strong>{{
-                    formatUsdWhole((weekPayEstimateByKey[wg.key] || { estimateUsd: 0 }).estimateUsd)
-                  }}</strong>
+                <div class="history-pay-total history-pay-total--mi">
+                  <span>Week billable miles</span>
+                  <strong>{{ formatMilesSum((weekPayEstimateByKey[wg.key] || { sumBillable: 0 }).sumBillable) }} mi</strong>
                 </div>
+              </div>
+            </details>
+
+            <details class="history-pay-fold history-pay-fold--estimate history-fold">
+              <summary class="history-pay-fold__summary history-fold__summary">
+                <span class="history-pay-fold__title">Estimate pay</span>
+              </summary>
+              <div class="history-pay-body">
+                <p class="history-pay-rules history-pay-rules--fedex">
+                  FedEx Ground pay is typically weekly on <strong>Friday</strong> for the prior completed period.
+                  Pay period: <strong>Sunday 12:00 AM – Saturday 11:59 PM</strong> (local). Direct deposit may post a day or two early depending on the bank.
+                  Estimate uses <strong>$1 per billable mile</strong> (same rounding as week totals).
+                </p>
+                <template v-if="(fedExEstimatePayRowsForWeek[wg.key] || []).length">
+                  <div
+                    v-for="(bucket, bi) in fedExEstimatePayRowsForWeek[wg.key]"
+                    :key="`${wg.key}-fedex-${bi}`"
+                    class="history-fedex-pay-bucket"
+                  >
+                    <p class="history-fedex-pay-bucket__head">
+                      <span class="history-fedex-pay-bucket__period">{{ bucket.periodLabel }}</span>
+                      <span class="history-fedex-pay-bucket__pay">{{ bucket.paycheckLabel }}</span>
+                    </p>
+                    <p v-if="bucket.splitNote" class="history-fedex-pay-bucket__split">{{ bucket.splitNote }}</p>
+                    <ul class="history-pay-list" :aria-label="`${bucket.periodLabel} trips`">
+                      <li
+                        v-for="row in bucket.rows"
+                        :key="row.id"
+                        class="history-pay-row"
+                      >
+                        <span class="history-pay-row__main">
+                          <span class="history-pay-row__od">{{ row.od }}</span>
+                          <span class="history-pay-row__when">{{ row.when }}</span>
+                        </span>
+                        <span class="history-pay-row__nums">
+                          <span class="history-pay-row__bill">{{ row.billableMi }} mi → {{ formatUsdWhole(row.billableMi) }}</span>
+                          <span v-if="row.rounded" class="history-pay-row__note"
+                            >{{ PAY_ROUND_BAND_MIN }}–{{ PAY_ROUND_BAND_MAX }} mi → {{ PAY_ROUND_TO_MI }} mi</span
+                          >
+                          <span v-else-if="row.paidMi == null" class="history-pay-row__note">no paid mi</span>
+                        </span>
+                      </li>
+                    </ul>
+                    <div class="history-pay-total">
+                      <span>Estimated pay this period</span>
+                      <strong>{{ formatUsdWhole(bucket.estimateUsd) }}</strong>
+                    </div>
+                  </div>
+                </template>
+                <p v-else class="history-pay-rules">No trips in this work week for estimate pay.</p>
               </div>
             </details>
           </details>
@@ -1686,7 +1838,7 @@ onUnmounted(() => {
   min-height: 1.55rem;
 }
 
-.history-pay-head-pill {
+.history-billable-head-pill {
   flex-shrink: 0;
   display: inline-flex;
   align-items: center;
@@ -1697,13 +1849,13 @@ onUnmounted(() => {
   font-weight: 800;
   font-variant-numeric: tabular-nums;
   line-height: 1.15;
-  background: rgba(34, 197, 94, 0.12);
-  border: 1px solid rgba(34, 197, 94, 0.38);
-  color: #bbf7d0;
+  background: rgba(251, 191, 36, 0.1);
+  border: 1px solid rgba(251, 191, 36, 0.35);
+  color: #fcd34d;
   white-space: nowrap;
 }
 
-.history-pay-head-pill--sm {
+.history-billable-head-pill--sm {
   font-size: 0.54rem;
   padding: 0.14rem 0.34rem;
   min-height: 1.55rem;
@@ -1862,14 +2014,61 @@ onUnmounted(() => {
   color: #9a9aaa;
 }
 
-.history-pay-total strong {
-  font-size: 0.78rem;
-  font-weight: 800;
-  font-variant-numeric: tabular-nums;
-  color: #f4f4fa;
+.history-pay-fold--estimate > .history-pay-fold__summary {
+  background: rgba(124, 92, 255, 0.08);
+  border-bottom-color: #3a3a4a;
 }
 
-.history-list--day {
+.history-pay-rules--fedex {
+  line-height: 1.45;
+}
+
+.history-fedex-pay-bucket {
+  margin-top: 0.55rem;
+  padding: 0.4rem 0.45rem;
+  border-radius: 8px;
+  border: 1px solid #333340;
+  background: rgba(0, 0, 0, 0.2);
+}
+
+.history-fedex-pay-bucket:first-of-type {
+  margin-top: 0.25rem;
+}
+
+.history-fedex-pay-bucket__head {
+  margin: 0 0 0.35rem;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.35rem 0.65rem;
+  font-size: 0.65rem;
+  font-weight: 700;
+  color: #c4c4d4;
+}
+
+.history-fedex-pay-bucket__period {
+  font-weight: 800;
+  color: #e8e8f4;
+}
+
+.history-fedex-pay-bucket__pay {
+  font-size: 0.58rem;
+  font-weight: 700;
+  color: #a7f3d0;
+}
+
+.history-fedex-pay-bucket__split {
+  margin: 0 0 0.4rem;
+  font-size: 0.58rem;
+  line-height: 1.35;
+  color: #8a8a9a;
+  font-style: italic;
+}
+
+.history-pay-total--mi strong {
+  color: #c4b5fd;
+}
   padding: 0 !important;
   gap: 0.45rem !important;
 }
