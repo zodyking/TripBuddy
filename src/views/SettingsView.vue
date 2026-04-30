@@ -982,8 +982,8 @@ onUnmounted(() => {
           <code class="bmk">.env</code> (build) which overrides the pasted value.
         </p>
         <p class="cred-hint">
-          The <strong>Traffic → Corridors</strong> schematic loads TomTom Flow Segment Data via the API server.
-          Set <code class="bmk">TOMTOM_API_KEY</code> (preferred) or <code class="bmk">VITE_TOMTOM_KEY</code> in the server environment for <code class="bmk">POST /api/traffic/tomtom/corridors</code>.
+          The <strong>Traffic → Corridors</strong> schematic uses the same key: your browser saves it above, and the app sends it with each corridor request so the server can call TomTom Flow Segment Data. Optional server fallback:
+          <code class="bmk">TOMTOM_API_KEY</code> or <code class="bmk">VITE_TOMTOM_KEY</code> in the API environment.
         </p>
         <p v-if="tomtomKeyFromEnv" class="cred-hint" style="color: #fbbf24; font-weight: 600">
           A build-time <code class="bmk">VITE_TOMTOM_KEY</code> is set — the crossings map uses it first for tiles.

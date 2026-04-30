@@ -122,7 +122,7 @@ onUnmounted(() => {
   width: 100%;
   display: flex;
   flex-direction: column;
-  flex: 1 1 auto;
+  flex: 1 1 0;
   min-height: 0;
   min-width: 0;
   box-sizing: border-box;
@@ -165,10 +165,12 @@ onUnmounted(() => {
 }
 
 .traffic-hub-panel {
-  flex: 1 1 auto;
+  flex: 1 1 0;
   min-height: 0;
+  min-width: 0;
   display: flex;
   flex-direction: column;
+  overflow: hidden;
 }
 
 .traffic-hub-panel--crossings {
@@ -176,7 +178,14 @@ onUnmounted(() => {
   padding-right: max(env(safe-area-inset-right, 0px), var(--space-2, 0.5rem));
 }
 
+.traffic-hub-panel--crossings > :deep(.bridges-page) {
+  flex: 1 1 0;
+  min-height: 0;
+}
+
 .traffic-hub-panel--corridors {
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
   padding-bottom: 0.25rem;
   padding-left: max(env(safe-area-inset-left, 0px), var(--space-2, 0.5rem));
   padding-right: max(env(safe-area-inset-right, 0px), var(--space-2, 0.5rem));

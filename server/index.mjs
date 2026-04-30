@@ -421,18 +421,32 @@ app.get('/api/bridges/panynj', async () => {
 })
 
 /**
- * TomTom Flow Segment Data for predefined corridor samples (server key only).
+ * TomTom Flow Segment Data. Key: request body `tomtomKey` (same key as Settings tiles) or server env.
+ * @param {unknown} raw
+ * @returns {string}
  */
+function sanitizeTomtomKeyFromBody(raw) {
+  if (typeof raw !== 'string') return ''
+  const s = raw.trim()
+  if (s.length < 8 || s.length > 256) return ''
+  if (!/^[A-Za-z0-9._~-]+$/.test(s)) return ''
+  return s
+}
+
 app.post('/api/traffic/tomtom/corridors', async (req, reply) => {
-  const key = String(process.env.TOMTOM_API_KEY || process.env.VITE_TOMTOM_KEY || '').trim()
+  const body = req.body && typeof req.body === 'object' ? req.body : {}
+  const fromClient = sanitizeTomtomKeyFromBody(body.tomtomKey)
+  const key = (
+    fromClient ||
+    String(process.env.TOMTOM_API_KEY || process.env.VITE_TOMTOM_KEY || '').trim()
+  ).trim()
   if (!key) {
     return reply.code(503).send({
       ok: false,
       error:
-        'Set TOMTOM_API_KEY (or VITE_TOMTOM_KEY) on the API server for corridor traffic.',
+        'Add your TomTom API key in Settings (same as traffic tiles), or set TOMTOM_API_KEY / VITE_TOMTOM_KEY on the API server.',
     })
   }
-  const body = req.body && typeof req.body === 'object' ? req.body : {}
   let corridors = corridorTomtomSamples
   if (Array.isArray(body.corridors) && body.corridors.length > 0) {
     corridors = body.corridors

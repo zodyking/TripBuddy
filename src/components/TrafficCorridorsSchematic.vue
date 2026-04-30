@@ -75,14 +75,14 @@ const segmentsByEdge = computed(() => {
       const [x2, y2] = path[i + 1]
       out.push({
         edgeId: edge.id,
-        color: heavy ? '#f87171' : edge.color,
+        color: heavy ? '#fb7185' : edge.color,
         x1,
         y1,
         x2,
         y2,
         heavy,
-        opacity: heavy ? 1 : 0.72,
-        strokeW: heavy ? 5 : 3.5,
+        opacity: heavy ? 0.98 : 0.55,
+        strokeW: heavy ? 4.25 : 2.85,
       })
     }
   }
@@ -132,7 +132,7 @@ const fetchedLabel = computed(() => {
       <div>
         <h2 class="tc-h2">Corridor traffic</h2>
         <p class="tc-sub">
-          Schematic map · TomTom flow segments · red segments / dots = heavy vs free flow
+          Transit-style schematic · live TomTom flow · warm accent only where speed drops vs free flow
         </p>
       </div>
       <p v-if="fetchedLabel" class="tc-updated">Updated {{ fetchedLabel }}</p>
@@ -150,23 +150,34 @@ const fetchedLabel = computed(() => {
         aria-label="NYC NJ truck corridor schematic"
       >
         <defs>
-          <filter id="tc-glow" x="-20%" y="-20%" width="140%" height="140%">
-            <feGaussianBlur stdDeviation="2" result="b" />
-            <feMerge>
-              <feMergeNode in="b" />
-              <feMergeNode in="SourceGraphic" />
-            </feMerge>
-          </filter>
+          <linearGradient id="tc-bg" x1="0%" y1="0%" x2="100%" y2="100%">
+            <stop offset="0%" stop-color="#0c0a14" />
+            <stop offset="45%" stop-color="#080812" />
+            <stop offset="100%" stop-color="#050508" />
+          </linearGradient>
+          <pattern id="tc-grid" width="40" height="40" patternUnits="userSpaceOnUse">
+            <path d="M 40 0 L 0 0 0 40" fill="none" stroke="#1e1b2e" stroke-width="0.35" opacity="0.45" />
+          </pattern>
         </defs>
 
-        <!-- faint region hints -->
-        <rect width="920" height="540" fill="#06060d" rx="12" />
-        <text x="460" y="28" text-anchor="middle" fill="#334155" font-size="11" font-weight="700">
+        <rect width="920" height="540" fill="url(#tc-bg)" rx="14" />
+        <rect width="920" height="540" fill="url(#tc-grid)" rx="14" opacity="0.55" />
+        <rect
+          width="916"
+          height="536"
+          x="2"
+          y="2"
+          fill="none"
+          stroke="rgba(167,139,250,0.12)"
+          stroke-width="1"
+          rx="12"
+        />
+        <text x="460" y="26" text-anchor="middle" fill="#475569" font-size="10" font-weight="600" letter-spacing="0.04em">
           NYC · LI · NJ — schematic (not to geographic scale)
         </text>
 
         <!-- corridors -->
-        <g class="tc-lines" filter="url(#tc-glow)">
+        <g class="tc-lines">
           <line
             v-for="(seg, si) in segmentsByEdge"
             :key="`${seg.edgeId}-${si}`"
@@ -178,6 +189,23 @@ const fetchedLabel = computed(() => {
             :stroke-width="seg.strokeW"
             :stroke-opacity="seg.opacity"
             stroke-linecap="round"
+            stroke-linejoin="round"
+          />
+        </g>
+
+        <g class="tc-lines-heavy" pointer-events="none">
+          <line
+            v-for="(seg, si) in segmentsByEdge"
+            v-show="seg.heavy"
+            :key="`h-${seg.edgeId}-${si}`"
+            :x1="seg.x1"
+            :y1="seg.y1"
+            :x2="seg.x2"
+            :y2="seg.y2"
+            stroke="#fb7185"
+            stroke-width="7"
+            stroke-opacity="0.22"
+            stroke-linecap="round"
           />
         </g>
 
@@ -188,10 +216,10 @@ const fetchedLabel = computed(() => {
             :key="`hd-${di}`"
             :cx="d.cx"
             :cy="d.cy"
-            r="6"
-            fill="#fecaca"
-            stroke="#7f1d1d"
-            stroke-width="1.2"
+            r="5"
+            fill="#fecdd3"
+            stroke="#9f1239"
+            stroke-width="1"
           >
             <title>{{ d.title }}</title>
           </circle>
@@ -204,55 +232,62 @@ const fetchedLabel = computed(() => {
               v-if="n.role === 'hub'"
               :cx="n.x"
               :cy="n.y"
-              r="9"
+              r="8"
               fill="#0f172a"
-              stroke="#e2e8f0"
-              stroke-width="2"
+              stroke="#cbd5e1"
+              stroke-width="1.6"
             />
             <circle
               v-else-if="n.role === 'airport'"
               :cx="n.x"
               :cy="n.y"
-              r="8"
+              r="7"
               fill="#134e4a"
               stroke="#5eead4"
-              stroke-width="1.8"
+              stroke-width="1.4"
             />
             <circle
               v-else-if="n.role === 'bridge'"
               :cx="n.x"
               :cy="n.y"
-              r="7"
+              r="6"
               fill="#1e1b4b"
               stroke="#c4b5fd"
-              stroke-width="1.5"
+              stroke-width="1.25"
             />
             <circle
               v-else
               :cx="n.x"
               :cy="n.y"
-              r="5"
+              r="4.5"
               fill="#0f172a"
-              stroke="#94a3b8"
-              stroke-width="1.2"
+              stroke="#64748b"
+              stroke-width="1"
             />
             <text
               :x="n.x"
-              :y="n.y + (n.role === 'hub' ? 22 : 18)"
+              :y="n.y + (n.role === 'hub' ? 20 : 16)"
               text-anchor="middle"
-              fill="#cbd5e1"
-              font-size="9"
-              font-weight="650"
+              fill="#94a3b8"
+              font-size="8.5"
+              font-weight="600"
               font-family="system-ui, sans-serif"
             >{{ n.label }}</text>
           </g>
         </g>
 
-        <!-- route pills -->
-        <g class="tc-pills" transform="translate(520, 455)">
-          <g v-for="(leg, li) in legendEdges" :key="leg.id" :transform="`translate(0 ${li * 18})`">
-            <rect x="0" y="-10" width="118" height="14" rx="4" :fill="leg.color" opacity="0.35" />
-            <text x="6" y="0" fill="#e2e8f0" font-size="8" font-weight="750">{{ leg.label }}</text>
+        <!-- route legend -->
+        <g class="tc-pills" transform="translate(24, 418)">
+          <text x="0" y="-6" fill="#64748b" font-size="8" font-weight="700" letter-spacing="0.08em">
+            ROUTES
+          </text>
+          <g
+            v-for="(leg, li) in legendEdges"
+            :key="leg.id"
+            :transform="`translate(${Math.floor(li / 8) * 132} ${10 + (li % 8) * 16})`"
+          >
+            <rect x="0" y="-9" width="11" height="11" rx="2" :fill="leg.color" opacity="0.85" />
+            <text x="16" y="0" fill="#cbd5e1" font-size="8" font-weight="600">{{ leg.label }}</text>
           </g>
         </g>
       </svg>
@@ -327,17 +362,20 @@ const fetchedLabel = computed(() => {
 
 .tc-svg-wrap {
   width: 100%;
-  border-radius: 12px;
+  border-radius: 14px;
   overflow: hidden;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  background: #030306;
+  border: 1px solid rgba(167, 139, 250, 0.14);
+  background: linear-gradient(165deg, #0a0812 0%, #050508 100%);
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.04) inset,
+    0 12px 40px rgba(0, 0, 0, 0.35);
 }
 
 .tc-svg {
   display: block;
   width: 100%;
   height: auto;
-  max-height: min(62vh, 520px);
+  max-height: min(58vh, 500px);
 }
 
 .tc-foot {
@@ -353,7 +391,7 @@ const fetchedLabel = computed(() => {
   width: 0.45rem;
   height: 0.45rem;
   border-radius: 999px;
-  background: #f87171;
+  background: #fb7185;
   flex-shrink: 0;
 }
 </style>
