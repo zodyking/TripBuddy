@@ -134,14 +134,14 @@ function formatShiftDayHeading(shiftDayKey) {
 }
 
 /**
- * One-line mileage for headers (paid mi).
+ * One-line mileage for headers (paid mi sum and trip count).
  * @param {number} sum
- * @param {number} withMi
  * @param {number} totalTrips
  */
-function mileageHeaderLine(sum, withMi, totalTrips) {
+function mileageHeaderLine(sum, totalTrips) {
   const s = Number.isFinite(sum) ? sum : 0
-  return `${formatMilesSum(s)} mi · ${withMi}/${totalTrips} trips`
+  const n = Number.isFinite(totalTrips) ? Math.max(0, Math.floor(totalTrips)) : 0
+  return `${formatMilesSum(s)} mi · ${n} ${n === 1 ? 'trip' : 'trips'}`
 }
 
 /**
@@ -1186,7 +1186,7 @@ onUnmounted(() => {
                 <h3 class="history-ww-title">{{ wg.groupLabel }}</h3>
                 <div class="history-head-metrics">
                   <span class="history-mile-pill">{{
-                    mileageHeaderLine(wg.mileageSum, wg.tripsWithMileage, wg.tripCount)
+                    mileageHeaderLine(wg.mileageSum, wg.tripCount)
                   }}</span>
                 </div>
               </div>
@@ -1205,7 +1205,7 @@ onUnmounted(() => {
                     <h4 class="history-day-title">{{ dg.dayLabel }}</h4>
                     <div class="history-head-metrics">
                       <span class="history-mile-pill history-mile-pill--sm">{{
-                        mileageHeaderLine(dg.mileageSum, dg.tripsWithMileage, dg.tripCount)
+                        mileageHeaderLine(dg.mileageSum, dg.tripCount)
                       }}</span>
                     </div>
                   </div>
