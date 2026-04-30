@@ -146,23 +146,29 @@ function mileageHeaderLine(sum, withMi, totalTrips) {
 }
 
 /**
- * Trip header: paid miles as plain text (0 when unknown).
+ * Trip header: paid miles value only (numeric string; 0 when unknown).
  * @param {LedgerEntry} e
  */
-function tripHeaderMiPlain(e) {
+function tripHeaderMilesValue(e) {
   const n = tripPaidMiles(e)
-  const mi = n != null ? formatMilesSum(n) : '0'
-  return `${mi} mi`
+  return n != null ? formatMilesSum(n) : '0'
 }
 
 /**
- * Trip header: run time when known (plain text, no pill).
+ * Trip header: run duration as "1h 42m" when mileage API provides decimal hours.
  * @param {LedgerEntry} e
  */
-function tripHeaderRunPlain(e) {
+function tripHeaderDurationHm(e) {
   const mb = mileageBlock(e)
-  if (mb?.run == null) return null
-  return `~${mb.run} h`
+  const h = mb?.run
+  if (typeof h !== 'number' || !Number.isFinite(h) || h < 0) return null
+  const totalMin = Math.round(h * 60)
+  const hrs = Math.floor(totalMin / 60)
+  const mins = totalMin % 60
+  const parts = []
+  if (hrs > 0) parts.push(`${hrs}h`)
+  if (mins > 0 || parts.length === 0) parts.push(`${mins}m`)
+  return parts.join(' ')
 }
 
 /**
@@ -1118,10 +1124,12 @@ onUnmounted(() => {
                               <span class="history-od-lab">Destination:</span>
                               <span class="history-od-id">{{ leadingLocationId(e.dispatchHeader?.destination) || '—' }}</span>
                               <span class="history-trip-od-sep" aria-hidden="true">·</span>
-                              <span class="history-trip-inline-k">{{ tripHeaderMiPlain(e) }}</span>
-                              <template v-if="tripHeaderRunPlain(e)">
+                              <span class="history-od-lab">Miles:</span>
+                              <span class="history-od-id">{{ tripHeaderMilesValue(e) }}</span>
+                              <template v-if="tripHeaderDurationHm(e)">
                                 <span class="history-trip-od-sep" aria-hidden="true">·</span>
-                                <span class="history-trip-inline-k">{{ tripHeaderRunPlain(e) }}</span>
+                                <span class="history-od-lab">Duration:</span>
+                                <span class="history-od-id">{{ tripHeaderDurationHm(e) }}</span>
                               </template>
                             </p>
                             <div
@@ -1986,12 +1994,6 @@ onUnmounted(() => {
   color: #4e4e58;
   font-weight: 700;
   padding: 0 0.04rem;
-}
-
-.history-trip-inline-k {
-  font-weight: 700;
-  font-variant-numeric: tabular-nums;
-  color: #dedeea;
 }
 
 .history-trip-meta-strip {
