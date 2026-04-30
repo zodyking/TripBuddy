@@ -325,14 +325,6 @@ function entriesByFedExPayPeriod(items) {
   return list
 }
 
-/** Billable miles line for week/day headers ($1/mi rule). */
-function billableMilesLine(sumBillable, tripCount) {
-  const s = Number.isFinite(sumBillable) ? sumBillable : 0
-  const r = Math.round(s * 10) / 10
-  const txt = Number.isInteger(r) ? String(r) : r.toFixed(1)
-  return `${txt} mi billable · ${tripCount} ${tripCount === 1 ? 'trip' : 'trips'}`
-}
-
 /**
  * @param {number} n
  */
@@ -1196,12 +1188,6 @@ onUnmounted(() => {
                   <span class="history-mile-pill">{{
                     mileageHeaderLine(wg.mileageSum, wg.tripsWithMileage, wg.tripCount)
                   }}</span>
-                  <span class="history-billable-head-pill">{{
-                    billableMilesLine(
-                      (weekPayEstimateByKey[wg.key] || { sumBillable: 0 }).sumBillable,
-                      wg.tripCount,
-                    )
-                  }}</span>
                 </div>
               </div>
             </summary>
@@ -1220,12 +1206,6 @@ onUnmounted(() => {
                     <div class="history-head-metrics">
                       <span class="history-mile-pill history-mile-pill--sm">{{
                         mileageHeaderLine(dg.mileageSum, dg.tripsWithMileage, dg.tripCount)
-                      }}</span>
-                      <span class="history-billable-head-pill history-billable-head-pill--sm">{{
-                        billableMilesLine(
-                          (dayPayEstimateFor(wg.key, dg.shiftDayKey).sumBillable),
-                          dg.tripCount,
-                        )
                       }}</span>
                     </div>
                   </div>
@@ -1874,29 +1854,6 @@ onUnmounted(() => {
 .history-mile-pill--sm {
   font-size: 0.56rem;
   padding: 0.14rem 0.36rem;
-  min-height: 1.55rem;
-}
-
-.history-billable-head-pill {
-  flex-shrink: 0;
-  display: inline-flex;
-  align-items: center;
-  min-height: 1.65rem;
-  padding: 0.18rem 0.42rem;
-  border-radius: 999px;
-  font-size: 0.58rem;
-  font-weight: 800;
-  font-variant-numeric: tabular-nums;
-  line-height: 1.15;
-  background: rgba(251, 191, 36, 0.1);
-  border: 1px solid rgba(251, 191, 36, 0.35);
-  color: #fcd34d;
-  white-space: nowrap;
-}
-
-.history-billable-head-pill--sm {
-  font-size: 0.54rem;
-  padding: 0.14rem 0.34rem;
   min-height: 1.55rem;
 }
 
