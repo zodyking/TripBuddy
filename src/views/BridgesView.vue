@@ -285,8 +285,8 @@ function bridgeChartModel(row) {
   const vb = {
     w: 100,
     h: 52,
-    plotL: 15,
-    plotR: 98,
+    plotL: 10,
+    plotR: 99,
     plotT: 7,
     plotB: 33,
   }
@@ -724,7 +724,6 @@ onUnmounted(() => {
                       :viewBox="`0 0 ${bridgeChartModel(row).vb.w} ${bridgeChartModel(row).vb.h}`"
                       preserveAspectRatio="xMidYMid meet"
                       width="100%"
-                      height="88"
                       role="img"
                       :aria-label="`Crossing time vs time for ${displayTitle(row)}`"
                     >
@@ -1333,7 +1332,7 @@ onUnmounted(() => {
 
 .bridge-chart-panel {
   border-radius: 10px;
-  padding: 0.18rem 0.12rem 0.08rem;
+  padding: 0.16rem 0.06rem 0.06rem;
   background: rgba(0, 0, 0, 0.38);
   border: 1px solid rgba(255, 255, 255, 0.05);
 }
@@ -1342,6 +1341,9 @@ onUnmounted(() => {
   display: block;
   width: 100%;
   max-width: 100%;
+  height: auto;
+  aspect-ratio: 100 / 52;
+  vertical-align: middle;
 }
 
 .bridge-chart-grid {
