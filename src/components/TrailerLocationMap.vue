@@ -9,13 +9,15 @@ import {
 } from 'vue'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
-import { trailerAssetIcon } from '../utils/mapMarkers.js'
+import { trailer20ftTopIcon, trailerFallbackPinIcon, userLocationTruckIcon } from '../utils/mapMarkers.js'
 
 const props = defineProps({
   lat: { type: Number, required: true },
   lng: { type: Number, required: true },
-  /** Shown in marker popup, e.g. "Trailer 1" */
-  trailerLabel: { type: String, default: '' },
+  /** '20ft' | '53ft' | '' — 20ft uses top-down PNG + number chip */
+  trailerSize: { type: String, default: '' },
+  /** Trailer number for marker chip (e.g. trlrNbr) */
+  trailerNumber: { type: String, default: '' },
   /** From parent: first fix after synchronous getCurrentPosition (WebKit gesture). */
   userLat: { type: Number, default: null },
   userLng: { type: Number, default: null },
@@ -50,7 +52,7 @@ let overlayLayer = null
 let userLayer = null
 /** @type {L.Marker | null} */
 let trailerMarker = null
-/** @type {L.CircleMarker | null} */
+/** @type {L.Marker | null} */
 let userMarker = null
 /** @type {L.Circle | null} */
 let userAccuracyCircle = null
@@ -73,7 +75,12 @@ function trailerLatLng() {
 }
 
 function makeTrailerIcon() {
-  return trailerAssetIcon()
+  const sz = String(props.trailerSize ?? '').trim().toLowerCase()
+  const num = String(props.trailerNumber ?? '').trim()
+  if (sz === '20ft' || sz === "20'") {
+    return trailer20ftTopIcon(num)
+  }
+  return trailerFallbackPinIcon()
 }
 
 function setBaseLayer(mode) {
@@ -158,14 +165,9 @@ function syncUserOverlay() {
   }
 
   if (!userMarker) {
-    userMarker = L.circleMarker(ll, {
-      radius: 7,
-      stroke: true,
-      color: '#0284c7',
-      weight: 2.5,
-      opacity: 1,
-      fillColor: '#ffffff',
-      fillOpacity: 1,
+    userMarker = L.marker(ll, {
+      icon: userLocationTruckIcon(),
+      zIndexOffset: 600,
     })
     userMarker.bindPopup('Your location')
     userMarker.addTo(userLayer)
@@ -337,15 +339,17 @@ function syncTrailerMarker() {
   if (!Number.isFinite(ll.lat) || !Number.isFinite(ll.lng)) return
 
   const label = props.trailerLabel.trim() || 'Trailer'
+  const icon = makeTrailerIcon()
   if (!trailerMarker) {
     trailerMarker = L.marker(ll, {
-      icon: makeTrailerIcon(),
+      icon,
       title: label,
     })
       .bindPopup(label)
       .addTo(overlayLayer)
   } else {
     trailerMarker.setLatLng(ll)
+    trailerMarker.setIcon(icon)
     trailerMarker.setPopupContent(label)
   }
   /* Trailer moved — refit if we do not have user yet */
@@ -365,7 +369,7 @@ onBeforeUnmount(() => {
 })
 
 watch(
-  () => [props.lat, props.lng, props.trailerLabel],
+  () => [props.lat, props.lng, props.trailerLabel, props.trailerSize, props.trailerNumber],
   () => {
     syncTrailerMarker()
     nextTick(() => map?.invalidateSize())

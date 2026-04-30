@@ -3,7 +3,7 @@ import { ref, watch, computed, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 import { tomtomKeyEffective } from '../stores/trafficTileKey.js'
-import { bridgesCrossingIcon } from '../utils/mapMarkers.js'
+import { bridgesCrossingIcon, userLocationTruckIcon } from '../utils/mapMarkers.js'
 
 const DEFAULT_CENTER = Object.freeze([40.64, -74.18])
 const DEFAULT_ZOOM = 9
@@ -52,7 +52,7 @@ const trafficOn = ref(false)
 let markerLayer = null
 /** @type {L.LayerGroup | null} */
 let userLayer = null
-/** @type {L.CircleMarker | null} */
+/** @type {L.Marker | null} */
 let userMarker = null
 /** @type {L.Circle | null} */
 let userAccuracyCircle = null
@@ -223,15 +223,11 @@ function syncUserOverlay() {
     }).addTo(userLayer)
   }
   if (!userMarker) {
-    userMarker = L.circleMarker(ll, {
-      radius: 6,
-      stroke: true,
-      color: '#34d399',
-      weight: 2.5,
-      fillColor: '#fff',
-      fillOpacity: 1,
+    userMarker = L.marker(ll, {
+      icon: userLocationTruckIcon(),
+      zIndexOffset: 600,
     })
-    userMarker.bindTooltip('You', { direction: 'top' })
+    userMarker.bindTooltip('You', { direction: 'top', offset: [0, -56] })
     userMarker.addTo(userLayer)
   } else {
     userMarker.setLatLng(ll)

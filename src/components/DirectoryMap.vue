@@ -9,7 +9,7 @@ import {
 } from 'vue'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
-import { directoryBuildingIcon } from '../utils/mapMarkers.js'
+import { directoryBuildingIcon, userLocationTruckIcon } from '../utils/mapMarkers.js'
 
 /** Default view when there are no directory pins (Manhattan). */
 const DEFAULT_CENTER = Object.freeze([40.7128, -74.006])
@@ -61,7 +61,7 @@ const activeBaseLayer = ref(/** @type {'street' | 'satellite'} */ ('street'))
 let markerLayer = null
 /** @type {L.LayerGroup | null} */
 let userLayer = null
-/** @type {L.CircleMarker | null} */
+/** @type {L.Marker | null} */
 let userMarker = null
 /** @type {L.Circle | null} */
 let userAccuracyCircle = null
@@ -232,20 +232,14 @@ function syncUserOverlay() {
   }
 
   /**
-   * CircleMarker is centered on lat/lng in projection (same anchor model as L.circle),
-   * so the dot does not drift vs the accuracy ring when zooming — unlike HTML divIcon markers.
+   * Truck icon anchor at GPS fix (accuracy ring unchanged).
    */
   if (!userMarker) {
-    userMarker = L.circleMarker(ll, {
-      radius: 7,
-      stroke: true,
-      color: '#38bdf8',
-      weight: 2.5,
-      opacity: 1,
-      fillColor: '#ffffff',
-      fillOpacity: 1,
+    userMarker = L.marker(ll, {
+      icon: userLocationTruckIcon(),
+      zIndexOffset: 600,
     })
-    userMarker.bindTooltip('Your location', { direction: 'top', offset: [0, -10] })
+    userMarker.bindTooltip('Your location', { direction: 'top', offset: [0, -56] })
     userMarker.addTo(userLayer)
   } else {
     userMarker.setLatLng(ll)

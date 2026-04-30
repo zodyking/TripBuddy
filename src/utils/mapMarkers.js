@@ -2,6 +2,8 @@
  * Shared `L.icon` assets for maps — SVG data URLs; stable anchors at all zoom levels.
  */
 import L from 'leaflet'
+import userLocationTruckImg from '../assets/map-markers/user-location-truck.png'
+import trailer20ftTopImg from '../assets/map-markers/trailer-20ft-top.png'
 
 /** @param {string} svg */
 function svgDataUrl(svg) {
@@ -15,6 +17,69 @@ function escapeSvgText(s) {
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
+}
+
+/** Safe `href` / `xlink:href` value for embedded raster in SVG. */
+function svgRasterHref(url) {
+  return String(url ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/"/g, '&quot;')
+}
+
+/**
+ * Top-down truck PNG for “my location” (replace `src/assets/map-markers/user-location-truck.png`).
+ * Anchor bottom-center.
+ */
+export function userLocationTruckIcon() {
+  const href = svgRasterHref(userLocationTruckImg)
+  const w = 96
+  const h = 112
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}">
+  <image href="${href}" xlink:href="${href}" x="0" y="0" width="${w}" height="${h}" preserveAspectRatio="xMidYMid meet"/>
+</svg>`
+  return L.icon({
+    iconUrl: svgDataUrl(svg),
+    iconSize: [w, h],
+    iconAnchor: [Math.round(w / 2), h],
+    popupAnchor: [0, -Math.round(h * 0.55)],
+    className: 'map-marker-img-icon map-marker-img-icon--user-truck',
+  })
+}
+
+/**
+ * 20′ trailer top PNG + optional number chip (replace `src/assets/map-markers/trailer-20ft-top.png`).
+ * @param {string} [trailerNumber]
+ */
+export function trailer20ftTopIcon(trailerNumber = '') {
+  const href = svgRasterHref(trailer20ftTopImg)
+  const vw = 72
+  const vh = 132
+  const imgY = 14
+  const imgH = 118
+  const raw = String(trailerNumber ?? '')
+    .trim()
+    .replace(/^#/, '')
+  const labelRaw = raw ? directoryMarkerIdLabel(raw) : ''
+  const labelEsc = escapeSvgText(labelRaw)
+  const fs =
+    labelRaw.length === 0 ? '0' : labelRaw.length <= 5 ? '7.5' : labelRaw.length <= 7 ? '6.5' : '6'
+  const labelBlock =
+    labelRaw !== ''
+      ? `<rect x="5" y="2" width="${vw - 10}" height="11" rx="2.5" fill="#0f172a" stroke="#e2e8f0" stroke-opacity="0.35" stroke-width="0.6"/>
+  <text x="${vw / 2}" y="9.6" text-anchor="middle" dominant-baseline="central" fill="#f8fafc" font-size="${fs}" font-family="ui-sans-serif,system-ui,sans-serif" font-weight="800">${labelEsc}</text>`
+      : ''
+
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="${vw}" height="${vh}" viewBox="0 0 ${vw} ${vh}">
+  ${labelBlock}
+  <image href="${href}" xlink:href="${href}" x="0" y="${imgY}" width="${vw}" height="${imgH}" preserveAspectRatio="xMidYMid meet"/>
+</svg>`
+  return L.icon({
+    iconUrl: svgDataUrl(svg),
+    iconSize: [vw, vh],
+    iconAnchor: [Math.round(vw / 2), vh],
+    popupAnchor: [0, -Math.round(vh * 0.52)],
+    className: 'map-marker-img-icon map-marker-img-icon--trailer-20',
+  })
 }
 
 /**
@@ -265,7 +330,7 @@ export function bridgesCrossingIcon(p) {
   })
 }
 
-/** Semi-trailer (tractor + van + wheels) inside orange pin — linehaul asset */
+/** Semi-trailer pin — fallback when trailer is not 20′ (PNG marker not wired yet). */
 function trailerSemiSvg() {
   return `<svg xmlns="http://www.w3.org/2000/svg" width="56" height="56" viewBox="0 0 56 56">
   <defs>
@@ -293,7 +358,7 @@ function trailerSemiSvg() {
 </svg>`
 }
 
-export function trailerAssetIcon() {
+export function trailerFallbackPinIcon() {
   return L.icon({
     iconUrl: svgDataUrl(trailerSemiSvg()),
     iconSize: [56, 56],

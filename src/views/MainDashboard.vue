@@ -143,6 +143,7 @@ const trailerGpsModalOpen = ref(false)
 /** @type {import('vue').Ref<{
  *   order: string,
  *   trlrNbr: string,
+ *   size?: string,
  *   lat: number,
  *   lng: number,
  *   userLat: number | null,
@@ -1126,6 +1127,7 @@ function openTrailerGpsModal(card) {
   trailerGpsData.value = {
     order: card.order,
     trlrNbr: card.trlrNbr,
+    size: card.size,
     lat: card.lat,
     lng: card.lng,
     userLat: null,
@@ -1650,6 +1652,8 @@ onUnmounted(() => {
               :user-lng="trailerGpsData.userLng"
               :user-location-pending="trailerGpsData.userGpsPending"
               :user-location-denied="trailerGpsData.userGeoDenied"
+              :trailer-size="trailerGpsData.size || ''"
+              :trailer-number="trailerGpsData.trlrNbr ? String(trailerGpsData.trlrNbr) : ''"
               :trailer-label="`Trailer ${trailerGpsData.order}${trailerGpsData.trlrNbr ? ` · #${trailerGpsData.trlrNbr}` : ''}`"
             />
           </div>

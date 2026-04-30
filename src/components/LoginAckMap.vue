@@ -2,6 +2,7 @@
 import { ref, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
+import { userLocationTruckIcon } from '../utils/mapMarkers.js'
 
 const DEFAULT_CENTER = [40.7128, -74.006]
 const DEFAULT_ZOOM = 11
@@ -28,7 +29,7 @@ const rootRef = ref(/** @type {HTMLElement | null} */ (null))
 let map = null
 /** @type {L.LayerGroup | null} */
 let layer = null
-/** @type {L.CircleMarker | null} */
+/** @type {L.Marker | null} */
 let dot = null
 /** @type {L.Circle | null} */
 let accCircle = null
@@ -84,14 +85,9 @@ function sync() {
   }
 
   if (!dot) {
-    dot = L.circleMarker(ll, {
-      radius: 7,
-      stroke: true,
-      color: '#38bdf8',
-      weight: 2.5,
-      opacity: 1,
-      fillColor: '#ffffff',
-      fillOpacity: 1,
+    dot = L.marker(ll, {
+      icon: userLocationTruckIcon(),
+      zIndexOffset: 500,
     }).addTo(layer)
   } else {
     dot.setLatLng(ll)
