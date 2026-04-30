@@ -282,12 +282,12 @@ function downsampleSeries(points, maxN) {
  * @param {unknown} row
  */
 function bridgeChartModel(row) {
-  /** Wide viewBox so `meet` + fixed pixel height still fills typical phone card width */
+  /** Wide viewBox; SVG uses CSS aspect-ratio matching vb so plot fills card width */
   const vb = {
     w: 268,
     h: 52,
-    plotL: 22,
-    plotR: 264,
+    plotL: 14,
+    plotR: 266,
     plotT: 7,
     plotB: 33,
   }
@@ -725,7 +725,9 @@ onUnmounted(() => {
                       :viewBox="`0 0 ${bridgeChartModel(row).vb.w} ${bridgeChartModel(row).vb.h}`"
                       preserveAspectRatio="xMidYMid meet"
                       width="100%"
-                      height="76"
+                      :style="{
+                        aspectRatio: `${bridgeChartModel(row).vb.w} / ${bridgeChartModel(row).vb.h}`,
+                      }"
                       role="img"
                       :aria-label="`Crossing time vs time for ${displayTitle(row)}`"
                     >
@@ -744,13 +746,13 @@ onUnmounted(() => {
                       <template v-if="bridgeChartModel(row).hasPath">
                         <text
                           class="bridge-chart-axis-title"
-                          x="12"
+                          x="6"
                           :y="bridgeChartModel(row).yTicks[0].y + 3.5"
                           text-anchor="start"
                         >{{ bridgeChartModel(row).yTicks[0].lab }}</text>
                         <text
                           class="bridge-chart-axis-title"
-                          x="12"
+                          x="6"
                           :y="bridgeChartModel(row).yTicks[2].y + 3.5"
                           text-anchor="start"
                         >{{ bridgeChartModel(row).yTicks[2].lab }}</text>
@@ -1334,24 +1336,19 @@ onUnmounted(() => {
 
 .bridge-chart-panel {
   border-radius: 10px;
-  padding: 0.16rem 0.06rem 0.06rem;
+  padding: 0.14rem 0 0.04rem;
   background: rgba(0, 0, 0, 0.38);
   border: 1px solid rgba(255, 255, 255, 0.05);
+  width: 100%;
+  min-width: 0;
 }
 
 .bridge-chart-svg {
   display: block;
   width: 100%;
   max-width: 100%;
-  height: 76px;
-  max-height: 76px;
-}
-
-@media (max-width: 360px) {
-  .bridge-chart-svg {
-    height: 72px;
-    max-height: 72px;
-  }
+  height: auto;
+  vertical-align: middle;
 }
 
 .bridge-chart-grid {
