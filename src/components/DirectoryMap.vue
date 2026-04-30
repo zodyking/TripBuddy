@@ -63,8 +63,6 @@ let markerLayer = null
 let userLayer = null
 /** @type {L.Marker | null} */
 let userMarker = null
-/** @type {L.Circle | null} */
-let userAccuracyCircle = null
 /** @type {Map<string, L.Marker>} */
 const markersById = new Map()
 
@@ -194,7 +192,7 @@ function syncMarkers() {
 }
 
 /**
- * Update “my location” marker and optional accuracy circle (does not re-zoom on every tick).
+ * Update “my location” truck marker (does not re-zoom on every tick).
  */
 function syncUserOverlay() {
   if (!map || !userLayer) return
@@ -205,41 +203,17 @@ function syncUserOverlay() {
       userLayer.removeLayer(userMarker)
       userMarker = null
     }
-    if (userAccuracyCircle) {
-      userLayer.removeLayer(userAccuracyCircle)
-      userAccuracyCircle = null
-    }
     return
   }
 
   const ll = L.latLng(u.lat, u.lng)
-  const acc =
-    Number.isFinite(u.accuracyM) && u.accuracyM > 0 ? u.accuracyM : 40
 
-  /* Accuracy ring first (geographic meters), then dot on top — both share the same lat/lng. */
-  if (userAccuracyCircle) {
-    userAccuracyCircle.setLatLng(ll)
-    userAccuracyCircle.setRadius(acc)
-  } else {
-    userAccuracyCircle = L.circle(ll, {
-      radius: acc,
-      color: '#38bdf8',
-      fillColor: '#38bdf8',
-      fillOpacity: 0.12,
-      weight: 1,
-      opacity: 0.45,
-    }).addTo(userLayer)
-  }
-
-  /**
-   * Truck icon anchor at GPS fix (accuracy ring unchanged).
-   */
   if (!userMarker) {
     userMarker = L.marker(ll, {
       icon: userLocationTruckIcon(),
       zIndexOffset: 600,
+      title: 'Your location',
     })
-    userMarker.bindTooltip('Your location', { direction: 'top', offset: [0, -56] })
     userMarker.addTo(userLayer)
   } else {
     userMarker.setLatLng(ll)
@@ -413,7 +387,6 @@ function destroyMap() {
   clearGeoWatch()
   markersById.clear()
   userMarker = null
-  userAccuracyCircle = null
   if (map) {
     map.remove()
     map = null

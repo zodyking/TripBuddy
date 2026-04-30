@@ -1,13 +1,15 @@
 # Map marker raster assets
 
-Leaflet “my location” and trailer top-view markers load PNGs from **`public/`** (base URL–aware in `src/utils/mapMarkers.js`):
+Leaflet truck / trailer markers load PNGs from **`public/`**:
 
 | File | Purpose |
 |------|---------|
-| `truck.png` | Top-down tractor — **your GPS dot** on Directory, Bridges, Trailer map, LoginAck preview |
-| `20ft.png` | Top-down **20′** van — trailer location map when size is 20ft |
-| `53ft.png` | Top-down **53′** van — when size is 53ft; same number chip as 20′ |
+| `truck.png` | Top-down tractor — **your GPS dot** (`L.icon` raster URL, not SVG-wrapped) |
+| `20ft.png` | Top-down **20′** van — trailer map (`divIcon` + `<img>` + optional number chip) |
+| `53ft.png` | Top-down **53′** van — same chip pattern |
 
-Replace these files with your transparent PNGs (same filenames). Prefer dimensions similar to the current assets so anchors stay reasonable; if you resize a lot, tweak `iconAnchor` in `mapMarkers.js` (`userLocationTruckIcon`, `trailer20ftTopIcon`, `trailer53ftTopIcon`).
+SVG data URLs with embedded `<image href="…png">` often fail to load cross-origin or are blocked for large files; we avoid that for user/trailer rasters.
+
+Replace these files with your transparent PNGs (same filenames). If you resize a lot, tweak anchors in `mapMarkers.js` (`userLocationTruckIcon`, `trailerTopDivIcon` layouts).
 
 Non–20′/53′ trailers use the orange SVG pin (`trailerFallbackPinIcon`).

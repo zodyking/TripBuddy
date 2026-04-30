@@ -22,26 +22,29 @@ function escapeSvgText(s) {
     .replace(/"/g, '&quot;')
 }
 
-/** Safe `href` / `xlink:href` value for embedded raster in SVG. */
-function svgRasterHref(url) {
-  return String(url ?? '')
+/** Escape plain text for HTML marker chips. */
+function escapeHtmlText(s) {
+  return String(s)
     .replace(/&/g, '&amp;')
-    .replace(/"/g, '&quot;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+}
+
+/** Escape double-quoted HTML attribute values (e.g. img src). */
+function escapeHtmlAttr(s) {
+  return String(s).replace(/&/g, '&amp;').replace(/"/g, '&quot;')
 }
 
 /**
  * Top-down truck PNG for “my location” (`public/truck.png`).
+ * Uses a raster `L.icon` (not SVG-wrapped) so large PNGs load reliably in all browsers.
  * Anchor bottom-center.
  */
 export function userLocationTruckIcon() {
-  const href = svgRasterHref(userLocationTruckImg)
   const w = 96
   const h = 112
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}">
-  <image href="${href}" xlink:href="${href}" x="0" y="0" width="${w}" height="${h}" preserveAspectRatio="xMidYMid meet"/>
-</svg>`
   return L.icon({
-    iconUrl: svgDataUrl(svg),
+    iconUrl: userLocationTruckImg,
     iconSize: [w, h],
     iconAnchor: [Math.round(w / 2), h],
     popupAnchor: [0, -Math.round(h * 0.55)],
@@ -50,37 +53,35 @@ export function userLocationTruckIcon() {
 }
 
 /**
- * Shared trailer top-view composite (PNG + optional number chip above image).
+ * Trailer top PNG + optional number chip via `L.divIcon` (PNG in `<img>`, not SVG foreignObject).
  * @param {string} rasterHref
- * @param {{ vw: number, vh: number, imgY: number, imgH: number, cls: string }} layout
+ * @param {{ vw: number, vh: number, chipH?: number }} layout
  * @param {string} trailerNumber
  */
-function trailerTopCompositeIcon(rasterHref, layout, trailerNumber = '') {
-  const href = svgRasterHref(rasterHref)
-  const { vw, vh, imgY, imgH, cls } = layout
+function trailerTopDivIcon(rasterHref, layout, trailerNumber = '') {
+  const { vw, vh, chipH = 14 } = layout
   const raw = String(trailerNumber ?? '')
     .trim()
     .replace(/^#/, '')
   const labelRaw = raw ? directoryMarkerIdLabel(raw) : ''
-  const labelEsc = escapeSvgText(labelRaw)
-  const fs =
-    labelRaw.length === 0 ? '0' : labelRaw.length <= 5 ? '7.5' : labelRaw.length <= 7 ? '6.5' : '6'
-  const labelBlock =
+  const fsPx =
+    labelRaw.length === 0 ? 0 : labelRaw.length <= 5 ? 7.5 : labelRaw.length <= 7 ? 6.5 : 6
+  const chipHtml =
     labelRaw !== ''
-      ? `<rect x="5" y="2" width="${vw - 10}" height="11" rx="2.5" fill="#0f172a" stroke="#e2e8f0" stroke-opacity="0.35" stroke-width="0.6"/>
-  <text x="${vw / 2}" y="9.6" text-anchor="middle" dominant-baseline="central" fill="#f8fafc" font-size="${fs}" font-family="ui-sans-serif,system-ui,sans-serif" font-weight="800">${labelEsc}</text>`
+      ? `<div class="map-trailer-marker-chip" style="font-size:${fsPx}px">${escapeHtmlText(
+          labelRaw,
+        )}</div>`
       : ''
-
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="${vw}" height="${vh}" viewBox="0 0 ${vw} ${vh}">
-  ${labelBlock}
-  <image href="${href}" xlink:href="${href}" x="0" y="${imgY}" width="${vw}" height="${imgH}" preserveAspectRatio="xMidYMid meet"/>
-</svg>`
-  return L.icon({
-    iconUrl: svgDataUrl(svg),
+  const imgH = labelRaw !== '' ? Math.max(vh - chipH, 1) : vh
+  const html = `<div class="map-trailer-marker-root" style="width:${vw}px;height:${vh}px">${chipHtml}<img class="map-trailer-marker-img" src="${escapeHtmlAttr(
+    rasterHref,
+  )}" alt="" width="${vw}" height="${imgH}"/></div>`
+  return L.divIcon({
+    html,
+    className: 'map-trailer-div-icon',
     iconSize: [vw, vh],
     iconAnchor: [Math.round(vw / 2), vh],
     popupAnchor: [0, -Math.round(vh * 0.52)],
-    className: `map-marker-img-icon ${cls}`,
   })
 }
 
@@ -89,11 +90,7 @@ function trailerTopCompositeIcon(rasterHref, layout, trailerNumber = '') {
  * @param {string} [trailerNumber]
  */
 export function trailer20ftTopIcon(trailerNumber = '') {
-  return trailerTopCompositeIcon(
-    trailer20ftTopImg,
-    { vw: 72, vh: 132, imgY: 14, imgH: 118, cls: 'map-marker-img-icon--trailer-20' },
-    trailerNumber,
-  )
+  return trailerTopDivIcon(trailer20ftTopImg, { vw: 72, vh: 132, chipH: 14 }, trailerNumber)
 }
 
 /**
@@ -101,11 +98,7 @@ export function trailer20ftTopIcon(trailerNumber = '') {
  * @param {string} [trailerNumber]
  */
 export function trailer53ftTopIcon(trailerNumber = '') {
-  return trailerTopCompositeIcon(
-    trailer53ftTopImg,
-    { vw: 76, vh: 262, imgY: 14, imgH: 248, cls: 'map-marker-img-icon--trailer-53' },
-    trailerNumber,
-  )
+  return trailerTopDivIcon(trailer53ftTopImg, { vw: 76, vh: 262, chipH: 14 }, trailerNumber)
 }
 
 /**

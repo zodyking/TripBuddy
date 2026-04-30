@@ -54,8 +54,6 @@ let markerLayer = null
 let userLayer = null
 /** @type {L.Marker | null} */
 let userMarker = null
-/** @type {L.Circle | null} */
-let userAccuracyCircle = null
 /** @type {Map<string, L.Marker>} */
 const markersById = new Map()
 
@@ -200,34 +198,15 @@ function syncUserOverlay() {
       userLayer.removeLayer(userMarker)
       userMarker = null
     }
-    if (userAccuracyCircle) {
-      userLayer.removeLayer(userAccuracyCircle)
-      userAccuracyCircle = null
-    }
     return
   }
   const ll = L.latLng(u.lat, u.lng)
-  const acc =
-    Number.isFinite(u.accuracyM) && u.accuracyM > 0 ? u.accuracyM : 40
-  if (userAccuracyCircle) {
-    userAccuracyCircle.setLatLng(ll)
-    userAccuracyCircle.setRadius(acc)
-  } else {
-    userAccuracyCircle = L.circle(ll, {
-      radius: acc,
-      color: '#34d399',
-      fillColor: '#34d399',
-      fillOpacity: 0.1,
-      weight: 1,
-      opacity: 0.4,
-    }).addTo(userLayer)
-  }
   if (!userMarker) {
     userMarker = L.marker(ll, {
       icon: userLocationTruckIcon(),
       zIndexOffset: 600,
+      title: 'Your location',
     })
-    userMarker.bindTooltip('You', { direction: 'top', offset: [0, -56] })
     userMarker.addTo(userLayer)
   } else {
     userMarker.setLatLng(ll)
@@ -458,7 +437,6 @@ function destroyMap() {
   }
   markersById.clear()
   userMarker = null
-  userAccuracyCircle = null
   if (map) {
     map.remove()
     map = null

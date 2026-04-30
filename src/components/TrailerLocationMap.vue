@@ -18,6 +18,8 @@ const props = defineProps({
   trailerSize: { type: String, default: '' },
   /** Trailer number for marker chip (e.g. trlrNbr) */
   trailerNumber: { type: String, default: '' },
+  /** Popup / accessibility title for trailer pin */
+  trailerLabel: { type: String, default: '' },
   /** From parent: first fix after synchronous getCurrentPosition (WebKit gesture). */
   userLat: { type: Number, default: null },
   userLng: { type: Number, default: null },
@@ -29,7 +31,7 @@ const props = defineProps({
 
 const containerRef = ref(null)
 
-/** Latest user fix (from props + live watch); accuracy drives the circle only. */
+/** Latest user fix (from props + live watch). */
 const userFix = ref(
   /** @type {{ lat: number, lng: number, accuracyM: number } | null} */ (null),
 )
@@ -54,8 +56,6 @@ let userLayer = null
 let trailerMarker = null
 /** @type {L.Marker | null} */
 let userMarker = null
-/** @type {L.Circle | null} */
-let userAccuracyCircle = null
 /** @type {number | null} */
 let geoWatchId = null
 /** @type {ReturnType<typeof setTimeout> | null} */
@@ -142,37 +142,17 @@ function syncUserOverlay() {
       userLayer.removeLayer(userMarker)
       userMarker = null
     }
-    if (userAccuracyCircle) {
-      userLayer.removeLayer(userAccuracyCircle)
-      userAccuracyCircle = null
-    }
     return
   }
 
   const ll = L.latLng(u.lat, u.lng)
-  const acc =
-    Number.isFinite(u.accuracyM) && u.accuracyM > 0 ? u.accuracyM : 40
-
-  if (userAccuracyCircle) {
-    userAccuracyCircle.setLatLng(ll)
-    userAccuracyCircle.setRadius(acc)
-  } else {
-    userAccuracyCircle = L.circle(ll, {
-      radius: acc,
-      color: '#0284c7',
-      fillColor: '#0284c7',
-      fillOpacity: 0.12,
-      weight: 1,
-      opacity: 0.45,
-    }).addTo(userLayer)
-  }
 
   if (!userMarker) {
     userMarker = L.marker(ll, {
       icon: userLocationTruckIcon(),
       zIndexOffset: 600,
+      title: 'Your location',
     })
-    userMarker.bindPopup('Your location')
     userMarker.addTo(userLayer)
   } else {
     userMarker.setLatLng(ll)
@@ -324,7 +304,6 @@ function destroyMap() {
   }
   trailerMarker = null
   userMarker = null
-  userAccuracyCircle = null
   userFix.value = null
   overlayLayer = null
   userLayer = null

@@ -31,8 +31,6 @@ let map = null
 let layer = null
 /** @type {L.Marker | null} */
 let dot = null
-/** @type {L.Circle | null} */
-let accCircle = null
 
 function prefersReducedMotion() {
   if (typeof window === 'undefined') return false
@@ -56,38 +54,17 @@ function sync() {
       layer.removeLayer(dot)
       dot = null
     }
-    if (accCircle) {
-      layer.removeLayer(accCircle)
-      accCircle = null
-    }
     map.setView(DEFAULT_CENTER, DEFAULT_ZOOM, { animate: false })
     return
   }
 
   const ll = L.latLng(la, ln)
-  const acc =
-    props.accuracyM != null && Number.isFinite(props.accuracyM) && props.accuracyM > 0
-      ? props.accuracyM
-      : 40
-
-  if (accCircle) {
-    accCircle.setLatLng(ll)
-    accCircle.setRadius(acc)
-  } else {
-    accCircle = L.circle(ll, {
-      radius: acc,
-      color: '#38bdf8',
-      fillColor: '#38bdf8',
-      fillOpacity: 0.12,
-      weight: 1,
-      opacity: 0.45,
-    }).addTo(layer)
-  }
 
   if (!dot) {
     dot = L.marker(ll, {
       icon: userLocationTruckIcon(),
       zIndexOffset: 500,
+      title: 'Your location',
     }).addTo(layer)
   } else {
     dot.setLatLng(ll)
@@ -135,7 +112,6 @@ function destroyMap() {
   }
   layer = null
   dot = null
-  accCircle = null
 }
 
 onMounted(() => {

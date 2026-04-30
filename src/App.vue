@@ -441,6 +441,48 @@ body {
   display: block;
 }
 
+/* Trailer divIcon: PNG + chip (avoids SVG-in-data-URL loading limits for large rasters) */
+.leaflet-div-icon.map-trailer-div-icon {
+  background: transparent !important;
+  border: none !important;
+}
+
+.map-trailer-marker-root {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 2px;
+  line-height: 0;
+  pointer-events: none;
+}
+
+.map-trailer-marker-chip {
+  flex-shrink: 0;
+  margin: 0 5px;
+  padding: 2px 4px;
+  border-radius: 2.5px;
+  text-align: center;
+  font-family: var(--font-sans, system-ui, sans-serif);
+  font-weight: 800;
+  line-height: 1.1;
+  color: #f8fafc;
+  background: #0f172a;
+  border: 0.6px solid rgba(226, 232, 240, 0.35);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.map-trailer-marker-img {
+  display: block;
+  width: 100%;
+  flex: 1 1 auto;
+  min-height: 0;
+  height: auto;
+  object-fit: contain;
+  pointer-events: none;
+}
+
 /* Focus ring */
 .focus-ring:focus-visible {
   outline: none;
