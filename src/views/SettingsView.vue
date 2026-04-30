@@ -969,7 +969,7 @@ onUnmounted(() => {
 
       <SettingsSection title="Map: TomTom traffic overlay">
         <p class="cred-hint">
-          Live road traffic tiles on the <strong>Traffic → Crossings</strong> map use
+          Live road traffic tiles on the <strong>Traffic</strong> map use
           <a
             href="https://developer.tomtom.com/traffic-api/documentation/product-information/introduction"
             target="_blank"
@@ -981,12 +981,8 @@ onUnmounted(() => {
           <code class="bmk">VITE_TOMTOM_KEY</code> in
           <code class="bmk">.env</code> (build) which overrides the pasted value.
         </p>
-        <p class="cred-hint">
-          The <strong>Traffic → Corridors</strong> schematic uses the same key: your browser saves it above, and the app sends it with each corridor request so the server can call TomTom Flow Segment Data. Optional server fallback:
-          <code class="bmk">TOMTOM_API_KEY</code> or <code class="bmk">VITE_TOMTOM_KEY</code> in the API environment.
-        </p>
         <p v-if="tomtomKeyFromEnv" class="cred-hint" style="color: #fbbf24; font-weight: 600">
-          A build-time <code class="bmk">VITE_TOMTOM_KEY</code> is set — the crossings map uses it first for tiles.
+          A build-time <code class="bmk">VITE_TOMTOM_KEY</code> is set — the Traffic map uses it first for tiles.
         </p>
         <label class="lbl" for="tomtom-traffic-key">TomTom API key (optional)</label>
         <input

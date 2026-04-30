@@ -686,7 +686,7 @@ onUnmounted(() => {
   flex-direction: column;
 }
 
-/* Traffic hub (crossings + corridor schematic): full-bleed like directory */
+/* Traffic (crossings): full-bleed like directory */
 .app-main.app-main--traffic {
   flex: 1;
   min-height: 0;

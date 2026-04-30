@@ -1,5 +1,3 @@
-import { getTomtomKeyEffective } from './stores/trafficTileKey.js'
-
 /**
  * All API calls include cookies (session auth). Use for `/api/*` only.
  * @param {RequestInfo} input
@@ -147,26 +145,6 @@ export async function getHealth() {
 /** Port Authority bridge/tunnel times + stored series for trend charts. */
 export async function getBridgesPanynj() {
   const r = await apiFetch('/api/bridges/panynj')
-  return handleJson(r)
-}
-
-/**
- * TomTom flow segment batch for corridor schematic.
- * Sends the same key as Traffic tiles (Settings localStorage / VITE_TOMTOM_KEY) when present.
- * @returns {Promise<{ ok: boolean, byCorridor?: Record<string, unknown[]>, fetchedAt?: number, error?: string }>}
- */
-export async function postTrafficTomtomCorridors(body = {}) {
-  const base =
-    body && typeof body === 'object' && !Array.isArray(body)
-      ? /** @type {Record<string, unknown>} */ ({ ...body })
-      : {}
-  const k = getTomtomKeyEffective().trim()
-  if (k) base.tomtomKey = k
-  const r = await apiFetch('/api/traffic/tomtom/corridors', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(base),
-  })
   return handleJson(r)
 }
 

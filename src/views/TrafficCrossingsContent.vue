@@ -283,7 +283,7 @@ function downsampleSeries(points, maxN) {
  * @param {unknown} row
  */
 function bridgeChartModel(row) {
-  /** Compact chart band — shorter cards; Y ledger shows max / mid / min */
+  /** Compact chart band — shorter cards; Y ledger shows four crossing-time ticks */
   const vb = {
     w: 268,
     h: 52,
@@ -354,18 +354,27 @@ function bridgeChartModel(row) {
 
   const last = pathPts[pathPts.length - 1]
 
-  const midM = (minM + maxM) / 2
-  const labMax = String(Math.round(maxM))
-  const labMin = String(Math.round(minM))
-  let labMid = String(Math.round(midM))
-  if (labMid === labMax || labMid === labMin) {
-    labMid = `${midM.toFixed(1)}`.replace(/\.0$/, '')
+  /** Crossing time axis: at least 4 labels (evenly spaced in value space). */
+  const fmtCrossMin = (v) => {
+    const r = Math.round(v)
+    if (Math.abs(v - r) < 0.08) return String(r)
+    return `${v.toFixed(1)}`.replace(/\.0$/, '')
   }
-  const yTicks = [
-    { y: yOf(maxM), lab: labMax },
-    { y: yOf(midM), lab: labMid },
-    { y: yOf(minM), lab: labMin },
+  const yLevels = [
+    maxM,
+    maxM - spanM / 3,
+    maxM - (2 * spanM) / 3,
+    minM,
   ]
+  /** @type {{ y: number, lab: string }[]} */
+  const yTicks = []
+  const seenYLab = new Set()
+  for (const v of yLevels) {
+    let lab = fmtCrossMin(v)
+    if (seenYLab.has(lab)) lab = `${v.toFixed(1)}`.replace(/\.0$/, '')
+    seenYLab.add(lab)
+    yTicks.push({ y: yOf(v), lab })
+  }
 
   const fmtHour = (ts) => {
     try {
@@ -377,12 +386,39 @@ function bridgeChartModel(row) {
       return ''
     }
   }
-  const midT = (tMin + tMax) / 2
-  const xTicks = [
-    { x: xOf(tMin), lab: fmtHour(tMin) },
-    { x: xOf(midT), lab: fmtHour(midT) },
-    { x: xOf(tMax), lab: fmtHour(tMax) },
-  ]
+
+  /** Time axis: tick every 4 hours on local clock boundaries (…, 12:00, 16:00, …). */
+  const FOUR_MS = 4 * 60 * 60 * 1000
+  /** @type {number[]} */
+  let xTickTs = []
+  {
+    const d = new Date(tMin)
+    d.setMinutes(0, 0, 0)
+    d.setMilliseconds(0)
+    const h = d.getHours()
+    let nextH = Math.ceil(h / 4) * 4
+    if (nextH >= 24) {
+      d.setDate(d.getDate() + 1)
+      d.setHours(0, 0, 0, 0)
+    } else {
+      d.setHours(nextH, 0, 0, 0)
+    }
+    let t = d.getTime()
+    while (t < tMin) t += FOUR_MS
+    while (t <= tMax) {
+      xTickTs.push(t)
+      t += FOUR_MS
+    }
+    if (xTickTs.length === 0) {
+      xTickTs = [tMin, tMax]
+    }
+  }
+  /** @type {{ x: number, lab: string }[]} */
+  const xTicks = xTickTs.map((ts) => ({ x: xOf(ts), lab: fmtHour(ts) }))
+  if (xTicks.length === 0) {
+    xTicks.push({ x: xOf(tMin), lab: fmtHour(tMin) })
+    if (tMax !== tMin) xTicks.push({ x: xOf(tMax), lab: fmtHour(tMax) })
+  }
 
   /** @type {{ x1: number, y1: number, x2: number, y2: number }[]} */
   const hGrids = yTicks.map((tk) => ({
