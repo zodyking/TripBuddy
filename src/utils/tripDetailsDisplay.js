@@ -163,44 +163,12 @@ export function buildTrailerCards(body) {
 }
 
 /**
- * Infer trailer length badge from FedEx trailer number prefix.
- * - **20'**: numbers typically start with **8**.
- * - **53'**: numbers typically start with **9** (do not assume everything else is 53').
- * @param {string} trlrNbr
- * @returns {'20ft' | '53ft'}
- */
-export function trailerLengthFromTrailerNumber(trlrNbr) {
-  const s = String(trlrNbr ?? '').trim()
-  if (!s) return '53ft'
-  if (s.startsWith('8')) return '20ft'
-  if (s.startsWith('9')) return '53ft'
-  return '20ft'
-}
-
-/**
  * Parse trailer metadata for display badges.
  * @param {Record<string, unknown>} trailer
- * @returns {{
- *   trlrNbr: string,
- *   size: '20ft' | '53ft',
- *   loadStatus: string,
- *   statusLabel: string,
- *   statusClass: string,
- *   emptyFlag: string,
- *   loadType: string,
- *   loadTypeClass: string,
- *   hasGps: boolean,
- *   lat: number | null,
- *   lng: number | null,
- *   sealNumber: string,
- *   loadDest: string,
- *   pkgWeight: string,
- *   dueDate: string
- * }}
  */
 export function parseTrailerMeta(trailer) {
   const trlrNbr = String(trailer.trlrNbr ?? '').trim()
-  const size = trailerLengthFromTrailerNumber(trlrNbr)
+  const size = trlrNbr.startsWith('8') ? '20ft' : '53ft'
 
   const loadStatus = String(trailer.detlCodeLoadStatus ?? '').toUpperCase()
   let statusLabel = '—'
