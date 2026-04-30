@@ -490,6 +490,18 @@ body {
   text-overflow: ellipsis;
 }
 
+.map-marker-raster-chip--tractor {
+  color: #faf5ff;
+  background: rgba(91, 33, 182, 0.94);
+  border-color: rgba(199, 168, 255, 0.55);
+}
+
+.map-marker-raster-chip--trailer {
+  color: #ede9fe;
+  background: rgba(76, 29, 149, 0.92);
+  border-color: rgba(196, 181, 253, 0.45);
+}
+
 /* Focus ring */
 .focus-ring:focus-visible {
   outline: none;

@@ -76,6 +76,7 @@ import {
 } from '../utils/linehaulLocationDisplay.js'
 import TrailerLocationMap from '../components/TrailerLocationMap.vue'
 import { copyTextToClipboard } from '../utils/copyToClipboard.js'
+import { vehicleIdForUserMapMarker } from '../utils/mapVehicleLabel.js'
 import {
   maybeAnnounceNewTrip,
   maybeAnnouncePrePlanTrip,
@@ -1135,11 +1136,7 @@ function openTrailerGpsModal(card) {
     userLng: null,
     userGpsPending: hasGeo,
     userGeoDenied: !hasGeo,
-    userVehicleId: (() => {
-      const n = linehaulTractorBody.value?.tractorNbr
-      if (n == null) return ''
-      return String(n).trim()
-    })(),
+    userVehicleId: vehicleIdForUserMapMarker(linehaulTractorBody.value, linehaulCredMeta.value),
   }
   trailerGpsModalOpen.value = true
 

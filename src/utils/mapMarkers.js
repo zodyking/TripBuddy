@@ -15,6 +15,20 @@ const userLocationTruckImg = truckMarkerUrl
 const trailer20ftTopImg = trailer20MarkerUrl
 const trailer53ftTopImg = trailer53MarkerUrl
 
+/** Display width for bundled truck PNG (~bridge marker width). */
+const USER_MARKER_IMG_W = 52
+/** Cab silhouette height at map scale (chip stacks below). */
+const USER_MARKER_IMG_H = 56
+const RASTER_CHIP_H = 13
+const RASTER_CHIP_GAP = 2
+
+/** 20′ trailer column (~same width cap as bridges). */
+const TRAILER_20_IMG_W = 52
+const TRAILER_20_IMG_H = Math.round(TRAILER_20_IMG_W * (118 / 72))
+/** 53′ trailer — taller column, same width cap. */
+const TRAILER_53_IMG_W = 52
+const TRAILER_53_IMG_H = Math.round(TRAILER_53_IMG_W * (248 / 76))
+
 /** @param {string} svg */
 function svgDataUrl(svg) {
   return `data:image/svg+xml,${encodeURIComponent(svg.trim())}`
@@ -59,22 +73,30 @@ function directoryMarkerIdLabel(raw) {
  * @param {{ vw: number, vh: number, chipH?: number }} layout vw/vh = total marker box (anchor bottom-center).
  * @param {string} labelRaw
  * @param {string} rootClass extra class on root div
+ * @param {string} [chipClass] extra class on chip (e.g. purple tractor label)
  */
-function rasterMarkerDivIconBottomChip(rasterHref, layout, labelRaw = '', rootClass = '') {
-  const { vw, vh, chipH = 14 } = layout
+function rasterMarkerDivIconBottomChip(
+  rasterHref,
+  layout,
+  labelRaw = '',
+  rootClass = '',
+  chipClass = '',
+) {
+  const { vw, vh, chipH = RASTER_CHIP_H } = layout
   const raw = String(labelRaw ?? '')
     .trim()
     .replace(/^#/, '')
   const idRaw = raw ? directoryMarkerIdLabel(raw) : ''
   const fsPx =
     idRaw.length === 0 ? 0 : idRaw.length <= 5 ? 7.5 : idRaw.length <= 7 ? 6.5 : 6
+  const chipExtraClass = chipClass ? ` ${chipClass}` : ''
   const chipHtml =
     idRaw !== ''
-      ? `<div class="map-marker-raster-chip" style="font-size:${fsPx}px">${escapeHtmlText(
+      ? `<div class="map-marker-raster-chip${chipExtraClass}" style="font-size:${fsPx}px">${escapeHtmlText(
           idRaw,
         )}</div>`
       : ''
-  const gap = idRaw !== '' ? 2 : 0
+  const gap = idRaw !== '' ? RASTER_CHIP_GAP : 0
   const imgBoxH = idRaw !== '' ? Math.max(vh - chipH - gap, 1) : vh
   const extraCls = rootClass ? ` ${rootClass}` : ''
   const html = `<div class="map-marker-raster-root${extraCls}" style="width:${vw}px;height:${vh}px"><img class="map-marker-raster-img" src="${escapeHtmlAttr(
@@ -95,10 +117,10 @@ function rasterMarkerDivIconBottomChip(rasterHref, layout, labelRaw = '', rootCl
  * @param {string} [vehicleId] tractor / unit number
  */
 export function userLocationTruckIcon(vehicleId = '') {
-  const vw = 96
-  const imgH = 112
-  const chipH = 14
-  const gap = 2
+  const vw = USER_MARKER_IMG_W
+  const imgH = USER_MARKER_IMG_H
+  const chipH = RASTER_CHIP_H
+  const gap = RASTER_CHIP_GAP
   const raw = String(vehicleId ?? '').trim()
   const showChip = raw !== '' && directoryMarkerIdLabel(raw) !== ''
   const boxH = showChip ? imgH + chipH + gap : imgH
@@ -107,6 +129,7 @@ export function userLocationTruckIcon(vehicleId = '') {
     { vw, vh: boxH, chipH },
     raw,
     'map-marker-raster-root--user-truck',
+    'map-marker-raster-chip--tractor',
   )
 }
 
@@ -118,8 +141,8 @@ export function userLocationTruckIcon(vehicleId = '') {
  * @param {string} trailerNumber
  */
 function trailerTopDivIcon(rasterHref, vw, imgH, trailerNumber = '') {
-  const chipH = 14
-  const gap = 2
+  const chipH = RASTER_CHIP_H
+  const gap = RASTER_CHIP_GAP
   const raw = String(trailerNumber ?? '')
     .trim()
     .replace(/^#/, '')
@@ -128,7 +151,7 @@ function trailerTopDivIcon(rasterHref, vw, imgH, trailerNumber = '') {
     labelRaw.length === 0 ? 0 : labelRaw.length <= 5 ? 7.5 : labelRaw.length <= 7 ? 6.5 : 6
   const chipHtml =
     labelRaw !== ''
-      ? `<div class="map-marker-raster-chip" style="font-size:${fsPx}px">${escapeHtmlText(
+      ? `<div class="map-marker-raster-chip map-marker-raster-chip--trailer" style="font-size:${fsPx}px">${escapeHtmlText(
           labelRaw,
         )}</div>`
       : ''
@@ -150,7 +173,7 @@ function trailerTopDivIcon(rasterHref, vw, imgH, trailerNumber = '') {
  * @param {string} [trailerNumber]
  */
 export function trailer20ftTopIcon(trailerNumber = '') {
-  return trailerTopDivIcon(trailer20ftTopImg, 72, 118, trailerNumber)
+  return trailerTopDivIcon(trailer20ftTopImg, TRAILER_20_IMG_W, TRAILER_20_IMG_H, trailerNumber)
 }
 
 /**
@@ -158,7 +181,7 @@ export function trailer20ftTopIcon(trailerNumber = '') {
  * @param {string} [trailerNumber]
  */
 export function trailer53ftTopIcon(trailerNumber = '') {
-  return trailerTopDivIcon(trailer53ftTopImg, 76, 248, trailerNumber)
+  return trailerTopDivIcon(trailer53ftTopImg, TRAILER_53_IMG_W, TRAILER_53_IMG_H, trailerNumber)
 }
 
 /**

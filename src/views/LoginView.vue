@@ -3,7 +3,7 @@ import { ref, computed, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { getAuthStatus, postAuthLogin, postLoginAccessLog } from '../api.js'
 import LoginAckMap from '../components/LoginAckMap.vue'
-import { linehaulTractorBody } from '../stores/linehaulSnapshotStore.js'
+import { useMapVehicleId } from '../composables/useMapVehicleId.js'
 
 const ACCESS_ACK_KEY = 'fedextool-login-access-ack-v3'
 
@@ -53,11 +53,7 @@ const mapPending = computed(
   () => geoPending.value || (geoLat.value == null && !geoDenied.value),
 )
 
-const mapVehicleId = computed(() => {
-  const n = linehaulTractorBody.value?.tractorNbr
-  if (n == null) return ''
-  return String(n).trim()
-})
+const { vehicleId: mapVehicleId } = useMapVehicleId()
 
 function redirectTarget() {
   const r = route.query.redirect
