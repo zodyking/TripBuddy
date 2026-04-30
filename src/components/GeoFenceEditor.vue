@@ -75,11 +75,12 @@ function onMapClick(e) {
 function init() {
   if (!elRef.value) return
   map = L.map(elRef.value, {
-    zoomControl: true,
+    zoomControl: false,
     attributionControl: true,
     scrollWheelZoom: true,
     preferCanvas: true,
   })
+  L.control.zoom({ position: 'topright' }).addTo(map)
   L.tileLayer(
     'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png',
     {

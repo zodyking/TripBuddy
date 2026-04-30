@@ -109,11 +109,12 @@ function sync() {
 function initMap() {
   if (!rootRef.value) return
   map = L.map(rootRef.value, {
-    zoomControl: true,
+    zoomControl: false,
     scrollWheelZoom: true,
     attributionControl: true,
   })
   map.setView(DEFAULT_CENTER, DEFAULT_ZOOM)
+  L.control.zoom({ position: 'topright' }).addTo(map)
   L.tileLayer(
     'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
     {

@@ -45,7 +45,7 @@ let satelliteLayer = null
  */
 let trafficLayer = null
 const activeBaseLayer = ref(/** @type {'street' | 'satellite'} */ ('street'))
-const trafficOn = ref(tomtomKeyEffective.value.length > 0)
+const trafficOn = ref(false)
 /** @type {L.LayerGroup | null} plain layer — no clustering (matches directory map) */
 let markerLayer = null
 /** @type {L.LayerGroup | null} */
@@ -149,8 +149,8 @@ function applyFitToPins() {
   }
   const bounds = L.latLngBounds(pts)
   map.fitBounds(bounds, {
-    padding: [28, 28],
-    maxZoom: 12,
+    padding: [44, 52],
+    maxZoom: 10,
     animate: !motion,
   })
 }
@@ -256,8 +256,8 @@ function applyGeo(pos, o = {}) {
       map.setView(pts[0], 10, { animate: !motion })
     } else {
       map.fitBounds(L.latLngBounds(pts), {
-        padding: [40, 40],
-        maxZoom: 12,
+        padding: [44, 52],
+        maxZoom: 10,
         animate: !motion,
       })
     }
@@ -414,16 +414,16 @@ function setTrafficLayerFromKey() {
       `https://api.tomtom.com/traffic/map/4/tile/flow/absolute/{z}/{x}/{y}.png?key=${encodeURIComponent(
         k,
       )}&tileSize=256`,
-      { maxZoom: 22, opacity: 0.8, zIndex: 400 },
+      { maxZoom: 22, opacity: 0.28, zIndex: 400 },
     )
   }
-  trafficOn.value = !!k
 }
 
 function initMap() {
   if (!containerRef.value) return
-  map = L.map(containerRef.value, { zoomControl: true, scrollWheelZoom: true })
+  map = L.map(containerRef.value, { zoomControl: false, scrollWheelZoom: true })
   map.setView(DEFAULT_CENTER, DEFAULT_ZOOM)
+  L.control.zoom({ position: 'topright' }).addTo(map)
   streetLayer = L.tileLayer(
     'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
     {

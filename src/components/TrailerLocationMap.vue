@@ -269,10 +269,12 @@ function initMap() {
   didFitWithUser = false
 
   map = L.map(containerRef.value, {
-    zoomControl: true,
+    zoomControl: false,
     scrollWheelZoom: true,
     attributionControl: true,
   })
+
+  L.control.zoom({ position: 'topright' }).addTo(map)
 
   streetLayer = L.tileLayer(
     'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png',

@@ -100,9 +100,10 @@ function initMap() {
   destroyMap()
   if (!elRef.value || !props.open) return
   map = L.map(elRef.value, {
-    zoomControl: true,
+    zoomControl: false,
     attributionControl: true,
   })
+  L.control.zoom({ position: 'topright' }).addTo(map)
   L.tileLayer(
     'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png',
     {

@@ -218,6 +218,8 @@ onMounted(() => {
   --map-controls-offset-y: var(--space-3, 0.75rem);
   --map-controls-gap: var(--space-2, 0.5rem);
   --map-controls-z: 900;
+  /* Vertical space below Leaflet zoom (+/−) so custom buttons do not overlap */
+  --map-zoom-stack-clearance: 5.35rem;
 
   /* ─── Legacy Compatibility (mapped to new tokens) ───────────────────────── */
   --bg: var(--color-bg-base);
@@ -323,13 +325,27 @@ body {
 .map-controls-stack {
   position: absolute;
   z-index: var(--map-controls-z, 900);
+  top: calc(var(--map-controls-offset-y) + var(--map-zoom-stack-clearance, 5.35rem));
   right: var(--map-controls-offset-x);
-  bottom: var(--map-controls-offset-y);
+  bottom: auto;
   display: flex;
   flex-direction: column;
   align-items: flex-end;
   gap: var(--map-controls-gap);
   pointer-events: none;
+}
+
+/* Leaflet built-ins — match custom controls (top-right) app-wide */
+.leaflet-container .leaflet-top.leaflet-right {
+  top: var(--map-controls-offset-y);
+  right: var(--map-controls-offset-x);
+}
+
+.leaflet-container .leaflet-control-zoom {
+  margin-top: 0 !important;
+  margin-right: 0 !important;
+  border: none;
+  box-shadow: var(--shadow-md, 0 4px 12px rgba(0, 0, 0, 0.35));
 }
 
 .map-controls-stack > * {

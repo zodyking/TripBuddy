@@ -374,12 +374,13 @@ function initMap() {
   if (!containerRef.value) return
 
   map = L.map(containerRef.value, {
-    zoomControl: true,
+    zoomControl: false,
     scrollWheelZoom: true,
     attributionControl: true,
   })
 
   map.setView(DEFAULT_CENTER, DEFAULT_ZOOM)
+  L.control.zoom({ position: 'topright' }).addTo(map)
 
   streetLayer = L.tileLayer(
     'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
