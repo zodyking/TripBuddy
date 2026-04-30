@@ -43,7 +43,6 @@ const outcomeMenuPos = ref(/** @type {null | { top: number, left: number, minWid
 const outcomeRowForMenu = ref(/** @type {null | LedgerEntry} */ (null))
 
 const outcomeMenuOpts = [
-  { k: 'none', t: 'None' },
   { k: 'delivered', t: 'Delivered' },
   { k: 'rejected', t: 'Rejected' },
   { k: 'removed', t: 'Removed' },
@@ -876,7 +875,7 @@ function toggleOutcomeMenu(row, id, ev) {
 function pickOutcomeFromMenu(e, o, ev) {
   ev?.stopPropagation()
   if (!/^\d+$/.test(e.dailyTripLegSequence)) return
-  if (o === 'none' || o === 'delivered' || o === 'rejected' || o === 'removed') {
+  if (o === 'delivered' || o === 'rejected' || o === 'removed') {
     void setOutcome(e.dailyTripLegSequence, o)
   }
   nextTick(() => {
@@ -915,15 +914,11 @@ function cycleOutcome(e) {
   if (!/^\d+$/.test(s)) return
   const cur = outcomeSelectValue(e)
   const next =
-    cur === 'none'
-      ? 'delivered'
-      : cur === 'delivered'
-        ? 'rejected'
-        : cur === 'rejected'
-          ? 'removed'
-          : cur === 'removed'
-            ? 'none'
-            : 'none'
+    cur === 'delivered'
+      ? 'rejected'
+      : cur === 'rejected'
+        ? 'removed'
+        : 'delivered'
   void setOutcome(s, next)
 }
 
