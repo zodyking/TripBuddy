@@ -1001,7 +1001,7 @@ onUnmounted(() => {
 .location-card-header {
   width: 100%;
   display: block;
-  padding: var(--space-3, 0.75rem) var(--space-3, 0.75rem) var(--space-2, 0.5rem);
+  padding: var(--space-3, 0.75rem) var(--space-4, 1rem) var(--space-2, 0.5rem);
   background: transparent;
   border: none;
   text-align: left;
@@ -1091,25 +1091,23 @@ onUnmounted(() => {
 }
 
 .location-details {
-  padding: var(--space-2, 0.5rem) var(--space-3, 0.75rem) var(--space-3, 0.75rem);
+  padding: 0.45rem var(--space-4, 1rem) 0.65rem;
   border-top: 1px solid rgba(255, 255, 255, 0.06);
   background: rgba(0, 0, 0, 0.15);
-  max-width: min(22rem, 100%);
-  margin-inline: auto;
   box-sizing: border-box;
 }
 
 .details-list {
   margin: 0;
-  padding: var(--space-2, 0.5rem) 0;
+  padding: 0.25rem 0 0;
 }
 
 .detail-row {
   display: grid;
-  grid-template-columns: minmax(4.75rem, 5.75rem) minmax(0, 1fr);
-  gap: 0.35rem 0.6rem;
-  align-items: start;
-  padding: 0.35rem 0;
+  grid-template-columns: minmax(7rem, 30%) minmax(0, 1fr);
+  gap: 0.5rem 1rem;
+  align-items: baseline;
+  padding: 0.28rem 0;
 }
 
 .detail-row:first-child {
@@ -1121,15 +1119,15 @@ onUnmounted(() => {
 }
 
 .detail-row dt {
-  font-size: 0.72rem;
+  font-size: var(--text-xs, 0.6875rem);
   color: var(--color-text-tertiary, #6e6e7e);
   flex-shrink: 0;
-  font-weight: var(--weight-medium, 500);
-  padding-top: 0.12rem;
+  font-weight: var(--weight-semibold, 600);
+  letter-spacing: 0.02em;
 }
 
 .detail-row dd {
-  font-size: 0.78rem;
+  font-size: var(--text-sm, 0.875rem);
   color: var(--color-text-primary, #f4f4f8);
   margin: 0;
   text-align: left;
@@ -1138,31 +1136,30 @@ onUnmounted(() => {
 }
 
 .detail-row--phone {
-  align-items: flex-start;
+  align-items: start;
 }
 
 .phone-edit-cell {
   display: flex;
   flex-direction: column;
   align-items: stretch;
-  gap: 0.35rem;
+  gap: 0.22rem;
   text-align: left;
 }
 
 .phone-display-row {
   display: flex;
   flex-wrap: wrap;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 0.35rem 0.5rem;
+  align-items: center;
+  gap: 0.35rem 0.65rem;
 }
 
 .phone-display {
-  font-size: 0.78rem;
+  font-size: var(--text-sm, 0.875rem);
   font-weight: var(--weight-semibold, 600);
   font-variant-numeric: tabular-nums;
   color: var(--color-text-primary, #f4f4f8);
-  word-break: break-all;
+  word-break: break-word;
 }
 
 .phone-edit-link {
@@ -1170,7 +1167,7 @@ onUnmounted(() => {
   padding: 0;
   border: none;
   background: none;
-  font-size: 0.68rem;
+  font-size: 0.6875rem;
   font-weight: var(--weight-semibold, 600);
   color: var(--color-accent-purple, #a78bfa);
   text-decoration: underline;
@@ -1185,15 +1182,15 @@ onUnmounted(() => {
 .phone-edit-row {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.35rem;
+  gap: 0.4rem;
   align-items: center;
 }
 
 .phone-input {
-  flex: 1 1 9rem;
+  flex: 1 1 min(12rem, 100%);
   min-width: 0;
-  padding: 0.38rem 0.55rem;
-  font-size: 0.78rem;
+  padding: 0.42rem 0.65rem;
+  font-size: var(--text-sm, 0.875rem);
   color: var(--color-text-primary, #f4f4f8);
   background: rgba(0, 0, 0, 0.25);
   border: 1px solid var(--color-border, rgba(255, 255, 255, 0.12));
@@ -1207,9 +1204,9 @@ onUnmounted(() => {
 
 .phone-save-btn {
   flex-shrink: 0;
-  padding: 0.38rem 0.6rem;
-  font-size: 0.72rem;
-  font-weight: var(--weight-medium, 500);
+  padding: 0.42rem 0.75rem;
+  font-size: var(--text-xs, 0.6875rem);
+  font-weight: var(--weight-semibold, 600);
   color: var(--color-text-primary, #f4f4f8);
   background: var(--color-accent-purple, #7b4db5);
   border: none;
@@ -1225,8 +1222,8 @@ onUnmounted(() => {
 
 .phone-cancel-btn {
   flex-shrink: 0;
-  padding: 0.38rem 0.5rem;
-  font-size: 0.72rem;
+  padding: 0.42rem 0.65rem;
+  font-size: var(--text-xs, 0.6875rem);
   font-weight: var(--weight-medium, 500);
   color: var(--color-text-secondary, #a0a0b0);
   background: transparent;
@@ -1242,9 +1239,9 @@ onUnmounted(() => {
 
 .phone-hint {
   margin: 0;
-  font-size: 0.62rem;
+  font-size: 0.625rem;
   color: var(--color-text-tertiary, #6e6e7e);
-  line-height: 1.35;
+  line-height: 1.3;
 }
 
 .phone-save-err {
@@ -1255,7 +1252,7 @@ onUnmounted(() => {
 
 .phone-call-link {
   align-self: flex-start;
-  font-size: 0.72rem;
+  font-size: var(--text-xs, 0.6875rem);
 }
 
 .detail-link {
@@ -1270,17 +1267,17 @@ onUnmounted(() => {
 .detail-actions {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.35rem;
-  margin-top: 0.5rem;
+  gap: 0.4rem;
+  margin-top: 0.45rem;
 }
 
 .action-btn {
   display: inline-flex;
   align-items: center;
-  gap: 0.3rem;
-  padding: 0.38rem 0.55rem;
-  font-size: 0.72rem;
-  font-weight: var(--weight-medium, 500);
+  gap: 0.35rem;
+  padding: 0.42rem 0.65rem;
+  font-size: var(--text-xs, 0.6875rem);
+  font-weight: var(--weight-semibold, 600);
   color: var(--color-text-primary, #f4f4f8);
   background: rgba(255, 255, 255, 0.06);
   border: 1px solid var(--color-border, rgba(255, 255, 255, 0.08));
