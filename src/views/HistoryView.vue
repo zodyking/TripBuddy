@@ -240,7 +240,7 @@ function tripOdIdsOnly(e) {
  * @param {LedgerEntry} e
  */
 function tripPayWhenWithLeg(e) {
-  const when = formatWhen(e.displayDate)
+  const when = formatWhenWithWeekday(e.displayDate)
   const seq = String(e.dailyTripLegSequence || '').trim()
   if (/^\d+$/.test(seq)) return `${when} · Leg #${seq}`
   return when
@@ -880,6 +880,23 @@ function formatWhen(ts) {
   }
 }
 
+/** Dispatch time with weekday (for week totals / pay rows). */
+function formatWhenWithWeekday(ts) {
+  if (!ts) return '—'
+  try {
+    return new Date(ts).toLocaleString(undefined, {
+      weekday: 'long',
+      year: 'numeric',
+      month: 'numeric',
+      day: 'numeric',
+      hour: 'numeric',
+      minute: '2-digit',
+    })
+  } catch {
+    return '—'
+  }
+}
+
 function str(v) {
   if (v == null || v === '') return ''
   return String(v)
@@ -1405,8 +1422,8 @@ onUnmounted(() => {
               </summary>
               <div class="history-pay-body">
                 <p class="history-pay-rules">
-                  Paid miles and billable miles for trips in this work week (same rounding rules as estimate pay:
-                  {{ PAY_ROUND_BAND_MIN }}–{{ PAY_ROUND_BAND_MAX }} mi → {{ PAY_ROUND_TO_MI }} mi billable). Missing mileage counts as 0 mi.
+                  Billable miles per trip (same rounding as pay:
+                  {{ PAY_ROUND_BAND_MIN }}–{{ PAY_ROUND_BAND_MAX }} mi → {{ PAY_ROUND_TO_MI }} mi). Missing mileage counts as 0 mi.
                 </p>
                 <ul class="history-pay-list" aria-label="Week mileage by trip">
                   <li
@@ -1418,14 +1435,12 @@ onUnmounted(() => {
                       <span class="history-pay-row__od">{{ row.od }}</span>
                       <span class="history-pay-row__when">{{ row.when }}</span>
                     </span>
-                    <span class="history-pay-row__nums">
-                      <span class="history-pay-row__bill"
-                        >{{ row.paidMi != null ? formatMilesSum(row.paidMi) : '—' }} mi paid · {{ formatMilesSum(row.billableMi) }} mi billable</span
-                      >
-                      <span v-if="row.rounded" class="history-pay-row__note"
+                    <span class="history-pay-row__nums history-pay-row__nums--week-mi">
+                      <span class="history-od-lab">Miles:</span>
+                      <span class="history-od-id">{{ formatMilesSum(row.billableMi) }}</span>
+                      <span v-if="row.rounded" class="history-pay-row__note history-pay-row__note--below-mi"
                         >{{ PAY_ROUND_BAND_MIN }}–{{ PAY_ROUND_BAND_MAX }} mi → {{ PAY_ROUND_TO_MI }} mi</span
                       >
-                      <span v-else-if="row.paidMi == null" class="history-pay-row__note">no paid mi</span>
                     </span>
                   </li>
                 </ul>
@@ -2034,6 +2049,20 @@ onUnmounted(() => {
   flex-direction: column;
   gap: 0.12rem;
   align-items: flex-end;
+}
+
+.history-pay-row__nums--week-mi {
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: flex-end;
+  gap: 0.18rem 0.35rem;
+  max-width: 11rem;
+}
+
+.history-pay-row__note--below-mi {
+  flex-basis: 100%;
+  text-align: right;
 }
 
 .history-pay-row__bill {
