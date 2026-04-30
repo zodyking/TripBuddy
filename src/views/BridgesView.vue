@@ -226,6 +226,24 @@ function finiteTravelMinutes(row) {
 }
 
 /**
+ * Delay severity for card accent + trend chrome (empty string if closed).
+ * @param {unknown} row
+ */
+function delayTierForRow(row) {
+  if (isClosedRow(row)) return ''
+  const fm = finiteTravelMinutes(row)
+  return fm != null ? bridgeDelayTier(fm) : 'orange'
+}
+
+/**
+ * @param {unknown} row
+ */
+function delayTierClass(row) {
+  const t = delayTierForRow(row)
+  return t ? `bridge-trend--delay-${t}` : ''
+}
+
+/**
  * Accent for chart line/dot from current delay tier.
  * @param {unknown} row
  */
@@ -286,6 +304,8 @@ function bridgeChartModel(row) {
 
   const raw = seriesForRow(row)
   const pts = downsampleSeries(raw, MAX_CHART_POINTS)
+    .slice()
+    .sort((a, b) => a.t - b.t)
   if (pts.length < 2) {
     return { hasPath: false, strokeColor, vb }
   }
@@ -301,9 +321,9 @@ function bridgeChartModel(row) {
 
   let minM = Math.min(...vals)
   let maxM = Math.max(...vals)
-  const pad = Math.max((maxM - minM) * 0.1, 1)
-  minM -= pad
-  maxM += pad
+  const pad = Math.max((maxM - minM) * 0.12, 1)
+  minM = Math.max(0, minM - pad)
+  maxM = maxM + pad
   const spanM = Math.max(maxM - minM, 0.5)
 
   const xOf = /** @param {number} t */ (t) => vb.plotL + pw * ((t - tMin) / spanT)
@@ -643,117 +663,136 @@ onUnmounted(() => {
                 'is-closed': isClosedRow(row),
                 'is-pick': isBestPick(idx, row),
                 'is-hi': isHighlighted(row),
+                'bridge-tile--d-green': delayTierForRow(row) === 'green',
+                'bridge-tile--d-orange': delayTierForRow(row) === 'orange',
+                'bridge-tile--d-red': delayTierForRow(row) === 'red',
               }"
               @click="onListTileClick(row)"
             >
               <div class="bridge-tile-inner">
-                <div class="bridge-tile-top">
-                  <div class="bridge-rank" aria-hidden="true">{{ idx + 1 }}</div>
-                  <div class="bridge-name-block">
+                <div class="bridge-card-head">
+                  <div class="bridge-card-id">
+                    <span class="bridge-rank" aria-hidden="true">{{ idx + 1 }}</span>
                     <h2 class="bridge-title">{{ displayTitle(row) }}</h2>
                   </div>
                   <div
                     class="bridge-trend ico"
-                    :class="trendInfo(row).cls"
+                    :class="[trendInfo(row).cls, delayTierClass(row)]"
                     :title="trendInfo(row).full"
                   >{{ trendInfo(row).short }}</div>
                 </div>
-                <div class="bridge-mid">
-                  <div class="bridge-min-block">
-                    <span class="bridge-min-num">
-                      <template
-                        v-if="row && typeof row === 'object' && (/** @type {any} */(row)).isCrossingClosed"
-                      >—</template>
-                      <template
-                        v-else-if="row && typeof row === 'object' && (/** @type {any} */(row)).routeTravelTime != null"
-                      >{{ String((/** @type {any} */(row)).routeTravelTime) }}</template>
-                      <template v-else>—</template>
-                    </span>
-                    <span class="bridge-min-suf">min</span>
+                <div class="bridge-card-metrics">
+                  <div class="bridge-kpi bridge-kpi--cross">
+                    <span class="bridge-kpi-lab">Crossing time</span>
+                    <div class="bridge-kpi-row">
+                      <span class="bridge-kpi-num">
+                        <template
+                          v-if="row && typeof row === 'object' && (/** @type {any} */(row)).isCrossingClosed"
+                        >—</template>
+                        <template
+                          v-else-if="row && typeof row === 'object' && (/** @type {any} */(row)).routeTravelTime != null"
+                        >{{ String((/** @type {any} */(row)).routeTravelTime) }}</template>
+                        <template v-else>—</template>
+                      </span>
+                      <span class="bridge-kpi-unit">min</span>
+                    </div>
                   </div>
-                  <div
-                    v-if="row && typeof row === 'object' && (/** @type {any} */(row)).routeSpeed != null"
-                    class="bridge-mph"
-                  >{{ (/** @type {any} */(row)).routeSpeed }} mph</div>
-                </div>
-                <div v-if="bridgeChartModel(row).hasPath" class="bridge-chart-wrap">
-                  <div class="bridge-chart-axis-labels">
-                    <span class="bridge-chart-y-lab">Minutes</span>
-                    <span class="bridge-chart-x-lab">Time</span>
-                  </div>
-                  <svg
-                    class="bridge-chart-svg"
-                    :viewBox="`0 0 ${bridgeChartModel(row).vb.w} ${bridgeChartModel(row).vb.h}`"
-                    preserveAspectRatio="xMidYMid meet"
-                    width="100%"
-                    height="72"
-                    role="img"
-                    :aria-label="`Crossing time vs time for ${displayTitle(row)}`"
-                  >
-                    <defs>
-                      <linearGradient
-                        :id="`bcg-${rowRouteId(row)}`"
-                        x1="0"
-                        y1="0"
-                        x2="0"
-                        y2="1"
+                  <div class="bridge-kpi-divider" aria-hidden="true" />
+                  <div class="bridge-kpi bridge-kpi--speed">
+                    <span class="bridge-kpi-lab">Observed speed</span>
+                    <div class="bridge-kpi-row bridge-kpi-row--speed">
+                      <template
+                        v-if="row && typeof row === 'object' && (/** @type {any} */(row)).routeSpeed != null"
                       >
-                        <stop offset="0%" :stop-color="bridgeChartModel(row).strokeColor" stop-opacity="0.28" />
-                        <stop offset="100%" :stop-color="bridgeChartModel(row).strokeColor" stop-opacity="0.04" />
-                      </linearGradient>
-                    </defs>
-                    <template v-if="bridgeChartModel(row).hasPath">
-                      <text
-                        class="bridge-chart-axis-title"
-                        x="5"
-                        :y="bridgeChartModel(row).yTicks[0].y + 3.5"
-                        text-anchor="start"
-                      >{{ bridgeChartModel(row).yTicks[0].lab }}</text>
-                      <text
-                        class="bridge-chart-axis-title"
-                        x="5"
-                        :y="bridgeChartModel(row).yTicks[2].y + 3.5"
-                        text-anchor="start"
-                      >{{ bridgeChartModel(row).yTicks[2].lab }}</text>
-                      <line
-                        v-for="(g, gi) in bridgeChartModel(row).hGrids"
-                        :key="`hg-${gi}`"
-                        :x1="g.x1"
-                        :y1="g.y1"
-                        :x2="g.x2"
-                        :y2="g.y2"
-                        class="bridge-chart-grid"
-                      />
-                      <path
-                        :d="bridgeChartModel(row).dArea"
-                        :fill="`url(#bcg-${rowRouteId(row)})`"
-                      />
-                      <path
-                        :d="bridgeChartModel(row).dLine"
-                        fill="none"
-                        :stroke="bridgeChartModel(row).strokeColor"
-                        stroke-width="1.35"
-                        stroke-linecap="round"
-                        stroke-linejoin="round"
-                      />
-                      <circle
-                        :cx="bridgeChartModel(row).lastCx"
-                        :cy="bridgeChartModel(row).lastCy"
-                        r="2.25"
-                        :fill="bridgeChartModel(row).strokeColor"
-                        stroke="#0f0f14"
-                        stroke-width="0.85"
-                      />
-                      <text
-                        v-for="(tk, ti) in bridgeChartModel(row).xTicks"
-                        :key="`xt-${ti}`"
-                        class="bridge-chart-tick-x"
-                        :x="tk.x"
-                        y="47"
-                        text-anchor="middle"
-                      >{{ tk.lab }}</text>
-                    </template>
-                  </svg>
+                        <span class="bridge-kpi-num">{{ (/** @type {any} */(row)).routeSpeed }}</span>
+                        <span class="bridge-kpi-unit">mph</span>
+                      </template>
+                      <template v-else>
+                        <span class="bridge-kpi-num bridge-kpi-num--muted">—</span>
+                      </template>
+                    </div>
+                  </div>
+                </div>
+                <div v-if="bridgeChartModel(row).hasPath" class="bridge-chart-shell">
+                  <div class="bridge-chart-head">
+                    <span class="bridge-chart-title">History</span>
+                    <span class="bridge-chart-sub">Minutes · local time</span>
+                  </div>
+                  <div class="bridge-chart-panel">
+                    <svg
+                      class="bridge-chart-svg"
+                      :viewBox="`0 0 ${bridgeChartModel(row).vb.w} ${bridgeChartModel(row).vb.h}`"
+                      preserveAspectRatio="xMidYMid meet"
+                      width="100%"
+                      height="88"
+                      role="img"
+                      :aria-label="`Crossing time vs time for ${displayTitle(row)}`"
+                    >
+                      <defs>
+                        <linearGradient
+                          :id="`bcg-${rowRouteId(row)}`"
+                          x1="0"
+                          y1="0"
+                          x2="0"
+                          y2="1"
+                        >
+                          <stop offset="0%" :stop-color="bridgeChartModel(row).strokeColor" stop-opacity="0.28" />
+                          <stop offset="100%" :stop-color="bridgeChartModel(row).strokeColor" stop-opacity="0.04" />
+                        </linearGradient>
+                      </defs>
+                      <template v-if="bridgeChartModel(row).hasPath">
+                        <text
+                          class="bridge-chart-axis-title"
+                          x="5"
+                          :y="bridgeChartModel(row).yTicks[0].y + 3.5"
+                          text-anchor="start"
+                        >{{ bridgeChartModel(row).yTicks[0].lab }}</text>
+                        <text
+                          class="bridge-chart-axis-title"
+                          x="5"
+                          :y="bridgeChartModel(row).yTicks[2].y + 3.5"
+                          text-anchor="start"
+                        >{{ bridgeChartModel(row).yTicks[2].lab }}</text>
+                        <line
+                          v-for="(g, gi) in bridgeChartModel(row).hGrids"
+                          :key="`hg-${gi}`"
+                          :x1="g.x1"
+                          :y1="g.y1"
+                          :x2="g.x2"
+                          :y2="g.y2"
+                          class="bridge-chart-grid"
+                        />
+                        <path
+                          :d="bridgeChartModel(row).dArea"
+                          :fill="`url(#bcg-${rowRouteId(row)})`"
+                        />
+                        <path
+                          :d="bridgeChartModel(row).dLine"
+                          fill="none"
+                          :stroke="bridgeChartModel(row).strokeColor"
+                          stroke-width="1.35"
+                          stroke-linecap="round"
+                          stroke-linejoin="round"
+                        />
+                        <circle
+                          :cx="bridgeChartModel(row).lastCx"
+                          :cy="bridgeChartModel(row).lastCy"
+                          r="2.25"
+                          :fill="bridgeChartModel(row).strokeColor"
+                          stroke="#0f0f14"
+                          stroke-width="0.85"
+                        />
+                        <text
+                          v-for="(tk, ti) in bridgeChartModel(row).xTicks"
+                          :key="`xt-${ti}`"
+                          class="bridge-chart-tick-x"
+                          :x="tk.x"
+                          y="47"
+                          text-anchor="middle"
+                        >{{ tk.lab }}</text>
+                      </template>
+                    </svg>
+                  </div>
                 </div>
               </div>
             </li>
@@ -1001,111 +1040,157 @@ onUnmounted(() => {
   width: 100%;
   border-radius: 14px;
   position: relative;
-  background: linear-gradient(150deg, #1a1a24 0%, #0c0c12 100%);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.35);
+  background:
+    linear-gradient(155deg, rgba(26, 26, 34, 0.98) 0%, rgba(12, 12, 18, 0.99) 48%, rgba(10, 10, 14, 1) 100%);
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.05) inset,
+    0 4px 18px rgba(0, 0, 0, 0.38);
   cursor: pointer;
   -webkit-tap-highlight-color: transparent;
-  transition: border-color 0.12s, box-shadow 0.12s, transform 0.1s;
+  transition: border-color 0.14s ease, box-shadow 0.14s ease, transform 0.08s ease;
+  overflow: hidden;
 }
+
+.bridge-tile::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 3px;
+  border-radius: 14px 0 0 14px;
+  background: transparent;
+  opacity: 0.95;
+  pointer-events: none;
+}
+
+.bridge-tile--d-green::before {
+  background: linear-gradient(180deg, #4ade80, #22c55e);
+  box-shadow: 0 0 14px rgba(74, 222, 128, 0.35);
+}
+
+.bridge-tile--d-orange::before {
+  background: linear-gradient(180deg, #fb923c, #ea580c);
+  box-shadow: 0 0 14px rgba(251, 146, 60, 0.28);
+}
+
+.bridge-tile--d-red::before {
+  background: linear-gradient(180deg, #f87171, #dc2626);
+  box-shadow: 0 0 14px rgba(248, 113, 113, 0.28);
+}
+
 .bridge-tile:active {
-  transform: scale(0.998);
+  transform: scale(0.997);
 }
 
 .bridge-tile.is-hi {
   border-color: rgba(199, 168, 255, 0.55);
-  box-shadow: 0 0 0 1px rgba(199, 168, 255, 0.25);
+  box-shadow:
+    0 0 0 1px rgba(199, 168, 255, 0.22),
+    0 6px 22px rgba(0, 0, 0, 0.42);
 }
 
 .bridge-tile.is-pick {
   border-color: var(--b-pick);
-  box-shadow: 0 0 0 1px var(--b-pick), 0 8px 24px rgba(0, 0, 0, 0.45);
+  box-shadow:
+    0 0 0 1px var(--b-pick),
+    0 8px 26px rgba(0, 0, 0, 0.48);
 }
 
 .bridge-tile.is-closed {
-  opacity: 0.7;
-  border-color: rgba(248, 113, 113, 0.3);
+  opacity: 0.72;
+  border-color: rgba(248, 113, 113, 0.28);
 }
 
 .bridge-tile-inner {
-  padding: 0.45rem 0.55rem 0.45rem;
+  padding: 0.48rem 0.55rem 0.48rem 0.62rem;
   min-height: 0;
   display: flex;
   flex-direction: column;
-  gap: 0.08rem;
+  gap: 0.38rem;
 }
 
-.bridge-tile-top {
-  display: grid;
-  grid-template-columns: 1.2rem 1fr auto;
-  grid-template-areas: 'rank name trend' 'bdg bdg bdg';
-  align-items: center;
-  column-gap: 0.35rem;
-  row-gap: 0;
-  min-height: 0;
-  position: relative;
+.bridge-card-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.45rem;
 }
 
-@media (min-width: 480px) {
-  .bridge-tile-top {
-    grid-template-columns: 1.25rem 1fr auto;
-  }
+.bridge-card-id {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.42rem;
+  min-width: 0;
+  flex: 1;
 }
 
 .bridge-rank {
-  grid-area: rank;
-  font-size: 0.55rem;
-  font-weight: 800;
+  flex-shrink: 0;
+  font-size: 0.52rem;
+  font-weight: 900;
   line-height: 1;
-  color: #6b6b78;
-  padding-top: 0;
-  text-align: center;
-  width: 1.2rem;
-  height: 1.2rem;
+  color: #8b8b9a;
+  width: 1.15rem;
+  height: 1.15rem;
   display: flex;
   align-items: center;
   justify-content: center;
-  background: rgba(0, 0, 0, 0.28);
-  border-radius: 5px;
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  background: rgba(0, 0, 0, 0.45);
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  margin-top: 0.12rem;
 }
 
 .bridge-tile.is-pick .bridge-rank {
-  color: #6ee7b7;
+  color: #a7f3d0;
   border-color: rgba(52, 211, 153, 0.35);
-}
-
-.bridge-name-block {
-  grid-area: name;
-  min-width: 0;
 }
 
 .bridge-title {
   margin: 0;
   font-size: var(--text-sm, 0.8125rem);
   font-weight: 650;
-  line-height: 1.25;
-  color: var(--color-text-primary, #f0f0f8);
-  letter-spacing: 0;
+  line-height: 1.28;
+  color: var(--color-text-primary, #f4f4f8);
+  letter-spacing: -0.01em;
   word-break: break-word;
-  hyphens: auto;
 }
 
 .bridge-trend {
-  grid-area: trend;
-  width: 1.45rem;
-  height: 1.45rem;
+  flex-shrink: 0;
+  width: 1.42rem;
+  height: 1.42rem;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 0.78rem;
+  font-size: 0.76rem;
   line-height: 1;
-  font-weight: 800;
-  border-radius: 8px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  color: #8a8a98;
-  background: rgba(0, 0, 0, 0.22);
-  flex-shrink: 0;
+  font-weight: 900;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: #a1a1b0;
+  background: rgba(0, 0, 0, 0.35);
+}
+
+/* Delay-tier chrome on trend badge (overrides trend palette below) */
+.bridge-trend.bridge-trend--delay-green {
+  color: #ecfdf5;
+  background: rgba(22, 101, 52, 0.55);
+  border-color: rgba(74, 222, 128, 0.45);
+}
+
+.bridge-trend.bridge-trend--delay-orange {
+  color: #fff7ed;
+  background: rgba(154, 52, 18, 0.52);
+  border-color: rgba(251, 146, 60, 0.48);
+}
+
+.bridge-trend.bridge-trend--delay-red {
+  color: #fef2f2;
+  background: rgba(127, 29, 29, 0.55);
+  border-color: rgba(248, 113, 113, 0.48);
 }
 
 .t--worse {
@@ -1113,89 +1198,144 @@ onUnmounted(() => {
   background: rgba(127, 29, 29, 0.45);
   border-color: rgba(248, 113, 113, 0.4);
 }
+
 .t--better {
   color: #a7f3d0;
   background: rgba(6, 78, 59, 0.4);
   border-color: rgba(52, 211, 153, 0.45);
 }
+
 .t--neutral {
   color: #fde68a;
   background: rgba(100, 80, 0, 0.35);
   border-color: rgba(250, 204, 21, 0.3);
 }
+
 .t--unk {
   color: #6a6a78;
 }
 
-.bridge-mid {
+.bridge-card-metrics {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: stretch;
+  gap: 0;
+  padding: 0.38rem 0.42rem;
+  border-radius: 11px;
+  background: rgba(0, 0, 0, 0.32);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.bridge-kpi {
+  display: flex;
+  flex-direction: column;
+  gap: 0.18rem;
+  min-width: 0;
+}
+
+.bridge-kpi--cross {
+  padding-right: 0.35rem;
+}
+
+.bridge-kpi--speed {
+  padding-left: 0.35rem;
+  align-items: flex-end;
+  text-align: right;
+}
+
+.bridge-kpi-divider {
+  width: 1px;
+  align-self: stretch;
+  margin: 0.12rem 0;
+  background: linear-gradient(
+    180deg,
+    transparent,
+    rgba(255, 255, 255, 0.08) 15%,
+    rgba(255, 255, 255, 0.08) 85%,
+    transparent
+  );
+}
+
+.bridge-kpi-lab {
+  font-size: 0.5rem;
+  font-weight: 800;
+  letter-spacing: 0.11em;
+  text-transform: uppercase;
+  color: #6b6b78;
+  line-height: 1.15;
+}
+
+.bridge-kpi-row {
+  display: flex;
+  align-items: baseline;
+  gap: 0.14rem;
+  flex-wrap: nowrap;
+}
+
+.bridge-kpi-row--speed {
+  justify-content: flex-end;
+}
+
+.bridge-kpi-num {
+  font-size: clamp(1.35rem, 5vw, 1.72rem);
+  font-weight: 800;
+  line-height: 1;
+  letter-spacing: -0.03em;
+  color: #f2efff;
+  font-variant-numeric: tabular-nums;
+}
+
+.bridge-kpi-num--muted {
+  font-size: 1.15rem;
+  font-weight: 700;
+  color: #5c5c6c;
+}
+
+.bridge-tile.is-pick .bridge-kpi-num:not(.bridge-kpi-num--muted) {
+  color: #d1fae5;
+}
+
+.bridge-kpi-unit {
+  font-size: 0.62rem;
+  font-weight: 750;
+  color: #8b8b9c;
+  letter-spacing: 0.02em;
+}
+
+.bridge-chart-shell {
+  display: flex;
+  flex-direction: column;
+  gap: 0.22rem;
+}
+
+.bridge-chart-head {
   display: flex;
   align-items: baseline;
   justify-content: space-between;
   gap: 0.35rem;
-  margin-top: 0.05rem;
-  min-height: 0;
+  padding: 0 0.06rem;
 }
 
-.bridge-min-block {
-  display: flex;
-  align-items: baseline;
-  gap: 0.12rem;
-  flex: 0 0 auto;
-}
-
-.bridge-min-num {
-  font-size: clamp(1.25rem, 4.2vw, 1.55rem);
-  font-weight: 800;
-  line-height: 1;
-  letter-spacing: -0.02em;
-  color: var(--color-text-primary, #ebe8f4);
-  font-variant-numeric: tabular-nums;
-}
-
-.bridge-tile.is-pick .bridge-min-num {
-  color: #b8f5d8;
-}
-
-.bridge-min-suf {
-  font-size: 0.65rem;
-  font-weight: 700;
-  text-transform: lowercase;
-  color: var(--color-text-tertiary, #7a7a8c);
-  letter-spacing: 0.02em;
-}
-
-.bridge-mph {
-  font-size: var(--text-xs, 0.6875rem);
-  font-weight: 600;
-  color: var(--color-text-tertiary, #6e6e80);
-  font-variant-numeric: tabular-nums;
-  text-align: right;
-  line-height: 1.2;
-  max-width: 5rem;
-  flex-shrink: 0;
-}
-
-.bridge-chart-wrap {
-  margin-top: 0.15rem;
-  padding-top: 0.2rem;
-  border-top: 1px solid rgba(255, 255, 255, 0.06);
-}
-
-.bridge-chart-axis-labels {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 0.15rem;
-  padding: 0 0.05rem;
-}
-
-.bridge-chart-y-lab,
-.bridge-chart-x-lab {
-  font-size: 0.5rem;
-  font-weight: 800;
+.bridge-chart-title {
+  font-size: 0.52rem;
+  font-weight: 900;
+  letter-spacing: 0.12em;
   text-transform: uppercase;
-  letter-spacing: 0.08em;
-  color: #5c5c6c;
+  color: #6e6e7e;
+}
+
+.bridge-chart-sub {
+  font-size: 0.52rem;
+  font-weight: 700;
+  color: #5a5a68;
+  letter-spacing: 0.04em;
+}
+
+.bridge-chart-panel {
+  border-radius: 10px;
+  padding: 0.18rem 0.12rem 0.08rem;
+  background: rgba(0, 0, 0, 0.38);
+  border: 1px solid rgba(255, 255, 255, 0.05);
 }
 
 .bridge-chart-svg {
@@ -1211,15 +1351,15 @@ onUnmounted(() => {
 }
 
 .bridge-chart-axis-title {
-  fill: #7a7a88;
+  fill: #8b8b9a;
   font-size: 5.5px;
   font-weight: 700;
   font-family: var(--font-sans, system-ui, sans-serif);
 }
 
 .bridge-chart-tick-x {
-  fill: #7a7a88;
-  font-size: 5.25px;
+  fill: #8b8b9a;
+  font-size: 5.35px;
   font-weight: 650;
   font-family: var(--font-sans, system-ui, sans-serif);
 }
