@@ -283,14 +283,14 @@ function downsampleSeries(points, maxN) {
  * @param {unknown} row
  */
 function bridgeChartModel(row) {
-  /** Wide viewBox; taller plot band so the history chart uses vertical space in the card */
+  /** Compact chart band — shorter cards; Y ledger shows max / mid / min */
   const vb = {
     w: 268,
-    h: 78,
+    h: 52,
     plotL: 14,
     plotR: 266,
-    plotT: 9,
-    plotB: 54,
+    plotT: 7,
+    plotB: 34,
   }
   const pw = vb.plotR - vb.plotL
   const ph = vb.plotB - vb.plotT
@@ -323,10 +323,16 @@ function bridgeChartModel(row) {
 
   let minM = Math.min(...vals)
   let maxM = Math.max(...vals)
-  const pad = Math.max((maxM - minM) * 0.12, 1)
+  const pad = Math.max((maxM - minM) * 0.12, 0.85)
   minM = Math.max(0, minM - pad)
   maxM = maxM + pad
-  const spanM = Math.max(maxM - minM, 0.5)
+  /** Ensure mid tick isn’t collapsed into max/min when range is tiny */
+  if (maxM - minM < 1.25) {
+    const c = (minM + maxM) / 2
+    minM = Math.max(0, c - 1)
+    maxM = c + 1
+  }
+  const spanM = Math.max(maxM - minM, 0.75)
 
   const xOf = /** @param {number} t */ (t) => vb.plotL + pw * ((t - tMin) / spanT)
   const yOf = /** @param {number} m */ (m) => vb.plotT + ph * (1 - (m - minM) / spanM)
@@ -349,10 +355,16 @@ function bridgeChartModel(row) {
   const last = pathPts[pathPts.length - 1]
 
   const midM = (minM + maxM) / 2
+  const labMax = String(Math.round(maxM))
+  const labMin = String(Math.round(minM))
+  let labMid = String(Math.round(midM))
+  if (labMid === labMax || labMid === labMin) {
+    labMid = `${midM.toFixed(1)}`.replace(/\.0$/, '')
+  }
   const yTicks = [
-    { y: yOf(maxM), lab: String(Math.round(maxM)) },
-    { y: yOf(midM), lab: String(Math.round(midM)) },
-    { y: yOf(minM), lab: String(Math.round(minM)) },
+    { y: yOf(maxM), lab: labMax },
+    { y: yOf(midM), lab: labMid },
+    { y: yOf(minM), lab: labMin },
   ]
 
   const fmtHour = (ts) => {
@@ -743,23 +755,19 @@ onUnmounted(() => {
                           x2="0"
                           y2="1"
                         >
-                          <stop offset="0%" :stop-color="bridgeChartModel(row).strokeColor" stop-opacity="0.28" />
-                          <stop offset="100%" :stop-color="bridgeChartModel(row).strokeColor" stop-opacity="0.04" />
+                          <stop offset="0%" :stop-color="bridgeChartModel(row).strokeColor" stop-opacity="0.14" />
+                          <stop offset="100%" :stop-color="bridgeChartModel(row).strokeColor" stop-opacity="0.02" />
                         </linearGradient>
                       </defs>
                       <template v-if="bridgeChartModel(row).hasPath">
                         <text
+                          v-for="(yt, yi) in bridgeChartModel(row).yTicks"
+                          :key="`yt-${yi}`"
                           class="bridge-chart-axis-title"
                           x="6"
-                          :y="bridgeChartModel(row).yTicks[0].y + 3.5"
+                          :y="yt.y + 3.5"
                           text-anchor="start"
-                        >{{ bridgeChartModel(row).yTicks[0].lab }}</text>
-                        <text
-                          class="bridge-chart-axis-title"
-                          x="6"
-                          :y="bridgeChartModel(row).yTicks[2].y + 3.5"
-                          text-anchor="start"
-                        >{{ bridgeChartModel(row).yTicks[2].lab }}</text>
+                        >{{ yt.lab }}</text>
                         <line
                           v-for="(g, gi) in bridgeChartModel(row).hGrids"
                           :key="`hg-${gi}`"
@@ -777,24 +785,26 @@ onUnmounted(() => {
                           :d="bridgeChartModel(row).dLine"
                           fill="none"
                           :stroke="bridgeChartModel(row).strokeColor"
-                          stroke-width="1.35"
+                          stroke-width="0.95"
                           stroke-linecap="round"
                           stroke-linejoin="round"
+                          opacity="0.82"
                         />
                         <circle
                           :cx="bridgeChartModel(row).lastCx"
                           :cy="bridgeChartModel(row).lastCy"
-                          r="1.85"
+                          r="1.35"
                           :fill="bridgeChartModel(row).strokeColor"
                           stroke="#0f0f14"
-                          stroke-width="0.65"
+                          stroke-width="0.45"
+                          opacity="0.9"
                         />
                         <text
                           v-for="(tk, ti) in bridgeChartModel(row).xTicks"
                           :key="`xt-${ti}`"
                           class="bridge-chart-tick-x"
                           :x="tk.x"
-                          y="69"
+                          :y="bridgeChartModel(row).vb.h - 5"
                           text-anchor="middle"
                         >{{ tk.lab }}</text>
                       </template>
@@ -1003,13 +1013,13 @@ onUnmounted(() => {
   display: block;
   width: 100%;
   max-width: none;
-  border-radius: 16px;
+  border-radius: 14px;
   border: 1px solid rgba(199, 168, 255, 0.12);
   background: linear-gradient(165deg, #101018 0%, #0a0a0e 100%);
-  padding: 0.6rem 0.55rem 0.8rem;
+  padding: 0.45rem 0.48rem 0.55rem;
   box-sizing: border-box;
-  margin-top: 0.25rem;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+  margin-top: 0.2rem;
+  box-shadow: 0 6px 22px rgba(0, 0, 0, 0.34);
 }
 
 .bridges-trips-h2 {
@@ -1034,7 +1044,7 @@ onUnmounted(() => {
   padding: 0;
   display: flex;
   flex-direction: column;
-  gap: 0.4rem;
+  gap: 0.28rem;
   width: 100%;
   max-width: none;
 }
@@ -1111,11 +1121,11 @@ onUnmounted(() => {
 }
 
 .bridge-tile-inner {
-  padding: 0.48rem 0.55rem 0.48rem 0.62rem;
+  padding: 0.38rem 0.48rem 0.38rem 0.54rem;
   min-height: 0;
   display: flex;
   flex-direction: column;
-  gap: 0.38rem;
+  gap: 0.26rem;
 }
 
 .bridge-card-head {
@@ -1157,9 +1167,9 @@ onUnmounted(() => {
 
 .bridge-title {
   margin: 0;
-  font-size: var(--text-sm, 0.8125rem);
-  font-weight: 650;
-  line-height: 1.28;
+  font-size: var(--text-xs, 0.6875rem);
+  font-weight: 600;
+  line-height: 1.25;
   color: var(--color-text-primary, #f4f4f8);
   letter-spacing: -0.01em;
   word-break: break-word;
@@ -1167,15 +1177,15 @@ onUnmounted(() => {
 
 .bridge-trend {
   flex-shrink: 0;
-  width: 1.42rem;
-  height: 1.42rem;
+  width: 1.28rem;
+  height: 1.28rem;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 0.76rem;
+  font-size: 0.68rem;
   line-height: 1;
-  font-weight: 900;
-  border-radius: 10px;
+  font-weight: 750;
+  border-radius: 9px;
   border: 1px solid rgba(255, 255, 255, 0.1);
   color: #a1a1b0;
   background: rgba(0, 0, 0, 0.35);
@@ -1227,8 +1237,8 @@ onUnmounted(() => {
   grid-template-columns: 1fr auto 1fr;
   align-items: stretch;
   gap: 0;
-  padding: 0.38rem 0.42rem;
-  border-radius: 11px;
+  padding: 0.28rem 0.34rem;
+  border-radius: 9px;
   background: rgba(0, 0, 0, 0.32);
   border: 1px solid rgba(255, 255, 255, 0.06);
 }
@@ -1264,9 +1274,9 @@ onUnmounted(() => {
 }
 
 .bridge-kpi-lab {
-  font-size: 0.5rem;
-  font-weight: 800;
-  letter-spacing: 0.11em;
+  font-size: 0.47rem;
+  font-weight: 750;
+  letter-spacing: 0.1em;
   text-transform: uppercase;
   color: #6b6b78;
   line-height: 1.15;
@@ -1284,17 +1294,17 @@ onUnmounted(() => {
 }
 
 .bridge-kpi-num {
-  font-size: clamp(1.35rem, 5vw, 1.72rem);
-  font-weight: 800;
+  font-size: clamp(1.05rem, 4.2vw, 1.38rem);
+  font-weight: 700;
   line-height: 1;
-  letter-spacing: -0.03em;
-  color: #f2efff;
+  letter-spacing: -0.02em;
+  color: #ebe8f7;
   font-variant-numeric: tabular-nums;
 }
 
 .bridge-kpi-num--muted {
-  font-size: 1.15rem;
-  font-weight: 700;
+  font-size: 1rem;
+  font-weight: 650;
   color: #5c5c6c;
 }
 
@@ -1303,8 +1313,8 @@ onUnmounted(() => {
 }
 
 .bridge-kpi-unit {
-  font-size: 0.62rem;
-  font-weight: 750;
+  font-size: 0.56rem;
+  font-weight: 650;
   color: #8b8b9c;
   letter-spacing: 0.02em;
 }
@@ -1312,7 +1322,7 @@ onUnmounted(() => {
 .bridge-chart-shell {
   display: flex;
   flex-direction: column;
-  gap: 0.22rem;
+  gap: 0.14rem;
 }
 
 .bridge-chart-head {
@@ -1320,27 +1330,27 @@ onUnmounted(() => {
   align-items: baseline;
   justify-content: space-between;
   gap: 0.35rem;
-  padding: 0 0.06rem;
+  padding: 0 0.04rem;
 }
 
 .bridge-chart-title {
-  font-size: 0.52rem;
-  font-weight: 900;
-  letter-spacing: 0.12em;
+  font-size: 0.48rem;
+  font-weight: 800;
+  letter-spacing: 0.11em;
   text-transform: uppercase;
   color: #6e6e7e;
 }
 
 .bridge-chart-sub {
-  font-size: 0.52rem;
-  font-weight: 700;
+  font-size: 0.48rem;
+  font-weight: 650;
   color: #5a5a68;
   letter-spacing: 0.04em;
 }
 
 .bridge-chart-panel {
-  border-radius: 10px;
-  padding: 0.14rem 0 0.04rem;
+  border-radius: 8px;
+  padding: 0.06rem 0 0;
   background: rgba(0, 0, 0, 0.38);
   border: 1px solid rgba(255, 255, 255, 0.05);
   width: 100%;
@@ -1356,22 +1366,22 @@ onUnmounted(() => {
 }
 
 .bridge-chart-grid {
-  stroke: rgba(255, 255, 255, 0.06);
+  stroke: rgba(255, 255, 255, 0.045);
   stroke-width: 1;
   vector-effect: non-scaling-stroke;
 }
 
 .bridge-chart-axis-title {
   fill: #8b8b9a;
-  font-size: 4.75px;
-  font-weight: 700;
+  font-size: 4.35px;
+  font-weight: 650;
   font-family: var(--font-sans, system-ui, sans-serif);
 }
 
 .bridge-chart-tick-x {
   fill: #8b8b9a;
-  font-size: 4.6px;
-  font-weight: 650;
+  font-size: 4.25px;
+  font-weight: 600;
   font-family: var(--font-sans, system-ui, sans-serif);
 }
 </style>
