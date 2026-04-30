@@ -108,6 +108,169 @@ function mergeTripDetailsMileage(td, mileageObj) {
 }
 
 /**
+ * Millisecond timestamp for ordering ledger rows (older = smaller).
+ * @param {unknown} entry
+ */
+function entryLedgerTime(entry) {
+  if (!entry || typeof entry !== 'object') return 0
+  const e = /** @type {Record<string, unknown>} */ (entry)
+  const r = e.recordedAt
+  if (typeof r === 'number' && Number.isFinite(r) && r > 0) return r
+  const c = e.completedAt
+  if (typeof c === 'number' && Number.isFinite(c) && c > 0) return c
+  return 0
+}
+
+/**
+ * True when trip already has mileage data we must not replace (API or prior copy).
+ * @param {unknown} td
+ */
+function tripDetailsHasUsableMileage(td) {
+  if (!td || typeof td !== 'object' || Array.isArray(td)) return false
+  const m =
+    /** @type {Record<string, unknown>} */ (td).mileage &&
+    typeof /** @type {Record<string, unknown>} */ (td).mileage === 'object' &&
+    !Array.isArray(/** @type {Record<string, unknown>} */ (td).mileage)
+      ? /** @type {Record<string, unknown>} */ (
+          /** @type {Record<string, unknown>} */ (td).mileage
+        )
+      : null
+  if (!m) return false
+  const tm = m.totalMiles != null ? String(m.totalMiles).trim() : ''
+  if (tm !== '') return true
+  const rt = m.runTimeHours
+  return typeof rt === 'number' && Number.isFinite(rt) && rt > 0
+}
+
+/**
+ * Payload to merge into a row missing mileage (subset of donor mileage only).
+ * @param {unknown} entry donor row
+ * @returns {Record<string, unknown> | null}
+ */
+function mileageSliceFromPriorOdEntry(entry) {
+  if (!entry || typeof entry !== 'object') return null
+  const td = /** @type {Record<string, unknown>} */ (entry).tripDetails
+  if (!td || typeof td !== 'object' || Array.isArray(td)) return null
+  const mil = /** @type {Record<string, unknown>} */ (td).mileage
+  if (!mil || typeof mil !== 'object' || Array.isArray(mil)) return null
+  const m = /** @type {Record<string, unknown>} */ (mil)
+  const totalMiles = m.totalMiles != null ? String(m.totalMiles).trim() : ''
+  const runH = m.runTimeHours
+  const hasRt = typeof runH === 'number' && Number.isFinite(runH) && runH > 0
+  if (totalMiles === '' && !hasRt) return null
+  /** @type {Record<string, unknown>} */
+  const out = {
+    copiedFromPriorOd: true,
+    copiedAt: Date.now(),
+  }
+  if (totalMiles !== '') out.totalMiles = totalMiles
+  if (hasRt) out.runTimeHours = runH
+  const dl = m.directionList
+  if (Array.isArray(dl) && dl.length > 0) out.directionList = dl
+  const origin = m.origin != null ? String(m.origin).trim() : ''
+  const destination = m.destination != null ? String(m.destination).trim() : ''
+  if (origin) out.origin = origin
+  if (destination) out.destination = destination
+  const src = m.source != null ? String(m.source).trim() : ''
+  if (src) out.source = `${src}_prior_od_copy`
+  return out
+}
+
+/**
+ * True when mileage came from a prior-O/D copy (do not use as donor for forward fill).
+ * @param {unknown} td
+ */
+function mileageIsPriorOdCopy(td) {
+  if (!td || typeof td !== 'object' || Array.isArray(td)) return false
+  const m =
+    /** @type {Record<string, unknown>} */ (td).mileage &&
+    typeof /** @type {Record<string, unknown>} */ (td).mileage === 'object' &&
+    !Array.isArray(/** @type {Record<string, unknown>} */ (td).mileage)
+      ? /** @type {Record<string, unknown>} */ (
+          /** @type {Record<string, unknown>} */ (td).mileage
+        )
+      : null
+  return Boolean(m && m.copiedFromPriorOd === true)
+}
+
+/**
+ * For each trip missing mileage, copy totalMiles / runTimeHours from another trip with the same
+ * origin/destination ids: prefer the nearest **older** row with usable mileage; if none, the nearest
+ * **newer** row that has real (non-copied) mileage. Never overwrites rows that already have mileage.
+ * @param {unknown[]} ledger
+ * @returns {{ ledger: unknown[], changed: boolean }}
+ */
+function applyPriorOdMileageBackfill(ledger) {
+  if (!Array.isArray(ledger) || ledger.length === 0) {
+    return { ledger, changed: false }
+  }
+  /** shallow row clones — we replace whole row objects when merging */
+  const result = ledger.map((e) =>
+    e && typeof e === 'object' && !Array.isArray(e)
+      ? /** @type {Record<string, unknown>} */ ({ ...e })
+      : e,
+  )
+  const order = result
+    .map((e, i) => ({ i, t: entryLedgerTime(e) }))
+    .sort((a, b) => a.t - b.t || a.i - b.i)
+
+  let changed = false
+
+  function fillFromNeighbor(si, dir) {
+    const i = order[si].i
+    const e = result[i]
+    if (!e || typeof e !== 'object') return
+    const td0 =
+      e.tripDetails && typeof e.tripDetails === 'object' && !Array.isArray(e.tripDetails)
+        ? /** @type {Record<string, unknown>} */ ({ ...e.tripDetails })
+        : {}
+    if (tripDetailsHasUsableMileage(td0)) return
+
+    const dh = e.dispatchHeader
+    if (!dh || typeof dh !== 'object') return
+    const o = leadingDigitsFromOdLabel(dh.origin)
+    const d = leadingDigitsFromOdLabel(dh.destination)
+    if (!o || !d || !odPairKey(o, d)) return
+
+    let donorSlice = null
+    if (dir === 'older') {
+      for (let sj = si - 1; sj >= 0; sj--) {
+        const j = order[sj].i
+        const older = result[j]
+        if (!older || typeof older !== 'object') continue
+        if (!ledgerEntryMatchesOd(older, o, d)) continue
+        if (!tripDetailsHasUsableMileage(older.tripDetails)) continue
+        donorSlice = mileageSliceFromPriorOdEntry(older)
+        break
+      }
+    } else {
+      for (let sj = si + 1; sj < order.length; sj++) {
+        const j = order[sj].i
+        const newer = result[j]
+        if (!newer || typeof newer !== 'object') continue
+        if (!ledgerEntryMatchesOd(newer, o, d)) continue
+        if (!tripDetailsHasUsableMileage(newer.tripDetails)) continue
+        if (mileageIsPriorOdCopy(newer.tripDetails)) continue
+        donorSlice = mileageSliceFromPriorOdEntry(newer)
+        break
+      }
+    }
+    if (!donorSlice) return
+
+    result[i] = {
+      ...e,
+      tripDetails: mergeTripDetailsMileage(td0, donorSlice),
+    }
+    changed = true
+  }
+
+  for (let si = 0; si < order.length; si++) fillFromNeighbor(si, 'older')
+  for (let si = 0; si < order.length; si++) fillFromNeighbor(si, 'newer')
+
+  return { ledger: result, changed }
+}
+
+/**
  * @param {unknown} label
  */
 function leadingDigitsFromOdLabel(label) {
@@ -339,6 +502,11 @@ export async function readAssignment() {
     n.tripHistoryLedger = applyOdCacheToLedger(n.tripHistoryLedger, legacyOdCache)
     await writeKeyJson(key, n)
   }
+  const odBack = applyPriorOdMileageBackfill(n.tripHistoryLedger)
+  if (odBack.changed) {
+    n.tripHistoryLedger = odBack.ledger
+    await writeKeyJson(key, n)
+  }
   return n
 }
 
@@ -560,6 +728,9 @@ export async function writeAssignment(body) {
         .slice(0, MAX_TRIP_HISTORY)
     }
   }
+
+  const odFill = applyPriorOdMileageBackfill(tripHistoryLedger)
+  tripHistoryLedger = odFill.ledger
 
   const instructionsTouched = 'instructions' in body
   const nextInstructions =
