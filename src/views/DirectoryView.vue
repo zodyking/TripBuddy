@@ -29,16 +29,38 @@ const phoneEditingId = ref('')
 const phoneCopiedForId = ref('')
 let phoneCopiedTimer = 0
 
+/**
+ * Sort directory entries by numeric location id when possible (312 before 3117).
+ * @param {{ locationId: string }} a
+ * @param {{ locationId: string }} b
+ */
+function compareLocationIdNumeric(a, b) {
+  const sa = String(a.locationId ?? '').trim()
+  const sb = String(b.locationId ?? '').trim()
+  const na = parseInt(sa, 10)
+  const nb = parseInt(sb, 10)
+  const aNum = /^\d+$/.test(sa) && Number.isFinite(na)
+  const bNum = /^\d+$/.test(sb) && Number.isFinite(nb)
+  if (aNum && bNum && na !== nb) return na - nb
+  if (aNum && !bNum) return -1
+  if (!aNum && bNum) return 1
+  return sa.localeCompare(sb, undefined, { numeric: true, sensitivity: 'base' })
+}
+
 const filteredLocations = computed(() => {
   const q = searchQuery.value.trim().toLowerCase()
-  if (!q) return locations.value
-  return locations.value.filter(
-    (loc) =>
-      loc.locationName.toLowerCase().includes(q) ||
-      loc.abbreviation.toLowerCase().includes(q) ||
-      loc.locationId.includes(q) ||
-      loc.address.toLowerCase().includes(q),
-  )
+  const base =
+    !q
+      ? [...locations.value]
+      : locations.value.filter(
+          (loc) =>
+            loc.locationName.toLowerCase().includes(q) ||
+            loc.abbreviation.toLowerCase().includes(q) ||
+            loc.locationId.includes(q) ||
+            loc.address.toLowerCase().includes(q),
+        )
+  base.sort(compareLocationIdNumeric)
+  return base
 })
 
 /** Locations with valid coordinates for the map (follows search filter). */
@@ -94,12 +116,52 @@ function onMapSelect(locationId) {
   })
 }
 
+/** Base64 body for `public/fedex-logo.svg` (embedded in exported vCard PHOTO). */
+const vcardFedexLogoB64 = ref('')
+
+async function ensureVcardFedexLogo() {
+  if (vcardFedexLogoB64.value || typeof fetch === 'undefined') return
+  try {
+    const r = await fetch(`${import.meta.env.BASE_URL}fedex-logo.svg`, { cache: 'force-cache' })
+    if (!r.ok) return
+    const buf = await r.arrayBuffer()
+    let bin = ''
+    const bytes = new Uint8Array(buf)
+    const chunk = 0x8000
+    for (let i = 0; i < bytes.length; i += chunk) {
+      bin += String.fromCharCode.apply(null, bytes.subarray(i, i + chunk))
+    }
+    vcardFedexLogoB64.value = btoa(bin)
+  } catch {
+    /* optional */
+  }
+}
+
+/**
+ * Fold one long vCard line to 75-octet chunks (continuation lines start with space).
+ * @param {string} line
+ */
+function foldVcardContentLine(line) {
+  const max = 75
+  if (line.length <= max) return [line]
+  /** @type {string[]} */
+  const out = []
+  out.push(line.slice(0, max))
+  let rest = line.slice(max)
+  while (rest.length > 0) {
+    out.push(` ${rest.slice(0, max - 1)}`)
+    rest = rest.slice(max - 1)
+  }
+  return out
+}
+
 async function loadDirectory() {
   loading.value = true
   error.value = ''
   try {
     const res = await fetchDirectory()
-    locations.value = res.locations ?? []
+    const raw = res.locations ?? []
+    locations.value = [...raw].sort(compareLocationIdNumeric)
   } catch (e) {
     error.value = e instanceof Error ? e.message : String(e)
   } finally {
@@ -288,13 +350,12 @@ function cardLocationTitle(loc) {
  */
 function buildDirectoryVcardString() {
   const lines = ['BEGIN:VCARD', 'VERSION:3.0', 'N:FedEx;;;', 'FN:FedEx']
+  const b64 = vcardFedexLogoB64.value
+  if (b64) {
+    lines.push(...foldVcardContentLine(`PHOTO;ENCODING=b;TYPE=SVG:${b64}`))
+  }
   let item = 1
-  const sorted = [...locations.value].sort((a, b) =>
-    String(a.locationId).localeCompare(String(b.locationId), undefined, {
-      numeric: true,
-      sensitivity: 'base',
-    }),
-  )
+  const sorted = [...locations.value].sort(compareLocationIdNumeric)
   for (const loc of sorted) {
     const raw =
       phoneDraft.value[loc.locationId] !== undefined
@@ -324,16 +385,19 @@ const hasVcardPhones = computed(() => {
 
 function downloadDirectoryVcard() {
   if (typeof window === 'undefined') return
-  const body = buildDirectoryVcardString()
-  if (!body.includes('item1.TEL')) return
-  const blob = new Blob([body], { type: 'text/vcard;charset=utf-8' })
-  const url = URL.createObjectURL(blob)
-  const a = document.createElement('a')
-  a.href = url
-  a.download = 'FedEx-directory-contacts.vcf'
-  a.rel = 'noopener'
-  a.click()
-  URL.revokeObjectURL(url)
+  void (async () => {
+    await ensureVcardFedexLogo()
+    const body = buildDirectoryVcardString()
+    if (!body.includes('item1.TEL')) return
+    const blob = new Blob([body], { type: 'text/vcard;charset=utf-8' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = 'FedEx-directory-contacts.vcf'
+    a.rel = 'noopener'
+    a.click()
+    URL.revokeObjectURL(url)
+  })()
 }
 
 /**
@@ -360,6 +424,7 @@ const DIRECTORY_POLL_MS = 60_000
 
 onMounted(() => {
   updateLandscapeSplit()
+  void ensureVcardFedexLogo()
   if (typeof window !== 'undefined' && window.matchMedia) {
     splitMql = window.matchMedia(
       '(orientation: landscape) and (min-width: 700px)',
