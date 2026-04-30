@@ -116,13 +116,15 @@ function onMapSelect(locationId) {
   })
 }
 
-/** Base64 body for `public/fedex-logo.svg` (embedded in exported vCard PHOTO). */
+/** Base64 body for `public/fedex-logo-vcard.png` (RFC2426 PHOTO; many clients reject SVG). */
 const vcardFedexLogoB64 = ref('')
 
 async function ensureVcardFedexLogo() {
   if (vcardFedexLogoB64.value || typeof fetch === 'undefined') return
   try {
-    const r = await fetch(`${import.meta.env.BASE_URL}fedex-logo.svg`, { cache: 'force-cache' })
+    const r = await fetch(`${import.meta.env.BASE_URL}fedex-logo-vcard.png`, {
+      cache: 'force-cache',
+    })
     if (!r.ok) return
     const buf = await r.arrayBuffer()
     let bin = ''
@@ -352,7 +354,7 @@ function buildDirectoryVcardString() {
   const lines = ['BEGIN:VCARD', 'VERSION:3.0', 'N:FedEx;;;', 'FN:FedEx']
   const b64 = vcardFedexLogoB64.value
   if (b64) {
-    lines.push(...foldVcardContentLine(`PHOTO;ENCODING=b;TYPE=SVG:${b64}`))
+    lines.push(...foldVcardContentLine(`PHOTO;ENCODING=b;TYPE=PNG:${b64}`))
   }
   let item = 1
   const sorted = [...locations.value].sort(compareLocationIdNumeric)
