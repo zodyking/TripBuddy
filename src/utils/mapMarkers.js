@@ -8,19 +8,49 @@ function svgDataUrl(svg) {
   return `data:image/svg+xml,${encodeURIComponent(svg.trim())}`
 }
 
+/** Escape text for SVG `<text>` nodes. */
+function escapeSvgText(s) {
+  return String(s)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+}
+
 /**
- * Directory: purple gradient pin + glass office tower (windows + door).
- * viewBox 0 0 48 56 — anchor bottom center.
+ * Short label for marker (keep readable at ~7px font).
+ * @param {string} raw
  */
-function directoryBuildingSvg(selected) {
+function directoryMarkerIdLabel(raw) {
+  const s = String(raw ?? '').trim()
+  if (!s) return ''
+  if (s.length <= 7) return s
+  return `${s.slice(0, 6)}…`
+}
+
+/**
+ * Directory: flat purple office block + ID strip on the facade (no map-pin shield).
+ * viewBox 0 0 44 48 — anchor bottom center.
+ * @param {boolean} selected
+ * @param {string} [locationId]
+ */
+function directoryBuildingSvg(selected, locationId = '') {
   const strokeRing = selected ? '#faf5ff' : '#e9d5ff'
   const ring = selected
-    ? `<circle cx="24" cy="17" r="15.5" fill="none" stroke="${strokeRing}" stroke-width="2.5" opacity="0.95"/>`
+    ? `<rect x="8.5" y="6.5" width="27" height="37" rx="3.5" fill="none" stroke="${strokeRing}" stroke-width="2" opacity="0.95"/>`
     : ''
 
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="48" height="56" viewBox="0 0 48 56">
+  const idRaw = directoryMarkerIdLabel(locationId)
+  const idEsc = escapeSvgText(idRaw)
+  const idBlock =
+    idRaw !== ''
+      ? `<rect x="11" y="34.5" width="22" height="8.5" rx="1.8" fill="#1e1b4b" stroke="#faf5ff" stroke-opacity="0.35" stroke-width="0.65"/>
+  <text x="22" y="39.35" text-anchor="middle" dominant-baseline="central" fill="#faf5ff" font-size="${idRaw.length > 5 ? '6.25' : '7.25'}" font-family="ui-sans-serif,system-ui,sans-serif" font-weight="700">${idEsc}</text>`
+      : ''
+
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="44" height="48" viewBox="0 0 44 48">
   <defs>
-    <linearGradient id="dirPin" x1="24" y1="4" x2="24" y2="46" gradientUnits="userSpaceOnUse">
+    <linearGradient id="dirBlk" x1="22" y1="8" x2="22" y2="42" gradientUnits="userSpaceOnUse">
       <stop offset="0%" stop-color="${selected ? '#c4b5fd' : '#a78bfa'}"/>
       <stop offset="55%" stop-color="${selected ? '#7b4db5' : '#6d28d9'}"/>
       <stop offset="100%" stop-color="#4c1d95"/>
@@ -30,33 +60,35 @@ function directoryBuildingSvg(selected) {
       <stop offset="100%" stop-color="#0f172a" stop-opacity="0.98"/>
     </linearGradient>
   </defs>
-  <ellipse cx="24" cy="52" rx="11" ry="3" fill="#000" opacity="0.2"/>
+  <ellipse cx="22" cy="46" rx="13" ry="2.2" fill="#000" opacity="0.22"/>
   ${ring}
-  <path d="M24 3.5c-1.2 0-2.3.4-3.2 1.1L8 15.2c-1.8 1.5-2.8 3.8-2.8 6.1V29c0 9.5 11 22.2 17.5 26.8.8.6 1.9.6 2.7 0C31.8 51.2 42.8 38.5 42.8 29V21.3c0-2.3-1-4.6-2.8-6.1L27.2 4.6c-.9-.7-2-1.1-3.2-1.1z" fill="url(#dirPin)" stroke="${strokeRing}" stroke-width="1.2"/>
-  <rect x="14" y="15" width="20" height="22" rx="1.5" fill="#faf5ff" fill-opacity="0.12" stroke="#faf5ff" stroke-opacity="0.35" stroke-width="0.85"/>
-  <rect x="16.5" y="17.5" width="4.5" height="3.8" rx="0.55" fill="url(#dirWin)"/>
-  <rect x="21.75" y="17.5" width="4.5" height="3.8" rx="0.55" fill="url(#dirWin)"/>
-  <rect x="27" y="17.5" width="4.5" height="3.8" rx="0.55" fill="url(#dirWin)"/>
-  <rect x="16.5" y="23.5" width="4.5" height="3.8" rx="0.55" fill="url(#dirWin)"/>
-  <rect x="21.75" y="23.5" width="4.5" height="3.8" rx="0.55" fill="url(#dirWin)"/>
-  <rect x="27" y="23.5" width="4.5" height="3.8" rx="0.55" fill="url(#dirWin)"/>
-  <rect x="16.5" y="29.5" width="4.5" height="3.8" rx="0.55" fill="url(#dirWin)"/>
-  <rect x="21.75" y="29.5" width="4.5" height="3.8" rx="0.55" fill="url(#dirWin)"/>
-  <rect x="27" y="29.5" width="4.5" height="3.8" rx="0.55" fill="url(#dirWin)"/>
-  <path d="M20.5 35.5h7v4.5h-7z" fill="#312e81"/>
-  <circle cx="24" cy="37.8" r="0.9" fill="#faf5ff" fill-opacity="0.7"/>
+  <rect x="10" y="8" width="24" height="36" rx="3" fill="url(#dirBlk)" stroke="${strokeRing}" stroke-width="1.15"/>
+  <rect x="13.5" y="11" width="17" height="20.5" rx="1.2" fill="#faf5ff" fill-opacity="0.1" stroke="#faf5ff" stroke-opacity="0.28" stroke-width="0.75"/>
+  <rect x="15.5" y="13.5" width="3.8" height="3.2" rx="0.45" fill="url(#dirWin)"/>
+  <rect x="20.1" y="13.5" width="3.8" height="3.2" rx="0.45" fill="url(#dirWin)"/>
+  <rect x="24.7" y="13.5" width="3.8" height="3.2" rx="0.45" fill="url(#dirWin)"/>
+  <rect x="15.5" y="18.8" width="3.8" height="3.2" rx="0.45" fill="url(#dirWin)"/>
+  <rect x="20.1" y="18.8" width="3.8" height="3.2" rx="0.45" fill="url(#dirWin)"/>
+  <rect x="24.7" y="18.8" width="3.8" height="3.2" rx="0.45" fill="url(#dirWin)"/>
+  <rect x="15.5" y="24.1" width="3.8" height="3.2" rx="0.45" fill="url(#dirWin)"/>
+  <rect x="20.1" y="24.1" width="3.8" height="3.2" rx="0.45" fill="url(#dirWin)"/>
+  <rect x="24.7" y="24.1" width="3.8" height="3.2" rx="0.45" fill="url(#dirWin)"/>
+  <path d="M18.5 29.2h7v3.8h-7z" fill="#312e81"/>
+  <circle cx="22" cy="31.2" r="0.75" fill="#faf5ff" fill-opacity="0.72"/>
+  ${idBlock}
 </svg>`
 }
 
 /**
  * @param {boolean} selected
+ * @param {string} [locationId]
  */
-export function directoryBuildingIcon(selected) {
+export function directoryBuildingIcon(selected, locationId = '') {
   return L.icon({
-    iconUrl: svgDataUrl(directoryBuildingSvg(selected)),
-    iconSize: [48, 56],
-    iconAnchor: [24, 56],
-    popupAnchor: [0, -52],
+    iconUrl: svgDataUrl(directoryBuildingSvg(selected, locationId)),
+    iconSize: [44, 48],
+    iconAnchor: [22, 48],
+    popupAnchor: [0, -46],
     className: 'map-marker-img-icon map-marker-img-icon--directory',
   })
 }

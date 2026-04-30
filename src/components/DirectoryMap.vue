@@ -162,13 +162,13 @@ function syncMarkers() {
 
     const id = String(p.locationId)
     const selected = props.highlightId === id
-    const icon = directoryBuildingIcon(selected)
+    const icon = directoryBuildingIcon(selected, id)
 
     const marker = L.marker([lat, lng], {
       icon,
       title: `Location ${id}`,
     })
-    marker.bindTooltip(`Location ${id}`, { direction: 'top', offset: [0, -52] })
+    marker.bindTooltip(`Location ${id}`, { direction: 'top', offset: [0, -46] })
     marker.on('click', () => {
       emit('select', id)
     })
