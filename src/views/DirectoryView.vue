@@ -25,6 +25,9 @@ const phoneSavingId = ref('')
 const phoneSaveError = ref('')
 /** When set, that location shows phone input + save (otherwise read-only + Edit link). */
 const phoneEditingId = ref('')
+/** Brief “Copied” feedback after copying phone (location id). */
+const phoneCopiedForId = ref('')
+let phoneCopiedTimer = 0
 
 const filteredLocations = computed(() => {
   const q = searchQuery.value.trim().toLowerCase()
@@ -150,6 +153,46 @@ async function savePhoneForLocation(loc) {
     phoneSaveError.value = e instanceof Error ? e.message : String(e)
   } finally {
     phoneSavingId.value = ''
+  }
+}
+
+function digitsOnlyPhone(phone) {
+  return String(phone ?? '').replace(/\D/g, '')
+}
+
+/**
+ * Copy formatted phone for paste-friendly display (fallback: digits).
+ * @param {{ locationId: string, phone?: string }} loc
+ */
+async function copyPhoneNumber(loc) {
+  const raw = phoneDraft.value[loc.locationId] ?? loc.phone ?? ''
+  const formatted = formatPhone(raw)
+  const digits = digitsOnlyPhone(raw)
+  const text = formatted || digits
+  if (!text) return
+  try {
+    if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text)
+    } else {
+      const ta = document.createElement('textarea')
+      ta.value = text
+      ta.setAttribute('readonly', '')
+      ta.style.position = 'fixed'
+      ta.style.opacity = '0'
+      document.body.appendChild(ta)
+      ta.select()
+      document.execCommand('copy')
+      document.body.removeChild(ta)
+    }
+    phoneCopiedForId.value = loc.locationId
+    if (typeof window !== 'undefined') {
+      window.clearTimeout(phoneCopiedTimer)
+      phoneCopiedTimer = window.setTimeout(() => {
+        phoneCopiedForId.value = ''
+      }, 2000)
+    }
+  } catch {
+    /* ignore */
   }
 }
 
@@ -330,6 +373,10 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
+  if (typeof window !== 'undefined' && phoneCopiedTimer) {
+    window.clearTimeout(phoneCopiedTimer)
+    phoneCopiedTimer = 0
+  }
   if (splitMql) {
     splitMql.removeEventListener('change', onSplitMqlChange)
   }
@@ -492,12 +539,14 @@ onUnmounted(() => {
         >
           <div class="location-main">
             <span class="location-id-chip" aria-hidden="true">{{ loc.locationId }}</span>
-            <div class="location-title-block">
-              <span class="location-name">{{ cardLocationTitle(loc) }}</span>
-              <span v-if="loc.abbreviation" class="location-abbr">{{ loc.abbreviation }}</span>
+            <div class="location-title-stack">
+              <div class="location-title-row">
+                <span class="location-name">{{ cardLocationTitle(loc) }}</span>
+                <span v-if="loc.abbreviation" class="location-abbr">{{ loc.abbreviation }}</span>
+              </div>
+              <p v-if="loc.address" class="location-address location-address--header">{{ loc.address }}</p>
             </div>
           </div>
-          <p v-if="loc.address" class="location-address">{{ loc.address }}</p>
           <svg
             class="expand-chevron"
             viewBox="0 0 24 24"
@@ -521,12 +570,18 @@ onUnmounted(() => {
               <dd class="phone-edit-cell">
                 <template v-if="phoneEditingId !== loc.locationId">
                   <div class="phone-display-row">
-                    <a
-                      v-if="buildTelHref(phoneDraft[loc.locationId] || loc.phone)"
-                      :href="buildTelHref(phoneDraft[loc.locationId] || loc.phone)"
-                      class="phone-display phone-dial tap"
-                      >{{ formatPhone(phoneDraft[loc.locationId] || loc.phone) }}</a
+                    <button
+                      v-if="digitsOnlyPhone(phoneDraft[loc.locationId] || loc.phone)"
+                      type="button"
+                      class="phone-display phone-copy tap"
+                      :title="'Copy phone number'"
+                      @click.stop="copyPhoneNumber(loc)"
                     >
+                      {{ formatPhone(phoneDraft[loc.locationId] || loc.phone) }}
+                      <span v-if="phoneCopiedForId === loc.locationId" class="phone-copied-note"
+                        >Copied</span
+                      >
+                    </button>
                     <span v-else class="phone-display">{{
                       formatPhone(phoneDraft[loc.locationId] || loc.phone) || '—'
                     }}</span>
@@ -539,7 +594,7 @@ onUnmounted(() => {
                     </button>
                   </div>
                   <p class="phone-hint">
-                    Updates the shared directory for everyone.
+                    Tap number to copy. Updates the shared directory for everyone.
                   </p>
                 </template>
                 <template v-else>
@@ -574,7 +629,7 @@ onUnmounted(() => {
                     {{ phoneSaveError }}
                   </p>
                   <p class="phone-hint">
-                    Updates the shared directory for everyone.
+                    Tap number to copy. Updates the shared directory for everyone.
                   </p>
                 </template>
               </dd>
@@ -609,6 +664,16 @@ onUnmounted(() => {
                 <circle cx="12" cy="10" r="3" />
               </svg>
               Open in Maps
+            </a>
+            <a
+              v-if="buildTelHref(phoneDraft[loc.locationId] || loc.phone)"
+              :href="buildTelHref(phoneDraft[loc.locationId] || loc.phone)"
+              class="action-btn tap"
+            >
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z" />
+              </svg>
+              Call
             </a>
           </div>
         </div>
@@ -1004,6 +1069,30 @@ onUnmounted(() => {
   padding-right: var(--space-6, 1.5rem);
 }
 
+.location-title-stack {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.location-title-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2, 0.5rem);
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+.location-address--header {
+  margin: 0;
+  padding-right: 0;
+  font-size: var(--text-xs, 0.6875rem);
+  line-height: 1.35;
+  word-break: break-word;
+}
+
 .location-id-chip {
   flex-shrink: 0;
   display: inline-flex;
@@ -1019,15 +1108,6 @@ onUnmounted(() => {
   background: rgba(255, 255, 255, 0.06);
   border: 1px solid rgba(255, 255, 255, 0.1);
   border-radius: var(--radius-md, 0.5rem);
-}
-
-.location-title-block {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2, 0.5rem);
-  flex-wrap: wrap;
-  min-width: 0;
-  flex: 1;
 }
 
 .location-name {
@@ -1144,15 +1224,36 @@ onUnmounted(() => {
   word-break: break-word;
 }
 
-a.phone-dial {
+button.phone-copy {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  max-width: 100%;
+  padding: 0;
+  margin: 0;
+  border: none;
+  background: none;
+  font: inherit;
+  font-weight: var(--weight-semibold, 600);
+  font-variant-numeric: tabular-nums;
   color: inherit;
-  text-decoration: none;
+  text-align: left;
   cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
 }
 
-a.phone-dial:hover {
+button.phone-copy:hover {
   text-decoration: underline;
   text-underline-offset: 2px;
+}
+
+.phone-copied-note {
+  font-size: 0.625rem;
+  font-weight: var(--weight-semibold, 600);
+  color: var(--color-accent-purple, #a78bfa);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
 }
 
 .phone-edit-link {
