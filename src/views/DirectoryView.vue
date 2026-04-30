@@ -23,6 +23,8 @@ const expandedId = ref('')
 const phoneDraft = ref({})
 const phoneSavingId = ref('')
 const phoneSaveError = ref('')
+/** When set, that location shows phone input + save (otherwise read-only + Edit link). */
+const phoneEditingId = ref('')
 
 const filteredLocations = computed(() => {
   const q = searchQuery.value.trim().toLowerCase()
@@ -78,6 +80,7 @@ function onMapSelect(locationId) {
   expandedId.value = locationId
   ensurePhoneDraftForId(locationId)
   phoneSaveError.value = ''
+  phoneEditingId.value = ''
   nextTick(() => {
     document
       .getElementById(`dir-loc-${locationId}`)
@@ -104,11 +107,29 @@ async function loadDirectory() {
 function toggleExpand(id) {
   if (expandedId.value === id) {
     expandedId.value = ''
+    phoneEditingId.value = ''
     return
   }
   expandedId.value = id
+  phoneEditingId.value = ''
   ensurePhoneDraftForId(id)
   phoneSaveError.value = ''
+}
+
+function startPhoneEdit(loc) {
+  ensurePhoneDraftForId(loc.locationId)
+  phoneEditingId.value = loc.locationId
+  phoneSaveError.value = ''
+}
+
+function cancelPhoneEdit(loc) {
+  const id = loc.locationId
+  phoneDraft.value = {
+    ...phoneDraft.value,
+    [id]: loc.phone != null ? String(loc.phone) : '',
+  }
+  phoneSaveError.value = ''
+  phoneEditingId.value = ''
 }
 
 async function savePhoneForLocation(loc) {
@@ -124,6 +145,7 @@ async function savePhoneForLocation(loc) {
       }
     }
     phoneDraft.value = { ...phoneDraft.value, [id]: res.entry?.phone ?? '' }
+    phoneEditingId.value = ''
   } catch (e) {
     phoneSaveError.value = e instanceof Error ? e.message : String(e)
   } finally {
@@ -497,38 +519,72 @@ onUnmounted(() => {
             <div class="detail-row detail-row--phone">
               <dt>Phone</dt>
               <dd class="phone-edit-cell">
-                <div class="phone-edit-row">
-                  <input
-                    v-model="phoneDraft[loc.locationId]"
-                    type="tel"
-                    class="phone-input"
-                    inputmode="tel"
-                    autocomplete="tel"
-                    :aria-label="'Phone for ' + (loc.locationName || loc.locationId)"
-                    placeholder="Add or update number"
-                  />
-                  <button
-                    type="button"
-                    class="phone-save-btn tap"
-                    :disabled="phoneSavingId === loc.locationId"
-                    @click="savePhoneForLocation(loc)"
+                <template v-if="phoneEditingId !== loc.locationId">
+                  <div class="phone-display-row">
+                    <span class="phone-display">{{
+                      formatPhone(phoneDraft[loc.locationId] || loc.phone) || '—'
+                    }}</span>
+                    <button
+                      type="button"
+                      class="phone-edit-link tap"
+                      @click.stop="startPhoneEdit(loc)"
+                    >
+                      Edit
+                    </button>
+                  </div>
+                  <p class="phone-hint">
+                    Updates the shared directory for everyone.
+                  </p>
+                  <a
+                    v-if="buildTelHref(phoneDraft[loc.locationId] || loc.phone)"
+                    :href="buildTelHref(phoneDraft[loc.locationId] || loc.phone)"
+                    class="detail-link phone-call-link"
                   >
-                    {{ phoneSavingId === loc.locationId ? 'Saving…' : 'Save' }}
-                  </button>
-                </div>
-                <p v-if="phoneSaveError && expandedId === loc.locationId" class="phone-save-err">
-                  {{ phoneSaveError }}
-                </p>
-                <p class="phone-hint">
-                  Updates the shared directory for everyone.
-                </p>
-                <a
-                  v-if="buildTelHref(phoneDraft[loc.locationId] || loc.phone)"
-                  :href="buildTelHref(phoneDraft[loc.locationId] || loc.phone)"
-                  class="detail-link phone-call-link"
-                >
-                  Call {{ formatPhone(phoneDraft[loc.locationId] || loc.phone) }}
-                </a>
+                    Call {{ formatPhone(phoneDraft[loc.locationId] || loc.phone) }}
+                  </a>
+                </template>
+                <template v-else>
+                  <div class="phone-edit-row">
+                    <input
+                      v-model="phoneDraft[loc.locationId]"
+                      type="tel"
+                      class="phone-input"
+                      inputmode="tel"
+                      autocomplete="tel"
+                      :aria-label="'Phone for ' + (loc.locationName || loc.locationId)"
+                      placeholder="Number"
+                    />
+                    <button
+                      type="button"
+                      class="phone-save-btn tap"
+                      :disabled="phoneSavingId === loc.locationId"
+                      @click="savePhoneForLocation(loc)"
+                    >
+                      {{ phoneSavingId === loc.locationId ? 'Saving…' : 'Save' }}
+                    </button>
+                    <button
+                      type="button"
+                      class="phone-cancel-btn tap"
+                      :disabled="phoneSavingId === loc.locationId"
+                      @click.stop="cancelPhoneEdit(loc)"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                  <p v-if="phoneSaveError && expandedId === loc.locationId" class="phone-save-err">
+                    {{ phoneSaveError }}
+                  </p>
+                  <p class="phone-hint">
+                    Updates the shared directory for everyone.
+                  </p>
+                  <a
+                    v-if="buildTelHref(phoneDraft[loc.locationId] || loc.phone)"
+                    :href="buildTelHref(phoneDraft[loc.locationId] || loc.phone)"
+                    class="detail-link phone-call-link"
+                  >
+                    Call {{ formatPhone(phoneDraft[loc.locationId] || loc.phone) }}
+                  </a>
+                </template>
               </dd>
             </div>
 
@@ -945,7 +1001,7 @@ onUnmounted(() => {
 .location-card-header {
   width: 100%;
   display: block;
-  padding: var(--space-4, 1rem) var(--space-4, 1rem) var(--space-3, 0.75rem);
+  padding: var(--space-3, 0.75rem) var(--space-3, 0.75rem) var(--space-2, 0.5rem);
   background: transparent;
   border: none;
   text-align: left;
@@ -1035,22 +1091,25 @@ onUnmounted(() => {
 }
 
 .location-details {
-  padding: var(--space-2, 0.5rem) var(--space-4, 1rem) var(--space-4, 1rem);
+  padding: var(--space-2, 0.5rem) var(--space-3, 0.75rem) var(--space-3, 0.75rem);
   border-top: 1px solid rgba(255, 255, 255, 0.06);
   background: rgba(0, 0, 0, 0.15);
+  max-width: min(22rem, 100%);
+  margin-inline: auto;
+  box-sizing: border-box;
 }
 
 .details-list {
   margin: 0;
-  padding: var(--space-3, 0.75rem) 0;
+  padding: var(--space-2, 0.5rem) 0;
 }
 
 .detail-row {
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-  gap: var(--space-4, 1rem);
-  padding: var(--space-2, 0.5rem) 0;
+  display: grid;
+  grid-template-columns: minmax(4.75rem, 5.75rem) minmax(0, 1fr);
+  gap: 0.35rem 0.6rem;
+  align-items: start;
+  padding: 0.35rem 0;
 }
 
 .detail-row:first-child {
@@ -1062,26 +1121,20 @@ onUnmounted(() => {
 }
 
 .detail-row dt {
-  font-size: var(--text-sm, 0.875rem);
+  font-size: 0.72rem;
   color: var(--color-text-tertiary, #6e6e7e);
   flex-shrink: 0;
+  font-weight: var(--weight-medium, 500);
+  padding-top: 0.12rem;
 }
 
 .detail-row dd {
-  font-size: var(--text-sm, 0.875rem);
+  font-size: 0.78rem;
   color: var(--color-text-primary, #f4f4f8);
   margin: 0;
-  text-align: right;
+  text-align: left;
   word-break: break-word;
-}
-
-.detail-link {
-  color: var(--color-accent-purple, #7b4db5);
-  text-decoration: none;
-}
-
-.detail-link:hover {
-  text-decoration: underline;
+  line-height: 1.35;
 }
 
 .detail-row--phone {
@@ -1092,23 +1145,55 @@ onUnmounted(() => {
   display: flex;
   flex-direction: column;
   align-items: stretch;
-  gap: var(--space-2, 0.5rem);
-  text-align: right;
+  gap: 0.35rem;
+  text-align: left;
+}
+
+.phone-display-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.35rem 0.5rem;
+}
+
+.phone-display {
+  font-size: 0.78rem;
+  font-weight: var(--weight-semibold, 600);
+  font-variant-numeric: tabular-nums;
+  color: var(--color-text-primary, #f4f4f8);
+  word-break: break-all;
+}
+
+.phone-edit-link {
+  flex-shrink: 0;
+  padding: 0;
+  border: none;
+  background: none;
+  font-size: 0.68rem;
+  font-weight: var(--weight-semibold, 600);
+  color: var(--color-accent-purple, #a78bfa);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+
+.phone-edit-link:hover {
+  color: #c4b5fd;
 }
 
 .phone-edit-row {
   display: flex;
   flex-wrap: wrap;
-  gap: var(--space-2, 0.5rem);
-  justify-content: flex-end;
+  gap: 0.35rem;
   align-items: center;
 }
 
 .phone-input {
-  flex: 1 1 10rem;
+  flex: 1 1 9rem;
   min-width: 0;
-  padding: var(--space-2, 0.5rem) var(--space-3, 0.75rem);
-  font-size: var(--text-sm, 0.875rem);
+  padding: 0.38rem 0.55rem;
+  font-size: 0.78rem;
   color: var(--color-text-primary, #f4f4f8);
   background: rgba(0, 0, 0, 0.25);
   border: 1px solid var(--color-border, rgba(255, 255, 255, 0.12));
@@ -1122,8 +1207,8 @@ onUnmounted(() => {
 
 .phone-save-btn {
   flex-shrink: 0;
-  padding: var(--space-2, 0.5rem) var(--space-3, 0.75rem);
-  font-size: var(--text-sm, 0.875rem);
+  padding: 0.38rem 0.6rem;
+  font-size: 0.72rem;
   font-weight: var(--weight-medium, 500);
   color: var(--color-text-primary, #f4f4f8);
   background: var(--color-accent-purple, #7b4db5);
@@ -1138,9 +1223,26 @@ onUnmounted(() => {
   cursor: not-allowed;
 }
 
+.phone-cancel-btn {
+  flex-shrink: 0;
+  padding: 0.38rem 0.5rem;
+  font-size: 0.72rem;
+  font-weight: var(--weight-medium, 500);
+  color: var(--color-text-secondary, #a0a0b0);
+  background: transparent;
+  border: 1px solid var(--color-border, rgba(255, 255, 255, 0.12));
+  border-radius: var(--radius-md, 0.5rem);
+  cursor: pointer;
+}
+
+.phone-cancel-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
 .phone-hint {
   margin: 0;
-  font-size: var(--text-xs, 0.75rem);
+  font-size: 0.62rem;
   color: var(--color-text-tertiary, #6e6e7e);
   line-height: 1.35;
 }
@@ -1152,21 +1254,32 @@ onUnmounted(() => {
 }
 
 .phone-call-link {
-  align-self: flex-end;
+  align-self: flex-start;
+  font-size: 0.72rem;
+}
+
+.detail-link {
+  color: var(--color-accent-purple, #7b4db5);
+  text-decoration: none;
+}
+
+.detail-link:hover {
+  text-decoration: underline;
 }
 
 .detail-actions {
   display: flex;
-  gap: var(--space-2, 0.5rem);
-  margin-top: var(--space-3, 0.75rem);
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin-top: 0.5rem;
 }
 
 .action-btn {
   display: inline-flex;
   align-items: center;
-  gap: var(--space-1-5, 0.375rem);
-  padding: var(--space-2, 0.5rem) var(--space-3, 0.75rem);
-  font-size: var(--text-sm, 0.875rem);
+  gap: 0.3rem;
+  padding: 0.38rem 0.55rem;
+  font-size: 0.72rem;
   font-weight: var(--weight-medium, 500);
   color: var(--color-text-primary, #f4f4f8);
   background: rgba(255, 255, 255, 0.06);
@@ -1208,12 +1321,12 @@ onUnmounted(() => {
   }
 
   .detail-row {
-    flex-direction: column;
-    gap: var(--space-1, 0.25rem);
+    grid-template-columns: 1fr;
+    gap: 0.15rem;
   }
 
-  .detail-row dd {
-    text-align: left;
+  .detail-row dt {
+    padding-top: 0;
   }
 
   .detail-actions {
