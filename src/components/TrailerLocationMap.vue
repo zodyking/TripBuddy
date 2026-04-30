@@ -27,6 +27,8 @@ const props = defineProps({
   userLocationPending: { type: Boolean, default: false },
   /** Parent could not obtain a fix */
   userLocationDenied: { type: Boolean, default: false },
+  /** Tractor / unit number chip under “your location” truck on this map */
+  userVehicleId: { type: String, default: '' },
 })
 
 const containerRef = ref(null)
@@ -149,13 +151,14 @@ function syncUserOverlay() {
 
   if (!userMarker) {
     userMarker = L.marker(ll, {
-      icon: userLocationTruckIcon(),
+      icon: userLocationTruckIcon(props.userVehicleId || ''),
       zIndexOffset: 600,
       title: 'Your location',
     })
     userMarker.addTo(userLayer)
   } else {
     userMarker.setLatLng(ll)
+    userMarker.setIcon(userLocationTruckIcon(props.userVehicleId || ''))
   }
 }
 
@@ -359,7 +362,13 @@ watch(
 )
 
 watch(
-  () => [props.userLat, props.userLng, props.userLocationPending, props.userLocationDenied],
+  () => [
+    props.userLat,
+    props.userLng,
+    props.userLocationPending,
+    props.userLocationDenied,
+    props.userVehicleId,
+  ],
   () => {
     applyUserCoordsFromProps()
   },

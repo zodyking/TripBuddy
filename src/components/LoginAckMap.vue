@@ -18,6 +18,8 @@ const props = defineProps({
   pending: { type: Boolean, default: true },
   /** After first center, pan to new positions (live GPS) instead of resetting zoom each tick */
   smoothFollow: { type: Boolean, default: false },
+  /** Tractor / unit number chip under truck marker (optional). */
+  vehicleId: { type: String, default: '' },
 })
 
 /** First fix uses setView; later updates use panTo when smoothFollow is on */
@@ -62,12 +64,13 @@ function sync() {
 
   if (!dot) {
     dot = L.marker(ll, {
-      icon: userLocationTruckIcon(),
+      icon: userLocationTruckIcon(props.vehicleId || ''),
       zIndexOffset: 500,
       title: 'Your location',
     }).addTo(layer)
   } else {
     dot.setLatLng(ll)
+    dot.setIcon(userLocationTruckIcon(props.vehicleId || ''))
   }
 
   const motion = !prefersReducedMotion()
@@ -123,7 +126,7 @@ onBeforeUnmount(() => {
 })
 
 watch(
-  () => [props.lat, props.lng, props.accuracyM, props.pending, props.smoothFollow],
+  () => [props.lat, props.lng, props.accuracyM, props.pending, props.smoothFollow, props.vehicleId],
   () => {
     sync()
     nextTick(() => map?.invalidateSize())

@@ -34,6 +34,8 @@ const props = defineProps({
     type: Boolean,
     default: false,
   },
+  /** Tractor / unit number chip under “my location” truck (optional). */
+  vehicleId: { type: String, default: '' },
 })
 
 const emit = defineEmits(['select'])
@@ -210,13 +212,14 @@ function syncUserOverlay() {
 
   if (!userMarker) {
     userMarker = L.marker(ll, {
-      icon: userLocationTruckIcon(),
+      icon: userLocationTruckIcon(props.vehicleId || ''),
       zIndexOffset: 600,
       title: 'Your location',
     })
     userMarker.addTo(userLayer)
   } else {
     userMarker.setLatLng(ll)
+    userMarker.setIcon(userLocationTruckIcon(props.vehicleId || ''))
   }
 }
 
@@ -423,7 +426,7 @@ onBeforeUnmount(() => {
 })
 
 watch(
-  () => [props.pins, props.highlightId, props.fillHeight],
+  () => [props.pins, props.highlightId, props.fillHeight, props.vehicleId],
   () => {
     syncMarkers()
     syncUserOverlay()

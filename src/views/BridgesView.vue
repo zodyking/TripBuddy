@@ -8,6 +8,7 @@ import {
   bridgeShortLabelFromDisplayName,
 } from '../utils/mapMarkers.js'
 import { bridgeDelayTier } from '../utils/bridgeDelayTier.js'
+import { linehaulTractorBody } from '../stores/linehaulSnapshotStore.js'
 
 defineOptions({ name: 'BridgesView' })
 
@@ -485,6 +486,12 @@ const mapPins = computed(() => {
   return out
 })
 
+const mapVehicleId = computed(() => {
+  const n = linehaulTractorBody.value?.tractorNbr
+  if (n == null) return ''
+  return String(n).trim()
+})
+
 const isLandscapeSplit = ref(false)
 let splitMql = /** @type {MediaQueryList | null} */(null)
 function updateLandscapeSplit() {
@@ -589,6 +596,7 @@ onUnmounted(() => {
           :travel-direction="direction"
           :highlight-id="highlightId"
           :fill-height="isLandscapeSplit"
+          :vehicle-id="mapVehicleId"
           @select="onMapSelect"
         />
         <div

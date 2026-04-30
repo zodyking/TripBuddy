@@ -43,30 +43,83 @@ function escapeHtmlAttr(s) {
 }
 
 /**
- * Top-down truck PNG (`src/assets/map-markers/truck.png`).
- * Uses a raster `L.icon` (not SVG-wrapped) so large PNGs load reliably in all browsers.
- * Anchor bottom-center.
+ * Short label for marker chips (keep readable at ~7px font).
+ * @param {string} raw
  */
-export function userLocationTruckIcon() {
-  const w = 96
-  const h = 112
-  return L.icon({
-    iconUrl: userLocationTruckImg,
-    iconSize: [w, h],
-    iconAnchor: [Math.round(w / 2), h],
-    popupAnchor: [0, -Math.round(h * 0.55)],
-    className: 'map-marker-img-icon map-marker-img-icon--user-truck',
+function directoryMarkerIdLabel(raw) {
+  const s = String(raw ?? '').trim()
+  if (!s) return ''
+  if (s.length <= 7) return s
+  return `${s.slice(0, 6)}…`
+}
+
+/**
+ * Raster marker: image on top + optional ID chip below (matches directory / bridge pin labeling).
+ * @param {string} rasterHref
+ * @param {{ vw: number, vh: number, chipH?: number }} layout vw/vh = total marker box (anchor bottom-center).
+ * @param {string} labelRaw
+ * @param {string} rootClass extra class on root div
+ */
+function rasterMarkerDivIconBottomChip(rasterHref, layout, labelRaw = '', rootClass = '') {
+  const { vw, vh, chipH = 14 } = layout
+  const raw = String(labelRaw ?? '')
+    .trim()
+    .replace(/^#/, '')
+  const idRaw = raw ? directoryMarkerIdLabel(raw) : ''
+  const fsPx =
+    idRaw.length === 0 ? 0 : idRaw.length <= 5 ? 7.5 : idRaw.length <= 7 ? 6.5 : 6
+  const chipHtml =
+    idRaw !== ''
+      ? `<div class="map-marker-raster-chip" style="font-size:${fsPx}px">${escapeHtmlText(
+          idRaw,
+        )}</div>`
+      : ''
+  const gap = idRaw !== '' ? 2 : 0
+  const imgBoxH = idRaw !== '' ? Math.max(vh - chipH - gap, 1) : vh
+  const extraCls = rootClass ? ` ${rootClass}` : ''
+  const html = `<div class="map-marker-raster-root${extraCls}" style="width:${vw}px;height:${vh}px"><img class="map-marker-raster-img" src="${escapeHtmlAttr(
+    rasterHref,
+  )}" alt="" role="presentation" decoding="async" width="${vw}" height="${imgBoxH}"/>${chipHtml}</div>`
+  return L.divIcon({
+    html,
+    className: 'map-marker-raster-div-icon',
+    iconSize: [vw, vh],
+    iconAnchor: [Math.round(vw / 2), vh],
+    popupAnchor: [0, -Math.round(vh * 0.52)],
   })
 }
 
 /**
- * Trailer top PNG + optional number chip via `L.divIcon` (PNG in `<img>`, not SVG foreignObject).
+ * Top-down truck PNG (`src/assets/map-markers/truck.png`).
+ * Optional `vehicleId` shows a chip under the cab like bridge / directory markers.
+ * @param {string} [vehicleId] tractor / unit number
+ */
+export function userLocationTruckIcon(vehicleId = '') {
+  const vw = 96
+  const imgH = 112
+  const chipH = 14
+  const gap = 2
+  const raw = String(vehicleId ?? '').trim()
+  const showChip = raw !== '' && directoryMarkerIdLabel(raw) !== ''
+  const boxH = showChip ? imgH + chipH + gap : imgH
+  return rasterMarkerDivIconBottomChip(
+    userLocationTruckImg,
+    { vw, vh: boxH, chipH },
+    raw,
+    'map-marker-raster-root--user-truck',
+  )
+}
+
+/**
+ * Trailer top PNG + optional number chip below image (`src/assets/map-markers/20ft.png` / `53ft.png`).
  * @param {string} rasterHref
- * @param {{ vw: number, vh: number, chipH?: number }} layout
+ * @param {number} vw
+ * @param {number} imgH drawable height for the PNG column (chip stacks below)
  * @param {string} trailerNumber
  */
-function trailerTopDivIcon(rasterHref, layout, trailerNumber = '') {
-  const { vw, vh, chipH = 14 } = layout
+function trailerTopDivIcon(rasterHref, vw, imgH, trailerNumber = '') {
+  const chipH = 14
+  const gap = 2
   const raw = String(trailerNumber ?? '')
     .trim()
     .replace(/^#/, '')
@@ -75,20 +128,20 @@ function trailerTopDivIcon(rasterHref, layout, trailerNumber = '') {
     labelRaw.length === 0 ? 0 : labelRaw.length <= 5 ? 7.5 : labelRaw.length <= 7 ? 6.5 : 6
   const chipHtml =
     labelRaw !== ''
-      ? `<div class="map-trailer-marker-chip" style="font-size:${fsPx}px">${escapeHtmlText(
+      ? `<div class="map-marker-raster-chip" style="font-size:${fsPx}px">${escapeHtmlText(
           labelRaw,
         )}</div>`
       : ''
-  const imgH = labelRaw !== '' ? Math.max(vh - chipH, 1) : vh
-  const html = `<div class="map-trailer-marker-root" style="width:${vw}px;height:${vh}px">${chipHtml}<img class="map-trailer-marker-img" src="${escapeHtmlAttr(
+  const boxH = labelRaw !== '' ? imgH + chipH + gap : imgH
+  const html = `<div class="map-marker-raster-root map-marker-raster-root--trailer" style="width:${vw}px;height:${boxH}px"><img class="map-marker-raster-img" src="${escapeHtmlAttr(
     rasterHref,
-  )}" alt="" role="presentation" decoding="async" width="${vw}" height="${imgH}"/></div>`
+  )}" alt="" role="presentation" decoding="async" width="${vw}" height="${imgH}"/>${chipHtml}</div>`
   return L.divIcon({
     html,
-    className: 'map-trailer-div-icon',
-    iconSize: [vw, vh],
-    iconAnchor: [Math.round(vw / 2), vh],
-    popupAnchor: [0, -Math.round(vh * 0.52)],
+    className: 'map-marker-raster-div-icon map-marker-raster-div-icon--trailer',
+    iconSize: [vw, boxH],
+    iconAnchor: [Math.round(vw / 2), boxH],
+    popupAnchor: [0, -Math.round(boxH * 0.52)],
   })
 }
 
@@ -97,7 +150,7 @@ function trailerTopDivIcon(rasterHref, layout, trailerNumber = '') {
  * @param {string} [trailerNumber]
  */
 export function trailer20ftTopIcon(trailerNumber = '') {
-  return trailerTopDivIcon(trailer20ftTopImg, { vw: 72, vh: 132, chipH: 14 }, trailerNumber)
+  return trailerTopDivIcon(trailer20ftTopImg, 72, 118, trailerNumber)
 }
 
 /**
@@ -105,18 +158,7 @@ export function trailer20ftTopIcon(trailerNumber = '') {
  * @param {string} [trailerNumber]
  */
 export function trailer53ftTopIcon(trailerNumber = '') {
-  return trailerTopDivIcon(trailer53ftTopImg, { vw: 76, vh: 262, chipH: 14 }, trailerNumber)
-}
-
-/**
- * Short label for marker (keep readable at ~7px font).
- * @param {string} raw
- */
-function directoryMarkerIdLabel(raw) {
-  const s = String(raw ?? '').trim()
-  if (!s) return ''
-  if (s.length <= 7) return s
-  return `${s.slice(0, 6)}…`
+  return trailerTopDivIcon(trailer53ftTopImg, 76, 248, trailerNumber)
 }
 
 /**

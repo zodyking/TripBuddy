@@ -150,6 +150,7 @@ const trailerGpsModalOpen = ref(false)
  *   userLng: number | null,
  *   userGpsPending: boolean,
  *   userGeoDenied: boolean,
+ *   userVehicleId: string,
  * } | null>} */
 const trailerGpsData = ref(null)
 
@@ -1134,6 +1135,11 @@ function openTrailerGpsModal(card) {
     userLng: null,
     userGpsPending: hasGeo,
     userGeoDenied: !hasGeo,
+    userVehicleId: (() => {
+      const n = linehaulTractorBody.value?.tractorNbr
+      if (n == null) return ''
+      return String(n).trim()
+    })(),
   }
   trailerGpsModalOpen.value = true
 
@@ -1652,6 +1658,7 @@ onUnmounted(() => {
               :user-lng="trailerGpsData.userLng"
               :user-location-pending="trailerGpsData.userGpsPending"
               :user-location-denied="trailerGpsData.userGeoDenied"
+              :user-vehicle-id="trailerGpsData.userVehicleId || ''"
               :trailer-size="trailerGpsData.size || ''"
               :trailer-number="trailerGpsData.trlrNbr ? String(trailerGpsData.trlrNbr) : ''"
               :trailer-label="`Trailer ${trailerGpsData.order}${trailerGpsData.trlrNbr ? ` · #${trailerGpsData.trlrNbr}` : ''}`"

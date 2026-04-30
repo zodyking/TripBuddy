@@ -2,6 +2,7 @@
 import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue'
 import { fetchDirectory, patchDirectoryPhone } from '../api.js'
 import DirectoryMap from '../components/DirectoryMap.vue'
+import { linehaulTractorBody } from '../stores/linehaulSnapshotStore.js'
 
 /** @type {import('vue').Ref<Array<{
  *   locationId: string,
@@ -77,6 +78,13 @@ const mapPins = computed(() => {
     })
   }
   return out
+})
+
+const mapVehicleId = computed(() => {
+  const n = linehaulTractorBody.value?.tractorNbr
+  if (n == null) return ''
+  const s = String(n).trim()
+  return s
 })
 
 const showMapNoCoordsNotice = computed(
@@ -462,6 +470,7 @@ onUnmounted(() => {
           :pins="mapPins"
           :highlight-id="expandedId"
           :fill-height="isLandscapeSplit"
+          :vehicle-id="mapVehicleId"
           @select="onMapSelect"
         />
       </div>

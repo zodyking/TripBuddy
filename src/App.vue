@@ -441,26 +441,39 @@ body {
   display: block;
 }
 
-/* Trailer divIcon: PNG + chip (avoids SVG-in-data-URL loading limits for large rasters) */
-.leaflet-div-icon.map-trailer-div-icon {
+/* Raster divIcons (truck + trailers): transparent shell, image + chip below */
+.leaflet-div-icon.map-marker-raster-div-icon {
   background: transparent !important;
   border: none !important;
-  overflow: hidden;
+  overflow: visible;
   line-height: 0;
 }
 
-.map-trailer-marker-root {
+.map-marker-raster-root {
   display: flex;
   flex-direction: column;
   align-items: stretch;
+  justify-content: flex-start;
   gap: 2px;
   line-height: 0;
   pointer-events: none;
-  overflow: hidden;
+  overflow: visible;
   box-sizing: border-box;
+  background: transparent;
 }
 
-.map-trailer-marker-chip {
+.map-marker-raster-img {
+  display: block;
+  width: 100%;
+  flex: 0 0 auto;
+  height: auto;
+  max-height: none;
+  object-fit: contain;
+  pointer-events: none;
+  background: transparent;
+}
+
+.map-marker-raster-chip {
   flex-shrink: 0;
   margin: 0 5px;
   padding: 2px 4px;
@@ -475,16 +488,6 @@ body {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-}
-
-.map-trailer-marker-img {
-  display: block;
-  width: 100%;
-  flex: 1 1 auto;
-  min-height: 0;
-  height: auto;
-  object-fit: contain;
-  pointer-events: none;
 }
 
 /* Focus ring */
