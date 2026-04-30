@@ -2,9 +2,6 @@
 import { ref, watch, computed, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
-import 'leaflet.markercluster/dist/leaflet.markercluster-src.js'
-import 'leaflet.markercluster/dist/MarkerCluster.css'
-import 'leaflet.markercluster/dist/MarkerCluster.Default.css'
 import { tomtomKeyEffective } from '../stores/trafficTileKey.js'
 import { bridgesCrossingIcon } from '../utils/mapMarkers.js'
 
@@ -15,7 +12,7 @@ const hasTomtomTraffic = computed(() => tomtomKeyEffective.value.length > 0)
 
 const props = defineProps({
   /** @type {import('vue').PropType<Array<{
-   *  id: string, lat: number, lng: number, title: string, minutes: string, trendIcon: string,
+   *  id: string, lat: number, lng: number, title: string, shortLabel?: string, minutes: string, trendIcon: string,
    *  trendKey: 'worse' | 'better' | 'neutral' | 'unk',
    *  trendFull: string, isPick: boolean, isClosed: boolean, rank: number
    * }>>} */
@@ -49,10 +46,7 @@ let satelliteLayer = null
 let trafficLayer = null
 const activeBaseLayer = ref(/** @type {'street' | 'satellite'} */ ('street'))
 const trafficOn = ref(tomtomKeyEffective.value.length > 0)
-/**
- * @type {L.MarkerClusterGroup | L.LayerGroup | null}
- * Clustering groups nearby pins until zoomed in (e.g. GWB upper-deck vs nearby routes).
- */
+/** @type {L.LayerGroup | null} plain layer — no clustering (matches directory map) */
 let markerLayer = null
 /** @type {L.LayerGroup | null} */
 let userLayer = null
@@ -326,32 +320,7 @@ function makeIcon(p, selected) {
     isPick: !!p.isPick,
     isClosed: !!p.isClosed,
     selected,
-  })
-}
-
-/**
- * Themed count bubble when several bridges share a pixel region (e.g. GWB decks).
- * @param {L.MarkerCluster} cluster
- */
-function clusterIcon(cluster) {
-  const n = cluster.getChildCount()
-  const size = 44
-  return L.divIcon({
-    html: `<div class="bclus-inner"><span class="bclus-n">${n}</span></div>`,
-    className: `bclus-ico bclus-ico--${n < 10 ? 's' : n < 20 ? 'm' : 'l'}`,
-    iconSize: L.point(size, size),
-  })
-}
-
-function createMarkerCluster() {
-  return L.markerClusterGroup({
-    maxClusterRadius: 52,
-    /** Bridge glyphs are small image icons — cluster until fairly zoomed in */
-    disableClusteringAtZoom: 14,
-    spiderfyOnMaxZoom: true,
-    showCoverageOnHover: false,
-    removeOutsideVisibleBounds: true,
-    iconCreateFunction: clusterIcon,
+    shortLabel: typeof p.shortLabel === 'string' ? p.shortLabel : '',
   })
 }
 
@@ -365,7 +334,7 @@ function syncMarkers() {
   const motion = prefersReducedMotion()
 
   if (structChanged) {
-    /** @type {L.MarkerClusterGroup} */(markerLayer).clearLayers()
+    markerLayer.clearLayers()
     markersById.clear()
   }
 
@@ -413,8 +382,6 @@ function syncMarkers() {
     }
   }
 
-  /** @type {L.MarkerClusterGroup} */(markerLayer).refreshClusters()
-
   lastStructureKey = sk
 
   if (structChanged) {
@@ -422,10 +389,7 @@ function syncMarkers() {
   } else if (props.highlightId) {
     const m = markersById.get(props.highlightId)
     if (m) {
-      /** @type {L.MarkerClusterGroup} */(markerLayer).zoomToShowLayer(
-        m,
-        () => map?.panTo(m.getLatLng(), { animate: !motion }),
-      )
+      map?.panTo(m.getLatLng(), { animate: !motion })
     }
   }
 
@@ -476,8 +440,7 @@ function initMap() {
   activeBaseLayer.value = 'street'
   streetLayer.addTo(map)
   applyTrafficToMap()
-  markerLayer = createMarkerCluster()
-  map.addLayer(markerLayer)
+  markerLayer = L.layerGroup().addTo(map)
   userLayer = L.layerGroup().addTo(map)
   lastStructureKey = ''
   syncMarkers()
@@ -489,7 +452,7 @@ function initMap() {
 function destroyMap() {
   clearGeoWatch()
   if (markerLayer) {
-    /** @type {L.MarkerClusterGroup} */(markerLayer).clearLayers()
+    markerLayer.clearLayers()
   }
   markersById.clear()
   userMarker = null
@@ -785,36 +748,5 @@ watch(tomtomKeyEffective, () => {
   overflow: hidden;
   text-overflow: ellipsis;
   max-width: 11rem;
-}
-:deep(.bclus-ico) {
-  background: none !important;
-  border: none;
-}
-:deep(.bclus-inner) {
-  width: 100%;
-  height: 100%;
-  border-radius: 999px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 1rem;
-  font-weight: 800;
-  color: #e8e2ff;
-  background: linear-gradient(145deg, rgba(100, 70, 160, 0.88), rgba(40, 20, 70, 0.9));
-  border: 1px solid rgba(199, 168, 255, 0.4);
-  box-shadow:
-    0 3px 14px rgba(0, 0, 0, 0.5),
-    0 0 0 1px rgba(0, 0, 0, 0.35) inset;
-}
-:deep(.bclus-ico--l .bclus-inner) {
-  background: linear-gradient(145deg, rgba(90, 60, 140, 0.9), rgba(20, 12, 40, 0.95));
-  color: #f4f0ff;
-}
-:deep(.bclus-ico--m .bclus-inner) {
-  color: #fde68a;
-}
-:deep(.leaflet-cluster-anim .leaflet-marker-icon) {
-  -webkit-backface-visibility: hidden;
-  backface-visibility: hidden;
 }
 </style>

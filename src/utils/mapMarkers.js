@@ -29,6 +29,55 @@ function directoryMarkerIdLabel(raw) {
 }
 
 /**
+ * One-word label for bridge map pins (PANYNJ `routeId`).
+ * @param {string} routeId
+ */
+export function bridgeShortLabelForRouteId(routeId) {
+  const k = String(routeId ?? '').trim()
+  const map = /** @type {Record<string, string>} */ ({
+    // Bayonne
+    217: 'Bayonne',
+    222: 'Bayonne',
+    // George Washington (upper deck per direction filter in UI)
+    11: 'GW',
+    12: 'GW',
+    211: 'GW',
+    212: 'GW',
+    // Goethals
+    86: 'Goethals',
+    87: 'Goethals',
+    // Outerbridge Crossing
+    260: 'Outerbridge',
+    2520: 'Outerbridge',
+  })
+  if (k && map[k]) return map[k]
+  return ''
+}
+
+/**
+ * Single token from crossing display name for map pins when routeId is unknown.
+ * @param {string} displayName
+ */
+export function bridgeShortLabelFromDisplayName(displayName) {
+  const raw = String(displayName ?? '').trim()
+  if (!raw) return ''
+  const head = raw.split(/\s*[—–-]\s*/)[0]?.trim() || raw
+  const word = head.split(/\s+/)[0] || head
+  const cleaned = word.replace(/^[^\p{L}\p{N}]+/u, '').replace(/[^\p{L}\p{N}]+$/u, '')
+  return cleaned ? cleaned.slice(0, 12) : ''
+}
+
+/**
+ * @param {string} raw
+ */
+function bridgeMarkerLabelText(raw) {
+  const s = String(raw ?? '').trim()
+  if (!s) return ''
+  if (s.length <= 10) return s
+  return `${s.slice(0, 9)}…`
+}
+
+/**
  * Directory: flat purple office block + ID strip on the facade (no map-pin shield).
  * viewBox 0 0 44 48 — anchor bottom center.
  * @param {boolean} selected
@@ -94,7 +143,7 @@ export function directoryBuildingIcon(selected, locationId = '') {
 }
 
 /**
- * Bridge: twin towers + suspended deck + cables (readable at small size).
+ * Bridge: twin towers + suspended deck + cables + one-word label strip (readable at small size).
  */
 function bridgeSvg(opts) {
   const {
@@ -104,20 +153,31 @@ function bridgeSvg(opts) {
     glow = '#a78bfa',
     dim = false,
     selected = false,
+    shortLabel = '',
   } = opts
   const op = dim ? 0.5 : 1
   const selRing = selected
     ? `<ellipse cx="26" cy="15" rx="17.5" ry="11.5" fill="none" stroke="${glow}" stroke-width="2" opacity="0.92"/>`
     : ''
 
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="52" height="54" viewBox="0 0 52 54" opacity="${op}">
+  const labelRaw = bridgeMarkerLabelText(shortLabel)
+  const labelEsc = escapeSvgText(labelRaw)
+  const fs =
+    labelRaw.length === 0 ? '0' : labelRaw.length <= 3 ? '8.5' : labelRaw.length <= 7 ? '7.25' : '6.35'
+  const labelBlock =
+    labelRaw !== ''
+      ? `<rect x="5" y="49.5" width="42" height="10.5" rx="2.2" fill="#0f172a" fill-opacity="0.92" stroke="${stroke}" stroke-opacity="0.55" stroke-width="0.75"/>
+  <text x="26" y="54.85" text-anchor="middle" dominant-baseline="central" fill="#f5f3ff" font-size="${fs}" font-family="ui-sans-serif,system-ui,sans-serif" font-weight="800">${labelEsc}</text>`
+      : ''
+
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="52" height="62" viewBox="0 0 52 62" opacity="${op}">
   <defs>
     <linearGradient id="brTower" x1="26" y1="10" x2="26" y2="36">
       <stop offset="0%" stop-color="${tower}"/>
       <stop offset="100%" stop-color="${deck}"/>
     </linearGradient>
   </defs>
-  <ellipse cx="26" cy="50" rx="12" ry="3" fill="#000" opacity="0.18"/>
+  <ellipse cx="26" cy="57.5" rx="12" ry="3" fill="#000" opacity="0.18"/>
   ${selRing}
   <rect x="9" y="14" width="5.5" height="22" rx="1.2" fill="url(#brTower)" stroke="${stroke}" stroke-width="1.15"/>
   <rect x="37.5" y="14" width="5.5" height="22" rx="1.2" fill="url(#brTower)" stroke="${stroke}" stroke-width="1.15"/>
@@ -126,6 +186,7 @@ function bridgeSvg(opts) {
   <path d="M11 17 Q26 27 41 17" fill="none" stroke="${stroke}" stroke-width="1" stroke-linecap="round" opacity="0.5"/>
   <line x1="9" y1="36" x2="43" y2="36" stroke="${stroke}" stroke-opacity="0.4" stroke-width="1.5" stroke-dasharray="2.5 2"/>
   <circle cx="26" cy="46" r="3.5" fill="${deck}" stroke="${stroke}" stroke-width="1.1"/>
+  ${labelBlock}
 </svg>`
 }
 
@@ -135,6 +196,7 @@ function bridgeSvg(opts) {
  * @param {boolean} [p.isPick]
  * @param {boolean} [p.isClosed]
  * @param {boolean} [p.selected]
+ * @param {string} [p.shortLabel] one-word (or short) name on the marker
  */
 export function bridgesCrossingIcon(p) {
   const tk = p.trendKey || 'unk'
@@ -178,11 +240,12 @@ export function bridgesCrossingIcon(p) {
         glow,
         dim: !!p.isClosed,
         selected: !!p.selected,
+        shortLabel: p.shortLabel || '',
       }),
     ),
-    iconSize: [52, 54],
-    iconAnchor: [26, 52],
-    popupAnchor: [0, -46],
+    iconSize: [52, 62],
+    iconAnchor: [26, 60],
+    popupAnchor: [0, -54],
     className: 'map-marker-img-icon map-marker-img-icon--bridge',
   })
 }

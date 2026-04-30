@@ -3,6 +3,10 @@ import { ref, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
 import { getBridgesPanynj } from '../api.js'
 import { getBridgeAnchorForRouteId } from '../bridges/bridgeRouteAnchors.js'
 import BridgesMap from '../components/BridgesMap.vue'
+import {
+  bridgeShortLabelForRouteId,
+  bridgeShortLabelFromDisplayName,
+} from '../utils/mapMarkers.js'
 
 defineOptions({ name: 'BridgesView' })
 
@@ -375,6 +379,21 @@ function displayTitleShort(row) {
   return `${t.slice(0, 21)}…`
 }
 
+/**
+ * One-word (or short token) label for map markers.
+ * @param {unknown} row
+ */
+function mapPinShortLabel(row) {
+  const id = rowRouteId(row)
+  const byRoute = bridgeShortLabelForRouteId(id)
+  if (byRoute) return byRoute
+  if (row == null || typeof row !== 'object') return ''
+  const o = /** @type {Record<string, unknown>} */(row)
+  const name =
+    typeof o.crossingDisplayName === 'string' ? o.crossingDisplayName : ''
+  return bridgeShortLabelFromDisplayName(name)
+}
+
 const mapPins = computed(() => {
   const rows = rankedRows.value
   const out = []
@@ -390,6 +409,7 @@ const mapPins = computed(() => {
       lat: pos[0],
       lng: pos[1],
       title: displayTitleShort(row),
+      shortLabel: mapPinShortLabel(row),
       minutes: isClosedRow(row) ? '—' : (() => {
         const m = travelMinutes(row)
         return Number.isFinite(m) ? String(Math.round(m)) : '—'
