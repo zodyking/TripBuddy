@@ -1,7 +1,11 @@
 <script setup>
 import { ref, computed, watch, onMounted, onUnmounted, nextTick, Teleport } from 'vue'
 import { getAssignment, getCredentials, patchTripHistoryOutcome } from '../api.js'
-import { monthGridForCalendarMonth, workWeekGroupMeta } from '../utils/workWeekGroup.js'
+import {
+  monthGridForCalendarMonth,
+  workWeekGroupMeta,
+  workWeekInclusiveDayCount,
+} from '../utils/workWeekGroup.js'
 import { shiftDateKeyForEventMs } from '../utils/shiftCalendar.js'
 import { resolveHistoryTrailerLoadBadge } from '../utils/tripDetailsDisplay.js'
 
@@ -705,7 +709,11 @@ const fedExEstimatePayRowsForWeek = computed(() => {
   for (const wg of tripsByWorkWeek.value) {
     const periods = entriesByFedExPayPeriod(wg.items)
     const ws = wg.weekStartMs
-    const we = ws + 7 * 24 * 60 * 60 * 1000 - 1
+    const spanDays = workWeekInclusiveDayCount(
+      workWeekFromCred.value.workWeekStartDay,
+      workWeekFromCred.value.workWeekEndDay,
+    )
+    const we = ws + spanDays * 24 * 60 * 60 * 1000 - 1
     out[wg.key] = periods.map((g) => {
       const est = computeWeekPayEstimate(g.items)
       const fri = fedExPaycheckFridayMs(g.meta.periodEndMs)

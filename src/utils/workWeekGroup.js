@@ -44,8 +44,20 @@ function workWeekDowLabel(startDay, endDay) {
 }
 
 /**
- * Group by rolling 7-day windows that start on `workWeekStartDay` (0–6, default Sunday).
- * `workWeekEndDay` is used in the group title only.
+ * Inclusive calendar-day count from start DOW to end DOW moving forward within the week (1–7).
+ * Example: Thu→Mon is 5 days (Thu, Fri, Sat, Sun, Mon). Sun→Sat is 7.
+ * @param {number} startDay 0–6
+ * @param {number} endDay 0–6
+ */
+export function workWeekInclusiveDayCount(startDay, endDay) {
+  const a = dayMod(Math.floor(Number(startDay) || 0))
+  const b = dayMod(Math.floor(Number(endDay) || 6))
+  return dayMod(b - a) + 1
+}
+
+/**
+ * Group by rolling windows that **start** on `workWeekStartDay` (0–6).
+ * The displayed date range ends on `workWeekEndDay` (inclusive), e.g. Thu–Mon spans 5 calendar days.
  * @param {number} tsMs
  * @param {{
  *   workWeekStartDay: number,
@@ -53,7 +65,7 @@ function workWeekDowLabel(startDay, endDay) {
  *   shiftStartMins?: number,
  *   shiftEndMins?: number
  * }} [opts]
- * @returns {{ key: string, endMs: number, groupLabel: string, weekStart: number } | null}
+ * @returns {{ key: string, endMs: number, groupLabel: string, weekStart: number, spanDays: number } | null}
  */
 export function workWeekGroupMeta(
   tsMs,
@@ -78,9 +90,9 @@ export function workWeekGroupMeta(
     return d
   })()
   const wStart = startOfWorkWeek(dAnchor, st)
-  const wEnd = new Date(wStart.getTime() + 7 * 24 * 60 * 60 * 1000 - 1)
+  const spanDays = workWeekInclusiveDayCount(st, en)
+  const wEnd = new Date(wStart.getTime() + spanDays * 24 * 60 * 60 * 1000 - 1)
   const endMs = wEnd.getTime()
-  const y = wStart.getFullYear()
   const fmt = (t) =>
     t.toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
   const ymd = (t) => `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, '0')}-${String(t.getDate()).padStart(2, '0')}`
@@ -88,7 +100,7 @@ export function workWeekGroupMeta(
   const dowL = workWeekDowLabel(st, en)
   const groupLabel = `Work week (${dowL}) — ${fmt(wStart)} – ${fmt(wEnd)}`
 
-  return { key, endMs, groupLabel, weekStart: wStart.getTime() }
+  return { key, endMs, groupLabel, weekStart: wStart.getTime(), spanDays }
 }
 
 /**
@@ -101,8 +113,11 @@ export function workWeekKeyForDate(
 ) {
   const w = workWeekGroupMeta(tsMs, opts)
   if (!w) return null
-  const wStart = new Date(w.weekStart)
-  const wEnd = new Date(w.weekStart + 7 * 24 * 60 * 60 * 1000 - 1)
+  const span =
+    typeof w.spanDays === 'number' && Number.isFinite(w.spanDays) && w.spanDays >= 1 && w.spanDays <= 7
+      ? w.spanDays
+      : 7
+  const wEnd = new Date(w.weekStart + span * 24 * 60 * 60 * 1000 - 1)
   return { key: w.key, weekStartMs: w.weekStart, weekEndMs: wEnd.getTime(), groupLabel: w.groupLabel }
 }
 
@@ -119,11 +134,12 @@ export function localDateKey(ts) {
  * Day strip: Mon–Sun labels around a week
  * @param {number} weekStartMs
  */
-export function dayStripForWeek(weekStartMs) {
+export function dayStripForWeek(weekStartMs, numDays = 7) {
+  const n = Math.max(1, Math.min(7, Math.floor(Number(numDays) || 7)))
   const a = new Date(weekStartMs)
   a.setHours(0, 0, 0, 0)
   const out = []
-  for (let i = 0; i < 7; i += 1) {
+  for (let i = 0; i < n; i += 1) {
     const d = new Date(a.getTime() + i * 24 * 60 * 60 * 1000)
     out.push({
       key: localDateKey(d.getTime()),
@@ -158,7 +174,7 @@ export function monthGridForWorkWeek(
   const todayK = shiftDateKeyForEventMs(Date.now(), sM, eM) || localDateKey(Date.now())
   const ws = new Date(workWeekStartMs)
   ws.setHours(0, 0, 0, 0)
-  const wEndT = new Date(ws.getTime() + 6 * 24 * 60 * 60 * 1000)
+  const wEndT = new Date(ws.getTime() + 6 * 24 * 60 * 60 * 1000) // legacy: full week strip (7 days)
   const wStartK = localDateKey(ws.getTime())
   const wEndK = localDateKey(wEndT.getTime())
   const grid0 = new Date(ws.getTime())

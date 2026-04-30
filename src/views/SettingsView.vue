@@ -853,7 +853,7 @@ onUnmounted(() => {
             </select>
           </div>
           <div>
-            <label class="lbl" for="work-week-end">Work week ends (label)</label>
+            <label class="lbl" for="work-week-end">Work week ends</label>
             <select
               id="work-week-end"
               v-model.number="workWeekEndDay"
@@ -865,6 +865,9 @@ onUnmounted(() => {
             </select>
           </div>
         </div>
+        <p class="cred-hint">
+          The end day is the <strong>last calendar day</strong> in each work block (e.g. Thu–Mon = Thu through Mon, five days).
+        </p>
         <label class="lbl">Phone number</label>
         <input
           :value="phoneDisplay"
