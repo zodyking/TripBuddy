@@ -219,9 +219,31 @@ export function parseTrailerMeta(trailer) {
   }
 
   const emptyFlag = String(trailer.emptyFlag ?? '').toUpperCase()
+
+  /** @returns {number | null} */
+  const pkgWeightLbs = () => {
+    const w = trailer.pkgWeight
+    if (w === null || w === undefined || w === '') return null
+    const n = typeof w === 'number' ? w : parseFloat(String(w).replace(/,/g, '').trim())
+    return Number.isFinite(n) ? n : null
+  }
+
+  /**
+   * Empty vs LOAD badge: `emptyFlag` alone is unreliable next to `pkgWeight` (e.g. N + 0 lbs).
+   * Prefer actual weight when present; fall back to Y/N only when weight is absent.
+   */
   let loadType = '—'
   let loadTypeClass = 'load-unknown'
-  if (emptyFlag === 'N') {
+  const lbs = pkgWeightLbs()
+  if (lbs !== null) {
+    if (lbs > 0) {
+      loadType = 'LOAD'
+      loadTypeClass = 'load-full'
+    } else {
+      loadType = 'Empty'
+      loadTypeClass = 'load-empty'
+    }
+  } else if (emptyFlag === 'N') {
     loadType = 'LOAD'
     loadTypeClass = 'load-full'
   } else if (emptyFlag === 'Y') {
@@ -268,6 +290,35 @@ export function parseTrailerMeta(trailer) {
     pkgWeight,
     dueDate,
   }
+}
+
+/**
+ * History ledger snapshots store `loadType` from an older parse; re-derive from snapshot `Weight` row when possible.
+ * @param {{ loadType?: string, loadTypeClass?: string, summaryRows?: { label: string, value: string }[] }} card
+ */
+export function resolveHistoryTrailerLoadBadge(card) {
+  const rows = Array.isArray(card?.summaryRows) ? card.summaryRows : []
+  const wRow = rows.find((r) => String(r?.label ?? '').trim().toLowerCase() === 'weight')
+  if (wRow) {
+    const raw = String(wRow.value ?? '').trim()
+    const m = raw.match(/([\d.,]+)\s*lbs?\b/i)
+    if (m) {
+      const n = parseFloat(m[1].replace(/,/g, ''))
+      if (Number.isFinite(n)) {
+        return n > 0
+          ? { text: 'LOAD', variant: 'full' }
+          : { text: 'Empty', variant: 'empty' }
+      }
+    }
+  }
+  const lt = String(card?.loadType ?? '').trim()
+  if (lt && lt !== '—') {
+    const u = lt.toUpperCase()
+    if (u === 'EMPTY') return { text: lt, variant: 'empty' }
+    if (u === 'LOAD') return { text: lt, variant: 'full' }
+    return { text: lt, variant: 'unknown' }
+  }
+  return { text: '—', variant: 'unknown' }
 }
 
 /**

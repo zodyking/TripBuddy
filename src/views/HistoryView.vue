@@ -3,6 +3,7 @@ import { ref, computed, watch, onMounted, onUnmounted, nextTick, Teleport } from
 import { getAssignment, getCredentials, patchTripHistoryOutcome } from '../api.js'
 import { monthGridForCalendarMonth, workWeekGroupMeta } from '../utils/workWeekGroup.js'
 import { shiftDateKeyForEventMs } from '../utils/shiftCalendar.js'
+import { resolveHistoryTrailerLoadBadge } from '../utils/tripDetailsDisplay.js'
 
 /**
  * @typedef {object} LedgerEntry
@@ -178,6 +179,19 @@ function filterDollyRows(rows) {
     if (s === '—' || s === '-' || s === '–') return false
     return true
   })
+}
+
+/**
+ * Trailers on a ledger entry with resolved empty/load badge (computed once per row).
+ * @param {LedgerEntry} e
+ */
+function tripTrailersDecorated(e) {
+  const arr = e?.tripDetails?.trailers
+  if (!Array.isArray(arr)) return []
+  return arr.map((t) => ({
+    ...t,
+    loadBadge: resolveHistoryTrailerLoadBadge(t),
+  }))
 }
 
 /** Paid miles in [PAY_ROUND_BAND_MIN, PAY_ROUND_BAND_MAX] count as {@link PAY_ROUND_TO_MI} mi for pay estimate. */
@@ -1226,7 +1240,7 @@ onUnmounted(() => {
                         class="history-trailers"
                       >
                         <div
-                          v-for="(t, ti) in e.tripDetails.trailers"
+                          v-for="(t, ti) in tripTrailersDecorated(e)"
                           :key="ti"
                           class="history-trailer-block"
                         >
@@ -1234,7 +1248,15 @@ onUnmounted(() => {
                             <span class="history-trailer-title">Trailer {{ t.order }}</span>
                             <span v-if="t.trlrNbr" class="history-trailer-nbr">#{{ t.trlrNbr }}</span>
                             <span class="history-badge">{{ t.size }}</span>
-                            <span class="history-badge history-badge--load">{{ t.loadType }}</span>
+                            <span
+                              v-if="t.loadBadge.text && t.loadBadge.text !== '—'"
+                              class="history-badge history-badge--load"
+                              :class="{
+                                'history-badge--load-full': t.loadBadge.variant === 'full',
+                                'history-badge--load-empty': t.loadBadge.variant === 'empty',
+                              }"
+                              >{{ t.loadBadge.text }}</span
+                            >
                           </div>
                           <ul
                             v-if="Array.isArray(t.summaryRows) && t.summaryRows.length"
@@ -2559,6 +2581,18 @@ onUnmounted(() => {
   background: rgba(156, 163, 175, 0.1);
   color: #9ca3af;
   border-color: rgba(156, 163, 175, 0.25);
+}
+
+.history-badge--load.history-badge--load-empty {
+  background: rgba(156, 163, 175, 0.08);
+  color: #b8bcc8;
+  border-color: rgba(156, 163, 175, 0.22);
+}
+
+.history-badge--load.history-badge--load-full {
+  background: rgba(34, 197, 94, 0.12);
+  color: #86efac;
+  border-color: rgba(34, 197, 94, 0.35);
 }
 
 .history-trailer-rows {
