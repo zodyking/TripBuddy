@@ -521,7 +521,13 @@ onUnmounted(() => {
               <dd class="phone-edit-cell">
                 <template v-if="phoneEditingId !== loc.locationId">
                   <div class="phone-display-row">
-                    <span class="phone-display">{{
+                    <a
+                      v-if="buildTelHref(phoneDraft[loc.locationId] || loc.phone)"
+                      :href="buildTelHref(phoneDraft[loc.locationId] || loc.phone)"
+                      class="phone-display phone-dial tap"
+                      >{{ formatPhone(phoneDraft[loc.locationId] || loc.phone) }}</a
+                    >
+                    <span v-else class="phone-display">{{
                       formatPhone(phoneDraft[loc.locationId] || loc.phone) || '—'
                     }}</span>
                     <button
@@ -535,13 +541,6 @@ onUnmounted(() => {
                   <p class="phone-hint">
                     Updates the shared directory for everyone.
                   </p>
-                  <a
-                    v-if="buildTelHref(phoneDraft[loc.locationId] || loc.phone)"
-                    :href="buildTelHref(phoneDraft[loc.locationId] || loc.phone)"
-                    class="detail-link phone-call-link"
-                  >
-                    Call {{ formatPhone(phoneDraft[loc.locationId] || loc.phone) }}
-                  </a>
                 </template>
                 <template v-else>
                   <div class="phone-edit-row">
@@ -577,13 +576,6 @@ onUnmounted(() => {
                   <p class="phone-hint">
                     Updates the shared directory for everyone.
                   </p>
-                  <a
-                    v-if="buildTelHref(phoneDraft[loc.locationId] || loc.phone)"
-                    :href="buildTelHref(phoneDraft[loc.locationId] || loc.phone)"
-                    class="detail-link phone-call-link"
-                  >
-                    Call {{ formatPhone(phoneDraft[loc.locationId] || loc.phone) }}
-                  </a>
                 </template>
               </dd>
             </div>
@@ -617,16 +609,6 @@ onUnmounted(() => {
                 <circle cx="12" cy="10" r="3" />
               </svg>
               Open in Maps
-            </a>
-            <a
-              v-if="buildTelHref(phoneDraft[loc.locationId] || loc.phone)"
-              :href="buildTelHref(phoneDraft[loc.locationId] || loc.phone)"
-              class="action-btn tap"
-            >
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z" />
-              </svg>
-              Call
             </a>
           </div>
         </div>
@@ -1162,6 +1144,17 @@ onUnmounted(() => {
   word-break: break-word;
 }
 
+a.phone-dial {
+  color: inherit;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+a.phone-dial:hover {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
 .phone-edit-link {
   flex-shrink: 0;
   padding: 0;
@@ -1248,20 +1241,6 @@ onUnmounted(() => {
   margin: 0;
   font-size: var(--text-xs, 0.75rem);
   color: #f87171;
-}
-
-.phone-call-link {
-  align-self: flex-start;
-  font-size: var(--text-xs, 0.6875rem);
-}
-
-.detail-link {
-  color: var(--color-accent-purple, #7b4db5);
-  text-decoration: none;
-}
-
-.detail-link:hover {
-  text-decoration: underline;
 }
 
 .detail-actions {
