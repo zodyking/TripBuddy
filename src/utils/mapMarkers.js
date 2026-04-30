@@ -2,9 +2,11 @@
  * Shared `L.icon` assets for maps — SVG data URLs; stable anchors at all zoom levels.
  */
 import L from 'leaflet'
-import userLocationTruckImg from '../assets/map-markers/user-location-truck.png'
-import trailer20ftTopImg from '../assets/map-markers/trailer-20ft-top.png'
-import trailer53ftTopImg from '../assets/map-markers/trailer-53ft-top.png'
+
+/** Raster markers served from `public/` (Vite base-aware paths). */
+const userLocationTruckImg = `${import.meta.env.BASE_URL}truck.png`
+const trailer20ftTopImg = `${import.meta.env.BASE_URL}20ft.png`
+const trailer53ftTopImg = `${import.meta.env.BASE_URL}53ft.png`
 
 /** @param {string} svg */
 function svgDataUrl(svg) {
@@ -28,7 +30,7 @@ function svgRasterHref(url) {
 }
 
 /**
- * Top-down truck PNG for “my location” (replace `src/assets/map-markers/user-location-truck.png`).
+ * Top-down truck PNG for “my location” (`public/truck.png`).
  * Anchor bottom-center.
  */
 export function userLocationTruckIcon() {
@@ -83,7 +85,7 @@ function trailerTopCompositeIcon(rasterHref, layout, trailerNumber = '') {
 }
 
 /**
- * 20′ trailer top PNG + optional number chip (replace `src/assets/map-markers/trailer-20ft-top.png`).
+ * 20′ trailer top PNG + optional number chip (`public/20ft.png`).
  * @param {string} [trailerNumber]
  */
 export function trailer20ftTopIcon(trailerNumber = '') {
@@ -95,7 +97,7 @@ export function trailer20ftTopIcon(trailerNumber = '') {
 }
 
 /**
- * 53′ trailer top PNG + optional number chip (replace `src/assets/map-markers/trailer-53ft-top.png`).
+ * 53′ trailer top PNG + optional number chip (`public/53ft.png`).
  * @param {string} [trailerNumber]
  */
 export function trailer53ftTopIcon(trailerNumber = '') {
