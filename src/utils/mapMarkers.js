@@ -185,7 +185,6 @@ function bridgeSvg(opts) {
   <path d="M11 14 Q26 26 41 14" fill="none" stroke="${stroke}" stroke-width="1.35" stroke-linecap="round" opacity="0.88"/>
   <path d="M11 17 Q26 27 41 17" fill="none" stroke="${stroke}" stroke-width="1" stroke-linecap="round" opacity="0.5"/>
   <line x1="9" y1="36" x2="43" y2="36" stroke="${stroke}" stroke-opacity="0.4" stroke-width="1.5" stroke-dasharray="2.5 2"/>
-  <circle cx="26" cy="46" r="3.5" fill="${deck}" stroke="${stroke}" stroke-width="1.1"/>
   ${labelBlock}
 </svg>`
 }
