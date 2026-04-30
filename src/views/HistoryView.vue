@@ -737,6 +737,22 @@ const fedExEstimatePayRowsForWeek = computed(() => {
   return out
 })
 
+/** Sum of FedEx pay-period estimates touching this work week ($1/mi per trip counted once). */
+const payTotalEstimateUsdByWeekKey = computed(() => {
+  const src = fedExEstimatePayRowsForWeek.value
+  /** @type {Record<string, number>} */
+  const out = {}
+  for (const k of Object.keys(src)) {
+    const buckets = src[k]
+    let sum = 0
+    for (const b of buckets) {
+      sum += typeof b.estimateUsd === 'number' ? b.estimateUsd : 0
+    }
+    out[k] = sum
+  }
+  return out
+})
+
 /** Per work-week pay estimate ($1 / billable mi); keyed like {@link tripsByWorkWeek}. */
 const weekPayEstimateByKey = computed(() => {
   /** @type {Record<string, ReturnType<typeof computeWeekPayEstimate>>} */
@@ -1149,9 +1165,10 @@ onUnmounted(() => {
       <template v-if="tripsByWorkWeek.length">
         <div class="history-hierarchy">
           <details
-            v-for="wg in tripsByWorkWeek"
+            v-for="(wg, wgi) in tripsByWorkWeek"
             :key="wg.key"
             :ref="bindWwDetailsEl(wg.key)"
+            :open="wgi === 0"
             class="history-ww-section history-fold"
             :aria-label="wg.groupLabel"
           >
@@ -1382,7 +1399,7 @@ onUnmounted(() => {
               </details>
             </div>
 
-            <details class="history-pay-fold history-fold">
+            <details class="history-pay-fold history-fold history-pay-card" open>
               <summary class="history-pay-fold__summary history-fold__summary">
                 <span class="history-pay-fold__title">Week totals</span>
               </summary>
@@ -1419,15 +1436,18 @@ onUnmounted(() => {
               </div>
             </details>
 
-            <details class="history-pay-fold history-pay-fold--estimate history-fold">
-              <summary class="history-pay-fold__summary history-fold__summary">
-                <span class="history-pay-fold__title">Estimate pay</span>
+            <details class="history-pay-fold history-pay-fold--pay-total history-fold history-pay-card" open>
+              <summary class="history-pay-fold__summary history-fold__summary history-pay-fold__summary--pay">
+                <span class="history-pay-fold__title">Pay total</span>
+                <span class="history-pay-fold__pill">{{
+                  formatUsdWhole(payTotalEstimateUsdByWeekKey[wg.key] ?? 0)
+                }}</span>
               </summary>
               <div class="history-pay-body">
                 <p class="history-pay-rules history-pay-rules--fedex">
                   FedEx Ground pay is typically weekly on <strong>Friday</strong> for the prior completed period.
                   Pay period: <strong>Sunday 12:00 AM – Saturday 11:59 PM</strong> (local). Direct deposit may post a day or two early depending on the bank.
-                  Estimate uses <strong>$1 per billable mile</strong> (same rounding as week totals).
+                  Estimate uses <strong>$1 per billable mile</strong> (same rounding as week totals). Trips are grouped by FedEx pay period; each trip counts once.
                 </p>
                 <template v-if="(fedExEstimatePayRowsForWeek[wg.key] || []).length">
                   <div
@@ -1465,7 +1485,11 @@ onUnmounted(() => {
                     </div>
                   </div>
                 </template>
-                <p v-else class="history-pay-rules">No trips in this work week for estimate pay.</p>
+                <p v-else class="history-pay-rules">No trips in this work week for pay estimate.</p>
+                <div class="history-pay-total history-pay-total--grand">
+                  <span>Estimated pay (this work week)</span>
+                  <strong>{{ formatUsdWhole(payTotalEstimateUsdByWeekKey[wg.key] ?? 0) }}</strong>
+                </div>
               </div>
             </details>
           </details>
@@ -1903,6 +1927,10 @@ onUnmounted(() => {
   overflow: hidden;
 }
 
+.history-pay-card {
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.35);
+}
+
 .history-pay-fold > .history-pay-fold__summary {
   display: flex;
   align-items: center;
@@ -1911,6 +1939,27 @@ onUnmounted(() => {
   padding: 0.42rem 0.55rem;
   background: rgba(255, 255, 255, 0.03);
   border-bottom: 1px solid #2a2a32;
+}
+
+.history-pay-fold__summary--pay {
+  justify-content: space-between !important;
+}
+
+.history-pay-fold__pill {
+  flex-shrink: 0;
+  font-size: 0.62rem;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  padding: 0.14rem 0.42rem;
+  border-radius: 999px;
+  background: rgba(34, 197, 94, 0.14);
+  border: 1px solid rgba(34, 197, 94, 0.45);
+  color: #bbf7d0;
+}
+
+.history-pay-fold--pay-total > .history-pay-fold__summary {
+  background: rgba(124, 92, 255, 0.08);
+  border-bottom-color: #3a3a4a;
 }
 
 .history-pay-fold__title {
@@ -2014,6 +2063,25 @@ onUnmounted(() => {
   color: #9a9aaa;
 }
 
+.history-pay-total strong {
+  font-size: 0.78rem;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  color: #f4f4fa;
+}
+
+.history-pay-total--grand {
+  margin-top: 0.55rem;
+  padding-top: 0.55rem;
+  border-top-width: 2px;
+  border-top-color: #3d3d4c;
+}
+
+.history-pay-total--grand strong {
+  font-size: 0.85rem;
+  color: #86efac;
+}
+
 .history-pay-fold--estimate > .history-pay-fold__summary {
   background: rgba(124, 92, 255, 0.08);
   border-bottom-color: #3a3a4a;
@@ -2069,6 +2137,8 @@ onUnmounted(() => {
 .history-pay-total--mi strong {
   color: #c4b5fd;
 }
+
+.history-list--day {
   padding: 0 !important;
   gap: 0.45rem !important;
 }
