@@ -23,6 +23,11 @@ export const DISPATCH_LOGIN_SUCCESS_PATH =
 export const SESSION_START_URL =
   (process.env.FEDEX_OKTA_AUTHORIZE_URL || '').trim() || DISPATCH_ENTRY_URL
 
+/**
+ * Optional TomTom key for **server-side** traffic APIs (e.g. `/api/traffic/tomtom/corridors`).
+ * Falls back to `VITE_TOMTOM_KEY` for dev. Prefer `TOMTOM_API_KEY` in production (not in SPA bundle).
+ */
+
 export const API_PORT = Number(process.env.FEDEX_TOOL_API_PORT ?? 3847)
 
 /**

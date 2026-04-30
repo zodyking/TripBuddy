@@ -203,7 +203,7 @@ onUnmounted(() => {
           class="app-main"
           :class="{
             'app-main--directory': route.name === 'directory',
-            'app-main--bridges': route.name === 'bridges',
+            'app-main--traffic': route.name === 'traffic',
           }"
         >
           <RouterView />
@@ -247,14 +247,21 @@ onUnmounted(() => {
       </RouterLink>
       <RouterLink
         class="nav-item"
-        :class="{ 'is-active': route.name === 'bridges' }"
-        to="/bridges"
+        :class="{ 'is-active': route.name === 'traffic' }"
+        to="/traffic"
       >
         <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M2 20h4l4-12 3 6 3-6h6"/>
-          <path d="M2 20h20"/>
+          <path d="M12 2v4"/>
+          <path d="M12 18v4"/>
+          <path d="m4.93 4.93 2.83 2.83"/>
+          <path d="m16.24 16.24 2.83 2.83"/>
+          <path d="M2 12h4"/>
+          <path d="M18 12h4"/>
+          <path d="m4.93 19.07 2.83-2.83"/>
+          <path d="m16.24 7.76 2.83-2.83"/>
+          <circle cx="12" cy="12" r="3"/>
         </svg>
-        <span class="nav-label">Bridges</span>
+        <span class="nav-label">Traffic</span>
       </RouterLink>
       <RouterLink
         class="nav-item"
@@ -679,8 +686,8 @@ onUnmounted(() => {
   flex-direction: column;
 }
 
-/* Bridges: same full-bleed width as directory; inner page handles padding */
-.app-main.app-main--bridges {
+/* Traffic hub (crossings + corridor schematic): full-bleed like directory */
+.app-main.app-main--traffic {
   flex: 1;
   min-height: 0;
   max-width: none;
@@ -694,7 +701,7 @@ onUnmounted(() => {
   flex-direction: column;
 }
 
-.app-main.app-main--bridges > * {
+.app-main.app-main--traffic > * {
   display: flex;
   flex-direction: column;
   flex: 1 0 auto;
@@ -703,10 +710,10 @@ onUnmounted(() => {
   min-height: 0;
 }
 
-/* Split-pane directory / bridges: only the list column scrolls, not the main element */
+/* Split-pane directory / traffic crossings: only the list column scrolls, not the main element */
 @media (orientation: landscape) and (min-width: 700px) {
   .app-main.app-main--directory,
-  .app-main.app-main--bridges {
+  .app-main.app-main--traffic {
     overflow-y: hidden;
   }
 }

@@ -4,7 +4,7 @@ import MainDashboard from '../views/MainDashboard.vue'
 import SettingsView from '../views/SettingsView.vue'
 import DirectoryView from '../views/DirectoryView.vue'
 import HistoryView from '../views/HistoryView.vue'
-import BridgesView from '../views/BridgesView.vue'
+import TrafficView from '../views/TrafficView.vue'
 import LoginView from '../views/LoginView.vue'
 import { getAuthStatus } from '../api.js'
 
@@ -40,10 +40,14 @@ export const router = createRouter({
           meta: { title: 'History' },
         },
         {
+          path: 'traffic',
+          name: 'traffic',
+          component: TrafficView,
+          meta: { title: 'Traffic' },
+        },
+        {
           path: 'bridges',
-          name: 'bridges',
-          component: BridgesView,
-          meta: { title: 'Bridges' },
+          redirect: { name: 'traffic' },
         },
         {
           path: 'settings',

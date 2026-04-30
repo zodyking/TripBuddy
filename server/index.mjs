@@ -128,6 +128,8 @@ import {
   refreshPanynjCrossingData,
   startPanynjBridgePoll,
 } from './bridge-panynj.mjs'
+import { fetchCorridorFlowBatch } from './traffic-tomtom.mjs'
+import { corridorTomtomSamples } from './traffic-corridors.mjs'
 
 await fs.mkdir(UPLOADS_DIR, { recursive: true })
 
@@ -416,6 +418,59 @@ app.get('/api/status', async () => ({
 
 app.get('/api/bridges/panynj', async () => {
   return getBridgesResponsePayload()
+})
+
+/**
+ * TomTom Flow Segment Data for predefined corridor samples (server key only).
+ */
+app.post('/api/traffic/tomtom/corridors', async (req, reply) => {
+  const key = String(process.env.TOMTOM_API_KEY || process.env.VITE_TOMTOM_KEY || '').trim()
+  if (!key) {
+    return reply.code(503).send({
+      ok: false,
+      error:
+        'Set TOMTOM_API_KEY (or VITE_TOMTOM_KEY) on the API server for corridor traffic.',
+    })
+  }
+  const body = req.body && typeof req.body === 'object' ? req.body : {}
+  let corridors = corridorTomtomSamples
+  if (Array.isArray(body.corridors) && body.corridors.length > 0) {
+    corridors = body.corridors
+      .filter(
+        (c) =>
+          c &&
+          typeof c === 'object' &&
+          typeof c.id === 'string' &&
+          Array.isArray(c.samples),
+      )
+      .map((c) => ({
+        id: String(c.id),
+        samples: c.samples
+          .filter(
+            (s) =>
+              Array.isArray(s) &&
+              s.length >= 2 &&
+              Number.isFinite(Number(s[0])) &&
+              Number.isFinite(Number(s[1])),
+          )
+          .map((s) => [Number(s[0]), Number(s[1])]),
+      }))
+      .filter((c) => c.samples.length > 0)
+      .slice(0, 24)
+  }
+  const totalPts = corridors.reduce((n, c) => n + c.samples.length, 0)
+  if (totalPts > 120) {
+    return reply.code(400).send({ ok: false, error: 'Too many sample points (max 120)' })
+  }
+  try {
+    const result = await fetchCorridorFlowBatch(key, corridors)
+    return { ok: true, ...result }
+  } catch (e) {
+    return reply.code(502).send({
+      ok: false,
+      error: e instanceof Error ? e.message : 'TomTom request failed',
+    })
+  }
 })
 
 app.get('/api/events', async (req, reply) => {

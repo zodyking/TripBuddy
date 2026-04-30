@@ -326,7 +326,7 @@ const linehaulPollAriaNow = computed(() =>
 const phoneDigits = ref('')
 const credMsg = ref(null)
 
-/** TomTom Traffic Raster API key (Bridges map overlay). Free developer account: developer.tomtom.com */
+/** TomTom Traffic Raster API key (Traffic map overlay). Free developer account: developer.tomtom.com */
 const tomtomTrafficDraft = ref('')
 const tomtomTrafficMsg = ref('')
 const tomtomKeyFromEnv = Boolean(
@@ -967,9 +967,9 @@ onUnmounted(() => {
         </div>
       </SettingsSection>
 
-      <SettingsSection title="Map: bridge traffic (TomTom)">
+      <SettingsSection title="Map: TomTom traffic overlay">
         <p class="cred-hint">
-          Live road traffic on the <strong>Bridges</strong> map uses
+          Live road traffic tiles on the <strong>Traffic → Crossings</strong> map use
           <a
             href="https://developer.tomtom.com/traffic-api/documentation/product-information/introduction"
             target="_blank"
@@ -981,8 +981,12 @@ onUnmounted(() => {
           <code class="bmk">VITE_TOMTOM_KEY</code> in
           <code class="bmk">.env</code> (build) which overrides the pasted value.
         </p>
+        <p class="cred-hint">
+          The <strong>Traffic → Corridors</strong> schematic loads TomTom Flow Segment Data via the API server.
+          Set <code class="bmk">TOMTOM_API_KEY</code> (preferred) or <code class="bmk">VITE_TOMTOM_KEY</code> in the server environment for <code class="bmk">POST /api/traffic/tomtom/corridors</code>.
+        </p>
         <p v-if="tomtomKeyFromEnv" class="cred-hint" style="color: #fbbf24; font-weight: 600">
-          A build-time <code class="bmk">VITE_TOMTOM_KEY</code> is set — the map uses it first.
+          A build-time <code class="bmk">VITE_TOMTOM_KEY</code> is set — the crossings map uses it first for tiles.
         </p>
         <label class="lbl" for="tomtom-traffic-key">TomTom API key (optional)</label>
         <input

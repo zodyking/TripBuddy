@@ -10,7 +10,7 @@ import {
 import { bridgeDelayTier } from '../utils/bridgeDelayTier.js'
 import { useMapVehicleId } from '../composables/useMapVehicleId.js'
 
-defineOptions({ name: 'BridgesView' })
+defineOptions({ name: 'TrafficCrossingsContent' })
 
 const POLL_MS = 5 * 60 * 1000
 
@@ -625,7 +625,7 @@ onUnmounted(() => {
       >
         <div class="bridges-bar">
           <div class="bridges-bar-top">
-            <h1 class="bridges-h1">Bridges</h1>
+            <h1 class="bridges-h1">Crossings</h1>
             <p v-if="payload?.fetchError" class="bridges-warn" role="status">
               Data may be stale · {{ payload.fetchError }}
             </p>

@@ -148,6 +148,19 @@ export async function getBridgesPanynj() {
   return handleJson(r)
 }
 
+/**
+ * TomTom flow segment batch for corridor schematic (server uses TOMTOM_API_KEY).
+ * @returns {Promise<{ ok: boolean, byCorridor?: Record<string, unknown[]>, fetchedAt?: number, error?: string }>}
+ */
+export async function postTrafficTomtomCorridors(body = {}) {
+  const r = await apiFetch('/api/traffic/tomtom/corridors', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body ?? {}),
+  })
+  return handleJson(r)
+}
+
 export async function getAssignment() {
   const r = await apiFetch('/api/assignment')
   return handleJson(r)
