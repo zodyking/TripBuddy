@@ -1070,7 +1070,7 @@ onUnmounted(() => {
                         @dblclick.stop.prevent="onRowDoubleClick(e)"
                       >
                         <div class="history-trip-head">
-                          <div class="history-trip-head__main">
+                          <div class="history-trip-row-a">
                             <p
                               class="history-trip-od-line"
                               :title="`${str(e.dispatchHeader?.origin) || '—'} → ${str(e.dispatchHeader?.destination) || '—'}`"
@@ -1081,17 +1081,7 @@ onUnmounted(() => {
                               <span class="history-od-lab">Destination:</span>
                               <span class="history-od-id">{{ leadingLocationId(e.dispatchHeader?.destination) || '—' }}</span>
                             </p>
-                            <div class="history-trip-dispatch">
-                              <span class="history-trip-dispatch__lab">{{
-                                e.source === 'linehaul' ? 'Dispatched' : 'Time'
-                              }}</span>
-                              <time
-                                class="history-trip-dispatch__when"
-                                :datetime="new Date(e.displayDate).toISOString()"
-                                >{{ formatWhen(e.displayDate) }}</time
-                              >
-                            </div>
-                            <div class="history-trip-actions">
+                            <div class="history-trip-rightbar">
                               <div
                                 v-if="e.dailyTripLegSequence"
                                 class="history-outcome-slot"
@@ -1113,18 +1103,34 @@ onUnmounted(() => {
                                   </button>
                                 </div>
                               </div>
-                              <span class="history-trip-mi-pill history-trip-mi-pill--trip">{{
+                              <span class="history-trip-mi-pill history-trip-mi-pill--inline">{{
                                 tripHeaderMileageDisplay(e)
                               }}</span>
                             </div>
                           </div>
                           <p
-                            v-if="e.dailyTripLegSequence"
-                            class="history-trip-legline"
-                            :title="`Double-tap header: cycle status · Leg #${e.dailyTripLegSequence}`"
+                            class="history-trip-meta-strip"
+                            :title="
+                              e.dailyTripLegSequence
+                                ? `Double-tap header: cycle status · Leg #${e.dailyTripLegSequence}`
+                                : ''
+                            "
                           >
-                            Leg #{{ e.dailyTripLegSequence }} ·
-                            {{ sourceLabel((str(e.dispatchHeader?.source) || e.source) || '') }}
+                            <span class="history-trip-meta-strip__lab">{{
+                              e.source === 'linehaul' ? 'Dispatched' : 'Time'
+                            }}</span>
+                            <span class="history-trip-meta-strip__sep" aria-hidden="true">·</span>
+                            <time
+                              class="history-trip-meta-strip__when"
+                              :datetime="new Date(e.displayDate).toISOString()"
+                              >{{ formatWhen(e.displayDate) }}</time
+                            >
+                            <template v-if="e.dailyTripLegSequence">
+                              <span class="history-trip-meta-strip__sep" aria-hidden="true">·</span>
+                              <span class="history-trip-meta-strip__leg">Leg #{{ e.dailyTripLegSequence }}</span>
+                              <span class="history-trip-meta-strip__sep" aria-hidden="true">·</span>
+                              <span>{{ sourceLabel((str(e.dispatchHeader?.source) || e.source) || '') }}</span>
+                            </template>
                           </p>
                         </div>
                       </summary>
@@ -1871,7 +1877,7 @@ onUnmounted(() => {
 
 .history-trip-summary.history-fold__summary {
   display: block;
-  padding: 0.32rem 1.75rem 0.28rem 0.44rem;
+  padding: 0.26rem 1.65rem 0.22rem 0.44rem;
 }
 
 .history-trip-summary.history-fold__summary::after {
@@ -1882,101 +1888,91 @@ onUnmounted(() => {
 .history-trip-head {
   display: flex;
   flex-direction: column;
-  gap: 0.22rem;
+  gap: 0.14rem;
   width: 100%;
 }
 
-.history-trip-head__main {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto minmax(6.5rem, max-content);
-  gap: 0.35rem 0.5rem;
+.history-trip-row-a {
+  display: flex;
+  flex-direction: row;
   align-items: center;
+  justify-content: space-between;
+  gap: 0.45rem;
   width: 100%;
+}
+
+.history-trip-rightbar {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.32rem;
+  flex-shrink: 0;
+}
+
+.history-trip-rightbar .history-outcome-slot {
+  flex-shrink: 0;
 }
 
 .history-trip-od-line {
   margin: 0;
   min-width: 0;
-  font-size: 0.65rem;
+  font-size: 0.64rem;
   font-weight: 600;
-  line-height: 1.22;
+  line-height: 1.18;
   color: var(--color-text-primary, #ececf4);
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 0.12rem 0.28rem;
+  gap: 0.1rem 0.26rem;
 }
 
-.history-trip-dispatch {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  justify-content: center;
-  gap: 0.04rem;
-  text-align: right;
-  min-width: 7.5rem;
-}
-
-.history-trip-dispatch__lab {
-  font-size: 0.48rem;
-  font-weight: 800;
-  letter-spacing: 0.07em;
-  text-transform: uppercase;
-  color: #7a7a88;
-  line-height: 1.1;
-}
-
-.history-trip-dispatch__when {
-  font-size: 0.64rem;
-  font-weight: 700;
-  font-variant-numeric: tabular-nums;
-  color: #e4dff8;
-  line-height: 1.15;
-}
-
-.history-trip-actions {
-  display: flex;
-  flex-direction: column;
-  align-items: stretch;
-  justify-content: center;
-  gap: 0.22rem;
-  min-width: 5.75rem;
-}
-
-.history-trip-actions .history-outcome-slot {
-  width: 100%;
-}
-
-.history-trip-actions .history-outcome-wrap {
-  width: 100%;
-}
-
-.history-outcome-pill--trip {
-  width: 100%;
-  min-height: 1.38rem;
-  padding: 0.06rem 0.32rem 0.06rem 0.34rem;
-  border-radius: 6px;
-}
-
-.history-trip-mi-pill--trip {
-  display: flex;
+.history-trip-mi-pill--inline {
+  display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 100%;
-  min-height: 1.38rem;
-  padding: 0.06rem 0.28rem;
-  font-size: 0.54rem;
+  width: auto;
+  min-height: 1.22rem;
+  padding: 0.05rem 0.26rem;
+  font-size: 0.53rem;
   box-sizing: border-box;
 }
 
-.history-trip-legline {
+.history-trip-meta-strip {
   margin: 0;
-  padding-top: 0.06rem;
-  font-size: 0.56rem;
+  font-size: 0.54rem;
   font-weight: 600;
-  color: var(--color-text-tertiary, #6e6e7e);
-  line-height: 1.2;
-  letter-spacing: 0.02em;
+  line-height: 1.18;
+  letter-spacing: 0.015em;
+  color: var(--color-text-tertiary, #7a7a88);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.18rem 0.28rem;
+}
+
+.history-trip-meta-strip__lab {
+  font-size: 0.48rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #6f6f7c;
+}
+
+.history-trip-meta-strip__when {
+  font-size: 0.56rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: #c8c4dc;
+}
+
+.history-trip-meta-strip__leg {
+  font-variant-numeric: tabular-nums;
+}
+
+.history-trip-meta-strip__sep {
+  color: #4e4e58;
+  font-weight: 700;
 }
 
 .history-od-lab {
@@ -2182,6 +2178,16 @@ onUnmounted(() => {
   opacity: 0.7;
   flex-shrink: 0;
 }
+
+/* Trip card header: compact pill (base rule above uses taller default for day/week rows) */
+.history-outcome-pill.history-outcome-pill--trip {
+  width: auto;
+  min-width: 4.45rem;
+  max-width: min(10rem, 42vw);
+  min-height: 1.22rem;
+  padding: 0.05rem 0.28rem 0.05rem 0.3rem;
+}
+
 .history-outcome-pop {
   position: absolute;
   right: 0;
