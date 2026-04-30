@@ -46,9 +46,9 @@ export function bridgeShortLabelForRouteId(routeId) {
     // Goethals
     86: 'Goethals',
     87: 'Goethals',
-    // Outerbridge Crossing
-    260: 'Outerbridge',
-    2520: 'Outerbridge',
+    // Outerbridge — short label fits marker without ellipsis
+    260: 'Outer',
+    2520: 'Outer',
   })
   if (k && map[k]) return map[k]
   return ''
@@ -197,6 +197,7 @@ function bridgeSvg(opts) {
  * @param {boolean} [p.isClosed]
  * @param {boolean} [p.selected]
  * @param {string} [p.shortLabel] one-word (or short) name on the marker
+ * @param {'green' | 'orange' | 'red'} [p.delayTier] crossing-time severity (overrides trend palette when set)
  */
 export function bridgesCrossingIcon(p) {
   const tk = p.trendKey || 'unk'
@@ -209,6 +210,21 @@ export function bridgesCrossingIcon(p) {
     tower = '#475569'
     deck = '#334155'
     glow = '#64748b'
+  } else if (p.delayTier === 'green') {
+    stroke = '#86efac'
+    tower = '#15803d'
+    deck = '#166534'
+    glow = '#4ade80'
+  } else if (p.delayTier === 'orange') {
+    stroke = '#fdba74'
+    tower = '#c2410c'
+    deck = '#9a3412'
+    glow = '#fb923c'
+  } else if (p.delayTier === 'red') {
+    stroke = '#fca5a5'
+    tower = '#991b1b'
+    deck = '#7f1d1d'
+    glow = '#f87171'
   } else if (p.isPick) {
     stroke = '#6ee7b7'
     tower = '#059669'

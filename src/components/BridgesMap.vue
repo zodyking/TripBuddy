@@ -12,7 +12,9 @@ const hasTomtomTraffic = computed(() => tomtomKeyEffective.value.length > 0)
 
 const props = defineProps({
   /** @type {import('vue').PropType<Array<{
-   *  id: string, lat: number, lng: number, title: string, shortLabel?: string, minutes: string, trendIcon: string,
+   *  id: string, lat: number, lng: number, title: string, shortLabel?: string,
+   *  delayTier?: 'green' | 'orange' | 'red',
+   *  minutes: string, trendIcon: string,
    *  trendKey: 'worse' | 'better' | 'neutral' | 'unk',
    *  trendFull: string, isPick: boolean, isClosed: boolean, rank: number
    * }>>} */
@@ -315,12 +317,16 @@ function toggleMyLocation() {
  * @param {boolean} selected
  */
 function makeIcon(p, selected) {
+  const tier = p.delayTier
+  const delayTier =
+    tier === 'green' || tier === 'orange' || tier === 'red' ? tier : undefined
   return bridgesCrossingIcon({
     trendKey: /** @type {'worse' | 'better' | 'neutral' | 'unk'} */(p.trendKey || 'unk'),
     isPick: !!p.isPick,
     isClosed: !!p.isClosed,
     selected,
     shortLabel: typeof p.shortLabel === 'string' ? p.shortLabel : '',
+    delayTier,
   })
 }
 

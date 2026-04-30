@@ -7,11 +7,11 @@ import {
   bridgeShortLabelForRouteId,
   bridgeShortLabelFromDisplayName,
 } from '../utils/mapMarkers.js'
+import { bridgeDelayTier } from '../utils/bridgeDelayTier.js'
 
 defineOptions({ name: 'BridgesView' })
 
 const POLL_MS = 5 * 60 * 1000
-const MAX_SPARK_POINTS = 48
 
 /** @typedef {'ToNY' | 'ToNJ'} TravelDir */
 /** @type {import('vue').Ref<TravelDir>} */
@@ -218,10 +218,33 @@ function seriesForRow(row) {
 }
 
 /**
- * @param {Array<{ t: number, m: number, s: number }>} points
- * @param {number} [maxN]
+ * @param {unknown} row
  */
-function downsampleTimeSeries(points, maxN = MAX_SPARK_POINTS) {
+function finiteTravelMinutes(row) {
+  const m = travelMinutes(row)
+  return Number.isFinite(m) && m !== Number.POSITIVE_INFINITY ? m : null
+}
+
+/**
+ * Accent for chart line/dot from current delay tier.
+ * @param {unknown} row
+ */
+function bridgeChartStrokeColor(row) {
+  if (isClosedRow(row)) return '#94a3b8'
+  const fm = finiteTravelMinutes(row)
+  const t = fm != null ? bridgeDelayTier(fm) : 'orange'
+  if (t === 'green') return '#4ade80'
+  if (t === 'red') return '#f87171'
+  return '#fb923c'
+}
+
+const MAX_CHART_POINTS = 96
+
+/**
+ * @param {Array<{ t: number, m: number, s: number }>} points
+ * @param {number} maxN
+ */
+function downsampleSeries(points, maxN) {
   if (!Array.isArray(points) || points.length === 0) return []
   if (points.length <= maxN) return points
   const out = []
@@ -237,72 +260,115 @@ function downsampleTimeSeries(points, maxN = MAX_SPARK_POINTS) {
 }
 
 /**
- * Rich mini-chart: area fill, grid, min/max + last point.
- * @param {Array<{ t: number, m: number, s: number }>} points
- */
-function sparklinePathD(points) {
-  if (!Array.isArray(points) || points.length < 1) return ''
-  const p = downsampleTimeSeries(points, MAX_SPARK_POINTS)
-  if (p.length < 1) return ''
-  const w = 100
-  const h = 32
-  const padX = 4
-  const padY = 6
-  const vals = p.map((x) => x.m)
-  const minV = Math.min(...vals, 0)
-  const maxV = Math.max(...vals, 1)
-  const span = Math.max(maxV - minV, 0.1)
-  const n = p.length
-  return p
-    .map((pt, i) => {
-      const x = padX + (w - 2 * padX) * (n <= 1 ? 0.5 : i / (n - 1))
-      const y = padY + (h - 2 * padY) * (1 - (pt.m - minV) / span)
-      return `${i === 0 ? 'M' : 'L'}${x.toFixed(1)},${y.toFixed(1)}`
-    })
-    .join(' ')
-}
-
-/**
- * @param {Array<{ t: number, m: number, s: number }>} points
- */
-function sparkAreaPathD(points) {
-  if (!Array.isArray(points) || points.length < 1) return ''
-  const p = downsampleTimeSeries(points, MAX_SPARK_POINTS)
-  if (p.length < 1) return ''
-  const w = 100
-  const h = 32
-  const padX = 4
-  const padY = 6
-  const vals = p.map((x) => x.m)
-  const minV = Math.min(...vals, 0)
-  const maxV = Math.max(...vals, 1)
-  const span = Math.max(maxV - minV, 0.1)
-  const n = p.length
-  const pts = p.map((pt, i) => {
-    const x = padX + (w - 2 * padX) * (n <= 1 ? 0.5 : i / (n - 1))
-    const y = padY + (h - 2 * padY) * (1 - (pt.m - minV) / span)
-    return { x, y }
-  })
-  const yBase = h - 2
-  return `M${pts[0].x.toFixed(1)},${yBase.toFixed(1)}${pts
-    .map((o) => `L${o.x.toFixed(1)},${o.y.toFixed(1)}`)
-    .join('')}L${pts[pts.length - 1].x.toFixed(1)},${yBase.toFixed(1)}Z`
-}
-
-/**
+ * Time-based chart: x = sample time, y = crossing minutes (axis labels).
  * @param {unknown} row
  */
-/**
- * @param {unknown} row
- */
-function sparkMeta(row) {
-  const s = seriesForRow(row)
-  if (!s.length) return { min: 0, max: 0 }
-  const p = downsampleTimeSeries(s, MAX_SPARK_POINTS)
-  const vals = p.map((x) => x.m)
+function bridgeChartModel(row) {
+  const vb = {
+    w: 100,
+    h: 52,
+    plotL: 15,
+    plotR: 98,
+    plotT: 7,
+    plotB: 33,
+  }
+  const pw = vb.plotR - vb.plotL
+  const ph = vb.plotB - vb.plotT
+  const strokeColor = bridgeChartStrokeColor(row)
+
+  if (isClosedRow(row)) {
+    return {
+      hasPath: false,
+      strokeColor,
+      vb,
+    }
+  }
+
+  const raw = seriesForRow(row)
+  const pts = downsampleSeries(raw, MAX_CHART_POINTS)
+  if (pts.length < 2) {
+    return { hasPath: false, strokeColor, vb }
+  }
+
+  const tMin = pts[0].t
+  const tMax = pts[pts.length - 1].t
+  const spanT = Math.max(tMax - tMin, 60_000)
+
+  const vals = pts.map((p) => p.m).filter((v) => Number.isFinite(v))
+  if (vals.length === 0) {
+    return { hasPath: false, strokeColor, vb }
+  }
+
+  let minM = Math.min(...vals)
+  let maxM = Math.max(...vals)
+  const pad = Math.max((maxM - minM) * 0.1, 1)
+  minM -= pad
+  maxM += pad
+  const spanM = Math.max(maxM - minM, 0.5)
+
+  const xOf = /** @param {number} t */ (t) => vb.plotL + pw * ((t - tMin) / spanT)
+  const yOf = /** @param {number} m */ (m) => vb.plotT + ph * (1 - (m - minM) / spanM)
+
+  const pathPts = pts.map((pt) => ({
+    x: xOf(pt.t),
+    y: yOf(Number.isFinite(pt.m) ? pt.m : minM),
+  }))
+
+  const dLine = pathPts
+    .map((p, i) => `${i === 0 ? 'M' : 'L'}${p.x.toFixed(2)},${p.y.toFixed(2)}`)
+    .join('')
+
+  const yBase = vb.plotB
+  const dArea =
+    `M${pathPts[0].x.toFixed(2)},${yBase.toFixed(2)}` +
+    pathPts.map((p) => `L${p.x.toFixed(2)},${p.y.toFixed(2)}`).join('') +
+    `L${pathPts[pathPts.length - 1].x.toFixed(2)},${yBase.toFixed(2)}Z`
+
+  const last = pathPts[pathPts.length - 1]
+
+  const midM = (minM + maxM) / 2
+  const yTicks = [
+    { y: yOf(maxM), lab: String(Math.round(maxM)) },
+    { y: yOf(midM), lab: String(Math.round(midM)) },
+    { y: yOf(minM), lab: String(Math.round(minM)) },
+  ]
+
+  const fmtHour = (ts) => {
+    try {
+      return new Date(ts).toLocaleTimeString(undefined, {
+        hour: 'numeric',
+        minute: '2-digit',
+      })
+    } catch {
+      return ''
+    }
+  }
+  const midT = (tMin + tMax) / 2
+  const xTicks = [
+    { x: xOf(tMin), lab: fmtHour(tMin) },
+    { x: xOf(midT), lab: fmtHour(midT) },
+    { x: xOf(tMax), lab: fmtHour(tMax) },
+  ]
+
+  /** @type {{ x1: number, y1: number, x2: number, y2: number }[]} */
+  const hGrids = yTicks.map((tk) => ({
+    x1: vb.plotL,
+    y1: tk.y,
+    x2: vb.plotR,
+    y2: tk.y,
+  }))
+
   return {
-    min: Math.min(...vals, 0),
-    max: Math.max(...vals, 1),
+    hasPath: true,
+    vb,
+    dLine,
+    dArea,
+    lastCx: last.x,
+    lastCy: last.y,
+    yTicks,
+    xTicks,
+    hGrids,
+    strokeColor,
   }
 }
 
@@ -315,35 +381,6 @@ function rowKey(row) {
   return [o.routeId, o.facilityModifier, o.cardinalDirection, o.travelDirection].join(
     ':',
   )
-}
-
-/**
- * @param {unknown} row
- */
-function sparkPathD(row) {
-  return sparklinePathD(seriesForRow(row))
-}
-function sparkAreaD(row) {
-  return sparkAreaPathD(seriesForRow(row))
-}
-function sparkLastPoint(row) {
-  const s = seriesForRow(row)
-  const p = downsampleTimeSeries(s, MAX_SPARK_POINTS)
-  if (p.length < 1) return { x: 50, y: 16 }
-  const w = 100
-  const h = 32
-  const padX = 4
-  const padY = 6
-  const vals = p.map((x) => x.m)
-  const minV = Math.min(...vals, 0)
-  const maxV = Math.max(...vals, 1)
-  const span = Math.max(maxV - minV, 0.1)
-  const n = p.length
-  const last = p[n - 1]
-  const i = n - 1
-  const x = padX + (w - 2 * padX) * (n <= 1 ? 0.5 : i / (n - 1))
-  const y = padY + (h - 2 * padY) * (1 - (last.m - minV) / span)
-  return { x, y, m: last.m }
 }
 
 /**
@@ -404,12 +441,14 @@ const mapPins = computed(() => {
     const pos = getBridgeAnchorForRouteId(id, direction.value)
     if (!pos) continue
     const ti = trendInfo(row)
+    const fm = finiteTravelMinutes(row)
     out.push({
       id,
       lat: pos[0],
       lng: pos[1],
       title: displayTitleShort(row),
       shortLabel: mapPinShortLabel(row),
+      delayTier: fm != null ? bridgeDelayTier(fm) : /** @type {'orange'} */ ('orange'),
       minutes: isClosedRow(row) ? '—' : (() => {
         const m = travelMinutes(row)
         return Number.isFinite(m) ? String(Math.round(m)) : '—'
@@ -635,78 +674,85 @@ onUnmounted(() => {
                   <div
                     v-if="row && typeof row === 'object' && (/** @type {any} */(row)).routeSpeed != null"
                     class="bridge-mph"
-                  >{{ (/** @type {any} */(row)).routeSpeed }}&nbsp;mph</div>
+                  >{{ (/** @type {any} */(row)).routeSpeed }} mph</div>
                 </div>
-                <div v-if="seriesForRow(row).length > 0" class="sparkline-wrap">
-                  <div class="spark-head">
-                    <span class="spark-lab">Recent (min)</span>
-                    <span
-                      v-if="sparkMeta(row).max > 0"
-                      class="spark-range"
-                    >{{ Math.round(sparkMeta(row).min) }}–{{ Math.round(sparkMeta(row).max) }}</span>
+                <div v-if="bridgeChartModel(row).hasPath" class="bridge-chart-wrap">
+                  <div class="bridge-chart-axis-labels">
+                    <span class="bridge-chart-y-lab">Minutes</span>
+                    <span class="bridge-chart-x-lab">Time</span>
                   </div>
                   <svg
-                    class="spark-svg"
-                    viewBox="0 0 100 32"
-                    preserveAspectRatio="none"
+                    class="bridge-chart-svg"
+                    :viewBox="`0 0 ${bridgeChartModel(row).vb.w} ${bridgeChartModel(row).vb.h}`"
+                    preserveAspectRatio="xMidYMid meet"
                     width="100%"
-                    height="32"
-                    :aria-label="`Recent travel time for ${displayTitle(row)}`"
+                    height="72"
+                    role="img"
+                    :aria-label="`Crossing time vs time for ${displayTitle(row)}`"
                   >
                     <defs>
                       <linearGradient
-                        :id="`spg-r${rowRouteId(row)}`"
+                        :id="`bcg-${rowRouteId(row)}`"
                         x1="0"
                         y1="0"
                         x2="0"
                         y2="1"
                       >
-                        <stop offset="0%" stop-color="rgba(167,139,250,0.35)" />
-                        <stop offset="100%" stop-color="rgba(167,139,250,0.02)" />
+                        <stop offset="0%" :stop-color="bridgeChartModel(row).strokeColor" stop-opacity="0.28" />
+                        <stop offset="100%" :stop-color="bridgeChartModel(row).strokeColor" stop-opacity="0.04" />
                       </linearGradient>
                     </defs>
-                    <line
-                      x1="4"
-                      y1="8"
-                      x2="96"
-                      y2="8"
-                      class="spark-grid"
-                    />
-                    <line
-                      x1="4"
-                      y1="16"
-                      x2="96"
-                      y2="16"
-                      class="spark-grid"
-                    />
-                    <line
-                      x1="4"
-                      y1="24"
-                      x2="96"
-                      y2="24"
-                      class="spark-grid"
-                    />
-                    <path
-                      v-if="sparkAreaD(row)"
-                      :d="sparkAreaD(row)"
-                      :fill="`url(#spg-r${rowRouteId(row)})`"
-                    />
-                    <path
-                      v-if="sparkPathD(row)"
-                      :d="sparkPathD(row)"
-                      fill="none"
-                      stroke="var(--b-spark, #c4b5fd)"
-                      stroke-width="1.75"
-                      stroke-linecap="round"
-                      stroke-linejoin="round"
-                    />
-                    <circle
-                      v-if="seriesForRow(row).length"
-                      :cx="sparkLastPoint(row).x"
-                      :cy="sparkLastPoint(row).y"
-                      r="2.2"
-                      class="spark-dot"
-                    />
+                    <template v-if="bridgeChartModel(row).hasPath">
+                      <text
+                        class="bridge-chart-axis-title"
+                        x="5"
+                        :y="bridgeChartModel(row).yTicks[0].y + 3.5"
+                        text-anchor="start"
+                      >{{ bridgeChartModel(row).yTicks[0].lab }}</text>
+                      <text
+                        class="bridge-chart-axis-title"
+                        x="5"
+                        :y="bridgeChartModel(row).yTicks[2].y + 3.5"
+                        text-anchor="start"
+                      >{{ bridgeChartModel(row).yTicks[2].lab }}</text>
+                      <line
+                        v-for="(g, gi) in bridgeChartModel(row).hGrids"
+                        :key="`hg-${gi}`"
+                        :x1="g.x1"
+                        :y1="g.y1"
+                        :x2="g.x2"
+                        :y2="g.y2"
+                        class="bridge-chart-grid"
+                      />
+                      <path
+                        :d="bridgeChartModel(row).dArea"
+                        :fill="`url(#bcg-${rowRouteId(row)})`"
+                      />
+                      <path
+                        :d="bridgeChartModel(row).dLine"
+                        fill="none"
+                        :stroke="bridgeChartModel(row).strokeColor"
+                        stroke-width="1.35"
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                      />
+                      <circle
+                        :cx="bridgeChartModel(row).lastCx"
+                        :cy="bridgeChartModel(row).lastCy"
+                        r="2.25"
+                        :fill="bridgeChartModel(row).strokeColor"
+                        stroke="#0f0f14"
+                        stroke-width="0.85"
+                      />
+                      <text
+                        v-for="(tk, ti) in bridgeChartModel(row).xTicks"
+                        :key="`xt-${ti}`"
+                        class="bridge-chart-tick-x"
+                        :x="tk.x"
+                        y="47"
+                        text-anchor="middle"
+                      >{{ tk.lab }}</text>
+                    </template>
                   </svg>
                 </div>
               </div>
@@ -942,7 +988,7 @@ onUnmounted(() => {
   padding: 0;
   display: flex;
   flex-direction: column;
-  gap: 0.6rem;
+  gap: 0.4rem;
   width: 100%;
   max-width: none;
 }
@@ -982,45 +1028,45 @@ onUnmounted(() => {
 }
 
 .bridge-tile-inner {
-  padding: 0.5rem 0.65rem 0.4rem;
+  padding: 0.45rem 0.55rem 0.45rem;
   min-height: 0;
   display: flex;
   flex-direction: column;
-  gap: 0.15rem;
+  gap: 0.08rem;
 }
 
 .bridge-tile-top {
   display: grid;
-  grid-template-columns: 1.35rem 1fr auto;
+  grid-template-columns: 1.2rem 1fr auto;
   grid-template-areas: 'rank name trend' 'bdg bdg bdg';
-  align-items: start;
-  column-gap: 0.4rem;
-  row-gap: 0.1rem;
-  min-height: 2.5rem;
+  align-items: center;
+  column-gap: 0.35rem;
+  row-gap: 0;
+  min-height: 0;
   position: relative;
 }
 
 @media (min-width: 480px) {
   .bridge-tile-top {
-    min-height: 2.6rem;
+    grid-template-columns: 1.25rem 1fr auto;
   }
 }
 
 .bridge-rank {
   grid-area: rank;
-  font-size: 0.65rem;
-  font-weight: 900;
+  font-size: 0.55rem;
+  font-weight: 800;
   line-height: 1;
-  color: #5c5c6c;
-  padding-top: 0.15rem;
+  color: #6b6b78;
+  padding-top: 0;
   text-align: center;
-  width: 1.35rem;
-  height: 1.35rem;
+  width: 1.2rem;
+  height: 1.2rem;
   display: flex;
   align-items: center;
   justify-content: center;
-  background: rgba(0, 0, 0, 0.35);
-  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.28);
+  border-radius: 5px;
   border: 1px solid rgba(255, 255, 255, 0.06);
 }
 
@@ -1036,29 +1082,29 @@ onUnmounted(() => {
 
 .bridge-title {
   margin: 0;
-  font-size: clamp(0.78rem, 2.1vw, 0.92rem);
-  font-weight: 800;
-  line-height: 1.2;
-  color: #f2eef9;
-  letter-spacing: 0.01em;
+  font-size: var(--text-sm, 0.8125rem);
+  font-weight: 650;
+  line-height: 1.25;
+  color: var(--color-text-primary, #f0f0f8);
+  letter-spacing: 0;
   word-break: break-word;
   hyphens: auto;
 }
 
 .bridge-trend {
   grid-area: trend;
-  width: 1.65rem;
-  height: 1.65rem;
+  width: 1.45rem;
+  height: 1.45rem;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 0.9rem;
+  font-size: 0.78rem;
   line-height: 1;
-  font-weight: 900;
+  font-weight: 800;
   border-radius: 8px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  color: #7a7a8c;
-  background: rgba(0, 0, 0, 0.35);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  color: #8a8a98;
+  background: rgba(0, 0, 0, 0.22);
   flex-shrink: 0;
 }
 
@@ -1085,89 +1131,96 @@ onUnmounted(() => {
   display: flex;
   align-items: baseline;
   justify-content: space-between;
-  gap: 0.4rem;
-  margin-top: 0.1rem;
-  min-height: 2.4rem;
+  gap: 0.35rem;
+  margin-top: 0.05rem;
+  min-height: 0;
 }
 
 .bridge-min-block {
   display: flex;
   align-items: baseline;
-  gap: 0.15rem;
+  gap: 0.12rem;
   flex: 0 0 auto;
 }
 
 .bridge-min-num {
-  font-size: clamp(1.8rem, 5.5vw, 2.35rem);
-  font-weight: 900;
-  line-height: 0.9;
-  letter-spacing: -0.03em;
-  color: #e9e4ff;
-  text-shadow: 0 1px 0 rgba(0, 0, 0, 0.5);
+  font-size: clamp(1.25rem, 4.2vw, 1.55rem);
+  font-weight: 800;
+  line-height: 1;
+  letter-spacing: -0.02em;
+  color: var(--color-text-primary, #ebe8f4);
   font-variant-numeric: tabular-nums;
 }
 
 .bridge-tile.is-pick .bridge-min-num {
-  color: #c4f4dd;
+  color: #b8f5d8;
 }
 
 .bridge-min-suf {
-  font-size: 0.75rem;
-  font-weight: 800;
-  text-transform: uppercase;
-  color: #8a8a9a;
-  letter-spacing: 0.06em;
+  font-size: 0.65rem;
+  font-weight: 700;
+  text-transform: lowercase;
+  color: var(--color-text-tertiary, #7a7a8c);
+  letter-spacing: 0.02em;
 }
 
 .bridge-mph {
-  font-size: 0.72rem;
-  font-weight: 700;
-  color: #6e6e80;
+  font-size: var(--text-xs, 0.6875rem);
+  font-weight: 600;
+  color: var(--color-text-tertiary, #6e6e80);
   font-variant-numeric: tabular-nums;
   text-align: right;
-  line-height: 1.1;
-  max-width: 4rem;
+  line-height: 1.2;
+  max-width: 5rem;
   flex-shrink: 0;
 }
 
-.sparkline-wrap {
-  margin-top: 0.25rem;
-  padding-top: 0.3rem;
+.bridge-chart-wrap {
+  margin-top: 0.15rem;
+  padding-top: 0.2rem;
   border-top: 1px solid rgba(255, 255, 255, 0.06);
 }
-.spark-head {
+
+.bridge-chart-axis-labels {
   display: flex;
-  align-items: center;
   justify-content: space-between;
-  margin-bottom: 0.2rem;
-  padding: 0 0.1rem;
+  align-items: center;
+  margin-bottom: 0.15rem;
+  padding: 0 0.05rem;
 }
-.spark-lab {
-  font-size: 0.55rem;
+
+.bridge-chart-y-lab,
+.bridge-chart-x-lab {
+  font-size: 0.5rem;
   font-weight: 800;
   text-transform: uppercase;
-  letter-spacing: 0.1em;
-  color: #6b6b78;
+  letter-spacing: 0.08em;
+  color: #5c5c6c;
 }
-.spark-range {
-  font-size: 0.6rem;
-  font-weight: 800;
-  font-variant-numeric: tabular-nums;
-  color: #9a9aac;
+
+.bridge-chart-svg {
+  display: block;
+  width: 100%;
+  max-width: 100%;
 }
-.spark-grid {
-  stroke: rgba(255, 255, 255, 0.04);
+
+.bridge-chart-grid {
+  stroke: rgba(255, 255, 255, 0.06);
   stroke-width: 1;
   vector-effect: non-scaling-stroke;
 }
-.spark-dot {
-  fill: #e9d5ff;
-  stroke: #7c3aed;
-  stroke-width: 1.2;
+
+.bridge-chart-axis-title {
+  fill: #7a7a88;
+  font-size: 5.5px;
+  font-weight: 700;
+  font-family: var(--font-sans, system-ui, sans-serif);
 }
-.spark-svg {
-  display: block;
-  max-width: 100%;
-  min-height: 1.5rem;
+
+.bridge-chart-tick-x {
+  fill: #7a7a88;
+  font-size: 5.25px;
+  font-weight: 650;
+  font-family: var(--font-sans, system-ui, sans-serif);
 }
 </style>
