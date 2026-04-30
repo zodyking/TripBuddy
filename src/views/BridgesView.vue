@@ -282,14 +282,14 @@ function downsampleSeries(points, maxN) {
  * @param {unknown} row
  */
 function bridgeChartModel(row) {
-  /** Wide viewBox; SVG uses CSS aspect-ratio matching vb so plot fills card width */
+  /** Wide viewBox; taller plot band so the history chart uses vertical space in the card */
   const vb = {
     w: 268,
-    h: 52,
+    h: 78,
     plotL: 14,
     plotR: 266,
-    plotT: 7,
-    plotB: 33,
+    plotT: 9,
+    plotB: 54,
   }
   const pw = vb.plotR - vb.plotL
   const ph = vb.plotB - vb.plotT
@@ -790,7 +790,7 @@ onUnmounted(() => {
                           :key="`xt-${ti}`"
                           class="bridge-chart-tick-x"
                           :x="tk.x"
-                          y="47"
+                          y="69"
                           text-anchor="middle"
                         >{{ tk.lab }}</text>
                       </template>
