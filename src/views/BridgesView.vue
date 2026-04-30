@@ -282,11 +282,12 @@ function downsampleSeries(points, maxN) {
  * @param {unknown} row
  */
 function bridgeChartModel(row) {
+  /** Wide viewBox so `meet` + fixed pixel height still fills typical phone card width */
   const vb = {
-    w: 100,
+    w: 268,
     h: 52,
-    plotL: 10,
-    plotR: 99,
+    plotL: 22,
+    plotR: 264,
     plotT: 7,
     plotB: 33,
   }
@@ -724,6 +725,7 @@ onUnmounted(() => {
                       :viewBox="`0 0 ${bridgeChartModel(row).vb.w} ${bridgeChartModel(row).vb.h}`"
                       preserveAspectRatio="xMidYMid meet"
                       width="100%"
+                      height="76"
                       role="img"
                       :aria-label="`Crossing time vs time for ${displayTitle(row)}`"
                     >
@@ -742,13 +744,13 @@ onUnmounted(() => {
                       <template v-if="bridgeChartModel(row).hasPath">
                         <text
                           class="bridge-chart-axis-title"
-                          x="5"
+                          x="12"
                           :y="bridgeChartModel(row).yTicks[0].y + 3.5"
                           text-anchor="start"
                         >{{ bridgeChartModel(row).yTicks[0].lab }}</text>
                         <text
                           class="bridge-chart-axis-title"
-                          x="5"
+                          x="12"
                           :y="bridgeChartModel(row).yTicks[2].y + 3.5"
                           text-anchor="start"
                         >{{ bridgeChartModel(row).yTicks[2].lab }}</text>
@@ -776,10 +778,10 @@ onUnmounted(() => {
                         <circle
                           :cx="bridgeChartModel(row).lastCx"
                           :cy="bridgeChartModel(row).lastCy"
-                          r="2.25"
+                          r="1.85"
                           :fill="bridgeChartModel(row).strokeColor"
                           stroke="#0f0f14"
-                          stroke-width="0.85"
+                          stroke-width="0.65"
                         />
                         <text
                           v-for="(tk, ti) in bridgeChartModel(row).xTicks"
@@ -1341,9 +1343,15 @@ onUnmounted(() => {
   display: block;
   width: 100%;
   max-width: 100%;
-  height: auto;
-  aspect-ratio: 100 / 52;
-  vertical-align: middle;
+  height: 76px;
+  max-height: 76px;
+}
+
+@media (max-width: 360px) {
+  .bridge-chart-svg {
+    height: 72px;
+    max-height: 72px;
+  }
 }
 
 .bridge-chart-grid {
@@ -1354,14 +1362,14 @@ onUnmounted(() => {
 
 .bridge-chart-axis-title {
   fill: #8b8b9a;
-  font-size: 5.5px;
+  font-size: 4.75px;
   font-weight: 700;
   font-family: var(--font-sans, system-ui, sans-serif);
 }
 
 .bridge-chart-tick-x {
   fill: #8b8b9a;
-  font-size: 5.35px;
+  font-size: 4.6px;
   font-weight: 650;
   font-family: var(--font-sans, system-ui, sans-serif);
 }
