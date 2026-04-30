@@ -145,16 +145,39 @@ function mileageHeaderLine(sum, withMi, totalTrips) {
 }
 
 /**
- * Always show paid miles on collapsed trip header (0 when unknown).
+ * Trip header: paid miles as plain text (0 when unknown).
  * @param {LedgerEntry} e
  */
-function tripHeaderMileageDisplay(e) {
+function tripHeaderMiPlain(e) {
   const n = tripPaidMiles(e)
   const mi = n != null ? formatMilesSum(n) : '0'
+  return `${mi} mi`
+}
+
+/**
+ * Trip header: run time when known (plain text, no pill).
+ * @param {LedgerEntry} e
+ */
+function tripHeaderRunPlain(e) {
   const mb = mileageBlock(e)
-  const parts = [`${mi} mi`]
-  if (mb?.run != null) parts.push(`~${mb.run}h`)
-  return parts.join(' · ')
+  if (mb?.run == null) return null
+  return `~${mb.run} h`
+}
+
+/**
+ * Hide dolly dl rows with empty / placeholder values.
+ * @param {unknown} rows
+ */
+function filterDollyRows(rows) {
+  if (!Array.isArray(rows)) return []
+  return rows.filter((row) => {
+    if (!row || typeof row !== 'object') return false
+    const v = /** @type {{ value?: unknown }} */ (row).value
+    const s = v == null ? '' : String(v).trim()
+    if (!s) return false
+    if (s === '—' || s === '-' || s === '–') return false
+    return true
+  })
 }
 
 /** Paid miles in [PAY_ROUND_BAND_MIN, PAY_ROUND_BAND_MAX] count as {@link PAY_ROUND_TO_MI} mi for pay estimate. */
@@ -1080,13 +1103,18 @@ onUnmounted(() => {
                               <span class="history-od-arrow" aria-hidden="true">→</span>
                               <span class="history-od-lab">Destination:</span>
                               <span class="history-od-id">{{ leadingLocationId(e.dispatchHeader?.destination) || '—' }}</span>
+                              <span class="history-trip-od-sep" aria-hidden="true">·</span>
+                              <span class="history-trip-inline-k">{{ tripHeaderMiPlain(e) }}</span>
+                              <template v-if="tripHeaderRunPlain(e)">
+                                <span class="history-trip-od-sep" aria-hidden="true">·</span>
+                                <span class="history-trip-inline-k">{{ tripHeaderRunPlain(e) }}</span>
+                              </template>
                             </p>
-                            <div class="history-trip-rightbar">
-                              <div
-                                v-if="e.dailyTripLegSequence"
-                                class="history-outcome-slot"
-                                @click.stop
-                              >
+                            <div
+                              v-if="e.dailyTripLegSequence"
+                              class="history-trip-rightbar"
+                            >
+                              <div class="history-outcome-slot" @click.stop>
                                 <div class="history-outcome-wrap" @click.stop>
                                   <button
                                     type="button"
@@ -1103,9 +1131,6 @@ onUnmounted(() => {
                                   </button>
                                 </div>
                               </div>
-                              <span class="history-trip-mi-pill history-trip-mi-pill--inline">{{
-                                tripHeaderMileageDisplay(e)
-                              }}</span>
                             </div>
                           </div>
                           <p
@@ -1145,12 +1170,19 @@ onUnmounted(() => {
                     <div class="history-body">
                       <template v-for="mb in [mileageBlock(e)]" :key="e.id + '-mileage'">
                         <div class="history-mileage">
-                          <span class="history-body-label">Paid mileage</span>
-                          <p class="history-mileage-total">
-                            <template v-if="mb && mb.total">{{ mb.total }} mi paid</template>
-                            <template v-else>0 mi paid</template>
-                            <template v-if="mb && mb.run != null"> &nbsp;·&nbsp;~{{ mb.run }} h run time</template>
-                          </p>
+                          <div class="history-mileage-top">
+                            <span class="history-body-label history-body-label--inline">Paid mileage</span>
+                            <p class="history-mileage-vals">
+                              <span class="history-mileage-mi">
+                                <template v-if="mb && mb.total">{{ mb.total }} mi</template>
+                                <template v-else>0 mi</template>
+                              </span>
+                              <template v-if="mb && mb.run != null">
+                                <span class="history-mile-stat-sep" aria-hidden="true">·</span>
+                                <span class="history-mile-run">~{{ mb.run }} h run</span>
+                              </template>
+                            </p>
+                          </div>
                           <ul
                             v-if="mb && mb.directionList && mb.directionList.length"
                             class="history-mileage-by-state"
@@ -1177,13 +1209,13 @@ onUnmounted(() => {
                         v-if="
                           e.tripDetails?.dolly &&
                           Array.isArray(e.tripDetails.dolly.rows) &&
-                          e.tripDetails.dolly.rows.length
+                          filterDollyRows(e.tripDetails.dolly.rows).length
                         "
                         class="history-dolly"
                       >
                         <span class="history-body-label">Dolly</span>
                         <dl class="history-mini-dl">
-                          <template v-for="(row, idx) in e.tripDetails.dolly.rows" :key="idx">
+                          <template v-for="(row, idx) in filterDollyRows(e.tripDetails.dolly.rows)" :key="idx">
                             <dt>{{ row.label }}</dt>
                             <dd>{{ row.value }}</dd>
                           </template>
@@ -1895,7 +1927,7 @@ onUnmounted(() => {
 .history-trip-row-a {
   display: flex;
   flex-direction: row;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
   gap: 0.45rem;
   width: 100%;
@@ -1904,10 +1936,11 @@ onUnmounted(() => {
 .history-trip-rightbar {
   display: flex;
   flex-direction: row;
-  align-items: center;
+  align-items: flex-start;
   justify-content: flex-end;
   gap: 0.32rem;
   flex-shrink: 0;
+  padding-top: 0.02rem;
 }
 
 .history-trip-rightbar .history-outcome-slot {
@@ -1917,25 +1950,27 @@ onUnmounted(() => {
 .history-trip-od-line {
   margin: 0;
   min-width: 0;
+  flex: 1 1 auto;
   font-size: 0.64rem;
   font-weight: 600;
-  line-height: 1.18;
+  line-height: 1.22;
   color: var(--color-text-primary, #ececf4);
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 0.1rem 0.26rem;
+  gap: 0.1rem 0.24rem;
 }
 
-.history-trip-mi-pill--inline {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: auto;
-  min-height: 1.22rem;
-  padding: 0.05rem 0.26rem;
-  font-size: 0.53rem;
-  box-sizing: border-box;
+.history-trip-od-sep {
+  color: #4e4e58;
+  font-weight: 700;
+  padding: 0 0.04rem;
+}
+
+.history-trip-inline-k {
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: #dedeea;
 }
 
 .history-trip-meta-strip {
@@ -2321,7 +2356,7 @@ onUnmounted(() => {
 }
 
 .history-dispatch {
-  padding: 0.75rem 0.85rem 0.5rem;
+  padding: 0.42rem 0.55rem 0.38rem;
   border-bottom: 1px solid #2a2a34;
 }
 
@@ -2354,55 +2389,91 @@ onUnmounted(() => {
 }
 
 .history-meta {
-  margin: 0.4rem 0 0;
-  font-size: 0.72rem;
+  margin: 0.28rem 0 0;
+  font-size: 0.68rem;
+  line-height: 1.3;
   color: var(--color-text-secondary, #a8a8b8);
 }
 
 .history-instr {
-  margin: 0.5rem 0 0;
-  font-size: 0.78rem;
-  line-height: 1.45;
+  margin: 0.38rem 0 0;
+  font-size: 0.72rem;
+  line-height: 1.35;
   color: var(--color-text-secondary, #c4c4d0);
   white-space: pre-wrap;
 }
 
 .history-body {
-  padding: 0.75rem 0.85rem 0.85rem;
+  padding: 0.45rem 0.55rem 0.55rem;
 }
 
 .history-mileage {
-  margin-bottom: 0.75rem;
-  padding: 0.55rem 0.65rem;
-  border-radius: 8px;
-  background: rgba(124, 92, 255, 0.06);
-  border: 1px solid rgba(124, 92, 255, 0.22);
+  margin-bottom: 0.45rem;
+  padding: 0.38rem 0.48rem;
+  border-radius: 6px;
+  background: rgba(124, 92, 255, 0.05);
+  border: 1px solid rgba(124, 92, 255, 0.18);
 }
 
-.history-mileage-total {
-  margin: 0 0 0.45rem;
-  font-size: 0.84rem;
+.history-mileage-top {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.35rem 0.55rem;
+  justify-content: space-between;
+}
+
+.history-body-label--inline {
+  display: inline;
+  margin: 0;
+  margin-right: 0.35rem;
+}
+
+.history-mileage-vals {
+  margin: 0;
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.2rem 0.35rem;
+  font-size: 0.72rem;
   font-weight: 600;
   color: var(--color-text-primary, #f0f0f8);
 }
 
+.history-mileage-mi {
+  font-variant-numeric: tabular-nums;
+}
+
+.history-mile-stat-sep {
+  color: #5c5c68;
+  font-weight: 700;
+}
+
+.history-mile-run {
+  font-size: 0.68rem;
+  font-weight: 600;
+  color: var(--color-text-secondary, #b4b4c4);
+  font-variant-numeric: tabular-nums;
+}
+
 .history-mileage-by-state {
-  margin: 0;
-  padding-left: 1.1rem;
-  font-size: 0.74rem;
-  line-height: 1.45;
-  color: var(--color-text-secondary, #b8b8c8);
+  margin: 0.32rem 0 0;
+  padding-left: 0.95rem;
+  font-size: 0.68rem;
+  line-height: 1.28;
+  color: var(--color-text-secondary, #a8a8b8);
 }
 
 .history-trip-meta {
-  margin: 0 0 0.65rem;
-  font-size: 0.72rem;
+  margin: 0 0 0.45rem;
+  font-size: 0.68rem;
+  line-height: 1.3;
   color: var(--color-text-secondary, #a8a8b8);
 }
 
 .history-body-label {
   display: block;
-  font-size: 0.65rem;
+  font-size: 0.6rem;
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.04em;
@@ -2413,9 +2484,9 @@ onUnmounted(() => {
 .history-mini-dl {
   display: grid;
   grid-template-columns: auto 1fr;
-  gap: 0.2rem 0.75rem;
+  gap: 0.14rem 0.55rem;
   margin: 0;
-  font-size: 0.75rem;
+  font-size: 0.7rem;
 }
 
 .history-mini-dl dt {
@@ -2429,38 +2500,38 @@ onUnmounted(() => {
 }
 
 .history-dolly {
-  margin-bottom: 0.75rem;
+  margin-bottom: 0.45rem;
 }
 
 .history-trailers {
   display: flex;
   flex-direction: column;
-  gap: 0.65rem;
+  gap: 0.45rem;
 }
 
 .history-trailer-block {
-  padding: 0.5rem 0.6rem;
-  border-radius: 8px;
+  padding: 0.38rem 0.45rem;
+  border-radius: 6px;
   background: #14141a;
-  border: 1px solid #2e2e38;
+  border: 1px solid #2a2a34;
 }
 
 .history-trailer-line {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 0.35rem;
+  gap: 0.28rem;
 }
 
 .history-trailer-title {
   font-weight: 700;
-  font-size: 0.8rem;
+  font-size: 0.74rem;
   color: var(--color-text-primary, #f4f4f8);
 }
 
 .history-trailer-nbr {
   font-weight: 700;
-  font-size: 0.8rem;
+  font-size: 0.74rem;
   font-family: ui-monospace, monospace;
   color: var(--color-text-primary, #f4f4f8);
 }
@@ -2468,9 +2539,9 @@ onUnmounted(() => {
 .history-badge {
   display: inline-flex;
   align-items: center;
-  padding: 0.15rem 0.4rem;
+  padding: 0.1rem 0.32rem;
   border-radius: 4px;
-  font-size: 0.62rem;
+  font-size: 0.58rem;
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.03em;
@@ -2493,12 +2564,12 @@ onUnmounted(() => {
 
 .history-trailer-rows {
   list-style: none;
-  margin: 0.45rem 0 0;
+  margin: 0.32rem 0 0;
   padding: 0;
   display: flex;
   flex-direction: column;
-  gap: 0.25rem;
-  font-size: 0.72rem;
+  gap: 0.18rem;
+  font-size: 0.66rem;
 }
 
 .history-trailer-rows li {
