@@ -24,6 +24,9 @@ const workWeekFromCred = ref({
   shiftEndMins: 1439,
 })
 
+/** FedEx pay-period estimate card — off until we bring per-period totals back */
+const SHOW_PAY_TOTAL_SECTION = false
+
 const loading = ref(true)
 const error = ref('')
 /** @type {import('vue').Ref<LedgerEntry[]>} */
@@ -1091,7 +1094,7 @@ onUnmounted(() => {
       <div class="history-month-nav" role="group" aria-label="Month">
         <button
           type="button"
-          class="history-mnav tap"
+          class="history-mnav"
           title="Previous month"
           :disabled="loading"
           @click="goPrevViewMonth"
@@ -1101,7 +1104,7 @@ onUnmounted(() => {
         <h2 class="history-month-h2">{{ viewMonthInfo.groupLabel }}</h2>
         <button
           type="button"
-          class="history-mnav tap"
+          class="history-mnav"
           title="Next month"
           :disabled="loading"
           @click="goNextViewMonth"
@@ -1431,7 +1434,11 @@ onUnmounted(() => {
               </div>
             </details>
 
-            <details class="history-pay-fold history-pay-fold--pay-total history-fold history-pay-card" open>
+            <details
+              v-if="SHOW_PAY_TOTAL_SECTION"
+              class="history-pay-fold history-pay-fold--pay-total history-fold history-pay-card"
+              open
+            >
               <summary class="history-pay-fold__summary history-fold__summary history-pay-fold__summary--pay">
                 <span class="history-pay-fold__title">Pay total</span>
                 <span class="history-pay-fold__pill">{{
@@ -1561,33 +1568,55 @@ onUnmounted(() => {
 }
 
 .history-month-nav {
-  flex: 0 0 auto;
-  min-width: 2.4rem;
-  min-height: 2.4rem;
   display: flex;
   align-items: center;
+  justify-content: space-between;
+  gap: 0.35rem;
+  width: 100%;
+  padding: 0.35rem 0.25rem;
+  margin-bottom: 0.15rem;
+}
+
+.history-mnav {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
   justify-content: center;
+  min-width: 2.25rem;
+  min-height: 2.25rem;
+  padding: 0;
+  margin: 0;
+  border: none;
   border-radius: 8px;
-  border: 1px solid rgba(167, 139, 250, 0.35);
-  background: linear-gradient(180deg, rgba(88, 52, 140, 0.55) 0%, rgba(42, 26, 72, 0.95) 100%);
-  color: #eee8ff;
-  font-size: 1rem;
+  background: transparent;
+  box-shadow: none;
+  color: #ffffff;
+  font-size: 1.15rem;
+  font-weight: 600;
   line-height: 1;
   cursor: pointer;
-  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.06) inset;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+  transition: opacity var(--duration-fast, 100ms) var(--ease-out, ease),
+    transform var(--duration-fast, 100ms) var(--ease-out, ease);
 }
 
 .history-mnav:hover:not(:disabled) {
-  border-color: rgba(196, 181, 253, 0.55);
-  background: linear-gradient(180deg, rgba(109, 71, 165, 0.65) 0%, rgba(52, 32, 88, 0.98) 100%);
+  opacity: 0.92;
+}
+
+.history-mnav:focus-visible {
+  outline: 2px solid rgba(255, 255, 255, 0.55);
+  outline-offset: 2px;
 }
 
 .history-mnav:active:not(:disabled) {
-  transform: translateY(1px);
+  transform: scale(0.96);
+  opacity: 0.85;
 }
 
 .history-mnav:disabled {
-  opacity: 0.4;
+  opacity: 0.35;
   cursor: not-allowed;
 }
 
