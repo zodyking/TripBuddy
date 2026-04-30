@@ -445,6 +445,8 @@ body {
 .leaflet-div-icon.map-trailer-div-icon {
   background: transparent !important;
   border: none !important;
+  overflow: hidden;
+  line-height: 0;
 }
 
 .map-trailer-marker-root {
@@ -454,6 +456,8 @@ body {
   gap: 2px;
   line-height: 0;
   pointer-events: none;
+  overflow: hidden;
+  box-sizing: border-box;
 }
 
 .map-trailer-marker-chip {

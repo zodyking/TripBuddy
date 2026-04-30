@@ -1,15 +1,15 @@
 # Map marker raster assets
 
-Leaflet truck / trailer markers load PNGs from **`public/`**:
+Truck and trailer top-view markers load PNGs **bundled by Vite** from `src/assets/map-markers/` (`import … ?url` in `src/utils/mapMarkers.js`). That way production builds get stable hashed URLs and renaming files under `public/` cannot break the map.
 
 | File | Purpose |
 |------|---------|
-| `truck.png` | Top-down tractor — **your GPS dot** (`L.icon` raster URL, not SVG-wrapped) |
-| `20ft.png` | Top-down **20′** van — trailer map (`divIcon` + `<img>` + optional number chip) |
-| `53ft.png` | Top-down **53′** van — same chip pattern |
+| `src/assets/map-markers/truck.png` | Top-down tractor — **your GPS dot** (`L.icon`) |
+| `src/assets/map-markers/20ft.png` | Top-down **20′** van — `divIcon` + `<img>` + optional chip |
+| `src/assets/map-markers/53ft.png` | Top-down **53′** van — same pattern |
 
-SVG data URLs with embedded `<image href="…png">` often fail to load cross-origin or are blocked for large files; we avoid that for user/trailer rasters.
+`public/truck.png` is kept as a convenience copy for non-bundled references; **the app reads the copies under `src/assets/map-markers/`**.
 
-Replace these files with your transparent PNGs (same filenames). If you resize a lot, tweak anchors in `mapMarkers.js` (`userLocationTruckIcon`, `trailerTopDivIcon` layouts).
+Replace those three files to update art. If dimensions change a lot, tweak `iconAnchor` / layout in `mapMarkers.js`.
 
 Non–20′/53′ trailers use the orange SVG pin (`trailerFallbackPinIcon`).

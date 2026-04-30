@@ -3,10 +3,17 @@
  */
 import L from 'leaflet'
 
-/** Raster markers served from `public/` (Vite base-aware paths). */
-const userLocationTruckImg = `${import.meta.env.BASE_URL}truck.png`
-const trailer20ftTopImg = `${import.meta.env.BASE_URL}20ft.png`
-const trailer53ftTopImg = `${import.meta.env.BASE_URL}53ft.png`
+/**
+ * Bundled raster URLs (Vite `?url`) — survives `public/` renames and gets correct hashes in production.
+ * Replace files under `src/assets/map-markers/` to update art.
+ */
+import truckMarkerUrl from '../assets/map-markers/truck.png?url'
+import trailer20MarkerUrl from '../assets/map-markers/20ft.png?url'
+import trailer53MarkerUrl from '../assets/map-markers/53ft.png?url'
+
+const userLocationTruckImg = truckMarkerUrl
+const trailer20ftTopImg = trailer20MarkerUrl
+const trailer53ftTopImg = trailer53MarkerUrl
 
 /** @param {string} svg */
 function svgDataUrl(svg) {
@@ -36,7 +43,7 @@ function escapeHtmlAttr(s) {
 }
 
 /**
- * Top-down truck PNG for “my location” (`public/truck.png`).
+ * Top-down truck PNG (`src/assets/map-markers/truck.png`).
  * Uses a raster `L.icon` (not SVG-wrapped) so large PNGs load reliably in all browsers.
  * Anchor bottom-center.
  */
@@ -75,7 +82,7 @@ function trailerTopDivIcon(rasterHref, layout, trailerNumber = '') {
   const imgH = labelRaw !== '' ? Math.max(vh - chipH, 1) : vh
   const html = `<div class="map-trailer-marker-root" style="width:${vw}px;height:${vh}px">${chipHtml}<img class="map-trailer-marker-img" src="${escapeHtmlAttr(
     rasterHref,
-  )}" alt="" width="${vw}" height="${imgH}"/></div>`
+  )}" alt="" role="presentation" decoding="async" width="${vw}" height="${imgH}"/></div>`
   return L.divIcon({
     html,
     className: 'map-trailer-div-icon',
@@ -86,7 +93,7 @@ function trailerTopDivIcon(rasterHref, layout, trailerNumber = '') {
 }
 
 /**
- * 20′ trailer top PNG + optional number chip (`public/20ft.png`).
+ * 20′ trailer top PNG + optional number chip (`src/assets/map-markers/20ft.png`).
  * @param {string} [trailerNumber]
  */
 export function trailer20ftTopIcon(trailerNumber = '') {
@@ -94,7 +101,7 @@ export function trailer20ftTopIcon(trailerNumber = '') {
 }
 
 /**
- * 53′ trailer top PNG + optional number chip (`public/53ft.png`).
+ * 53′ trailer top PNG + optional number chip (`src/assets/map-markers/53ft.png`).
  * @param {string} [trailerNumber]
  */
 export function trailer53ftTopIcon(trailerNumber = '') {
