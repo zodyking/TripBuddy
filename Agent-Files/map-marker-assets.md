@@ -12,6 +12,18 @@ The tractor/unit ID chip under the truck comes from **`linehaulTractorBody.tract
 
 `public/original-*.png` are optional backups of the large transparent masters; **`public/truck.png` / `20ft.png` / `53ft.png`** are synced for convenience only — the SPA uses the bundled paths above.
 
-Use **real alpha transparency** in these PNGs (not a checkerboard baked into pixels).
+### Fixing a solid white / gray “plate” behind the art
+
+If exports are **RGB** (no alpha), the browser cannot see through them — you get a big rectangle on the map.
+
+**Best:** Re-export from your editor as **PNG with transparency** (alpha channel), then replace the three files under `src/assets/map-markers/` (and run `npm run build`).
+
+**Quick fix in-repo:** We ship processed PNGs where border-connected background pixels are made transparent via flood-fill from the edges (`scripts/process-map-marker-pngs.py`). After swapping new masters, run:
+
+```bash
+python3 scripts/process-map-marker-pngs.py
+```
+
+Tune tolerance inside the script if a thin halo remains.
 
 Non–20′/53′ trailers use the orange SVG pin (`trailerFallbackPinIcon`).
