@@ -4,6 +4,7 @@
 import L from 'leaflet'
 import userLocationTruckImg from '../assets/map-markers/user-location-truck.png'
 import trailer20ftTopImg from '../assets/map-markers/trailer-20ft-top.png'
+import trailer53ftTopImg from '../assets/map-markers/trailer-53ft-top.png'
 
 /** @param {string} svg */
 function svgDataUrl(svg) {
@@ -47,15 +48,14 @@ export function userLocationTruckIcon() {
 }
 
 /**
- * 20′ trailer top PNG + optional number chip (replace `src/assets/map-markers/trailer-20ft-top.png`).
- * @param {string} [trailerNumber]
+ * Shared trailer top-view composite (PNG + optional number chip above image).
+ * @param {string} rasterHref
+ * @param {{ vw: number, vh: number, imgY: number, imgH: number, cls: string }} layout
+ * @param {string} trailerNumber
  */
-export function trailer20ftTopIcon(trailerNumber = '') {
-  const href = svgRasterHref(trailer20ftTopImg)
-  const vw = 72
-  const vh = 132
-  const imgY = 14
-  const imgH = 118
+function trailerTopCompositeIcon(rasterHref, layout, trailerNumber = '') {
+  const href = svgRasterHref(rasterHref)
+  const { vw, vh, imgY, imgH, cls } = layout
   const raw = String(trailerNumber ?? '')
     .trim()
     .replace(/^#/, '')
@@ -78,8 +78,32 @@ export function trailer20ftTopIcon(trailerNumber = '') {
     iconSize: [vw, vh],
     iconAnchor: [Math.round(vw / 2), vh],
     popupAnchor: [0, -Math.round(vh * 0.52)],
-    className: 'map-marker-img-icon map-marker-img-icon--trailer-20',
+    className: `map-marker-img-icon ${cls}`,
   })
+}
+
+/**
+ * 20′ trailer top PNG + optional number chip (replace `src/assets/map-markers/trailer-20ft-top.png`).
+ * @param {string} [trailerNumber]
+ */
+export function trailer20ftTopIcon(trailerNumber = '') {
+  return trailerTopCompositeIcon(
+    trailer20ftTopImg,
+    { vw: 72, vh: 132, imgY: 14, imgH: 118, cls: 'map-marker-img-icon--trailer-20' },
+    trailerNumber,
+  )
+}
+
+/**
+ * 53′ trailer top PNG + optional number chip (replace `src/assets/map-markers/trailer-53ft-top.png`).
+ * @param {string} [trailerNumber]
+ */
+export function trailer53ftTopIcon(trailerNumber = '') {
+  return trailerTopCompositeIcon(
+    trailer53ftTopImg,
+    { vw: 76, vh: 262, imgY: 14, imgH: 248, cls: 'map-marker-img-icon--trailer-53' },
+    trailerNumber,
+  )
 }
 
 /**
@@ -330,7 +354,7 @@ export function bridgesCrossingIcon(p) {
   })
 }
 
-/** Semi-trailer pin — fallback when trailer is not 20′ (PNG marker not wired yet). */
+/** Semi-trailer pin — fallback when trailer size is unknown / not 20′ or 53′ */
 function trailerSemiSvg() {
   return `<svg xmlns="http://www.w3.org/2000/svg" width="56" height="56" viewBox="0 0 56 56">
   <defs>

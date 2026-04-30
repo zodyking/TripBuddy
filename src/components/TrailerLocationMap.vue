@@ -9,12 +9,12 @@ import {
 } from 'vue'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
-import { trailer20ftTopIcon, trailerFallbackPinIcon, userLocationTruckIcon } from '../utils/mapMarkers.js'
+import { trailer20ftTopIcon, trailer53ftTopIcon, trailerFallbackPinIcon, userLocationTruckIcon } from '../utils/mapMarkers.js'
 
 const props = defineProps({
   lat: { type: Number, required: true },
   lng: { type: Number, required: true },
-  /** '20ft' | '53ft' | '' — 20ft uses top-down PNG + number chip */
+  /** '20ft' | '53ft' | '' — top-down PNG + number chip when known */
   trailerSize: { type: String, default: '' },
   /** Trailer number for marker chip (e.g. trlrNbr) */
   trailerNumber: { type: String, default: '' },
@@ -79,6 +79,9 @@ function makeTrailerIcon() {
   const num = String(props.trailerNumber ?? '').trim()
   if (sz === '20ft' || sz === "20'") {
     return trailer20ftTopIcon(num)
+  }
+  if (sz === '53ft' || sz === "53'") {
+    return trailer53ftTopIcon(num)
   }
   return trailerFallbackPinIcon()
 }
