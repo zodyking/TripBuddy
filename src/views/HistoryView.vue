@@ -1234,7 +1234,6 @@ onUnmounted(() => {
                             <span class="history-trailer-title">Trailer {{ t.order }}</span>
                             <span v-if="t.trlrNbr" class="history-trailer-nbr">#{{ t.trlrNbr }}</span>
                             <span class="history-badge">{{ t.size }}</span>
-                            <span class="history-badge history-badge--muted">{{ t.statusLabel }}</span>
                             <span class="history-badge history-badge--load">{{ t.loadType }}</span>
                           </div>
                           <ul
