@@ -1,42 +1,155 @@
 <script setup>
-import { ref, onMounted, onUnmounted, computed } from 'vue'
+import { ref, onMounted, onUnmounted, computed, watch } from 'vue'
 import { RouterLink } from 'vue-router'
 import CorridorFlowMap from '../components/CorridorFlowMap.vue'
-import { postTrafficCorridorStatus } from '../api.js'
+import {
+  getTrafficMonitoredRoutes,
+  postTrafficMonitoredRouteCreate,
+  postTrafficMonitoredRoutePreview,
+  postTrafficMonitoredRouteRemove,
+  postTrafficMonitoredRoutesSync,
+} from '../api.js'
 import { useMapVehicleId } from '../composables/useMapVehicleId.js'
+import { getTomtomKeyEffective } from '../stores/trafficTileKey.js'
 
 defineOptions({ name: 'TrafficCorridorsContent' })
 
-const POLL_MS = 45 * 1000
+const POLL_MS = 60 * 1000
 
-/** @type {import('vue').Ref<Record<string, unknown> | null>} */
-const payload = ref(null)
+/** @typedef {{ lat: number, lng: number }} LatLng */
+/** @typedef {{
+ *   localId: string,
+ *   name: string,
+ *   pathPoints: LatLng[],
+ *   createdAt: number,
+ *   tomtomRouteId: number,
+ *   status: Record<string, unknown> | null,
+ *   statusOk: boolean,
+ *   statusError: string | null,
+ * }} MonitoredRouteRow */
+
+const mode = ref(/** @type {'list' | 'create'} */ ('list'))
 const loading = ref(false)
 const error = ref('')
 const configError = ref('')
+/** @type {import('vue').Ref<{ ok?: boolean, fetchedAt?: number, routes?: unknown[] } | null>} */
+const syncPayload = ref(null)
+
+const selectedLocalId = ref('')
+
+/** @type {import('vue').Ref<LatLng[]>} */
+const draftWaypoints = ref([])
+const draftName = ref('')
+/** @type {import('vue').Ref<LatLng[]>} */
+const previewPolyline = ref([])
+const previewBusy = ref(false)
+const createBusy = ref(false)
+
+/** @type {ReturnType<typeof setTimeout> | null} */
+let previewTimer = null
 
 const needsTomtomKey = computed(() =>
   /tomtom api key required/i.test(String(configError.value || '')),
 )
 
-async function load() {
+const routesList = computed(() => {
+  const arr = syncPayload.value?.routes
+  return Array.isArray(arr) ? arr : []
+})
+
+const selectedRoute = computed(() => {
+  const id = selectedLocalId.value
+  if (!id) return null
+  return (
+    routesList.value.find(
+      (r) => r && typeof r === 'object' && /** @type {any} */ (r).localId === id,
+    ) || null
+  )
+})
+
+watch(
+  routesList,
+  (list) => {
+    if (!list.length) {
+      selectedLocalId.value = ''
+      return
+    }
+    if (!selectedLocalId.value || !list.some((r) => r?.localId === selectedLocalId.value)) {
+      const first = list[0]
+      if (first && typeof first === 'object' && 'localId' in first) {
+        selectedLocalId.value = String(/** @type {any} */ (first).localId)
+      }
+    }
+  },
+  { immediate: true },
+)
+
+const mapPolyline = computed(() => {
+  const sel = selectedRoute.value
+  if (!sel || typeof sel !== 'object') return []
+  const o = /** @type {Record<string, unknown>} */ (sel)
+  const st = o.status && typeof o.status === 'object' ? /** @type {Record<string, unknown>} */ (o.status) : null
+  const rp = st?.routePathPoints
+  if (Array.isArray(rp) && rp.length >= 2) {
+    return rp
+      .map((p) => {
+        if (!p || typeof p !== 'object') return null
+        const q = /** @type {Record<string, unknown>} */ (p)
+        const lat = Number(q.latitude ?? q.lat)
+        const lng = Number(q.longitude ?? q.lng ?? q.lon)
+        if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null
+        return { lat, lng }
+      })
+      .filter(Boolean)
+  }
+  const pp = o.pathPoints
+  if (Array.isArray(pp) && pp.length >= 2) {
+    return pp
+      .map((p) => {
+        if (!p || typeof p !== 'object') return null
+        const q = /** @type {Record<string, unknown>} */ (p)
+        const lat = Number(q.lat)
+        const lng = Number(q.lng ?? q.lon)
+        if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null
+        return { lat, lng }
+      })
+      .filter(Boolean)
+  }
+  return []
+})
+
+async function loadRoutes() {
   loading.value = true
   error.value = ''
   configError.value = ''
   try {
-    const r = await postTrafficCorridorStatus({})
+    const r = await getTrafficMonitoredRoutes()
     if (r && typeof r === 'object' && r.ok === false) {
       configError.value =
-        typeof r.error === 'string' ? r.error : 'Corridor traffic unavailable'
-      payload.value = null
+        typeof r.error === 'string' ? r.error : 'Route monitoring unavailable'
+      syncPayload.value = null
       return
     }
-    payload.value = /** @type {Record<string, unknown>} */ (r)
+    syncPayload.value = /** @type {Record<string, unknown>} */ (r)
   } catch (e) {
-    error.value = e instanceof Error ? e.message : 'Failed to load corridor'
-    payload.value = null
+    const msg = e instanceof Error ? e.message : 'Failed to load routes'
+    error.value = msg
+    syncPayload.value = null
   } finally {
     loading.value = false
+  }
+}
+
+async function pollSync() {
+  if (getTomtomKeyEffective().trim().length === 0) return
+  if (!routesList.value.length) return
+  try {
+    const r = await postTrafficMonitoredRoutesSync()
+    if (r && typeof r === 'object' && r.ok !== false) {
+      syncPayload.value = /** @type {Record<string, unknown>} */ (r)
+    }
+  } catch {
+    /* non-fatal poll */
   }
 }
 
@@ -44,14 +157,18 @@ async function load() {
 let intervalId = null
 
 onMounted(() => {
-  void load()
-  intervalId = setInterval(() => void load(), POLL_MS)
+  void loadRoutes()
+  intervalId = setInterval(() => void pollSync(), POLL_MS)
 })
 
 onUnmounted(() => {
   if (intervalId) {
     clearInterval(intervalId)
     intervalId = null
+  }
+  if (previewTimer) {
+    clearTimeout(previewTimer)
+    previewTimer = null
   }
 })
 
@@ -78,66 +195,213 @@ function fmtSec(s) {
   return sec > 0 ? `${m}m ${sec}s` : `${m}m`
 }
 
-function fmtMph(v) {
-  const n = Number(v)
-  if (!Number.isFinite(n)) return '—'
-  return `${Math.round(n)}`
+function fmtMeters(m) {
+  const n = Number(m)
+  if (!Number.isFinite(n) || n < 0) return '—'
+  if (n >= 1000) return `${(n / 1000).toFixed(1)} km`
+  return `${Math.round(n)} m`
 }
 
-const polyline = computed(() => {
-  const p = payload.value?.polyline
-  return Array.isArray(p) ? p : []
-})
+/**
+ * @param {unknown} row
+ */
+function routeStatusLabel(row) {
+  if (!row || typeof row !== 'object') return '—'
+  const st = /** @type {Record<string, unknown>} */ (row).status
+  if (!st || typeof st !== 'object') return '—'
+  const s = st.routeStatus
+  return typeof s === 'string' ? s : '—'
+}
 
-const segments = computed(() => {
-  const s = payload.value?.segments
-  return Array.isArray(s) ? s : []
-})
-
-const summaryCards = computed(() => {
-  const p = payload.value
-  if (!p || p.ok !== true) return []
-  const tt = p.totalTravelTimeSec
-  const dl = p.totalDelaySec
-  const cur = p.avgCurrentSpeedMph
-  const ff = p.avgFreeFlowSpeedMph
-  return [
+/**
+ * @param {unknown} row
+ */
+function routeSummaryCards(row) {
+  if (!row || typeof row !== 'object') return []
+  const st = /** @type {Record<string, unknown>} */ (row).status
+  if (!st || typeof st !== 'object') return []
+  const tt = st.travelTime
+  const delay = st.delayTime
+  const typical = st.typicalTravelTime
+  const len = st.routeLength
+  const complete = st.completeness
+  const pass = st.passable
+  const cards = [
     {
       key: 'tt',
-      lab: 'Travel time (sum)',
+      lab: 'Travel time',
       val: fmtSec(tt),
-      sub: 'TomTom segment times',
+      sub: 'Current (Route Monitoring)',
     },
     {
       key: 'delay',
-      lab: 'Delay vs free flow',
-      val: fmtSec(dl),
-      sub: 'Σ max(0, current − free)',
+      lab: 'Delay',
+      val: fmtSec(delay),
+      sub: 'vs free-flow traffic',
     },
     {
-      key: 'spd',
-      lab: 'Avg speed',
-      val: `${fmtMph(cur)} / ${fmtMph(ff)} mph`,
-      sub: 'Current · free flow',
+      key: 'typ',
+      lab: 'Typical time',
+      val: fmtSec(typical),
+      sub: 'Speed profiles / typical',
+    },
+    {
+      key: 'len',
+      lab: 'Route length',
+      val: fmtMeters(len),
+      sub: 'Along monitored path',
     },
   ]
-})
+  if (Number.isFinite(Number(complete))) {
+    cards.push({
+      key: 'cov',
+      lab: 'Live coverage',
+      val: `${Math.round(Number(complete))}%`,
+      sub: 'Traffic data completeness',
+    })
+  }
+  if (typeof pass === 'boolean') {
+    cards.push({
+      key: 'pass',
+      lab: 'Passable',
+      val: pass ? 'Yes' : 'No',
+      sub: 'TomTom route status',
+    })
+  }
+  return cards
+}
 
 /**
- * @param {unknown} seg
+ * @param {unknown} data
+ * @returns {LatLng[]}
  */
-function segmentTierClass(seg) {
-  if (!seg || typeof seg !== 'object') return ''
-  const o = /** @type {Record<string, unknown>} */ (seg)
-  if (o.ok === false) return 'corridor-seg--muted'
-  if (o.roadClosure === true) return 'corridor-seg--red'
-  const cur = Number(o.currentSpeed)
-  const ff = Number(o.freeFlowSpeed)
-  if (!Number.isFinite(cur) || !Number.isFinite(ff) || ff < 8) return 'corridor-seg--orange'
-  const ratio = cur / ff
-  if (ratio <= 0.55) return 'corridor-seg--red'
-  if (ratio <= 0.85) return 'corridor-seg--orange'
-  return 'corridor-seg--green'
+function polylineFromTomTomPreview(data) {
+  if (!data || typeof data !== 'object') return []
+  const o = /** @type {Record<string, unknown>} */ (data)
+  const candidates = [o.routedPathPoints, o.pathPoints, o.routePathPoints]
+  for (const c of candidates) {
+    if (!Array.isArray(c) || c.length < 2) continue
+    const out = []
+    for (const p of c) {
+      if (!p || typeof p !== 'object') continue
+      const q = /** @type {Record<string, unknown>} */ (p)
+      const lat = Number(q.latitude ?? q.lat)
+      const lng = Number(q.longitude ?? q.lng ?? q.lon)
+      if (!Number.isFinite(lat) || !Number.isFinite(lng)) continue
+      out.push({ lat, lng })
+    }
+    if (out.length >= 2) return out
+  }
+  return []
+}
+
+/**
+ * @param {LatLng[]} pts
+ */
+function schedulePreview(pts) {
+  if (previewTimer) clearTimeout(previewTimer)
+  previewTimer = setTimeout(() => void runPreview(pts), 450)
+}
+
+async function runPreview(pts) {
+  if (pts.length < 2) {
+    previewPolyline.value = []
+    return
+  }
+  if (getTomtomKeyEffective().trim().length === 0) return
+  previewBusy.value = true
+  try {
+    const r = await postTrafficMonitoredRoutePreview({ pathPoints: pts })
+    if (r && typeof r === 'object' && r.ok === true && r.preview) {
+      previewPolyline.value = polylineFromTomTomPreview(r.preview)
+    } else {
+      previewPolyline.value = []
+    }
+  } catch {
+    previewPolyline.value = []
+  } finally {
+    previewBusy.value = false
+  }
+}
+
+/**
+ * @param {LatLng[]} next
+ */
+function onWaypointsChange(next) {
+  draftWaypoints.value = Array.isArray(next) ? next : []
+}
+
+watch(
+  () => draftWaypoints.value,
+  (pts) => {
+    if (mode.value !== 'create') return
+    schedulePreview(pts)
+  },
+  { deep: true },
+)
+
+function startCreate() {
+  mode.value = 'create'
+  draftWaypoints.value = []
+  draftName.value = ''
+  previewPolyline.value = []
+}
+
+function cancelCreate() {
+  mode.value = 'list'
+  draftWaypoints.value = []
+  previewPolyline.value = []
+}
+
+function clearDraftPoints() {
+  draftWaypoints.value = []
+  previewPolyline.value = []
+}
+
+async function submitCreate() {
+  const pts = draftWaypoints.value
+  if (pts.length < 2) {
+    error.value = 'Add at least two points on the map (tap to add, drag to adjust).'
+    return
+  }
+  const name = draftName.value.trim() || 'Monitored route'
+  createBusy.value = true
+  error.value = ''
+  try {
+    const r = await postTrafficMonitoredRouteCreate({ name, pathPoints: pts })
+    if (r && typeof r === 'object' && r.ok === true) {
+      cancelCreate()
+      await loadRoutes()
+      const route = r.route && typeof r.route === 'object' ? /** @type {any} */ (r.route) : null
+      if (route?.localId) selectedLocalId.value = String(route.localId)
+    } else {
+      error.value =
+        r && typeof r === 'object' && typeof r.error === 'string'
+          ? r.error
+          : 'Could not create route'
+    }
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : 'Could not create route'
+  } finally {
+    createBusy.value = false
+  }
+}
+
+async function removeSelected() {
+  const sel = selectedRoute.value
+  if (!sel || typeof sel !== 'object') return
+  const id = String(/** @type {any} */ (sel).localId || '')
+  if (!id) return
+  if (typeof window !== 'undefined' && !window.confirm('Remove this monitored route from TomTom and this account?')) {
+    return
+  }
+  try {
+    await postTrafficMonitoredRouteRemove(id)
+    selectedLocalId.value = ''
+    await loadRoutes()
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : 'Remove failed'
+  }
 }
 </script>
 
@@ -146,10 +410,20 @@ function segmentTierClass(seg) {
     <div class="corridor-map-column">
       <div class="corridor-map-shell">
         <CorridorFlowMap
-          :polyline="polyline"
-          :segments="segments"
+          v-if="mode === 'list'"
+          :polyline="mapPolyline"
+          :segments="[]"
           :vehicle-id="mapVehicleId"
           fill-height
+        />
+        <CorridorFlowMap
+          v-else
+          edit-mode
+          :waypoints="draftWaypoints"
+          :preview-polyline="previewPolyline"
+          :vehicle-id="mapVehicleId"
+          fill-height
+          @waypoints-change="onWaypointsChange"
         />
       </div>
     </div>
@@ -157,15 +431,34 @@ function segmentTierClass(seg) {
     <div class="corridor-list-column">
       <div class="corridor-list-inner">
         <div class="corridor-bar">
-          <h1 class="corridor-h1">Corridor</h1>
+          <h1 class="corridor-h1">Route monitoring</h1>
           <p class="corridor-sub">
-            Caton Ave → Linden Blvd → S Conduit Ave · TomTom Flow (not routing)
+            TomTom Route Monitoring — create routes from waypoints, then poll live travel time and delay
+            (<a
+              class="corridor-doc-link"
+              href="https://developer.tomtom.com/route-monitoring/documentation/routes-service/routes"
+              target="_blank"
+              rel="noopener noreferrer"
+            >API docs</a>).
           </p>
-          <p v-if="payload?.fetchedAt" class="corridor-time">
-            Updated {{ fmtTime(payload.fetchedAt) }}
-            <span v-if="payload.cacheTtlMs" class="corridor-cache"
-            >· cache {{ Math.round(Number(payload.cacheTtlMs) / 1000) }}s</span>
+          <p v-if="syncPayload?.fetchedAt" class="corridor-time">
+            Updated {{ fmtTime(syncPayload.fetchedAt) }}
           </p>
+        </div>
+
+        <div class="corridor-mode-row" role="tablist" aria-label="Corridor mode">
+          <button
+            type="button"
+            class="corridor-mode-btn tap"
+            :class="{ 'is-on': mode === 'list' }"
+            @click="mode = 'list'"
+          >My routes</button>
+          <button
+            type="button"
+            class="corridor-mode-btn tap"
+            :class="{ 'is-on': mode === 'create' }"
+            @click="startCreate"
+          >New route</button>
         </div>
 
         <p v-if="configError" class="corridor-warn" role="status">{{ configError }}</p>
@@ -173,59 +466,99 @@ function segmentTierClass(seg) {
           <RouterLink class="corridor-setup-link tap" :to="{ name: 'settings', hash: '#tomtom' }">
             Open Settings → TomTom key
           </RouterLink>
-          <span class="corridor-setup-sub">(paste key and save)</span>
+          <span class="corridor-setup-sub">Route Monitoring and map tiles use the same key.</span>
         </p>
         <p v-else-if="error" class="corridor-err" role="alert">{{ error }}</p>
-        <p v-else-if="loading && !payload" class="corridor-skel" aria-busy="true">Loading…</p>
 
-        <ul v-if="summaryCards.length" class="corridor-summary-grid" aria-label="Corridor summary">
-          <li v-for="c in summaryCards" :key="c.key" class="corridor-card corridor-card--summary">
-            <span class="corridor-card-lab">{{ c.lab }}</span>
-            <span class="corridor-card-val">{{ c.val }}</span>
-            <span class="corridor-card-sub">{{ c.sub }}</span>
-          </li>
-        </ul>
+        <template v-if="mode === 'create'">
+          <div class="corridor-create-panel">
+            <label class="corridor-lbl" for="mr-name">Route name</label>
+            <input
+              id="mr-name"
+              v-model="draftName"
+              class="corridor-inp tap"
+              type="text"
+              maxlength="120"
+              placeholder="e.g. Caton → Conduit"
+              autocomplete="off"
+            />
+            <p class="corridor-hint">
+              Tap the map to drop waypoints (start green). Drag pins to adjust. Preview updates after you pause.
+              <span v-if="previewBusy" class="corridor-inline-status">Preview…</span>
+            </p>
+            <div class="corridor-create-actions">
+              <button type="button" class="corridor-btn tap" :disabled="createBusy" @click="clearDraftPoints">
+                Clear points
+              </button>
+              <button type="button" class="corridor-btn tap" :disabled="createBusy" @click="cancelCreate">
+                Cancel
+              </button>
+              <button
+                type="button"
+                class="corridor-btn corridor-btn--primary tap"
+                :disabled="createBusy || draftWaypoints.length < 2"
+                @click="submitCreate"
+              >
+                {{ createBusy ? 'Creating…' : 'Create monitored route' }}
+              </button>
+            </div>
+          </div>
+        </template>
 
-        <h2 class="corridor-h2">Segments</h2>
-        <p class="corridor-hint">Sampled ~every 400 m along path · speeds mph</p>
-        <ul class="corridor-seg-list" aria-label="Flow segments">
-          <li
-            v-for="(seg, si) in segments"
-            :key="`seg-${si}`"
-            class="corridor-card corridor-seg"
-            :class="segmentTierClass(seg)"
-          >
-            <template v-if="seg && typeof seg === 'object'">
-              <div class="corridor-seg-head">
-                <span class="corridor-seg-idx">#{{ si + 1 }}</span>
-                <span v-if="seg.ok === false" class="corridor-seg-err">{{ seg.error || 'No data' }}</span>
-                <span v-else-if="seg.roadClosure" class="corridor-seg-err">Closed</span>
+        <template v-else>
+          <p v-if="loading && !syncPayload" class="corridor-skel" aria-busy="true">Loading…</p>
+          <template v-else-if="!routesList.length">
+            <p class="corridor-empty">No monitored routes yet. Use <strong>New route</strong> to draw one.</p>
+          </template>
+          <template v-else>
+            <h2 class="corridor-h2">Your routes</h2>
+            <ul class="corridor-route-pick" aria-label="Select route">
+              <li v-for="r in routesList" :key="String(r?.localId)">
+                <button
+                  v-if="r && typeof r === 'object'"
+                  type="button"
+                  class="corridor-route-pill tap"
+                  :class="{ 'is-sel': r.localId === selectedLocalId }"
+                  @click="selectedLocalId = String(r.localId)"
+                >
+                  <span class="corridor-route-pill-name">{{ r.name || 'Route' }}</span>
+                  <span class="corridor-route-pill-meta">{{ routeStatusLabel(r) }}</span>
+                </button>
+              </li>
+            </ul>
+
+            <div v-if="selectedRoute && typeof selectedRoute === 'object'" class="corridor-detail">
+              <div class="corridor-detail-head">
+                <h2 class="corridor-h2">{{ selectedRoute.name || 'Route' }}</h2>
+                <button type="button" class="corridor-btn corridor-btn--danger tap" @click="removeSelected">
+                  Remove
+                </button>
               </div>
-              <template v-if="seg.ok !== false && !seg.roadClosure">
-                <div class="corridor-seg-metrics">
-                  <div class="corridor-kpi">
-                    <span class="corridor-kpi-lab">Travel</span>
-                    <span class="corridor-kpi-num">{{ fmtSec(seg.currentTravelTime) }}</span>
-                  </div>
-                  <div class="corridor-kpi">
-                    <span class="corridor-kpi-lab">Free flow</span>
-                    <span class="corridor-kpi-num corridor-kpi-num--muted">{{ fmtSec(seg.freeFlowTravelTime) }}</span>
-                  </div>
-                  <div class="corridor-kpi">
-                    <span class="corridor-kpi-lab">Speed</span>
-                    <span class="corridor-kpi-num">{{ fmtMph(seg.currentSpeed) }}</span>
-                    <span class="corridor-kpi-unit">mph</span>
-                  </div>
-                  <div class="corridor-kpi">
-                    <span class="corridor-kpi-lab">Free</span>
-                    <span class="corridor-kpi-num corridor-kpi-num--muted">{{ fmtMph(seg.freeFlowSpeed) }}</span>
-                    <span class="corridor-kpi-unit">mph</span>
-                  </div>
-                </div>
-              </template>
-            </template>
-          </li>
-        </ul>
+              <p v-if="selectedRoute.statusError" class="corridor-status-err" role="status">
+                {{ selectedRoute.statusError }}
+              </p>
+              <p v-else-if="selectedRoute.statusOk === false" class="corridor-status-err" role="status">
+                No live status yet (route may be NEW or processing).
+              </p>
+
+              <ul
+                v-if="routeSummaryCards(selectedRoute).length"
+                class="corridor-summary-grid"
+                aria-label="Route summary"
+              >
+                <li
+                  v-for="c in routeSummaryCards(selectedRoute)"
+                  :key="c.key"
+                  class="corridor-card corridor-card--summary"
+                >
+                  <span class="corridor-card-lab">{{ c.lab }}</span>
+                  <span class="corridor-card-val">{{ c.val }}</span>
+                  <span class="corridor-card-sub">{{ c.sub }}</span>
+                </li>
+              </ul>
+            </div>
+          </template>
+        </template>
       </div>
     </div>
   </div>
@@ -290,6 +623,10 @@ function segmentTierClass(seg) {
   line-height: 1.35;
 }
 
+.corridor-doc-link {
+  color: #a78bfa;
+}
+
 .corridor-time {
   margin: 0.35rem 0 0;
   font-size: 0.62rem;
@@ -297,8 +634,30 @@ function segmentTierClass(seg) {
   font-variant-numeric: tabular-nums;
 }
 
-.corridor-cache {
-  opacity: 0.85;
+.corridor-mode-row {
+  display: flex;
+  gap: 0.35rem;
+  margin-bottom: 0.65rem;
+}
+
+.corridor-mode-btn {
+  flex: 1;
+  padding: 0.45rem 0.5rem;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(0, 0, 0, 0.35);
+  color: #9a9ab0;
+  font-size: 0.65rem;
+  font-weight: 750;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.corridor-mode-btn.is-on {
+  color: #f4f4f8;
+  border-color: rgba(167, 139, 250, 0.45);
+  background: rgba(123, 77, 181, 0.28);
 }
 
 .corridor-warn {
@@ -336,14 +695,6 @@ function segmentTierClass(seg) {
   color: var(--color-text-tertiary, #8b8b9c);
 }
 
-.corridor-setup-sub .inline-code {
-  font-family: ui-monospace, monospace;
-  font-size: 0.68em;
-  padding: 0.05rem 0.25rem;
-  border-radius: 4px;
-  background: rgba(255, 255, 255, 0.06);
-}
-
 .corridor-err {
   margin: 0 0 0.5rem;
   color: #fca5a5;
@@ -354,6 +705,154 @@ function segmentTierClass(seg) {
   margin: 0 0 0.5rem;
   color: #9ca3af;
   font-size: 0.85rem;
+}
+
+.corridor-empty {
+  margin: 0.25rem 0 0.75rem;
+  font-size: 0.78rem;
+  color: #8b8b9c;
+  line-height: 1.4;
+}
+
+.corridor-create-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+}
+
+.corridor-lbl {
+  font-size: 0.55rem;
+  font-weight: 750;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #7a7a8c;
+}
+
+.corridor-inp {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 0.5rem 0.55rem;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(0, 0, 0, 0.35);
+  color: #f4f4f8;
+  font-size: 0.85rem;
+}
+
+.corridor-hint {
+  margin: 0;
+  font-size: 0.58rem;
+  color: #5c5c6a;
+  line-height: 1.45;
+}
+
+.corridor-inline-status {
+  margin-left: 0.35rem;
+  color: #a78bfa;
+  font-weight: 650;
+}
+
+.corridor-create-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin-top: 0.25rem;
+}
+
+.corridor-btn {
+  padding: 0.42rem 0.65rem;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.06);
+  color: #e4e4f0;
+  font-size: 0.72rem;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.corridor-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.corridor-btn--primary {
+  border-color: rgba(167, 139, 250, 0.5);
+  background: rgba(123, 77, 181, 0.35);
+}
+
+.corridor-btn--danger {
+  border-color: rgba(248, 113, 113, 0.35);
+  color: #fecaca;
+  background: rgba(127, 29, 29, 0.25);
+}
+
+.corridor-h2 {
+  margin: 0.5rem 0 0.35rem;
+  font-size: 0.72rem;
+  font-weight: 750;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #a8a8b8;
+}
+
+.corridor-route-pick {
+  list-style: none;
+  margin: 0 0 0.65rem;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.corridor-route-pill {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.08rem;
+  padding: 0.4rem 0.55rem;
+  border-radius: 9px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(18, 18, 26, 0.9);
+  color: #e8e8f0;
+  cursor: pointer;
+  text-align: left;
+  max-width: 100%;
+}
+
+.corridor-route-pill.is-sel {
+  border-color: rgba(167, 139, 250, 0.55);
+  box-shadow: 0 0 0 1px rgba(167, 139, 250, 0.2);
+}
+
+.corridor-route-pill-name {
+  font-size: 0.75rem;
+  font-weight: 650;
+}
+
+.corridor-route-pill-meta {
+  font-size: 0.55rem;
+  color: #8b8b9c;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.corridor-detail-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.corridor-detail-head .corridor-h2 {
+  margin: 0;
+}
+
+.corridor-status-err {
+  margin: 0 0 0.5rem;
+  font-size: 0.72rem;
+  color: #fca5a5;
 }
 
 .corridor-summary-grid {
@@ -397,110 +896,6 @@ function segmentTierClass(seg) {
 .corridor-card-sub {
   font-size: 0.55rem;
   color: #6b6b78;
-}
-
-.corridor-h2 {
-  margin: 0.5rem 0 0.2rem;
-  font-size: 0.72rem;
-  font-weight: 750;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: #a8a8b8;
-}
-
-.corridor-hint {
-  margin: 0 0 0.45rem;
-  font-size: 0.58rem;
-  color: #5c5c6a;
-}
-
-.corridor-seg-list {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 0.4rem;
-}
-
-.corridor-seg {
-  border-left: 3px solid rgba(148, 163, 184, 0.4);
-}
-
-.corridor-seg--green {
-  border-left-color: #4ade80;
-}
-
-.corridor-seg--orange {
-  border-left-color: #fb923c;
-}
-
-.corridor-seg--red {
-  border-left-color: #f87171;
-}
-
-.corridor-seg--muted {
-  border-left-color: rgba(148, 163, 184, 0.35);
-  opacity: 0.85;
-}
-
-.corridor-seg-head {
-  display: flex;
-  align-items: center;
-  gap: 0.35rem;
-  margin-bottom: 0.35rem;
-}
-
-.corridor-seg-idx {
-  font-size: 0.58rem;
-  font-weight: 800;
-  color: #7b7b8c;
-  font-variant-numeric: tabular-nums;
-}
-
-.corridor-seg-err {
-  font-size: 0.62rem;
-  color: #fca5a5;
-}
-
-.corridor-seg-metrics {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 0.35rem 0.65rem;
-}
-
-.corridor-kpi {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: 0.15rem 0.35rem;
-}
-
-.corridor-kpi-lab {
-  font-size: 0.48rem;
-  font-weight: 750;
-  letter-spacing: 0.05em;
-  text-transform: uppercase;
-  color: #6e6e80;
-  width: 100%;
-}
-
-.corridor-kpi-num {
-  font-size: 0.95rem;
-  font-weight: 700;
-  color: #ebe8f7;
-  font-variant-numeric: tabular-nums;
-}
-
-.corridor-kpi-num--muted {
-  color: #9ca3af;
-  font-weight: 650;
-}
-
-.corridor-kpi-unit {
-  font-size: 0.55rem;
-  color: #6b7280;
-  font-weight: 650;
 }
 
 @media (orientation: landscape) and (min-width: 700px) {

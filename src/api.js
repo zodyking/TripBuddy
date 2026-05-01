@@ -151,21 +151,75 @@ export async function getBridgesPanynj() {
 }
 
 /**
- * Caton → Conduit corridor: TomTom Flow Segment aggregation (server caches 60s).
- * Sends the Settings-saved TomTom key from the browser when present.
+ * TomTom Route Monitoring: list stored routes + live status per route.
+ * @see https://developer.tomtom.com/route-monitoring/documentation/routes-service/routes
+ */
+export async function getTrafficMonitoredRoutes() {
+  const k = getTomtomKeyEffective().trim()
+  const qs = k ? `?${new URLSearchParams({ tomtomKey: k }).toString()}` : ''
+  const r = await apiFetch(`/api/traffic/monitored-routes${qs}`)
+  return handleJson(r)
+}
+
+/**
+ * Refresh all monitored routes (POST avoids long query strings).
  * @returns {Promise<Record<string, unknown>>}
  */
-export async function postTrafficCorridorStatus(body = {}) {
-  const base =
-    body && typeof body === 'object' && !Array.isArray(body)
-      ? /** @type {Record<string, unknown>} */ ({ ...body })
-      : {}
+export async function postTrafficMonitoredRoutesSync() {
   const k = getTomtomKeyEffective().trim()
-  if (k) base.tomtomKey = k
-  const r = await apiFetch('/api/traffic/corridor-status', {
+  const r = await apiFetch('/api/traffic/monitored-routes/sync', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(base),
+    body: JSON.stringify(k ? { tomtomKey: k } : {}),
+  })
+  return handleJson(r)
+}
+
+/**
+ * Preview routed geometry before creating a monitored route.
+ * @param {{ name?: string, pathPoints: Array<{ lat: number, lng: number }> }} body
+ */
+export async function postTrafficMonitoredRoutePreview(body) {
+  const k = getTomtomKeyEffective().trim()
+  const r = await apiFetch('/api/traffic/monitored-routes/preview', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      ...(body && typeof body === 'object' ? body : {}),
+      ...(k ? { tomtomKey: k } : {}),
+    }),
+  })
+  return handleJson(r)
+}
+
+/**
+ * Create a monitored route (TomTom POST /routemonitoring/3/routes).
+ * @param {{ name: string, pathPoints: Array<{ lat: number, lng: number }> }} body
+ */
+export async function postTrafficMonitoredRouteCreate(body) {
+  const k = getTomtomKeyEffective().trim()
+  const r = await apiFetch('/api/traffic/monitored-routes', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      ...(body && typeof body === 'object' ? body : {}),
+      ...(k ? { tomtomKey: k } : {}),
+    }),
+  })
+  return handleJson(r)
+}
+
+/**
+ * Remove route from app storage and TomTom (POST …/remove).
+ * @param {string} localId
+ */
+export async function postTrafficMonitoredRouteRemove(localId) {
+  const k = getTomtomKeyEffective().trim()
+  const id = encodeURIComponent(localId)
+  const r = await apiFetch(`/api/traffic/monitored-routes/${id}/remove`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(k ? { tomtomKey: k } : {}),
   })
   return handleJson(r)
 }

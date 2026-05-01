@@ -21,14 +21,28 @@ const props = defineProps({
     type: Array,
     default: () => [],
   },
-  /** Flow samples with lat/lon — used for colored legs */
+  /** Flow samples with lat/lon — used for colored legs (monitor mode) */
   segments: {
+    type: Array,
+    default: () => [],
+  },
+  /** When true, map adds / drags waypoints and shows preview geometry */
+  editMode: { type: Boolean, default: false },
+  /** Waypoints for route creation (lat/lng) */
+  waypoints: {
+    type: Array,
+    default: () => [],
+  },
+  /** Optional preview polyline from TomTom Route Monitoring preview (lat/lng) */
+  previewPolyline: {
     type: Array,
     default: () => [],
   },
   fillHeight: { type: Boolean, default: false },
   vehicleId: { type: String, default: '' },
 })
+
+const emit = defineEmits(['waypointsChange'])
 
 const containerRef = ref(/** @type {HTMLElement | null} */ (null))
 
@@ -102,9 +116,110 @@ function polyLatLngs() {
   return out
 }
 
+/** @type {L.LayerGroup | null} */
+let editLayer = null
+/** @type {(() => void) | null} */
+let mapClickUnsub = null
+
+function waypointLatLngs() {
+  const arr = Array.isArray(props.waypoints) ? props.waypoints : []
+  /** @type {L.LatLng[]} */
+  const out = []
+  for (const p of arr) {
+    if (!p || typeof p !== 'object') continue
+    const lat = Number(p.lat)
+    const lng = Number(p.lng ?? p.lon)
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) continue
+    out.push(L.latLng(lat, lng))
+  }
+  return out
+}
+
+function previewLatLngs() {
+  const arr = Array.isArray(props.previewPolyline) ? props.previewPolyline : []
+  /** @type {L.LatLng[]} */
+  const out = []
+  for (const p of arr) {
+    if (!p || typeof p !== 'object') continue
+    const lat = Number(p.lat ?? p.latitude)
+    const lng = Number(p.lng ?? p.lon ?? p.longitude)
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) continue
+    out.push(L.latLng(lat, lng))
+  }
+  return out
+}
+
+function emitWaypointsFromLatLngs(pts) {
+  const next = pts.map((ll) => ({ lat: ll.lat, lng: ll.lng }))
+  emit('waypointsChange', next)
+}
+
+function waypointIcon(isFirst) {
+  return L.divIcon({
+    className: 'corridor-wp-marker',
+    html: `<span class="corridor-wp-dot" data-first="${isFirst ? '1' : '0'}"></span>`,
+    iconSize: [22, 22],
+    iconAnchor: [11, 11],
+  })
+}
+
+function syncEditOverlay() {
+  if (!map || !editLayer) return
+  editLayer.clearLayers()
+  if (!props.editMode) return
+
+  const wps = waypointLatLngs()
+  const prev = previewLatLngs()
+
+  if (prev.length >= 2) {
+    L.polyline(prev, {
+      color: '#c4b5fd',
+      weight: 5,
+      opacity: 0.95,
+      lineCap: 'round',
+      lineJoin: 'round',
+    }).addTo(editLayer)
+  } else if (wps.length >= 2) {
+    L.polyline(wps, {
+      color: 'rgba(167, 139, 250, 0.45)',
+      weight: 3,
+      dashArray: '6 8',
+      lineCap: 'round',
+      lineJoin: 'round',
+    }).addTo(editLayer)
+  }
+
+  wps.forEach((ll, i) => {
+    const m = L.marker(ll, {
+      draggable: true,
+      icon: waypointIcon(i === 0),
+      zIndexOffset: 800,
+    })
+    m.on('dragend', () => {
+      const base = waypointLatLngs()
+      const next = base.map((p, j) => (j === i ? m.getLatLng() : p))
+      emitWaypointsFromLatLngs(next)
+    })
+    m.addTo(editLayer)
+  })
+
+  nextTick(() => map?.invalidateSize())
+}
+
+function onMapClickEdit(e) {
+  if (!props.editMode || !map) return
+  const ll = e.latlng
+  const wps = waypointLatLngs()
+  emitWaypointsFromLatLngs([...wps, ll])
+}
+
 function syncRouteOverlay() {
   if (!map || !routeLayer) return
   routeLayer.clearLayers()
+  if (props.editMode) {
+    nextTick(() => map?.invalidateSize())
+    return
+  }
   const base = polyLatLngs()
   if (base.length >= 2) {
     L.polyline(base, {
@@ -154,8 +269,25 @@ function syncRouteOverlay() {
 
 function fitCorridor() {
   if (!map) return
-  const pts = polyLatLngs()
   const motion = prefersReducedMotion()
+  if (props.editMode) {
+    const prev = previewLatLngs()
+    const wps = waypointLatLngs()
+    const pts = prev.length >= 2 ? prev : wps.length >= 2 ? wps : []
+    if (pts.length >= 2) {
+      map.fitBounds(L.latLngBounds(pts), {
+        padding: [36, 44],
+        maxZoom: 14,
+        animate: !motion,
+      })
+    } else if (wps.length === 1) {
+      map.setView(wps[0], 13, { animate: !motion })
+    } else {
+      map.setView(DEFAULT_CENTER, DEFAULT_ZOOM, { animate: !motion })
+    }
+    return
+  }
+  const pts = polyLatLngs()
   if (pts.length >= 2) {
     map.fitBounds(L.latLngBounds(pts), {
       padding: [36, 44],
@@ -321,21 +453,31 @@ function initMap() {
   applyTrafficToMap()
   routeLayer = L.layerGroup().addTo(map)
   userLayer = L.layerGroup().addTo(map)
+  editLayer = L.layerGroup().addTo(map)
   syncRouteOverlay()
+  syncEditOverlay()
   fitCorridor()
   syncUserOverlay()
+  map.on('click', onMapClickEdit)
+  mapClickUnsub = () => {
+    map?.off('click', onMapClickEdit)
+  }
   nextTick(() => map?.invalidateSize())
 }
 
 function destroyMap() {
   clearGeoWatch()
+  mapClickUnsub?.()
+  mapClickUnsub = null
   if (routeLayer) routeLayer.clearLayers()
+  if (editLayer) editLayer.clearLayers()
   userMarker = null
   if (map) {
     map.remove()
     map = null
   }
   routeLayer = null
+  editLayer = null
   userLayer = null
   streetLayer = null
   satelliteLayer = null
@@ -366,9 +508,18 @@ onBeforeUnmount(() => {
 })
 
 watch(
-  () => [props.polyline, props.segments, props.fillHeight, props.vehicleId],
+  () => [
+    props.polyline,
+    props.segments,
+    props.fillHeight,
+    props.vehicleId,
+    props.editMode,
+    props.waypoints,
+    props.previewPolyline,
+  ],
   () => {
     syncRouteOverlay()
+    syncEditOverlay()
     fitCorridor()
     syncUserOverlay()
   },
@@ -392,7 +543,9 @@ watch(tomtomKeyEffective, () => {
   >
     <div class="corridor-map-stage">
       <div ref="containerRef" class="corridor-map-el" />
-      <p v-if="!hasTomtomTraffic" class="corridor-map-foot" role="note">TomTom key in Settings for traffic tiles</p>
+      <p v-if="editMode" class="corridor-map-foot corridor-map-foot--edit" role="note"
+      >Tap map to add points · drag to adjust</p>
+      <p v-else-if="!hasTomtomTraffic" class="corridor-map-foot" role="note">TomTom key in Settings for traffic tiles</p>
       <p v-else-if="activeBaseLayer === 'satellite' && trafficOn" class="corridor-map-foot" role="note">Traffic hidden on satellite</p>
       <p v-if="geoPending" class="corridor-map-hint">Location…</p>
       <p v-else-if="geoDenied" class="corridor-map-hint is-warn">Location denied</p>
@@ -530,8 +683,29 @@ watch(tomtomKeyEffective, () => {
   max-width: 85%;
 }
 
-.corridor-map-foot {
-  bottom: 2rem;
+.corridor-map-foot--edit {
+  color: #c4b5fd;
+  border: 1px solid rgba(167, 139, 250, 0.35);
+}
+
+:deep(.corridor-wp-marker) {
+  background: transparent;
+  border: none;
+}
+
+:deep(.corridor-wp-dot) {
+  display: block;
+  width: 14px;
+  height: 14px;
+  margin: 4px;
+  border-radius: 50%;
+  background: linear-gradient(145deg, #ddd6fe, #7b4db5);
+  border: 2px solid rgba(15, 15, 20, 0.9);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.45);
+}
+
+:deep(.corridor-wp-dot[data-first='1']) {
+  background: linear-gradient(145deg, #6ee7b7, #059669);
 }
 
 .corridor-map-hint.is-warn {

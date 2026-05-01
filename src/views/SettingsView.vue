@@ -988,10 +988,10 @@ onUnmounted(() => {
             class="ext-link"
           >TomTom Traffic</a>
           (free developer tier, API key). Paste your key here — it is stored only in
-          <strong>this browser</strong> and is sent to this app’s API when loading corridor traffic (not stored on the server).
+          <strong>this browser</strong> and is sent to this app’s API for traffic tiles and TomTom Route Monitoring (not stored on the server).
         </p>
         <p class="cred-hint">
-          <strong>Traffic → Corridors</strong> uses TomTom Flow Segment Data with the same saved key.
+          <strong>Traffic → Corridors</strong> uses the same key for Route Monitoring (create routes, live travel time).
         </p>
         <label class="lbl" for="tomtom-traffic-key">TomTom API key (optional)</label>
         <input
