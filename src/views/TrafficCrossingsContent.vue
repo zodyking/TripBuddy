@@ -657,14 +657,8 @@ onUnmounted(() => {
       </div>
     </div>
 
-    <div
-      class="bridges-list-column"
-      :class="{ 'is-scroll-pane': isLandscapeSplit }"
-    >
-      <div
-        class="bridges-list-inner"
-        :class="{ 'is-scroll-pane': isLandscapeSplit }"
-      >
+    <div class="bridges-list-column">
+      <div class="bridges-list-inner">
         <div class="bridges-bar">
           <div class="bridges-bar-top">
             <h1 class="bridges-h1">Crossings</h1>
@@ -902,6 +896,7 @@ onUnmounted(() => {
   flex-direction: column;
   min-width: 0;
   min-height: 0;
+  flex-shrink: 0;
 }
 
 .bridges-page.is-split .bridges-map-column {
@@ -934,20 +929,18 @@ onUnmounted(() => {
 }
 
 .bridges-list-column {
-  flex: 1 1 auto;
+  flex: 1 1 0;
   min-width: 0;
   min-height: 0;
   display: flex;
   flex-direction: column;
+  overflow: hidden;
 }
 
 .bridges-list-inner {
   padding: 0.65rem min(1.25rem, 3.5vw) 0.85rem;
-  flex: 1 1 auto;
+  flex: 1 1 0;
   min-height: 0;
-}
-
-.bridges-list-inner.is-scroll-pane {
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
   overscroll-behavior: contain;
