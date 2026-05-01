@@ -3,7 +3,7 @@ import { ref, watch, computed, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 import { tomtomKeyEffective } from '../stores/trafficTileKey.js'
-import { userLocationTruckIcon } from '../utils/mapMarkers.js'
+import { closestPointOnPolyline, pointDistanceM } from '../utils/polylineSnap.js'
 
 const DEFAULT_CENTER = Object.freeze([40.661, -73.915])
 const DEFAULT_ZOOM = 12
@@ -42,7 +42,7 @@ const props = defineProps({
   vehicleId: { type: String, default: '' },
 })
 
-const emit = defineEmits(['waypointsChange'])
+const emit = defineEmits(['waypointsChange', 'removeWaypoint', 'addWaypoint'])
 
 const containerRef = ref(/** @type {HTMLElement | null} */ (null))
 
@@ -154,12 +154,23 @@ function emitWaypointsFromLatLngs(pts) {
   emit('waypointsChange', next)
 }
 
-function waypointIcon(isFirst) {
+function previewPlainPoints() {
+  const prev = previewLatLngs()
+  return prev.map((ll) => ({ lat: ll.lat, lng: ll.lng }))
+}
+
+function waypointIcon(isFirst, showRemove) {
+  const rm =
+    showRemove ?
+      `<button type="button" class="corridor-wp-rm tap" aria-label="Remove waypoint" data-wp-rm="1">×</button>`
+    : ''
   return L.divIcon({
     className: 'corridor-wp-marker',
-    html: `<span class="corridor-wp-dot" data-first="${isFirst ? '1' : '0'}"></span>`,
-    iconSize: [22, 22],
-    iconAnchor: [11, 11],
+    html: `<div class="corridor-wp-wrap">
+      <span class="corridor-wp-dot" data-first="${isFirst ? '1' : '0'}"></span>${rm}
+    </div>`,
+    iconSize: showRemove ? [28, 26] : [22, 22],
+    iconAnchor: showRemove ? [14, 13] : [11, 11],
   })
 }
 
@@ -178,6 +189,8 @@ function syncEditOverlay() {
       opacity: 0.95,
       lineCap: 'round',
       lineJoin: 'round',
+      interactive: false,
+      bubblingMouseEvents: true,
     }).addTo(editLayer)
   } else if (wps.length >= 2) {
     L.polyline(wps, {
@@ -189,16 +202,38 @@ function syncEditOverlay() {
     }).addTo(editLayer)
   }
 
+  const showRm = wps.length > 1
   wps.forEach((ll, i) => {
     const m = L.marker(ll, {
       draggable: true,
-      icon: waypointIcon(i === 0),
+      icon: waypointIcon(i === 0, showRm),
       zIndexOffset: 800,
     })
     m.on('dragend', () => {
+      let ll = m.getLatLng()
+      const plain = previewPlainPoints()
+      if (plain.length >= 2) {
+        const p = { lat: ll.lat, lng: ll.lng }
+        const snap = closestPointOnPolyline(p, plain)
+        if (pointDistanceM(p, snap) <= 400) {
+          ll = L.latLng(snap.lat, snap.lng)
+          m.setLatLng(ll)
+        }
+      }
       const base = waypointLatLngs()
-      const next = base.map((p, j) => (j === i ? m.getLatLng() : p))
+      const next = base.map((p, j) => (j === i ? ll : p))
       emitWaypointsFromLatLngs(next)
+    })
+    m.on('add', () => {
+      const el = m.getElement()
+      if (!el) return
+      const btn = el.querySelector('[data-wp-rm="1"]')
+      if (!(btn instanceof HTMLButtonElement)) return
+      L.DomEvent.on(btn, 'click mousedown', L.DomEvent.stopPropagation)
+      L.DomEvent.on(btn, 'click', (ev) => {
+        L.DomEvent.stop(ev)
+        emit('removeWaypoint', i)
+      })
     })
     m.addTo(editLayer)
   })
@@ -210,7 +245,19 @@ function onMapClickEdit(e) {
   if (!props.editMode || !map) return
   const ll = e.latlng
   const wps = waypointLatLngs()
-  emitWaypointsFromLatLngs([...wps, ll])
+  const plain = previewPlainPoints()
+
+  /** @type {{ lat: number, lng: number }} */
+  let p = { lat: ll.lat, lng: ll.lng }
+  if (wps.length >= 2 && plain.length >= 2) {
+    const snap = closestPointOnPolyline(p, plain)
+    const d = pointDistanceM(p, snap)
+    if (d <= 280) {
+      p = { lat: snap.lat, lng: snap.lng }
+    }
+  }
+
+  emit('addWaypoint', p)
 }
 
 function syncRouteOverlay() {
@@ -688,9 +735,31 @@ watch(tomtomKeyEffective, () => {
   border: 1px solid rgba(167, 139, 250, 0.35);
 }
 
-:deep(.corridor-wp-marker) {
-  background: transparent;
-  border: none;
+:deep(.corridor-wp-wrap) {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+:deep(.corridor-wp-rm) {
+  margin: 0;
+  padding: 0 3px;
+  min-width: 18px;
+  height: 18px;
+  line-height: 16px;
+  font-size: 12px;
+  font-weight: 800;
+  border-radius: 5px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  background: rgba(30, 30, 38, 0.95);
+  color: #fca5a5;
+  cursor: pointer;
+  pointer-events: auto;
+}
+
+:deep(.corridor-wp-rm:hover) {
+  background: rgba(127, 29, 29, 0.45);
+  color: #fff;
 }
 
 :deep(.corridor-wp-dot) {

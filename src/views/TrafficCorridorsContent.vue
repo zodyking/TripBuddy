@@ -11,6 +11,7 @@ import {
 } from '../api.js'
 import { useMapVehicleId } from '../composables/useMapVehicleId.js'
 import { getTomtomKeyEffective } from '../stores/trafficTileKey.js'
+import { bestWaypointInsertionIndex } from '../utils/polylineSnap.js'
 
 defineOptions({ name: 'TrafficCorridorsContent' })
 
@@ -331,6 +332,44 @@ function onWaypointsChange(next) {
   draftWaypoints.value = Array.isArray(next) ? next : []
 }
 
+/**
+ * @param {number} index
+ */
+function onRemoveWaypoint(index) {
+  const i = Math.floor(Number(index))
+  const pts = [...draftWaypoints.value]
+  if (!Number.isFinite(i) || i < 0 || i >= pts.length) return
+  if (pts.length <= 1) {
+    draftWaypoints.value = []
+    return
+  }
+  pts.splice(i, 1)
+  draftWaypoints.value = pts
+}
+
+/**
+ * @param {{ lat: number, lng: number }} p
+ */
+function onAddWaypoint(p) {
+  if (!p || typeof p !== 'object') return
+  const lat = Number(p.lat)
+  const lng = Number(p.lng)
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return
+  const pt = { lat, lng }
+  const cur = [...draftWaypoints.value]
+  if (cur.length === 0) {
+    draftWaypoints.value = [pt]
+    return
+  }
+  if (cur.length === 1) {
+    draftWaypoints.value = [...cur, pt]
+    return
+  }
+  const k = bestWaypointInsertionIndex(cur, pt)
+  const next = [...cur.slice(0, k), pt, ...cur.slice(k)]
+  draftWaypoints.value = next
+}
+
 watch(
   () => draftWaypoints.value,
   (pts) => {
@@ -356,6 +395,13 @@ function cancelCreate() {
 function clearDraftPoints() {
   draftWaypoints.value = []
   previewPolyline.value = []
+}
+
+function removeLastWaypoint() {
+  const pts = [...draftWaypoints.value]
+  if (!pts.length) return
+  pts.pop()
+  draftWaypoints.value = pts
 }
 
 async function submitCreate() {
@@ -424,6 +470,8 @@ async function removeSelected() {
           :vehicle-id="mapVehicleId"
           fill-height
           @waypoints-change="onWaypointsChange"
+          @remove-waypoint="onRemoveWaypoint"
+          @add-waypoint="onAddWaypoint"
         />
       </div>
     </div>
@@ -483,12 +531,21 @@ async function removeSelected() {
               autocomplete="off"
             />
             <p class="corridor-hint">
-              Tap the map to drop waypoints (start green). Drag pins to adjust. Preview updates after you pause.
+              After two points, TomTom previews the <strong>routed</strong> path — taps near that line snap to the road.
+              New taps insert a via where they shorten the path most. Drag pins (snaps to preview when close). Use × on a pin or <strong>Undo last</strong>.
               <span v-if="previewBusy" class="corridor-inline-status">Preview…</span>
             </p>
             <div class="corridor-create-actions">
               <button type="button" class="corridor-btn tap" :disabled="createBusy" @click="clearDraftPoints">
                 Clear points
+              </button>
+              <button
+                type="button"
+                class="corridor-btn tap"
+                :disabled="createBusy || !draftWaypoints.length"
+                @click="removeLastWaypoint"
+              >
+                Undo last
               </button>
               <button type="button" class="corridor-btn tap" :disabled="createBusy" @click="cancelCreate">
                 Cancel
