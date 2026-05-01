@@ -3,6 +3,7 @@ import { ref, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 import { userLocationTruckIcon } from '../utils/mapMarkers.js'
+import { useMapUserHeading } from '../composables/useMapUserHeading.js'
 
 const DEFAULT_CENTER = [40.7128, -74.006]
 const DEFAULT_ZOOM = 11
@@ -24,6 +25,16 @@ const props = defineProps({
 
 /** First fix uses setView; later updates use panTo when smoothFollow is on */
 const userViewInitialized = ref(false)
+
+const {
+  headingDeg,
+  feedGeolocation: feedUserHeadingFromGeo,
+  startListening: startHeadingListening,
+  stopListening: stopHeadingListening,
+  resetTrack: resetHeadingTrack,
+} = useMapUserHeading()
+
+let headingArmed = false
 
 const rootRef = ref(/** @type {HTMLElement | null} */ (null))
 
@@ -52,6 +63,9 @@ function sync() {
 
   if (!hasFix || props.pending) {
     userViewInitialized.value = false
+    stopHeadingListening()
+    resetHeadingTrack()
+    headingArmed = false
     if (dot) {
       layer.removeLayer(dot)
       dot = null
@@ -62,15 +76,35 @@ function sync() {
 
   const ll = L.latLng(la, ln)
 
+  if (!headingArmed && !props.pending) {
+    headingArmed = true
+    void startHeadingListening()
+  }
+
+  feedUserHeadingFromGeo({
+    latitude: la,
+    longitude: ln,
+    altitude: null,
+    accuracy:
+      props.accuracyM != null && Number.isFinite(props.accuracyM)
+        ? props.accuracyM
+        : 40,
+    altitudeAccuracy: null,
+    heading: null,
+    speed: null,
+  })
+
+  const hd = headingDeg.value
+
   if (!dot) {
     dot = L.marker(ll, {
-      icon: userLocationTruckIcon(props.vehicleId || ''),
+      icon: userLocationTruckIcon(props.vehicleId || '', hd),
       zIndexOffset: 500,
       title: 'Your location',
     }).addTo(layer)
   } else {
     dot.setLatLng(ll)
-    dot.setIcon(userLocationTruckIcon(props.vehicleId || ''))
+    dot.setIcon(userLocationTruckIcon(props.vehicleId || '', hd))
   }
 
   const motion = !prefersReducedMotion()
@@ -109,6 +143,9 @@ function initMap() {
 }
 
 function destroyMap() {
+  stopHeadingListening()
+  resetHeadingTrack()
+  headingArmed = false
   if (map) {
     map.remove()
     map = null
@@ -132,6 +169,10 @@ watch(
     nextTick(() => map?.invalidateSize())
   },
 )
+
+watch(headingDeg, () => {
+  sync()
+})
 </script>
 
 <template>

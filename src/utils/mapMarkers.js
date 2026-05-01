@@ -81,6 +81,7 @@ function rasterMarkerDivIconBottomChip(
   labelRaw = '',
   rootClass = '',
   chipClass = '',
+  headingDeg = /** @type {number | null | undefined} */ (null),
 ) {
   const { vw, vh, chipH = RASTER_CHIP_H } = layout
   const raw = String(labelRaw ?? '')
@@ -99,9 +100,18 @@ function rasterMarkerDivIconBottomChip(
   const gap = idRaw !== '' ? RASTER_CHIP_GAP : 0
   const imgBoxH = idRaw !== '' ? Math.max(vh - chipH - gap, 1) : vh
   const extraCls = rootClass ? ` ${rootClass}` : ''
-  const html = `<div class="map-marker-raster-root${extraCls}" style="width:${vw}px;height:${vh}px"><img class="map-marker-raster-img" src="${escapeHtmlAttr(
+  const hd =
+    headingDeg != null && Number.isFinite(headingDeg)
+      ? (((headingDeg % 360) + 360) % 360)
+      : null
+  const imgTag = `<img class="map-marker-raster-img" src="${escapeHtmlAttr(
     rasterHref,
-  )}" alt="" role="presentation" decoding="async" width="${vw}" height="${imgBoxH}"/>${chipHtml}</div>`
+  )}" alt="" role="presentation" decoding="async" width="${vw}" height="${imgBoxH}"/>`
+  const imgBlock =
+    hd != null
+      ? `<div class="map-marker-raster-rotate" style="transform:rotate(${hd}deg)">${imgTag}</div>`
+      : imgTag
+  const html = `<div class="map-marker-raster-root${extraCls}" style="width:${vw}px;height:${vh}px">${imgBlock}${chipHtml}</div>`
   return L.divIcon({
     html,
     className: 'map-marker-raster-div-icon',
@@ -115,8 +125,9 @@ function rasterMarkerDivIconBottomChip(
  * Top-down truck PNG (`src/assets/map-markers/truck.png`).
  * Optional `vehicleId` shows a chip under the cab like bridge / directory markers.
  * @param {string} [vehicleId] tractor / unit number
+ * @param {number | null} [headingDeg] clockwise from north; rotates cab, chip stays upright
  */
-export function userLocationTruckIcon(vehicleId = '') {
+export function userLocationTruckIcon(vehicleId = '', headingDeg = null) {
   const vw = USER_MARKER_IMG_W
   const imgH = USER_MARKER_IMG_H
   const chipH = RASTER_CHIP_H
@@ -130,6 +141,7 @@ export function userLocationTruckIcon(vehicleId = '') {
     raw,
     'map-marker-raster-root--user-truck',
     'map-marker-raster-chip--tractor',
+    headingDeg,
   )
 }
 

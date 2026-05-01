@@ -462,6 +462,20 @@ body {
   background: transparent;
 }
 
+.map-marker-raster-rotate {
+  flex: 0 0 auto;
+  width: 100%;
+  line-height: 0;
+  transform-origin: 50% 100%;
+  transition: transform 0.2s ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .map-marker-raster-rotate {
+    transition: none;
+  }
+}
+
 .map-marker-raster-img {
   display: block;
   width: 100%;

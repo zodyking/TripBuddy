@@ -10,6 +10,7 @@ import {
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 import { directoryBuildingIcon, userLocationTruckIcon } from '../utils/mapMarkers.js'
+import { useMapUserHeading } from '../composables/useMapUserHeading.js'
 
 /** Default view when there are no directory pins (Manhattan). */
 const DEFAULT_CENTER = Object.freeze([40.7128, -74.006])
@@ -51,6 +52,14 @@ const geoPending = ref(false)
 const geoDenied = ref(false)
 /** @type {number | null} */
 let geoWatchId = null
+
+const {
+  headingDeg,
+  feedGeolocation: feedUserHeadingFromGeo,
+  startListening: startHeadingListening,
+  stopListening: stopHeadingListening,
+  resetTrack: resetHeadingTrack,
+} = useMapUserHeading()
 
 /** @type {L.Map | null} */
 let map = null
@@ -210,16 +219,17 @@ function syncUserOverlay() {
 
   const ll = L.latLng(u.lat, u.lng)
 
+  const hd = headingDeg.value
   if (!userMarker) {
     userMarker = L.marker(ll, {
-      icon: userLocationTruckIcon(props.vehicleId || ''),
+      icon: userLocationTruckIcon(props.vehicleId || '', hd),
       zIndexOffset: 600,
       title: 'Your location',
     })
     userMarker.addTo(userLayer)
   } else {
     userMarker.setLatLng(ll)
-    userMarker.setIcon(userLocationTruckIcon(props.vehicleId || ''))
+    userMarker.setIcon(userLocationTruckIcon(props.vehicleId || '', hd))
   }
 }
 
@@ -233,6 +243,7 @@ function applyGeolocationPosition(pos, opts = {}) {
   const lng = pos.coords.longitude
   const acc = pos.coords.accuracy
   if (!Number.isFinite(lat) || !Number.isFinite(lng)) return
+  feedUserHeadingFromGeo(pos.coords)
   userFix.value = {
     lat,
     lng,
@@ -274,6 +285,8 @@ function clearGeoWatch() {
 
 function stopUserTracking() {
   clearGeoWatch()
+  stopHeadingListening()
+  resetHeadingTrack()
   geoTracking.value = false
   geoPending.value = false
   userFix.value = null
@@ -293,6 +306,7 @@ function toggleMyLocation() {
   geoDenied.value = false
   geoPending.value = true
   geoTracking.value = true
+  void startHeadingListening()
 
   const opts = {
     enableHighAccuracy: true,
@@ -388,6 +402,8 @@ function initMap() {
 
 function destroyMap() {
   clearGeoWatch()
+  stopHeadingListening()
+  resetHeadingTrack()
   markersById.clear()
   userMarker = null
   if (map) {
@@ -436,6 +452,10 @@ watch(
   },
   { deep: true },
 )
+
+watch(headingDeg, () => {
+  syncUserOverlay()
+})
 </script>
 
 <template>

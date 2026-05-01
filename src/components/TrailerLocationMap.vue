@@ -10,6 +10,7 @@ import {
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 import { trailer20ftTopIcon, trailer53ftTopIcon, trailerFallbackPinIcon, userLocationTruckIcon } from '../utils/mapMarkers.js'
+import { useMapUserHeading } from '../composables/useMapUserHeading.js'
 
 const props = defineProps({
   lat: { type: Number, required: true },
@@ -32,6 +33,14 @@ const props = defineProps({
 })
 
 const containerRef = ref(null)
+
+const {
+  headingDeg,
+  feedGeolocation: feedUserHeadingFromGeo,
+  startListening: startHeadingListening,
+  stopListening: stopHeadingListening,
+  resetTrack: resetHeadingTrack,
+} = useMapUserHeading()
 
 /** Latest user fix (from props + live watch). */
 const userFix = ref(
@@ -148,17 +157,18 @@ function syncUserOverlay() {
   }
 
   const ll = L.latLng(u.lat, u.lng)
+  const hd = headingDeg.value
 
   if (!userMarker) {
     userMarker = L.marker(ll, {
-      icon: userLocationTruckIcon(props.userVehicleId || ''),
+      icon: userLocationTruckIcon(props.userVehicleId || '', hd),
       zIndexOffset: 600,
       title: 'Your location',
     })
     userMarker.addTo(userLayer)
   } else {
     userMarker.setLatLng(ll)
-    userMarker.setIcon(userLocationTruckIcon(props.userVehicleId || ''))
+    userMarker.setIcon(userLocationTruckIcon(props.userVehicleId || '', hd))
   }
 }
 
@@ -170,6 +180,17 @@ function syncUserOverlay() {
  */
 function setUserFixFromLatLng(lat, lng, accuracyM = 40, fitCamera = false) {
   if (!Number.isFinite(lat) || !Number.isFinite(lng)) return
+  feedUserHeadingFromGeo(
+    /** @type {GeolocationCoordinates} */ ({
+      latitude: lat,
+      longitude: lng,
+      altitude: null,
+      accuracy: accuracyM,
+      altitudeAccuracy: null,
+      heading: null,
+      speed: null,
+    }),
+  )
   userFix.value = {
     lat,
     lng,
@@ -200,6 +221,8 @@ function stopWatch() {
   }
   geoWatchId = null
   watchStarted = false
+  stopHeadingListening()
+  resetHeadingTrack()
 }
 
 function startWatchForLiveUpdates() {
@@ -240,6 +263,7 @@ function applyUserCoordsFromProps() {
     Number.isFinite(la) &&
     Number.isFinite(ln)
   ) {
+    void startHeadingListening()
     setUserFixFromLatLng(la, ln, 40, true)
     startWatchForLiveUpdates()
   } else if (!props.userLocationPending && props.userLocationDenied) {
@@ -301,6 +325,8 @@ function initMap() {
 function destroyMap() {
   geoStopped = true
   stopWatch()
+  stopHeadingListening()
+  resetHeadingTrack()
   if (fitDebounce) {
     clearTimeout(fitDebounce)
     fitDebounce = null
@@ -373,6 +399,10 @@ watch(
     applyUserCoordsFromProps()
   },
 )
+
+watch(headingDeg, () => {
+  syncUserOverlay()
+})
 </script>
 
 <template>

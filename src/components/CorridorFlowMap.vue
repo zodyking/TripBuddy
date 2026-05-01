@@ -4,6 +4,7 @@ import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 import { tomtomKeyEffective } from '../stores/trafficTileKey.js'
 import { userLocationTruckIcon } from '../utils/mapMarkers.js'
+import { useMapUserHeading } from '../composables/useMapUserHeading.js'
 
 const DEFAULT_CENTER = Object.freeze([40.661, -73.915])
 const DEFAULT_ZOOM = 12
@@ -57,6 +58,14 @@ const geoPending = ref(false)
 const geoDenied = ref(false)
 /** @type {number | null} */
 let geoWatchId = null
+
+const {
+  headingDeg,
+  feedGeolocation: feedUserHeadingFromGeo,
+  startListening: startHeadingListening,
+  stopListening: stopHeadingListening,
+  resetTrack: resetHeadingTrack,
+} = useMapUserHeading()
 
 function prefersReducedMotion() {
   if (typeof window === 'undefined') return false
@@ -206,16 +215,17 @@ function syncUserOverlay() {
     return
   }
   const ll = L.latLng(u.lat, u.lng)
+  const hd = headingDeg.value
   if (!userMarker) {
     userMarker = L.marker(ll, {
-      icon: userLocationTruckIcon(props.vehicleId || ''),
+      icon: userLocationTruckIcon(props.vehicleId || '', hd),
       zIndexOffset: 600,
       title: 'Your location',
     })
     userMarker.addTo(userLayer)
   } else {
     userMarker.setLatLng(ll)
-    userMarker.setIcon(userLocationTruckIcon(props.vehicleId || ''))
+    userMarker.setIcon(userLocationTruckIcon(props.vehicleId || '', hd))
   }
 }
 
@@ -225,6 +235,7 @@ function syncUserOverlay() {
 function applyGeo(pos) {
   const { latitude: lat, longitude: lng, accuracy: acc } = pos.coords
   if (!Number.isFinite(lat) || !Number.isFinite(lng)) return
+  feedUserHeadingFromGeo(pos.coords)
   userFix.value = { lat, lng, accuracyM: Number.isFinite(acc) ? acc : 40 }
   geoDenied.value = false
   geoPending.value = false
@@ -240,6 +251,8 @@ function clearGeoWatch() {
 
 function stopTracking() {
   clearGeoWatch()
+  stopHeadingListening()
+  resetHeadingTrack()
   geoTracking.value = false
   geoPending.value = false
   userFix.value = null
@@ -258,6 +271,7 @@ function toggleMyLocation() {
   geoPending.value = true
   geoDenied.value = false
   geoTracking.value = true
+  void startHeadingListening()
   navigator.geolocation.getCurrentPosition(
     (p) => {
       applyGeo(p)
@@ -329,6 +343,8 @@ function initMap() {
 
 function destroyMap() {
   clearGeoWatch()
+  stopHeadingListening()
+  resetHeadingTrack()
   if (routeLayer) routeLayer.clearLayers()
   userMarker = null
   if (map) {
@@ -380,6 +396,10 @@ watch(tomtomKeyEffective, () => {
     setTrafficLayerFromKey()
     applyTrafficToMap()
   }
+})
+
+watch(headingDeg, () => {
+  syncUserOverlay()
 })
 </script>
 
