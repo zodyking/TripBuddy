@@ -147,7 +147,8 @@ export async function getCatonConduitCorridorStatus(apiKey) {
   if (!key) {
     return {
       ok: false,
-      error: 'TomTom API key required (Settings traffic key or TOMTOM_API_KEY).',
+      error:
+        'TomTom API key required. Add it in Settings → Map: TomTom traffic overlay (saved in browser), or set TOMTOM_API_KEY / VITE_TOMTOM_KEY on the API server.',
     }
   }
 

@@ -1,5 +1,6 @@
 <script setup>
 import { ref, onMounted, onUnmounted, computed } from 'vue'
+import { RouterLink } from 'vue-router'
 import CorridorFlowMap from '../components/CorridorFlowMap.vue'
 import { postTrafficCorridorStatus } from '../api.js'
 import { useMapVehicleId } from '../composables/useMapVehicleId.js'
@@ -13,6 +14,10 @@ const payload = ref(null)
 const loading = ref(false)
 const error = ref('')
 const configError = ref('')
+
+const needsTomtomKey = computed(() =>
+  /tomtom api key required/i.test(String(configError.value || '')),
+)
 
 async function load() {
   loading.value = true
@@ -164,6 +169,14 @@ function segmentTierClass(seg) {
         </div>
 
         <p v-if="configError" class="corridor-warn" role="status">{{ configError }}</p>
+        <p v-if="needsTomtomKey" class="corridor-setup-hint">
+          <RouterLink class="corridor-setup-link tap" :to="{ name: 'settings', hash: '#tomtom' }">
+            Open Settings → TomTom key
+          </RouterLink>
+          <span class="corridor-setup-sub">
+            (paste key and save). For production, also set <code class="inline-code">TOMTOM_API_KEY</code> on the API server.
+          </span>
+        </p>
         <p v-else-if="error" class="corridor-err" role="alert">{{ error }}</p>
         <p v-else-if="loading && !payload" class="corridor-skel" aria-busy="true">Loading…</p>
 
@@ -298,6 +311,39 @@ function segmentTierClass(seg) {
   border: 1px solid rgba(251, 191, 36, 0.35);
   color: #fcd34d;
   font-size: 0.75rem;
+}
+
+.corridor-setup-hint {
+  margin: 0 0 0.65rem;
+  font-size: 0.72rem;
+  line-height: 1.45;
+  color: var(--color-text-secondary, #c4c4d4);
+}
+
+.corridor-setup-link {
+  display: inline-block;
+  margin-right: 0.35rem;
+  font-weight: 650;
+  color: var(--color-accent-purple, #a78bfa);
+  text-decoration: none;
+}
+
+.corridor-setup-link:hover {
+  text-decoration: underline;
+}
+
+.corridor-setup-sub {
+  display: block;
+  margin-top: 0.25rem;
+  color: var(--color-text-tertiary, #8b8b9c);
+}
+
+.corridor-setup-sub .inline-code {
+  font-family: ui-monospace, monospace;
+  font-size: 0.68em;
+  padding: 0.05rem 0.25rem;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.06);
 }
 
 .corridor-err {

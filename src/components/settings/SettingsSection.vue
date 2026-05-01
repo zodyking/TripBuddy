@@ -5,17 +5,19 @@ defineProps({
   open: { type: Boolean, default: false },
   /** When false, title is static (no collapse / chevron) */
   collapsible: { type: Boolean, default: true },
+  /** Optional DOM id for deep links (e.g. #settings-tomtom) */
+  sectionId: { type: String, default: '' },
 })
 </script>
 
 <template>
-  <details v-if="collapsible" class="settings-details" :open="open">
+  <details v-if="collapsible" :id="sectionId || undefined" class="settings-details" :open="open">
     <summary class="settings-summary">{{ title }}</summary>
     <div class="settings-body">
       <slot />
     </div>
   </details>
-  <div v-else class="settings-details settings-details-static">
+  <div v-else :id="sectionId || undefined" class="settings-details settings-details-static">
     <div class="settings-summary-static">{{ title }}</div>
     <div class="settings-body">
       <slot />

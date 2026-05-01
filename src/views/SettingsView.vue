@@ -1,6 +1,6 @@
 <script setup>
 import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRouter, useRoute } from 'vue-router'
 import {
   getAssignment,
   getCredentials,
@@ -67,6 +67,7 @@ const SECRET_SAVED_MASK = '••••••••••••••••'
 
 /** @type {import('vue').Ref<'general' | 'automation' | 'audio' | 'security'>} */
 const router = useRouter()
+const route = useRoute()
 
 const settingsTab = ref('general')
 
@@ -719,13 +720,27 @@ async function runLinehaulTest() {
   }
 }
 
+function applySettingsRouteFragment() {
+  const raw = typeof route.hash === 'string' ? route.hash.replace(/^#/, '').trim() : ''
+  if (raw !== 'tomtom') return
+  settingsTab.value = 'general'
+  nextTick(() => {
+    const el = document.getElementById('settings-tomtom')
+    if (el instanceof HTMLDetailsElement) el.open = true
+    el?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  })
+}
+
 onMounted(() => {
   tripAlertMode.value = getTripAlertMode()
   unregisterRecover = registerApiRecover(reconnectLiveLogStream)
   loadCredentials()
   loadAssignmentState()
   tomtomTrafficDraft.value = trafficTomtomKeyOverride.value
+  applySettingsRouteFragment()
 })
+
+watch(() => route.hash, () => applySettingsRouteFragment())
 
 watch(settingsTab, (tab) => {
   if (tab === 'audio') {
@@ -970,7 +985,7 @@ onUnmounted(() => {
         </div>
       </SettingsSection>
 
-      <SettingsSection title="Map: TomTom traffic overlay">
+      <SettingsSection title="Map: TomTom traffic overlay" section-id="settings-tomtom" :open="true">
         <p class="cred-hint">
           Live road traffic tiles on the <strong>Traffic</strong> map use
           <a
