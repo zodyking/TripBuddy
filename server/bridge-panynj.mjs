@@ -1,5 +1,6 @@
 import { readKeyJson, writeKeyJson } from './kv-store.mjs'
 import { G } from './scope-kv.mjs'
+import { maybeNotifyBridgeCrossingDigest } from './notification-publish.mjs'
 
 const KEY = G('bridge:panynj:series')
 const PA_URL =
@@ -103,7 +104,9 @@ export async function refreshPanynjCrossingData() {
   lastLiveArray = live
   lastFetchAt = Date.now()
   lastFetchError = null
-  return appendPanynjSnapshotFromLive(live)
+  const st = await appendPanynjSnapshotFromLive(live)
+  maybeNotifyBridgeCrossingDigest(live)
+  return st
 }
 
 export function getLastPanynjLive() {

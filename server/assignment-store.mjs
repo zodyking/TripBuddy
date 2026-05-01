@@ -1,7 +1,7 @@
 import { readKeyJson, writeKeyJson } from './kv-store.mjs'
 import { getDataAccountKey, userScopeKey } from './scope-kv.mjs'
 import { emitLog } from './log-bus.mjs'
-import { appendInAppNotification } from './in-app-notifications-store.mjs'
+import { publishInAppForAccount } from './notification-publish.mjs'
 
 /**
  * @returns {string}
@@ -760,7 +760,7 @@ export async function writeAssignment(body) {
     if (ak) {
       try {
         const n = String(nextInstructions ?? '').trim()
-        const r = await appendInAppNotification(ak, {
+        const r = await publishInAppForAccount(ak, {
           type: 'assignment',
           message: n
             ? 'Dispatch instructions were updated'
@@ -768,14 +768,9 @@ export async function writeAssignment(body) {
           source: 'dispatch',
           extra: { hint: n ? n.slice(0, 200) : '' },
         })
-        if (r?.item) {
-          emitLog('inapp', r.item.message, {
-            id: r.item.id,
-            ntype: r.item.type,
-            source: r.item.source,
-            read: r.item.read,
-            ts: r.item.ts,
-            extra: r.item.extra,
+        if (!r?.item) {
+          emitLog('assignment', 'Dispatch instructions updated (in-app notify skipped)', {
+            source: 'save',
           })
         }
       } catch {

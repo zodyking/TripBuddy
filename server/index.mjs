@@ -308,6 +308,11 @@ app.post('/api/auth/login', async (req, reply) => {
         sameSite: 'lax',
         maxAge: 7 * 24 * 60 * 60,
       })
+      void publishInAppForAccount(accountKey, {
+        type: 'info',
+        message: 'Signed in — alerts for dispatch changes and crossing-time refreshes appear here.',
+        source: 'session',
+      })
       return { ok: true, fastLogin: true }
     }
     /* Verified user but token expired — refresh via background sign-in below. */
@@ -342,6 +347,11 @@ app.post('/api/auth/login', async (req, reply) => {
     secure: process.env.NODE_ENV === 'production',
     sameSite: 'lax',
     maxAge: 7 * 24 * 60 * 60,
+  })
+  void publishInAppForAccount(accountKey, {
+    type: 'info',
+    message: 'Signed in — alerts for dispatch changes and crossing-time refreshes appear here.',
+    source: 'session',
   })
   return { ok: true }
 })
@@ -457,7 +467,8 @@ app.get('/api/events', async (req, reply) => {
   logBus.on('entry', onEntry)
   let unregisterSse = () => {}
   if (sid) {
-    unregisterSse = registerSseConnection(sid, send)
+    const ak = getSessionAccountKey(sid) || ''
+    unregisterSse = registerSseConnection(sid, send, ak)
   }
   req.raw.on('close', () => {
     logBus.off('entry', onEntry)

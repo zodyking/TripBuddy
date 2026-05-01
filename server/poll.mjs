@@ -1,8 +1,8 @@
 import { POLL_INTERVAL_MS } from './config.mjs'
 import { emitLog } from './log-bus.mjs'
-import { appendInAppForLastActive } from './in-app-notifications-store.mjs'
 import { pollFingerprintSafe } from './playwright/runner.mjs'
 import { maybeUpdateAssignmentFromContext } from './assignment-logic.mjs'
+import { publishInAppForLastActiveUser } from './notification-publish.mjs'
 
 let intervalId = null
 let lastSerialized = null
@@ -40,20 +40,14 @@ export function startPoll({ headless = true } = {}) {
       if (lastSerialized != null && next !== lastSerialized) {
         lastChangeAt = Date.now()
         void (async () => {
-          const r = await appendInAppForLastActive({
+          const r = await publishInAppForLastActiveUser({
             type: 'assignment',
             message: 'Home screen changed — check for a new dispatch',
             source: 'poll',
             extra: { previous: lastFingerprint, current: fp },
           })
           if (r && r.item) {
-            emitLog('inapp', r.item.message, {
-              id: r.item.id,
-              ntype: r.item.type,
-              source: r.item.source,
-              read: r.item.read,
-              ts: r.item.ts,
-            })
+            emitLog('poll', `Notified: ${r.item.message}`)
           }
         })()
         void maybeUpdateAssignmentFromContext({
