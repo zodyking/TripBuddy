@@ -984,6 +984,9 @@ onUnmounted(() => {
           <code class="bmk">VITE_TOMTOM_KEY</code> in
           <code class="bmk">.env</code> (build) which overrides the pasted value.
         </p>
+        <p class="cred-hint">
+          <strong>Traffic → Corridors</strong> uses TomTom Flow Segment Data on the API server with the same saved key (fallback: <code class="bmk">TOMTOM_API_KEY</code> or <code class="bmk">VITE_TOMTOM_KEY</code> on the server).
+        </p>
         <p v-if="tomtomKeyFromEnv" class="cred-hint" style="color: #fbbf24; font-weight: 600">
           A build-time <code class="bmk">VITE_TOMTOM_KEY</code> is set — the Traffic map uses it first for tiles.
         </p>

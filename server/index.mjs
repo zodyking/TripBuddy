@@ -128,6 +128,10 @@ import {
   refreshPanynjCrossingData,
   startPanynjBridgePoll,
 } from './bridge-panynj.mjs'
+import {
+  getCatonConduitCorridorStatus,
+  sanitizeTomtomApiKey,
+} from './caton-conduit-flow-monitor.mjs'
 await fs.mkdir(UPLOADS_DIR, { recursive: true })
 
 const app = Fastify({ logger: false })
@@ -415,6 +419,39 @@ app.get('/api/status', async () => ({
 
 app.get('/api/bridges/panynj', async () => {
   return getBridgesResponsePayload()
+})
+
+/**
+ * Caton → Conduit corridor: TomTom Flow Segment aggregation (60s server cache).
+ * POST JSON optional `{ tomtomKey }`; else `TOMTOM_API_KEY` / `VITE_TOMTOM_KEY`.
+ */
+app.post('/api/traffic/corridor-status', async (req, reply) => {
+  const body = req.body && typeof req.body === 'object' ? req.body : {}
+  const fromClient = sanitizeTomtomApiKey(body.tomtomKey)
+  const key =
+    fromClient ||
+    String(process.env.TOMTOM_API_KEY || process.env.VITE_TOMTOM_KEY || '').trim()
+  const out = await getCatonConduitCorridorStatus(key)
+  if (!out.ok) {
+    return reply.code(503).send(out)
+  }
+  return out
+})
+
+/** Same corridor status (GET for simple clients). */
+app.get('/api/traffic/corridor-status', async (req, reply) => {
+  const q = req.query && typeof req.query === 'object' ? req.query : {}
+  const fromClient = sanitizeTomtomApiKey(
+    typeof q.tomtomKey === 'string' ? q.tomtomKey : '',
+  )
+  const key =
+    fromClient ||
+    String(process.env.TOMTOM_API_KEY || process.env.VITE_TOMTOM_KEY || '').trim()
+  const out = await getCatonConduitCorridorStatus(key)
+  if (!out.ok) {
+    return reply.code(503).send(out)
+  }
+  return out
 })
 
 app.get('/api/events', async (req, reply) => {

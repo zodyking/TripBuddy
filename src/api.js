@@ -1,3 +1,5 @@
+import { getTomtomKeyEffective } from './stores/trafficTileKey.js'
+
 /**
  * All API calls include cookies (session auth). Use for `/api/*` only.
  * @param {RequestInfo} input
@@ -145,6 +147,25 @@ export async function getHealth() {
 /** Port Authority bridge/tunnel times + stored series for trend charts. */
 export async function getBridgesPanynj() {
   const r = await apiFetch('/api/bridges/panynj')
+  return handleJson(r)
+}
+
+/**
+ * Caton → Conduit corridor: TomTom Flow Segment aggregation (server caches 60s).
+ * @returns {Promise<Record<string, unknown>>}
+ */
+export async function postTrafficCorridorStatus(body = {}) {
+  const base =
+    body && typeof body === 'object' && !Array.isArray(body)
+      ? /** @type {Record<string, unknown>} */ ({ ...body })
+      : {}
+  const k = getTomtomKeyEffective().trim()
+  if (k) base.tomtomKey = k
+  const r = await apiFetch('/api/traffic/corridor-status', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(base),
+  })
   return handleJson(r)
 }
 
