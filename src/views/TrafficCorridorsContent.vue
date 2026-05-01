@@ -173,9 +173,7 @@ function segmentTierClass(seg) {
           <RouterLink class="corridor-setup-link tap" :to="{ name: 'settings', hash: '#tomtom' }">
             Open Settings → TomTom key
           </RouterLink>
-          <span class="corridor-setup-sub">
-            (paste key and save). For production, also set <code class="inline-code">TOMTOM_API_KEY</code> on the API server.
-          </span>
+          <span class="corridor-setup-sub">(paste key and save)</span>
         </p>
         <p v-else-if="error" class="corridor-err" role="alert">{{ error }}</p>
         <p v-else-if="loading && !payload" class="corridor-skel" aria-busy="true">Loading…</p>

@@ -330,17 +330,10 @@ const credMsg = ref(null)
 /** TomTom Traffic Raster API key (Traffic map overlay). Free developer account: developer.tomtom.com */
 const tomtomTrafficDraft = ref('')
 const tomtomTrafficMsg = ref('')
-const tomtomKeyFromEnv = Boolean(
-  typeof import.meta !== 'undefined' &&
-    import.meta.env?.VITE_TOMTOM_KEY &&
-    String(import.meta.env.VITE_TOMTOM_KEY).trim().length > 0,
-)
 
 function saveTomtomTrafficKey() {
   setTomtomTrafficKey(tomtomTrafficDraft.value)
-  tomtomTrafficMsg.value = tomtomKeyFromEnv
-    ? 'Saved locally. Build VITE_TOMTOM_KEY still takes priority if set.'
-    : 'Map traffic key saved in this browser.'
+  tomtomTrafficMsg.value = 'Map traffic key saved in this browser.'
 }
 
 const screenshotModal = ref(null)
@@ -995,15 +988,10 @@ onUnmounted(() => {
             class="ext-link"
           >TomTom Traffic</a>
           (free developer tier, API key). Paste your key here — it is stored only in
-          <strong>this browser</strong>. You can also set
-          <code class="bmk">VITE_TOMTOM_KEY</code> in
-          <code class="bmk">.env</code> (build) which overrides the pasted value.
+          <strong>this browser</strong> and is sent to this app’s API when loading corridor traffic (not stored on the server).
         </p>
         <p class="cred-hint">
-          <strong>Traffic → Corridors</strong> uses TomTom Flow Segment Data on the API server with the same saved key (fallback: <code class="bmk">TOMTOM_API_KEY</code> or <code class="bmk">VITE_TOMTOM_KEY</code> on the server).
-        </p>
-        <p v-if="tomtomKeyFromEnv" class="cred-hint" style="color: #fbbf24; font-weight: 600">
-          A build-time <code class="bmk">VITE_TOMTOM_KEY</code> is set — the Traffic map uses it first for tiles.
+          <strong>Traffic → Corridors</strong> uses TomTom Flow Segment Data with the same saved key.
         </p>
         <label class="lbl" for="tomtom-traffic-key">TomTom API key (optional)</label>
         <input

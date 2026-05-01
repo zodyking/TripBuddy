@@ -1,6 +1,6 @@
 /**
- * Optional TomTom Traffic Raster tile key: Settings paste (localStorage) or
- * VITE_TOMTOM_KEY at build time. https://developer.tomtom.com/
+ * TomTom Traffic Raster tile key from Settings (localStorage only).
+ * https://developer.tomtom.com/
  */
 import { ref, computed } from 'vue'
 
@@ -44,17 +44,7 @@ export function setTomtomTrafficKey(key) {
  * @returns {string}
  */
 export function getTomtomKeyEffective() {
-  if (typeof import.meta !== 'undefined' && import.meta.env?.VITE_TOMTOM_KEY) {
-    const env = String(import.meta.env.VITE_TOMTOM_KEY).trim()
-    if (env) return env
-  }
   return override.value
 }
 
-export const tomtomKeyEffective = computed(() => {
-  if (typeof import.meta !== 'undefined' && import.meta.env?.VITE_TOMTOM_KEY) {
-    const env = String(import.meta.env.VITE_TOMTOM_KEY).trim()
-    if (env) return env
-  }
-  return override.value
-})
+export const tomtomKeyEffective = computed(() => override.value)

@@ -44,7 +44,7 @@ let streetLayer = null
 /** @type {L.TileLayer | null} */
 let satelliteLayer = null
 /**
- * TomTom Traffic raster flow (needs `VITE_TOMTOM_KEY` at build time).
+ * TomTom Traffic raster flow (key from Settings, localStorage).
  * @type {L.TileLayer | null}
  */
 let trafficLayer = null
@@ -501,7 +501,7 @@ watch(tomtomKeyEffective, () => {
     <div class="bridge-map-stage">
       <div ref="containerRef" class="bridge-map-el" />
       <p v-if="!hasTomtomTraffic" class="bridge-map-footnote" role="note"
-      >Traffic: set TomTom key in Settings, or <code class="bmk">VITE_TOMTOM_KEY</code> in <code class="bmk">.env</code> (free tier)</p>
+      >Traffic: set TomTom key in Settings (free developer tier)</p>
       <p v-else-if="activeBaseLayer === 'satellite' && trafficOn" class="bridge-map-footnote" role="note"
       >Traffic hidden on Sat — switch to map</p>
       <p v-if="geoPending" class="bridge-map-hint">Location…</p>
@@ -515,7 +515,7 @@ watch(tomtomKeyEffective, () => {
         :aria-pressed="trafficOn"
         :disabled="activeBaseLayer === 'satellite' || !hasTomtomTraffic"
         :title="!hasTomtomTraffic
-          ? 'Add TomTom key in Settings (free developer tier) or VITE_TOMTOM_KEY in .env'
+          ? 'Add TomTom key in Settings (free developer tier)'
           : (activeBaseLayer === 'satellite' ? 'Traffic (street only)' : 'Live traffic (TomTom)')"
         @click="toggleTraffic"
       >

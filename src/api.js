@@ -152,6 +152,7 @@ export async function getBridgesPanynj() {
 
 /**
  * Caton → Conduit corridor: TomTom Flow Segment aggregation (server caches 60s).
+ * Sends the Settings-saved TomTom key from the browser when present.
  * @returns {Promise<Record<string, unknown>>}
  */
 export async function postTrafficCorridorStatus(body = {}) {

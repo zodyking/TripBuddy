@@ -423,14 +423,12 @@ app.get('/api/bridges/panynj', async () => {
 
 /**
  * Caton → Conduit corridor: TomTom Flow Segment aggregation (60s server cache).
- * POST JSON optional `{ tomtomKey }`; else `TOMTOM_API_KEY` / `VITE_TOMTOM_KEY`.
+ * POST JSON `{ tomtomKey }` from the app (Settings-saved key in the browser).
  */
 app.post('/api/traffic/corridor-status', async (req, reply) => {
   const body = req.body && typeof req.body === 'object' ? req.body : {}
   const fromClient = sanitizeTomtomApiKey(body.tomtomKey)
-  const key =
-    fromClient ||
-    String(process.env.TOMTOM_API_KEY || process.env.VITE_TOMTOM_KEY || '').trim()
+  const key = fromClient
   const out = await getCatonConduitCorridorStatus(key)
   if (!out.ok) {
     return reply.code(503).send(out)
@@ -444,9 +442,7 @@ app.get('/api/traffic/corridor-status', async (req, reply) => {
   const fromClient = sanitizeTomtomApiKey(
     typeof q.tomtomKey === 'string' ? q.tomtomKey : '',
   )
-  const key =
-    fromClient ||
-    String(process.env.TOMTOM_API_KEY || process.env.VITE_TOMTOM_KEY || '').trim()
+  const key = fromClient
   const out = await getCatonConduitCorridorStatus(key)
   if (!out.ok) {
     return reply.code(503).send(out)
