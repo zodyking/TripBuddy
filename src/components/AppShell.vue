@@ -18,6 +18,7 @@ import {
   markInAppItemRead,
   markInAppAllRead,
 } from '../stores/inAppNotificationsStore.js'
+import { startBridgeTrafficAlerts, stopBridgeTrafficAlerts } from '../composables/useBridgeTrafficAlerts.js'
 
 const route = useRoute()
 const router = useRouter()
@@ -80,6 +81,7 @@ async function logoutApp() {
 const headerAriaLabel = 'FedExTool — Linehaul'
 
 onMounted(() => {
+  startBridgeTrafficAlerts()
   connectLiveLogStream()
   void fetchInAppInbox()
   for (const ms of [500, 1500, 3500]) {
@@ -96,6 +98,7 @@ onUnmounted(() => {
     document.removeEventListener('click', docClickClose)
     docClickClose = null
   }
+  stopBridgeTrafficAlerts()
   disconnectLiveLogStream()
 })
 </script>

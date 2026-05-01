@@ -213,6 +213,19 @@ export async function postInAppMarkRead(body) {
   return handleJson(r)
 }
 
+/**
+ * Append an inbox notification from the client (shows toast + SSE `inapp`).
+ * @param {{ type?: string, source?: string, message: string, extra?: Record<string, unknown> }} body
+ */
+export async function postClientNotification(body) {
+  const r = await apiFetch('/api/notifications/client', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body ?? {}),
+  })
+  return handleJson(r)
+}
+
 export async function getDollyRegistry() {
   const r = await apiFetch('/api/dolly')
   return handleJson(r)

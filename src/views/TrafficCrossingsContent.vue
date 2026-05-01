@@ -9,6 +9,7 @@ import {
 } from '../utils/mapMarkers.js'
 import { bridgeDelayTier } from '../utils/bridgeDelayTier.js'
 import { useMapVehicleId } from '../composables/useMapVehicleId.js'
+import { trafficCrossingDirection } from '../stores/trafficCrossingDirectionStore.js'
 
 defineOptions({ name: 'TrafficCrossingsContent' })
 
@@ -17,6 +18,14 @@ const POLL_MS = 5 * 60 * 1000
 /** @typedef {'ToNY' | 'ToNJ'} TravelDir */
 /** @type {import('vue').Ref<TravelDir>} */
 const direction = ref('ToNY')
+
+watch(
+  direction,
+  (v) => {
+    trafficCrossingDirection.value = v
+  },
+  { immediate: true },
+)
 
 const loading = ref(true)
 const error = ref('')

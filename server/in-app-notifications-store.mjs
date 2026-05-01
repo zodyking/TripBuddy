@@ -24,6 +24,23 @@ function isDuplicateOfNewest(prev, item) {
   if (!top) return false
   if (top.message !== item.message) return false
   if (top.source !== item.source) return false
+  const fpTop =
+    top.extra &&
+    typeof top.extra === 'object' &&
+    typeof /** @type {Record<string, unknown>} */ (top.extra).tripFingerprint === 'string'
+      ? String(
+          /** @type {Record<string, unknown>} */ (top.extra).tripFingerprint,
+        )
+      : ''
+  const fpNew =
+    item.extra &&
+    typeof item.extra === 'object' &&
+    typeof /** @type {Record<string, unknown>} */ (item.extra).tripFingerprint === 'string'
+      ? String(
+          /** @type {Record<string, unknown>} */ (item.extra).tripFingerprint,
+        )
+      : ''
+  if (fpTop && fpNew && fpTop === fpNew) return true
   return (item.ts || 0) - (top.ts || 0) < 20_000
 }
 

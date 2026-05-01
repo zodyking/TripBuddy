@@ -111,6 +111,7 @@ import {
   readInAppInbox,
   markInAppRead,
   markInAppAllRead,
+  appendInAppNotification,
 } from './in-app-notifications-store.mjs'
 import {
   addOrTouchDolly,
@@ -543,6 +544,48 @@ app.post('/api/notifications/read', async (req, reply) => {
     return { ok: true, items: next.items, unreadCount: 0 }
   }
   return reply.code(400).send({ error: 'Provide { id: string } or { all: true }' })
+})
+
+/**
+ * Client-triggered inbox row (quick actions, trip UI). SSE broadcasts `inapp` like server events.
+ */
+app.post('/api/notifications/client', async (req, reply) => {
+  const ak = /** @type {any} */(req).credentialAccountKey
+  if (!ak) {
+    return reply.code(400).send({ error: 'Not signed in' })
+  }
+  const b = req.body ?? {}
+  const message = typeof b.message === 'string' ? b.message.trim() : ''
+  if (!message) {
+    return reply.code(400).send({ error: 'message required' })
+  }
+  const type = typeof b.type === 'string' && b.type.trim() ? b.type.trim() : 'info'
+  const source =
+    typeof b.source === 'string' && b.source.trim() ? b.source.trim() : 'client'
+  const extra =
+    b.extra && typeof b.extra === 'object' && !Array.isArray(b.extra)
+      ? { ...b.extra }
+      : undefined
+  try {
+    const r = await appendInAppNotification(ak, { type, message, source, extra })
+    if (r?.item) {
+      emitLog('inapp', r.item.message, {
+        id: r.item.id,
+        ntype: r.item.type,
+        source: r.item.source,
+        read: r.item.read,
+        ts: r.item.ts,
+        extra: r.item.extra,
+      })
+    }
+    const inbox = r?.inbox || (await readInAppInbox(ak))
+    const list = Array.isArray(inbox.items) ? inbox.items : []
+    const unreadCount = list.filter((x) => x && !x.read).length
+    return { ok: true, items: list, unreadCount }
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e)
+    return reply.code(400).send({ error: msg })
+  }
 })
 
 app.get('/api/dolly', async () => {

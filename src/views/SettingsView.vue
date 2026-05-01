@@ -55,6 +55,12 @@ import {
   setTrailerGpsTtsEnabled,
 } from '../utils/tripVoiceAnnouncement.js'
 import {
+  isBridgeTrafficSpeechEnabled,
+  setBridgeTrafficSpeechEnabled,
+  isBridgeTrafficNotifyEnabled,
+  setBridgeTrafficNotifyEnabled,
+} from '../composables/useBridgeTrafficAlerts.js'
+import {
   getAlertPrefs,
   setAlertPrefs,
   testTractorChangeAlert,
@@ -209,6 +215,19 @@ const arrivalAlertsOn = ref(isArrivalAlertsEnabled())
 const trailerNearbyOn = ref(isTrailerGpsTtsEnabled())
 const nearTrailerRadiusFeet = ref(getNearTrailerRadiusFeet())
 const audioMoreExpanded = ref(false)
+
+const bridgeTrafficSpeechOn = ref(isBridgeTrafficSpeechEnabled())
+const bridgeTrafficNotifyOn = ref(isBridgeTrafficNotifyEnabled())
+
+function toggleBridgeTrafficSpeech(enabled) {
+  bridgeTrafficSpeechOn.value = enabled
+  setBridgeTrafficSpeechEnabled(enabled)
+}
+
+function toggleBridgeTrafficNotify(enabled) {
+  bridgeTrafficNotifyOn.value = enabled
+  setBridgeTrafficNotifyEnabled(enabled)
+}
 
 function saveNearTrailerRadius() {
   setNearTrailerRadiusFeet(nearTrailerRadiusFeet.value)
@@ -1105,6 +1124,37 @@ onUnmounted(() => {
           <p class="audio-near-trailer-hint">
             “You are near trailer …” only while a trailer location map is open. Open the map from a trailer card pin.
           </p>
+        </div>
+
+        <div v-if="ttsEnabled" class="audio-row">
+          <label class="toggle-switch">
+            <input
+              type="checkbox"
+              :checked="bridgeTrafficSpeechOn"
+              @change="toggleBridgeTrafficSpeech($event.target.checked)"
+            />
+            <span class="toggle-slider"></span>
+          </label>
+          <span class="audio-row-label">Bridge traffic speech (crossing time updates)</span>
+          <button
+            type="button"
+            class="audio-test-btn tap"
+            @click="previewTripAlertSample('George Washington Bridge toward New York. Traffic worsened. Crossing time about 12 minutes.')"
+          >
+            Test
+          </button>
+        </div>
+
+        <div class="audio-row">
+          <label class="toggle-switch">
+            <input
+              type="checkbox"
+              :checked="bridgeTrafficNotifyOn"
+              @change="toggleBridgeTrafficNotify($event.target.checked)"
+            />
+            <span class="toggle-slider"></span>
+          </label>
+          <span class="audio-row-label">Heavy bridge traffic notifications (red crossings)</span>
         </div>
 
         <div v-if="ttsEnabled" class="audio-more-wrap">

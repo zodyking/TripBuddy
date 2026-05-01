@@ -74,6 +74,9 @@ const assignmentListeners = new Set()
 /** @type {Set<(data: object) => void>} */
 const sessionListeners = new Set()
 
+/** @type {Set<(data: object) => void>} */
+const bridgeTierListeners = new Set()
+
 /** @type {EventSource | null} */
 let eventSource = null
 
@@ -134,6 +137,25 @@ export function registerSessionListener(fn) {
   return () => sessionListeners.delete(fn)
 }
 
+/**
+ * @param {(data: object) => void} fn
+ * @returns {() => void}
+ */
+export function registerBridgeTierListener(fn) {
+  bridgeTierListeners.add(fn)
+  return () => bridgeTierListeners.delete(fn)
+}
+
+function notifyBridgeTierListeners(data) {
+  for (const fn of bridgeTierListeners) {
+    try {
+      fn(data)
+    } catch {
+      /* ignore */
+    }
+  }
+}
+
 function notifySessionListeners(data) {
   for (const fn of sessionListeners) {
     try {
@@ -176,6 +198,9 @@ export function connectLiveLogStream() {
         }
       } else if (data.type === 'assignment') {
         notifyAssignment(data)
+      }
+      if (data.type === 'bridge_tier') {
+        notifyBridgeTierListeners(data)
       }
       pushLiveLog(data)
     } catch {

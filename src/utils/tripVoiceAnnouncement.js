@@ -7,17 +7,32 @@ import {
   extractOriginDest,
   hasTripOriginAndDestination,
 } from './tripDetailsDisplay.js'
+import { pushLiveLog } from '../stores/liveLogStore.js'
+import { enqueueAnnouncement, speakDirect, cancelAllAlerts } from './alertAudioQueue.js'
 
 /** @param {unknown} body */
-function legSeqKey(body) {
+export function legSeqKey(body) {
   if (body == null || typeof body !== 'object' || Array.isArray(body)) return ''
   const s = /** @type {Record<string, unknown>} */ (body).dailyTripLegSequence
   if (s == null) return ''
   const t = String(s).trim()
   return /^\d+$/.test(t) ? t : ''
 }
-import { pushLiveLog } from '../stores/liveLogStore.js'
-import { enqueueAnnouncement, speakDirect, cancelAllAlerts } from './alertAudioQueue.js'
+
+/** Origin|dest fingerprint for inbox dedupe (matches new-trip speech key). */
+export function tripAssignmentFingerprint(tripsBody) {
+  if (
+    tripsBody == null ||
+    typeof tripsBody !== 'object' ||
+    Array.isArray(tripsBody)
+  ) {
+    return ''
+  }
+  if (!hasTripOriginAndDestination(tripsBody)) return ''
+  const { origin, destination } = extractOriginDest(tripsBody)
+  const leg = legSeqKey(tripsBody)
+  return `${leg}|||${origin}|||${destination}`
+}
 
 const OLD_TTS_KEY = 'fedexTripTtsEnabled'
 const MODE_KEY = 'fedexTripAlertMode'
@@ -361,6 +376,11 @@ export function setTripTtsEnabled(enabled) {
 }
 
 let lastTripPhase = ''
+
+/** Sync tracker without speaking (e.g. initial load / hydration). */
+export function seedTripPhaseForAnnouncements(phase) {
+  lastTripPhase = phase || ''
+}
 
 /**
  * Announce trip status phase changes (none → assigned → dispatched → none).

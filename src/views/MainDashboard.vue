@@ -25,6 +25,7 @@ import {
   getDollyRegistry,
   putDollyNumber,
   patchDollyRating,
+  postClientNotification,
 } from '../api.js'
 import {
   linehaulTractorBody,
@@ -60,6 +61,7 @@ import {
   registerSessionListener,
   reconnectLiveLogStream,
 } from '../stores/liveLogStore.js'
+import { fetchInAppInbox } from '../stores/inAppNotificationsStore.js'
 import { formatRunErrorForUser } from '../utils/runErrorFormat.js'
 import { isCheckInLocationMismatchMessage } from '../utils/checkInLocationMismatch.js'
 import { parseTripReadyBoolean } from '../utils/tripReadyParse.js'
@@ -94,6 +96,9 @@ import {
   clearTripPhaseTracking,
   announceGeofenceArrival,
   announceArrivalSuccess,
+  tripAssignmentFingerprint,
+  seedTripPhaseForAnnouncements,
+  getTripAlertMode,
 } from '../utils/tripVoiceAnnouncement.js'
 import {
   announceTractorChange,
@@ -104,7 +109,12 @@ import {
   announceCheckInNewTrip,
   announceInspectCheckoutCancelled,
   cancelAllAlerts,
+  enqueueAnnouncement,
 } from '../utils/alertAudioQueue.js'
+import {
+  startBridgeTrafficAlerts,
+  stopBridgeTrafficAlerts,
+} from '../composables/useBridgeTrafficAlerts.js'
 
 const router = useRouter()
 
@@ -646,11 +656,44 @@ async function runQuickAction(auto) {
   dismissCheckInSuccess()
   dismissCheckInFailure()
   automationPreviewHidden.value = false
+
+  const qaLabel = String(auto.manualButtonLabel || auto.name || 'Quick action').trim()
+
+  async function notifyQuickActionOutcome(ok, message) {
+    const mode = getTripAlertMode()
+    const base =
+      typeof message === 'string' && message.trim()
+        ? message.trim()
+        : ok
+          ? `${qaLabel} completed.`
+          : `${qaLabel} failed.`
+    if (mode !== 'off') {
+      enqueueAnnouncement(base, {
+        bell: mode === 'both',
+        category: `quickAction:${auto.id}:${ok ? 'ok' : 'fail'}`,
+      })
+    }
+    try {
+      await postClientNotification({
+        type: 'automation',
+        source: 'quickAction',
+        message: base,
+        extra: { automationId: auto.id, ok },
+      })
+      await fetchInAppInbox()
+    } catch {
+      /* offline */
+    }
+  }
+
+  let outcomePending = true
   try {
     if (!(await ensureFedexApiReady())) {
-      setRunErrorBanner(
-        'API is not running on port 3847. With vite-only dev, wait a few seconds for autostart, or run npm run dev from the project root.',
-      )
+      const msg =
+        'API is not running on port 3847. With vite-only dev, wait a few seconds for autostart, or run npm run dev from the project root.'
+      setRunErrorBanner(msg)
+      await notifyQuickActionOutcome(false, msg)
+      outcomePending = false
       return
     }
     const result = await runAutomation(auto.id, { headless: true })
@@ -658,6 +701,8 @@ async function runQuickAction(auto) {
       if (result.variables?._inspectCheckoutCancelled === true) {
         runMsg.value = 'No trip to inspect'
         announceInspectCheckoutCancelled()
+        await notifyQuickActionOutcome(true, `${qaLabel}: no trip to inspect.`)
+        outcomePending = false
       } else {
         const arrivePayload = result.variables?._arrivePayload
         if (arrivePayload && typeof arrivePayload === 'object') {
@@ -687,15 +732,30 @@ async function runQuickAction(auto) {
         } else {
           runMsg.value = `${auto.manualButtonLabel || auto.name} completed`
         }
+        const summ =
+          checkInSuccessBanner.value ||
+          runMsg.value ||
+          `${qaLabel} completed.`
+        await notifyQuickActionOutcome(true, summ)
       }
+      outcomePending = false
     } else {
-      setRunErrorBanner(result.error || 'Failed')
+      const err = result.error || 'Failed'
+      setRunErrorBanner(err)
+      await notifyQuickActionOutcome(false, err)
     }
+    outcomePending = false
   } catch (e) {
-    setRunErrorBanner(e instanceof Error ? e.message : String(e))
+    const err = e instanceof Error ? e.message : String(e)
+    setRunErrorBanner(err)
+    await notifyQuickActionOutcome(false, err)
+    outcomePending = false
   } finally {
     runningAutomationId.value = null
     runStartTs.value = null
+    if (outcomePending) {
+      void notifyQuickActionOutcome(false, `${qaLabel} ended unexpectedly.`)
+    }
   }
 }
 
@@ -936,18 +996,66 @@ watch(linehaulLastFetchAt, () => {
 
 watch(
   tripPhase,
-  (newPhase, oldPhase) => {
-    if (oldPhase != null) {
-      maybeAnnounceStatusChange(newPhase)
+  async (newPhase, oldPhase) => {
+    if (oldPhase === undefined) {
+      seedTripPhaseForAnnouncements(newPhase)
+      return
     }
+    maybeAnnounceStatusChange(newPhase)
     if (newPhase === 'none' && oldPhase !== 'none') {
       clearTrailerStatusTracking()
       clearTrailerGpsTracking()
     }
+    let msg = ''
+    if (newPhase === 'assigned' && oldPhase !== 'assigned' && oldPhase !== 'none') {
+      msg = 'Trip assigned — ready for dispatch.'
+    } else if (newPhase === 'dispatched' && oldPhase !== 'dispatched') {
+      msg = 'Trip dispatched — en route.'
+    } else if (newPhase === 'none' && oldPhase !== 'none') {
+      msg = 'Trip completed or cleared.'
+    }
+    if (msg) {
+      try {
+        await postClientNotification({
+          type: 'trip',
+          source: 'status',
+          message: msg,
+          extra: { phase: newPhase },
+        })
+        await fetchInAppInbox()
+      } catch {
+        /* offline */
+      }
+    }
   },
 )
 
+let lastTripAssignedNotifyFp = ''
+
 watch(
+  [linehaulTripsBody, linehaulTripsNoActive],
+  async ([body, noActive]) => {
+    if (noActive || body == null || typeof body !== 'object') {
+      lastTripAssignedNotifyFp = ''
+      return
+    }
+    const fp = tripAssignmentFingerprint(body)
+    if (!fp || fp === lastTripAssignedNotifyFp) return
+    lastTripAssignedNotifyFp = fp
+    const { origin, destination } = extractOriginDest(body)
+    try {
+      await postClientNotification({
+        type: 'trip',
+        source: 'linehaul',
+        message: `New trip assigned: ${origin} → ${destination}`,
+        extra: { tripFingerprint: fp },
+      })
+      await fetchInAppInbox()
+    } catch {
+      /* offline */
+    }
+  },
+)
   () => {
     const body = linehaulTripsBody.value
     if (!body || typeof body !== 'object') return null
