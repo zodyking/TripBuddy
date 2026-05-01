@@ -40,10 +40,17 @@ export function normalizePathPointsForTomTom(raw) {
  */
 async function tomTomFetch(key, path, init = {}) {
   const url = `${BASE}${path}${path.includes('?') ? '&' : '?'}key=${encodeURIComponent(key)}`
+  const hasBody =
+    init.method &&
+    typeof init.body === 'string' &&
+    init.body.length > 0 &&
+    String(init.method).toUpperCase() !== 'GET' &&
+    String(init.method).toUpperCase() !== 'HEAD'
   const res = await fetch(url, {
     ...init,
     headers: {
       Accept: 'application/json',
+      ...(hasBody ? { 'Content-Type': 'application/json' } : {}),
       ...(init.headers || {}),
     },
   })

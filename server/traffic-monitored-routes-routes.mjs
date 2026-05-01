@@ -12,6 +12,8 @@ import {
   postRouteMonitoringCreate,
   postRouteMonitoringPreview,
 } from './tomtom-route-monitoring.mjs'
+import { formatTomTomApiError } from './tomtom-errors.mjs'
+import { getCalculateRoutePolyline } from './tomtom-routing-calculate.mjs'
 
 function randomLocalId() {
   return `mr_${randomBytes(12).toString('hex')}`
@@ -52,16 +54,23 @@ function pathPointsFromBody(body) {
 
 /**
  * @param {unknown} data
- * @returns {string}
+ * @param {number} httpStatus
  */
-function tomTomErrorMessage(data) {
-  if (!data || typeof data !== 'object') return 'TomTom request failed'
+function tomTomErrorMessage(data, httpStatus = 0) {
+  return formatTomTomApiError(data, httpStatus || 0)
+}
+
+/**
+ * @param {unknown} data
+ */
+function routeMonitoringPreviewHasPolyline(data) {
+  if (!data || typeof data !== 'object') return false
   const o = /** @type {Record<string, unknown>} */ (data)
-  const d = o.detailedError
-  const m = o.message
-  if (typeof d === 'string' && d.trim()) return d.trim()
-  if (typeof m === 'string' && m.trim()) return m.trim()
-  return 'TomTom request failed'
+  for (const k of ['routedPathPoints', 'pathPoints', 'routePathPoints']) {
+    const arr = o[k]
+    if (Array.isArray(arr) && arr.length >= 2) return true
+  }
+  return false
 }
 
 /**
@@ -84,12 +93,40 @@ export function registerTrafficMonitoredRoutes(app) {
         .send({ ok: false, error: 'At least two path points are required.' })
     }
     const { ok, status, data } = await postRouteMonitoringPreview(key, pathPoints)
-    if (!ok) {
-      return reply
-        .code(status >= 400 && status < 600 ? status : 502)
-        .send({ ok: false, error: tomTomErrorMessage(data), tomtom: data })
+    let preview = ok ? data : null
+    let previewSource = 'route-monitoring'
+
+    if (!routeMonitoringPreviewHasPolyline(preview)) {
+      const fb = await getCalculateRoutePolyline(key, pathPoints)
+      if (fb.ok && fb.points.length >= 2) {
+        preview = { routedPathPoints: fb.points }
+        previewSource = 'routing-calculateRoute'
+      } else if (!ok) {
+        const primaryMsg = tomTomErrorMessage(data, status)
+        const fbMsg = !fb.ok ? tomTomErrorMessage(fb.data, fb.status) : ''
+        return reply
+          .code(status >= 400 && status < 600 ? status : 502)
+          .send({
+            ok: false,
+            error: fbMsg
+              ? `${primaryMsg} · Map preview fallback (Routing API): ${fbMsg}`
+              : primaryMsg,
+            tomtom: data,
+            routingFallback: fb.data,
+          })
+      }
     }
-    return { ok: true, preview: data }
+
+    if (!routeMonitoringPreviewHasPolyline(preview)) {
+      return reply.code(502).send({
+        ok: false,
+        error:
+          'TomTom returned no route geometry. Enable Routing + Route Monitoring on your developer key, or try a Move trial key.',
+        tomtom: preview,
+      })
+    }
+
+    return { ok: true, preview, previewSource }
   })
 
   app.post('/api/traffic/monitored-routes', async (req, reply) => {
@@ -112,7 +149,7 @@ export function registerTrafficMonitoredRoutes(app) {
     if (!ok || !data || typeof data !== 'object') {
       return reply
         .code(status >= 400 && status < 600 ? status : 502)
-        .send({ ok: false, error: tomTomErrorMessage(data), tomtom: data })
+        .send({ ok: false, error: tomTomErrorMessage(data, status), tomtom: data })
     }
     const d = /** @type {Record<string, unknown>} */ (data)
     const routeId = Number(d.routeId)
@@ -172,7 +209,7 @@ export function registerTrafficMonitoredRoutes(app) {
             status: short.ok ? short.data : null,
             statusHttp: short.status,
             statusOk: short.ok,
-            statusError: short.ok ? null : tomTomErrorMessage(short.data),
+            statusError: short.ok ? null : tomTomErrorMessage(short.data, short.status),
           }
         }),
       )
@@ -206,7 +243,7 @@ export function registerTrafficMonitoredRoutes(app) {
             status: short.ok ? short.data : null,
             statusHttp: short.status,
             statusOk: short.ok,
-            statusError: short.ok ? null : tomTomErrorMessage(short.data),
+            statusError: short.ok ? null : tomTomErrorMessage(short.data, short.status),
           }
         }),
       )
@@ -239,7 +276,7 @@ export function registerTrafficMonitoredRoutes(app) {
     if (!del.ok && del.status !== 404) {
       return reply.code(del.status >= 400 ? del.status : 502).send({
         ok: false,
-        error: tomTomErrorMessage(del.data),
+        error: tomTomErrorMessage(del.data, del.status),
         removedLocal: true,
         tomtom: del.data,
       })

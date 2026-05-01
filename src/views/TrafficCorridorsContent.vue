@@ -43,6 +43,7 @@ const draftWaypoints = ref([])
 const draftName = ref('')
 /** @type {import('vue').Ref<LatLng[]>} */
 const previewPolyline = ref([])
+const previewSource = ref('')
 const previewBusy = ref(false)
 const createBusy = ref(false)
 
@@ -307,19 +308,30 @@ function schedulePreview(pts) {
 async function runPreview(pts) {
   if (pts.length < 2) {
     previewPolyline.value = []
+    previewSource.value = ''
     return
   }
   if (getTomtomKeyEffective().trim().length === 0) return
   previewBusy.value = true
+  error.value = ''
+  previewSource.value = ''
   try {
     const r = await postTrafficMonitoredRoutePreview({ pathPoints: pts })
     if (r && typeof r === 'object' && r.ok === true && r.preview) {
       previewPolyline.value = polylineFromTomTomPreview(r.preview)
+      previewSource.value =
+        typeof r.previewSource === 'string' ? r.previewSource : 'route-monitoring'
     } else {
       previewPolyline.value = []
+      previewSource.value = ''
+      if (r && typeof r === 'object' && r.ok === false && typeof r.error === 'string') {
+        error.value = r.error
+      }
     }
-  } catch {
+  } catch (e) {
     previewPolyline.value = []
+    previewSource.value = ''
+    error.value = e instanceof Error ? e.message : 'Preview failed'
   } finally {
     previewBusy.value = false
   }
@@ -384,6 +396,8 @@ function startCreate() {
   draftWaypoints.value = []
   draftName.value = ''
   previewPolyline.value = []
+  previewSource.value = ''
+  error.value = ''
 }
 
 function cancelCreate() {
@@ -395,6 +409,7 @@ function cancelCreate() {
 function clearDraftPoints() {
   draftWaypoints.value = []
   previewPolyline.value = []
+  previewSource.value = ''
 }
 
 function removeLastWaypoint() {
@@ -531,9 +546,10 @@ async function removeSelected() {
               autocomplete="off"
             />
             <p class="corridor-hint">
-              After two points, TomTom previews the <strong>routed</strong> path — taps near that line snap to the road.
-              New taps insert a via where they shorten the path most. Drag pins (snaps to preview when close). Use × on a pin or <strong>Undo last</strong>.
-              <span v-if="previewBusy" class="corridor-inline-status">Preview…</span>
+              After two points, the app shows a <strong>road-snapped</strong> path (TomTom Route Monitoring preview when available, otherwise Routing calculateRoute for the map only).
+              <span v-if="previewSource === 'routing-calculateRoute'" class="corridor-inline-status">Preview: Routing API</span>
+              <span v-else-if="previewPolyline.length" class="corridor-inline-status">Preview: Route Monitoring</span>
+              <span v-if="previewBusy" class="corridor-inline-status">Updating…</span>
             </p>
             <div class="corridor-create-actions">
               <button type="button" class="corridor-btn tap" :disabled="createBusy" @click="clearDraftPoints">

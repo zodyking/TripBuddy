@@ -991,7 +991,21 @@ onUnmounted(() => {
           <strong>this browser</strong> and is sent to this app’s API for traffic tiles and TomTom Route Monitoring (not stored on the server).
         </p>
         <p class="cred-hint">
-          <strong>Traffic → Corridors</strong> uses the same key for Route Monitoring (create routes, live travel time).
+          <strong>Traffic → Corridors</strong> uses the same key for
+          <a
+            href="https://developer.tomtom.com/route-monitoring/documentation/routes-service/routes"
+            target="_blank"
+            rel="noopener noreferrer"
+            class="ext-link"
+          >Route Monitoring</a>
+          (create monitored routes). The map preview may use
+          <a
+            href="https://developer.tomtom.com/routing-api/documentation/routing/calculate-route"
+            target="_blank"
+            rel="noopener noreferrer"
+            class="ext-link"
+          >Routing calculateRoute</a>
+          when Route Monitoring preview is unavailable — your key still needs Route Monitoring for saving routes.
         </p>
         <label class="lbl" for="tomtom-traffic-key">TomTom API key (optional)</label>
         <input
