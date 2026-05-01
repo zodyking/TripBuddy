@@ -33,7 +33,15 @@ async function handleJson(res) {
         )
       }
     }
-    const msg = data.error || data.message || res.statusText || 'Request failed'
+    const errStr = typeof data.error === 'string' ? data.error.trim() : ''
+    const msgStr = typeof data.message === 'string' ? data.message.trim() : ''
+    const codeStr = typeof data.code === 'string' ? data.code.trim() : ''
+    const msg =
+      errStr ||
+      msgStr ||
+      (codeStr && msgStr ? `${codeStr}: ${msgStr}` : codeStr) ||
+      res.statusText ||
+      'Request failed'
     throw new Error(msg)
   }
   return data

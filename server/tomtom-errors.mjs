@@ -5,7 +5,20 @@
  * @returns {string}
  */
 export function formatTomTomApiError(data, httpStatus) {
-  if (typeof data === 'string' && data.trim()) return data.trim().slice(0, 500)
+  if (typeof data === 'string') {
+    const t = data.trim()
+    if (t.startsWith('{')) {
+      try {
+        const parsed = JSON.parse(t)
+        if (parsed && typeof parsed === 'object') {
+          return formatTomTomApiError(parsed, httpStatus)
+        }
+      } catch {
+        /* use raw slice below */
+      }
+    }
+    return t.slice(0, 500)
+  }
 
   if (Array.isArray(data)) {
     const parts = data
@@ -22,22 +35,28 @@ export function formatTomTomApiError(data, httpStatus) {
         : typeof o.tracking_id === 'string'
           ? o.tracking_id
           : ''
+    const code = typeof o.code === 'string' ? o.code.trim() : ''
+    const msg = typeof o.message === 'string' ? o.message.trim() : ''
+    if (code === 'Forbidden' || httpStatus === 403) {
+      const detail = msg || 'You are not allowed to access this endpoint'
+      return `TomTom denied access (403): ${detail}. Your API key must include the right products — for Corridors, enable Route Monitoring (and Routing for map preview) in the TomTom developer portal, or use a trial key that includes those APIs.`
+    }
+
     const detailed =
       typeof o.detailedError === 'string'
         ? o.detailedError.trim()
         : o.detailedError && typeof o.detailedError === 'object'
           ? JSON.stringify(o.detailedError).slice(0, 200)
           : ''
-    const msg = typeof o.message === 'string' ? o.message.trim() : ''
     const err = typeof o.error === 'string' ? o.error.trim() : ''
     const errDesc =
       o.error && typeof o.error === 'object'
         ? formatTomTomApiError(o.error, httpStatus)
         : ''
-    const code = o.errorText != null ? String(o.errorText) : ''
+    const errText = o.errorText != null ? String(o.errorText) : ''
     const dev = typeof o.developerMessage === 'string' ? o.developerMessage.trim() : ''
 
-    const core = detailed || msg || errDesc || err || dev || code
+    const core = detailed || msg || errDesc || err || dev || errText
     if (core) {
       const tid = tracking ? ` (trackingId: ${tracking})` : ''
       return `${core}${tid}`
