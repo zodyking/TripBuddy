@@ -1,9 +1,10 @@
 import { readKeyJson, writeKeyJson } from './kv-store.mjs'
 import { G } from './scope-kv.mjs'
-import { readAssignment } from './assignment-store.mjs'
+import { readAssignmentForAccount } from './assignment-store.mjs'
 import { bridgeDelayTier } from './bridge-delay-tier.mjs'
 import { inferTravelDirectionFromTripBody } from './bridge-travel-context.mjs'
 import { publishInAppForLastActiveUser } from './notification-publish.mjs'
+import { getLastActiveAccountKey } from './active-account.mjs'
 
 const STATE_KEY = G('bridge:tier-notify:v1')
 const COOLDOWN_MS = 90_000
@@ -44,8 +45,10 @@ function isClosedRow(row) {
  * @returns {Promise<'ToNY' | 'ToNJ' | ''>}
  */
 async function dispatchWatchTravelDir() {
+  const ak = getLastActiveAccountKey()
+  if (!ak) return ''
   try {
-    const a = await readAssignment()
+    const a = await readAssignmentForAccount(ak)
     const snap = a?.persistedLinehaulTripSnapshot
     if (snap && typeof snap === 'object' && !Array.isArray(snap)) {
       const dir = inferTravelDirectionFromTripBody(snap)

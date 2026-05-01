@@ -1,5 +1,5 @@
 import { readKeyJson, writeKeyJson } from './kv-store.mjs'
-import { getDataAccountKey, userScopeKey } from './scope-kv.mjs'
+import { getDataAccountKey, userScopeKey, keyForUser } from './scope-kv.mjs'
 import { emitLog } from './log-bus.mjs'
 import { publishInAppForAccount } from './notification-publish.mjs'
 import { inferTravelDirectionFromTripBody } from './bridge-travel-context.mjs'
@@ -508,6 +508,28 @@ export async function readAssignment() {
     n.tripHistoryLedger = odBack.ledger
     await writeKeyJson(key, n)
   }
+  return n
+}
+
+/**
+ * Read assignment for a specific account (no AsyncLocalStorage request context).
+ * Used by background jobs (e.g. bridge notifications) keyed by last-active user.
+ * @param {string} accountKey
+ */
+export async function readAssignmentForAccount(accountKey) {
+  const ak = String(accountKey || '').trim()
+  if (!ak) return cloneDefault()
+  const key = keyForUser(ak, 'assignment')
+  let raw = await readKeyJson(key, () => null)
+  if (raw == null) raw = {}
+  const n = normalizeAssignmentData(raw)
+  if (!n) return cloneDefault()
+  if (!Array.isArray(n.hiddenDailyTripLegSequences)) n.hiddenDailyTripLegSequences = []
+  if (!('persistedLinehaulTripSnapshot' in n)) n.persistedLinehaulTripSnapshot = null
+  if (!('persistedPrePlanTripSnapshot' in n)) n.persistedPrePlanTripSnapshot = null
+  if (!('persistedCachedTripSnapshot' in n)) n.persistedCachedTripSnapshot = null
+  if (!('lastDailyTripLegSequencePersisted' in n)) n.lastDailyTripLegSequencePersisted = null
+  if (!Array.isArray(n.tripHistoryLedger)) n.tripHistoryLedger = []
   return n
 }
 
