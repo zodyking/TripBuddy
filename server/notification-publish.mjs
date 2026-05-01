@@ -1,37 +1,8 @@
 import { appendInAppNotification, appendInAppForLastActive } from './in-app-notifications-store.mjs'
-import { getLastActiveAccountKey } from './active-account.mjs'
 import { emitLog } from './log-bus.mjs'
-import { broadcastInAppToAccountSessions } from './session-sse.mjs'
 
 /**
- * @param {{ id: string, message: string, type?: string, source?: string, read?: boolean, ts?: number, extra?: object }} item
- * @param {string} accountKey
- */
-function emitInAppToSse(item, accountKey) {
-  if (!item) return
-  const pl = {
-    type: 'inapp',
-    message: item.message,
-    id: item.id,
-    ntype: item.type,
-    source: item.source,
-    read: item.read,
-    ts: item.ts,
-    extra: item.extra,
-  }
-  emitLog('inapp', item.message, {
-    id: item.id,
-    ntype: item.type,
-    source: item.source,
-    read: item.read,
-    ts: item.ts,
-    extra: item.extra,
-  })
-  broadcastInAppToAccountSessions(accountKey, pl)
-}
-
-/**
- * Persist + broadcast one in-app notification to a specific account (SSE `inapp`).
+ * Persist + emit one in-app notification (KV inbox + SSE via logBus `inapp`).
  * @param {string} accountKey
  * @param {{ type?: string, message: string, source: string, extra?: object }} payload
  */
@@ -40,7 +11,14 @@ export async function publishInAppForAccount(accountKey, payload) {
   try {
     const r = await appendInAppNotification(accountKey, payload)
     if (r?.item) {
-      emitInAppToSse(r.item, accountKey)
+      emitLog('inapp', r.item.message, {
+        id: r.item.id,
+        ntype: r.item.type,
+        source: r.item.source,
+        read: r.item.read,
+        ts: r.item.ts,
+        extra: r.item.extra,
+      })
     }
     return r
   } catch (e) {
@@ -50,14 +28,20 @@ export async function publishInAppForAccount(accountKey, payload) {
 }
 
 /**
- * Persist + broadcast for whichever account is “last active” (poll, bridge digest).
+ * Persist + emit for last-active account (poll, bridge digest).
  */
 export async function publishInAppForLastActiveUser(payload) {
   try {
     const r = await appendInAppForLastActive(payload)
-    const ak = getLastActiveAccountKey()
-    if (r?.item && ak) {
-      emitInAppToSse(r.item, ak)
+    if (r?.item) {
+      emitLog('inapp', r.item.message, {
+        id: r.item.id,
+        ntype: r.item.type,
+        source: r.item.source,
+        read: r.item.read,
+        ts: r.item.ts,
+        extra: r.item.extra,
+      })
     }
     return r
   } catch (e) {
@@ -70,7 +54,7 @@ export async function publishInAppForLastActiveUser(payload) {
 let lastBridgeDigestSig = null
 
 /**
- * When Port Authority crossing data changes materially, notify the last-active user (same as poll).
+ * When Port Authority crossing data changes materially, notify the last-active user.
  * @param {unknown[]} live
  */
 export function maybeNotifyBridgeCrossingDigest(live) {

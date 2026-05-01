@@ -467,8 +467,7 @@ app.get('/api/events', async (req, reply) => {
   logBus.on('entry', onEntry)
   let unregisterSse = () => {}
   if (sid) {
-    const ak = getSessionAccountKey(sid) || ''
-    unregisterSse = registerSseConnection(sid, send, ak)
+    unregisterSse = registerSseConnection(sid, send)
   }
   req.raw.on('close', () => {
     logBus.off('entry', onEntry)
