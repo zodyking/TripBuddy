@@ -1,5 +1,5 @@
 <script setup>
-import { ref, watch, onMounted, onUnmounted } from 'vue'
+import { ref } from 'vue'
 import TrafficCrossingsContent from './TrafficCrossingsContent.vue'
 import TrafficCorridorsContent from './TrafficCorridorsContent.vue'
 
@@ -13,26 +13,28 @@ const tab = ref('crossings')
 <template>
   <div class="traffic-hub">
     <nav class="traffic-hub-tabs" role="tablist" aria-label="Traffic views">
-      <button
-        type="button"
-        role="tab"
-        class="traffic-hub-tab tap"
-        :class="{ 'is-active': tab === 'crossings' }"
-        :aria-selected="tab === 'crossings'"
-        @click="tab = 'crossings'"
-      >
-        Crossings
-      </button>
-      <button
-        type="button"
-        role="tab"
-        class="traffic-hub-tab tap"
-        :class="{ 'is-active': tab === 'corridors' }"
-        :aria-selected="tab === 'corridors'"
-        @click="tab = 'corridors'"
-      >
-        Corridors
-      </button>
+      <div class="traffic-hub-seg">
+        <button
+          type="button"
+          role="tab"
+          class="traffic-hub-tab tap"
+          :class="{ 'is-active': tab === 'crossings' }"
+          :aria-selected="tab === 'crossings'"
+          @click="tab = 'crossings'"
+        >
+          Crossings
+        </button>
+        <button
+          type="button"
+          role="tab"
+          class="traffic-hub-tab tap"
+          :class="{ 'is-active': tab === 'corridors' }"
+          :aria-selected="tab === 'corridors'"
+          @click="tab = 'corridors'"
+        >
+          Corridors
+        </button>
+      </div>
     </nav>
 
     <div
@@ -66,37 +68,51 @@ const tab = ref('crossings')
 
 .traffic-hub-tabs {
   display: flex;
-  gap: 0.35rem;
-  margin-bottom: 0.5rem;
+  justify-content: center;
   flex-shrink: 0;
   padding-left: max(env(safe-area-inset-left, 0px), var(--space-2, 0.5rem));
   padding-right: max(env(safe-area-inset-right, 0px), var(--space-2, 0.5rem));
-  padding-top: 0.45rem;
+  padding-top: 0.4rem;
+  margin-bottom: 0.45rem;
+}
+
+.traffic-hub-seg {
+  display: flex;
+  width: 100%;
+  max-width: 19.5rem;
+  padding: 3px;
+  border-radius: 11px;
+  background: rgba(8, 8, 14, 0.72);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  box-sizing: border-box;
+  gap: 2px;
 }
 
 .traffic-hub-tab {
   flex: 1;
-  max-width: 12rem;
-  padding: 0.42rem 0.65rem;
-  border-radius: 10px;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  background: rgba(15, 15, 20, 0.85);
-  color: #a8a8b8;
-  font-size: 0.72rem;
+  min-width: 0;
+  padding: 0.4rem 0.55rem;
+  border-radius: 8px;
+  border: none;
+  background: transparent;
+  color: #7d7d8f;
+  font-size: 0.66rem;
   font-weight: 750;
-  letter-spacing: 0.06em;
+  letter-spacing: 0.05em;
   text-transform: uppercase;
   cursor: pointer;
   transition:
     background 0.15s ease,
     color 0.15s ease,
-    border-color 0.15s ease;
+    box-shadow 0.15s ease;
 }
 
 .traffic-hub-tab.is-active {
   color: #f4f4f8;
-  border-color: rgba(199, 168, 255, 0.45);
-  background: rgba(123, 77, 181, 0.28);
+  background: rgba(123, 77, 181, 0.42);
+  box-shadow:
+    0 0 0 1px rgba(199, 168, 255, 0.22),
+    0 2px 10px rgba(0, 0, 0, 0.25);
 }
 
 .traffic-hub-panel {

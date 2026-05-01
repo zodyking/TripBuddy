@@ -407,7 +407,7 @@ function initMap() {
   if (!containerRef.value) return
   map = L.map(containerRef.value, { zoomControl: false, scrollWheelZoom: true })
   map.setView(DEFAULT_CENTER, DEFAULT_ZOOM)
-  L.control.zoom({ position: 'topright' }).addTo(map)
+  L.control.zoom({ position: 'bottomright' }).addTo(map)
   streetLayer = L.tileLayer(
     'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
     {
@@ -498,8 +498,16 @@ watch(tomtomKeyEffective, () => {
     role="region"
     aria-label="Bridge times map"
   >
-    <div ref="containerRef" class="bridge-map-el" />
-    <div class="map-controls-stack bridge-map-controls">
+    <div class="bridge-map-stage">
+      <div ref="containerRef" class="bridge-map-el" />
+      <p v-if="!hasTomtomTraffic" class="bridge-map-footnote" role="note"
+      >Traffic: set TomTom key in Settings, or <code class="bmk">VITE_TOMTOM_KEY</code> in <code class="bmk">.env</code> (free tier)</p>
+      <p v-else-if="activeBaseLayer === 'satellite' && trafficOn" class="bridge-map-footnote" role="note"
+      >Traffic hidden on Sat — switch to map</p>
+      <p v-if="geoPending" class="bridge-map-hint">Location…</p>
+      <p v-else-if="geoDenied" class="bridge-map-hint is-warn">Location denied</p>
+    </div>
+    <div class="bridge-map-toolbar" role="toolbar" aria-label="Map display">
       <button
         type="button"
         class="map-control-btn map-control-btn--traffic map-control-btn--pill tap"
@@ -511,7 +519,7 @@ watch(tomtomKeyEffective, () => {
           : (activeBaseLayer === 'satellite' ? 'Traffic (street only)' : 'Live traffic (TomTom)')"
         @click="toggleTraffic"
       >
-        Traff
+        Traffic
       </button>
       <button
         type="button"
@@ -549,18 +557,11 @@ watch(tomtomKeyEffective, () => {
         <span class="sr-only">My location</span>
       </button>
     </div>
-    <p v-if="!hasTomtomTraffic" class="bridge-map-footnote" role="note"
-    >Traffic: set TomTom key in Settings, or <code class="bmk">VITE_TOMTOM_KEY</code> in <code class="bmk">.env</code> (free tier)</p>
-    <p v-else-if="activeBaseLayer === 'satellite' && trafficOn" class="bridge-map-footnote" role="note"
-    >Traffic hidden on Sat — switch to map</p>
-    <p v-if="geoPending" class="bridge-map-hint">Location…</p>
-    <p v-else-if="geoDenied" class="bridge-map-hint is-warn">Location denied</p>
   </div>
 </template>
 
 <style scoped>
 .bridge-map-root {
-  position: relative;
   display: flex;
   flex-direction: column;
   width: 100%;
@@ -577,9 +578,21 @@ watch(tomtomKeyEffective, () => {
   height: 100%;
 }
 
+.bridge-map-stage {
+  position: relative;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: min(45vh, 20rem);
+}
+
+.is-fill .bridge-map-stage {
+  min-height: 0;
+}
+
 .bridge-map-el {
   flex: 1;
-  min-height: min(45vh, 20rem);
+  min-height: min(42vh, 17rem);
   width: 100%;
   z-index: 0;
 }
@@ -589,8 +602,22 @@ watch(tomtomKeyEffective, () => {
   height: 100%;
 }
 
-.bridge-map-controls {
-  max-width: min(14rem, calc(100% - 1.5rem));
+.bridge-map-toolbar {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  padding: 0.45rem 0.5rem;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  background: rgba(10, 10, 15, 0.96);
+  pointer-events: auto;
+}
+
+.bridge-map-toolbar .map-control-btn {
+  position: relative;
+  flex-shrink: 0;
 }
 
 .sr-only {
@@ -629,13 +656,24 @@ watch(tomtomKeyEffective, () => {
   pointer-events: none;
 }
 .bridge-map-footnote {
-  bottom: 1.75rem;
+  bottom: 2.15rem;
   color: #94a3b8;
   font-size: 0.52rem;
 }
 .bridge-map-hint.is-warn {
   color: #fb923c;
 }
+
+:deep(.leaflet-container .leaflet-bottom.leaflet-right) {
+  bottom: 0.35rem;
+  right: 0.35rem;
+}
+
+:deep(.leaflet-control-zoom) {
+  margin-bottom: 0 !important;
+  margin-right: 0 !important;
+}
+
 :deep(.leaflet-control-zoom a) {
   color: #e0e0ec !important;
   background: rgba(0, 0, 0, 0.55) !important;

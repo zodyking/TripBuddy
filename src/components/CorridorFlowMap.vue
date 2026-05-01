@@ -302,7 +302,7 @@ function initMap() {
   if (!containerRef.value) return
   map = L.map(containerRef.value, { zoomControl: false, scrollWheelZoom: true })
   map.setView(DEFAULT_CENTER, DEFAULT_ZOOM)
-  L.control.zoom({ position: 'topright' }).addTo(map)
+  L.control.zoom({ position: 'bottomright' }).addTo(map)
   streetLayer = L.tileLayer(
     'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
     {
@@ -390,8 +390,14 @@ watch(tomtomKeyEffective, () => {
     role="region"
     aria-label="Corridor traffic map"
   >
-    <div ref="containerRef" class="corridor-map-el" />
-    <div class="map-controls-stack corridor-map-controls">
+    <div class="corridor-map-stage">
+      <div ref="containerRef" class="corridor-map-el" />
+      <p v-if="!hasTomtomTraffic" class="corridor-map-foot" role="note">TomTom key in Settings for traffic tiles</p>
+      <p v-else-if="activeBaseLayer === 'satellite' && trafficOn" class="corridor-map-foot" role="note">Traffic hidden on satellite</p>
+      <p v-if="geoPending" class="corridor-map-hint">Location…</p>
+      <p v-else-if="geoDenied" class="corridor-map-hint is-warn">Location denied</p>
+    </div>
+    <div class="corridor-map-toolbar" role="toolbar" aria-label="Map display">
       <button
         type="button"
         class="map-control-btn map-control-btn--traffic map-control-btn--pill tap"
@@ -403,7 +409,7 @@ watch(tomtomKeyEffective, () => {
           : (activeBaseLayer === 'satellite' ? 'Traffic (street only)' : 'Live traffic (TomTom)')"
         @click="toggleTraffic"
       >
-        Traff
+        Traffic
       </button>
       <button
         type="button"
@@ -435,16 +441,11 @@ watch(tomtomKeyEffective, () => {
         <span class="sr-only">My location</span>
       </button>
     </div>
-    <p v-if="!hasTomtomTraffic" class="corridor-map-foot" role="note">TomTom key in Settings for traffic tiles</p>
-    <p v-else-if="activeBaseLayer === 'satellite' && trafficOn" class="corridor-map-foot" role="note">Traffic hidden on satellite</p>
-    <p v-if="geoPending" class="corridor-map-hint">Location…</p>
-    <p v-else-if="geoDenied" class="corridor-map-hint is-warn">Location denied</p>
   </div>
 </template>
 
 <style scoped>
 .corridor-map-root {
-  position: relative;
   display: flex;
   flex-direction: column;
   width: 100%;
@@ -461,9 +462,21 @@ watch(tomtomKeyEffective, () => {
   height: 100%;
 }
 
+.corridor-map-stage {
+  position: relative;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: min(45vh, 20rem);
+}
+
+.is-fill .corridor-map-stage {
+  min-height: 0;
+}
+
 .corridor-map-el {
   flex: 1;
-  min-height: min(45vh, 20rem);
+  min-height: min(42vh, 17rem);
   width: 100%;
   z-index: 0;
 }
@@ -473,8 +486,20 @@ watch(tomtomKeyEffective, () => {
   height: 100%;
 }
 
-.corridor-map-controls {
-  max-width: min(14rem, calc(100% - 1.5rem));
+.corridor-map-toolbar {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  padding: 0.45rem 0.5rem;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  background: rgba(10, 10, 15, 0.96);
+}
+
+.corridor-map-toolbar .map-control-btn {
+  flex-shrink: 0;
 }
 
 .sr-only {
@@ -505,7 +530,21 @@ watch(tomtomKeyEffective, () => {
   max-width: 85%;
 }
 
+.corridor-map-foot {
+  bottom: 2rem;
+}
+
 .corridor-map-hint.is-warn {
   color: #fca5a5;
+}
+
+:deep(.leaflet-container .leaflet-bottom.leaflet-right) {
+  bottom: 0.35rem;
+  right: 0.35rem;
+}
+
+:deep(.leaflet-control-zoom) {
+  margin-bottom: 0 !important;
+  margin-right: 0 !important;
 }
 </style>

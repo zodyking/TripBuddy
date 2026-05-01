@@ -603,8 +603,14 @@ async function load() {
   }
 }
 
-function setDir(d) {
-  direction.value = d
+/**
+ * @param {Event} e
+ */
+function onDirToggleChange(e) {
+  const t = e.target
+  if (t instanceof HTMLInputElement) {
+    direction.value = t.checked ? 'ToNJ' : 'ToNY'
+  }
 }
 
 onMounted(() => {
@@ -673,23 +679,24 @@ onUnmounted(() => {
             </p>
           </div>
 
-          <div class="bridges-toggle" role="group" aria-label="Direction">
-            <button
-              type="button"
-              class="dir-btn tap"
-              :class="{ 'is-on': direction === 'ToNY' }"
-              @click="setDir('ToNY')"
-            >
-              To NY
-            </button>
-            <button
-              type="button"
-              class="dir-btn tap"
-              :class="{ 'is-on': direction === 'ToNJ' }"
-              @click="setDir('ToNJ')"
-            >
-              To NJ
-            </button>
+          <div class="bridges-dir-row">
+            <span class="dir-toggle-caption">Direction</span>
+            <div class="bridges-dir-toggle" role="group" aria-label="Travel direction">
+              <span class="dir-toggle-lab" :class="{ 'is-on': direction === 'ToNY' }">NY</span>
+              <label class="dir-toggle-switch tap">
+                <input
+                  type="checkbox"
+                  class="dir-toggle-input"
+                  :checked="direction === 'ToNJ'"
+                  aria-label="Toggle direction: New York or New Jersey"
+                  @change="onDirToggleChange"
+                />
+                <span class="dir-toggle-track" aria-hidden="true">
+                  <span class="dir-toggle-thumb" />
+                </span>
+              </label>
+              <span class="dir-toggle-lab" :class="{ 'is-on': direction === 'ToNJ' }">NJ</span>
+            </div>
           </div>
         </div>
 
@@ -999,37 +1006,96 @@ onUnmounted(() => {
   font-weight: 600;
 }
 
-.bridges-toggle {
+.bridges-dir-row {
   display: flex;
-  gap: 0.45rem;
-  width: 100%;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.65rem;
+  flex-wrap: wrap;
 }
 
-.dir-btn {
-  flex: 1;
-  min-height: 2.75rem;
-  min-width: 0;
-  font-size: clamp(0.85rem, 2.8vw, 1rem);
+.dir-toggle-caption {
+  font-size: 0.58rem;
   font-weight: 800;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.08em;
   text-transform: uppercase;
-  border-radius: 0.8rem;
-  border: 2px solid rgba(123, 77, 181, 0.35);
-  background: rgba(0, 0, 0, 0.4);
-  color: #9a9aac;
+  color: #5c5c6e;
+}
+
+.bridges-dir-toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.dir-toggle-lab {
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  color: #5a5a6c;
+  min-width: 1.5rem;
+  text-align: center;
+  transition: color 0.15s ease;
+}
+
+.dir-toggle-lab.is-on {
+  color: #ddd6fe;
+}
+
+.dir-toggle-switch {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
   cursor: pointer;
-  transition: background 0.12s, border-color 0.12s, color 0.12s;
   -webkit-tap-highlight-color: transparent;
 }
-.dir-btn.is-on {
-  background: linear-gradient(
-    160deg,
-    rgba(123, 77, 181, 0.55),
-    rgba(60, 35, 110, 0.4)
-  );
-  border-color: rgba(199, 168, 255, 0.6);
-  color: #f8f4ff;
-  box-shadow: 0 0 0 1px rgba(167, 139, 250, 0.2);
+
+.dir-toggle-input {
+  position: absolute;
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+.dir-toggle-track {
+  position: relative;
+  display: block;
+  width: 2.85rem;
+  height: 1.55rem;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.45);
+  border: 1px solid rgba(123, 77, 181, 0.35);
+  box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.35);
+  transition:
+    border-color 0.15s ease,
+    background 0.15s ease;
+}
+
+.dir-toggle-thumb {
+  position: absolute;
+  top: 50%;
+  left: 0.12rem;
+  width: 1.22rem;
+  height: 1.22rem;
+  border-radius: 50%;
+  background: linear-gradient(145deg, #c4b5fd, #7b4db5);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.35);
+  transform: translateY(-50%);
+  transition: transform 0.18s ease;
+}
+
+.dir-toggle-input:focus-visible + .dir-toggle-track {
+  outline: 2px solid rgba(199, 168, 255, 0.65);
+  outline-offset: 2px;
+}
+
+.dir-toggle-input:checked + .dir-toggle-track {
+  border-color: rgba(199, 168, 255, 0.5);
+  background: rgba(123, 77, 181, 0.22);
+}
+
+.dir-toggle-input:checked + .dir-toggle-track .dir-toggle-thumb {
+  transform: translate(1.22rem, -50%);
 }
 
 .bridges-err {
