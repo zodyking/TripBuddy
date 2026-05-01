@@ -499,8 +499,52 @@ function nextMonthFrom(y, m0) {
   return { y, m0: m0 + 1 }
 }
 
+/**
+ * Calendar months (YYYY-MM keys) that overlap the configured work-week block containing this trip.
+ * Ensures a week split across two months appears in both month views with the same full week bucket.
+ * @param {LedgerEntry} e
+ * @param {{
+ *   workWeekStartDay: number,
+ *   workWeekEndDay: number,
+ *   shiftStartMins?: number,
+ *   shiftEndMins?: number
+ * }} opts
+ * @returns {string[]}
+ */
+function monthKeysOverlappingTripWorkWeek(e, opts) {
+  const t = e.displayDate
+  if (typeof t !== 'number' || !Number.isFinite(t) || t <= 0) return []
+  const meta = workWeekGroupMeta(t, opts)
+  if (!meta) {
+    const { key } = monthKeyFromMs(t)
+    return key ? [key] : []
+  }
+  const span =
+    typeof meta.spanDays === 'number' &&
+    Number.isFinite(meta.spanDays) &&
+    meta.spanDays >= 1 &&
+    meta.spanDays <= 7
+      ? meta.spanDays
+      : 7
+  const dayMs = 24 * 60 * 60 * 1000
+  /** @type {Set<string>} */
+  const keys = new Set()
+  for (let i = 0; i < span; i += 1) {
+    const d = new Date(meta.weekStart + i * dayMs)
+    if (isNaN(d.getTime())) continue
+    keys.add(monthKey(d.getFullYear(), d.getMonth()))
+  }
+  return keys.size ? Array.from(keys) : [monthKeyFromMs(t).key]
+}
+
 const monthByKey = computed(() => {
   const list = sorted.value
+  const wwOpts = {
+    workWeekStartDay: workWeekFromCred.value.workWeekStartDay,
+    workWeekEndDay: workWeekFromCred.value.workWeekEndDay,
+    shiftStartMins: workWeekFromCred.value.shiftStartMins,
+    shiftEndMins: workWeekFromCred.value.shiftEndMins,
+  }
   const m = new Map()
   for (const e of list) {
     const t = e.displayDate
@@ -511,13 +555,21 @@ const monthByKey = computed(() => {
       m.get('unknown').items.push(e)
       continue
     }
-    const { y, m0, key } = monthKeyFromMs(t)
-    if (!m.has(key)) {
-      const d0 = new Date(y, m0, 1, 12, 0, 0, 0)
-      const groupLabel = d0.toLocaleString('en-US', { month: 'long', year: 'numeric' })
-      m.set(key, { key, y, m0, groupLabel, items: [] })
+    const monthKeys = monthKeysOverlappingTripWorkWeek(e, wwOpts)
+    for (const key of monthKeys) {
+      const parsed = /^(\d{4})-(\d{2})$/.exec(key)
+      const y = parsed ? parseInt(parsed[1], 10) : monthKeyFromMs(t).y
+      const m0 = parsed ? parseInt(parsed[2], 10) - 1 : monthKeyFromMs(t).m0
+      if (!m.has(key)) {
+        const d0 = new Date(y, m0, 1, 12, 0, 0, 0)
+        const groupLabel = d0.toLocaleString('en-US', { month: 'long', year: 'numeric' })
+        m.set(key, { key, y, m0, groupLabel, items: [] })
+      }
+      const bucket = m.get(key)
+      if (!bucket.items.some((x) => x.id === e.id)) {
+        bucket.items.push(e)
+      }
     }
-    m.get(key).items.push(e)
   }
   for (const g of m.values()) {
     g.items.sort((a, b) => b.displayDate - a.displayDate)
