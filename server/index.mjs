@@ -73,6 +73,7 @@ import {
   getTractorNumber,
   getLinehaulDriverId,
   getDecryptedLinehaulBearer,
+  getDecryptedTomtomTrafficApiKey,
   accountKeyForUsername,
   isAppLoginVerifiedForAccountKey,
   verifyPasswordForAccountKey,
@@ -422,15 +423,31 @@ app.get('/api/bridges/panynj', async () => {
 })
 
 /**
+ * TomTom key: request body/query first, then encrypted Settings credential, then env.
+ * @param {unknown} body
+ * @param {unknown} queryTomtomKey
+ */
+async function resolveTomtomKeyForCorridor(body, queryTomtomKey) {
+  if (body && typeof body === 'object' && typeof body.tomtomKey === 'string') {
+    const k = sanitizeTomtomApiKey(body.tomtomKey)
+    if (k) return k
+  }
+  if (typeof queryTomtomKey === 'string') {
+    const k = sanitizeTomtomApiKey(queryTomtomKey)
+    if (k) return k
+  }
+  const stored = sanitizeTomtomApiKey(await getDecryptedTomtomTrafficApiKey())
+  if (stored) return stored
+  return String(process.env.TOMTOM_API_KEY || process.env.VITE_TOMTOM_KEY || '').trim()
+}
+
+/**
  * Caton → Conduit corridor: TomTom Flow Segment aggregation (60s server cache).
- * POST JSON optional `{ tomtomKey }`; else `TOMTOM_API_KEY` / `VITE_TOMTOM_KEY`.
+ * POST JSON optional `{ tomtomKey }`; else saved Settings key; else `TOMTOM_API_KEY` / `VITE_TOMTOM_KEY`.
  */
 app.post('/api/traffic/corridor-status', async (req, reply) => {
   const body = req.body && typeof req.body === 'object' ? req.body : {}
-  const fromClient = sanitizeTomtomApiKey(body.tomtomKey)
-  const key =
-    fromClient ||
-    String(process.env.TOMTOM_API_KEY || process.env.VITE_TOMTOM_KEY || '').trim()
+  const key = await resolveTomtomKeyForCorridor(body, null)
   const out = await getCatonConduitCorridorStatus(key)
   if (!out.ok) {
     return reply.code(503).send(out)
@@ -441,12 +458,10 @@ app.post('/api/traffic/corridor-status', async (req, reply) => {
 /** Same corridor status (GET for simple clients). */
 app.get('/api/traffic/corridor-status', async (req, reply) => {
   const q = req.query && typeof req.query === 'object' ? req.query : {}
-  const fromClient = sanitizeTomtomApiKey(
+  const key = await resolveTomtomKeyForCorridor(
+    null,
     typeof q.tomtomKey === 'string' ? q.tomtomKey : '',
   )
-  const key =
-    fromClient ||
-    String(process.env.TOMTOM_API_KEY || process.env.VITE_TOMTOM_KEY || '').trim()
   const out = await getCatonConduitCorridorStatus(key)
   if (!out.ok) {
     return reply.code(503).send(out)

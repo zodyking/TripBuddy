@@ -335,11 +335,40 @@ const tomtomKeyFromEnv = Boolean(
     String(import.meta.env.VITE_TOMTOM_KEY).trim().length > 0,
 )
 
-function saveTomtomTrafficKey() {
+async function saveTomtomTrafficKey() {
   setTomtomTrafficKey(tomtomTrafficDraft.value)
-  tomtomTrafficMsg.value = tomtomKeyFromEnv
-    ? 'Saved locally. Build VITE_TOMTOM_KEY still takes priority if set.'
-    : 'Map traffic key saved in this browser.'
+  const keyStr = String(tomtomTrafficDraft.value ?? '').trim()
+  if (!(await ensureFedexApiReady())) {
+    tomtomTrafficMsg.value =
+      'Browser key saved. Connect API on port 3847 and save again to sync server-side Corridors.'
+    pushLiveLog({
+      type: 'error',
+      message:
+        'API not reachable — TomTom key saved in browser only until Corridors can sync to server.',
+      ts: Date.now(),
+    })
+    return
+  }
+  try {
+    await putCredentials({
+      ...(keyStr
+        ? { tomtomTrafficApiKey: keyStr }
+        : { clearTomtomTrafficApiKey: true }),
+    })
+    await loadCredentials()
+    tomtomTrafficMsg.value = tomtomKeyFromEnv
+      ? 'Saved locally and on server. Build VITE_TOMTOM_KEY still takes priority for map tiles if set.'
+      : 'TomTom key saved for map tiles and Traffic → Corridors (server).'
+  } catch (e) {
+    tomtomTrafficMsg.value =
+      e instanceof Error ? e.message : String(e)
+    pushLiveLog({
+      type: 'error',
+      message:
+        e instanceof Error ? e.message : String(e),
+      ts: Date.now(),
+    })
+  }
 }
 
 const screenshotModal = ref(null)
@@ -440,6 +469,15 @@ async function loadCredentials() {
       typeof credMeta.value.fedexLinehaulBearer === 'string'
         ? credMeta.value.fedexLinehaulBearer
         : ''
+    if (
+      !credMeta.value?.hasTomtomTrafficApiKey &&
+      trafficTomtomKeyOverride.value.trim().length > 0
+    ) {
+      await putCredentials({
+        tomtomTrafficApiKey: trafficTomtomKeyOverride.value.trim(),
+      })
+      credMeta.value = await getCredentials({ includeLinehaulBearer: true })
+    }
   } catch {
     credMeta.value = null
     credLinehaulToken.value = ''
@@ -979,13 +1017,14 @@ onUnmounted(() => {
             rel="noopener noreferrer"
             class="ext-link"
           >TomTom Traffic</a>
-          (free developer tier, API key). Paste your key here — it is stored only in
-          <strong>this browser</strong>. You can also set
+          (free developer tier, API key).
+          Paste your key — it is saved in <strong>this browser</strong> for map tiles and encrypted with your account on the API server for <strong>Traffic → Corridors</strong>.
+          You can also set
           <code class="bmk">VITE_TOMTOM_KEY</code> in
-          <code class="bmk">.env</code> (build) which overrides the pasted value.
+          <code class="bmk">.env</code> (build) which overrides the pasted value for tiles only.
         </p>
         <p class="cred-hint">
-          <strong>Traffic → Corridors</strong> uses TomTom Flow Segment Data on the API server with the same saved key (fallback: <code class="bmk">TOMTOM_API_KEY</code> or <code class="bmk">VITE_TOMTOM_KEY</code> on the server).
+          Corridors Flow requests use the pasted/server-stored key first, then <code class="bmk">TOMTOM_API_KEY</code> or <code class="bmk">VITE_TOMTOM_KEY</code> on the server if no key is saved.
         </p>
         <p v-if="tomtomKeyFromEnv" class="cred-hint" style="color: #fbbf24; font-weight: 600">
           A build-time <code class="bmk">VITE_TOMTOM_KEY</code> is set — the Traffic map uses it first for tiles.
@@ -1000,7 +1039,7 @@ onUnmounted(() => {
           placeholder="Paste API key"
           :aria-describedby="'tomtom-hint'"
         />
-        <p id="tomtom-hint" class="cred-hint">In-browser key: {{ trafficTomtomKeyOverride ? 'on file' : 'empty' }}</p>
+        <p id="tomtom-hint" class="cred-hint">In-browser key: {{ trafficTomtomKeyOverride ? 'on file' : 'empty' }} · server (account): {{ credMeta?.hasTomtomTrafficApiKey ? 'on file' : 'empty' }}</p>
         <p v-if="tomtomTrafficMsg" class="cred-msg">{{ tomtomTrafficMsg }}</p>
         <div class="btn-row">
           <button type="button" class="btn primary tap" @click="saveTomtomTrafficKey">Save traffic key</button>

@@ -79,6 +79,7 @@ function resolveAccountKey() {
  *   tractorNumber: string | null,
  *   employeeNumber: string | null,
  *   linehaulBearerEnc: object | null,
+ *   tomtomTrafficApiKeyEnc: object | null,
  *   driverName: string | null,
  *   linehaulPollMinutes: number | null,
  * }>}
@@ -115,6 +116,12 @@ function parseCredData(data) {
     employeeNumber:
       typeof data.employeeNumber === 'string' ? data.employeeNumber : null,
     linehaulBearerEnc: data.linehaulBearerEnc ?? null,
+    tomtomTrafficApiKeyEnc:
+      data.tomtomTrafficApiKeyEnc &&
+      typeof data.tomtomTrafficApiKeyEnc === 'object' &&
+      data.tomtomTrafficApiKeyEnc !== null
+        ? data.tomtomTrafficApiKeyEnc
+        : null,
     driverName: typeof data.driverName === 'string' ? data.driverName : null,
     linehaulPollMinutes: pollM,
     workWeekStartDay,
@@ -138,6 +145,7 @@ async function readFileRawForAccount(accountKey) {
     tractorNumber: null,
     employeeNumber: null,
     linehaulBearerEnc: null,
+    tomtomTrafficApiKeyEnc: null,
     driverName: null,
     linehaulPollMinutes: null,
     workWeekStartDay: 0,
@@ -193,6 +201,7 @@ export async function getCredentialsMeta() {
     tractorNumber,
     employeeNumber,
     linehaulBearerEnc,
+    tomtomTrafficApiKeyEnc,
     driverName,
     linehaulPollMinutes,
     workWeekStartDay,
@@ -233,6 +242,11 @@ export async function getCredentialsMeta() {
       linehaulBearerEnc?.data &&
         linehaulBearerEnc?.iv &&
         linehaulBearerEnc?.tag,
+    ),
+    hasTomtomTrafficApiKey: Boolean(
+      tomtomTrafficApiKeyEnc?.data &&
+        tomtomTrafficApiKeyEnc?.iv &&
+        tomtomTrafficApiKeyEnc?.tag,
     ),
     driverName: driverName || null,
     linehaulPollMinutes: poll,
@@ -298,6 +312,17 @@ export async function getDecryptedLinehaulBearer() {
   }
 }
 
+/** Decrypted TomTom Traffic API key for server-side Flow/corridor calls (or null). */
+export async function getDecryptedTomtomTrafficApiKey() {
+  const { tomtomTrafficApiKeyEnc } = await readFileRaw()
+  if (!tomtomTrafficApiKeyEnc?.data) return null
+  try {
+    return decryptPassword(tomtomTrafficApiKeyEnc)
+  } catch {
+    return null
+  }
+}
+
 /** Scraped driver name from Okta userinfo (or null). */
 export async function getDriverName() {
   const { driverName } = await readFileRaw()
@@ -311,6 +336,8 @@ export async function getDriverName() {
  *   tractorNumber?: string,
  *   fedexLinehaulBearer?: string,
  *   clearFedexLinehaulBearer?: boolean,
+ *   tomtomTrafficApiKey?: string,
+ *   clearTomtomTrafficApiKey?: boolean,
  *   driverName?: string,
  *   clearDriverName?: boolean,
  *   linehaulPollMinutes?: number,
@@ -354,6 +381,16 @@ export async function saveCredentials(body) {
       tok = tok.replace(/^bearer\s+/i, '').trim()
     }
     linehaulBearerEnc = encryptPassword(tok)
+  }
+
+  let tomtomTrafficApiKeyEnc = prev.tomtomTrafficApiKeyEnc
+  if (body.clearTomtomTrafficApiKey === true) {
+    tomtomTrafficApiKeyEnc = null
+  } else if (
+    typeof body.tomtomTrafficApiKey === 'string' &&
+    body.tomtomTrafficApiKey.trim().length > 0
+  ) {
+    tomtomTrafficApiKeyEnc = encryptPassword(body.tomtomTrafficApiKey.trim())
   }
 
   let driverName = prev.driverName
@@ -412,6 +449,7 @@ export async function saveCredentials(body) {
     tractorNumber,
     employeeNumber,
     linehaulBearerEnc,
+    tomtomTrafficApiKeyEnc,
     driverName,
     linehaulPollMinutes,
     workWeekStartDay,
@@ -434,6 +472,7 @@ export async function clearCredentials() {
     tractorNumber: null,
     employeeNumber: null,
     linehaulBearerEnc: null,
+    tomtomTrafficApiKeyEnc: null,
     driverName: null,
     linehaulPollMinutes: null,
     workWeekStartDay: 0,
