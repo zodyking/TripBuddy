@@ -1007,6 +1007,11 @@ onUnmounted(() => {
           >Routing calculateRoute</a>
           when Route Monitoring preview is unavailable — your key still needs Route Monitoring for saving routes.
         </p>
+        <p class="cred-hint">
+          <strong>403 “not allowed” with Corridors but tiles work?</strong>
+          Map tiles run in your browser (TomTom sees your site as referrer); Route Monitoring and Routing run on this app’s server (no referrer).
+          In the TomTom dashboard, open your key and relax <strong>allowed URLs / domain</strong> restrictions for server-side use, or create a second key without referrer locking for Corridors.
+        </p>
         <label class="lbl" for="tomtom-traffic-key">TomTom API key (optional)</label>
         <input
           id="tomtom-traffic-key"

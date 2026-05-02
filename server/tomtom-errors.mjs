@@ -39,7 +39,13 @@ export function formatTomTomApiError(data, httpStatus) {
     const msg = typeof o.message === 'string' ? o.message.trim() : ''
     if (code === 'Forbidden' || httpStatus === 403) {
       const detail = msg || 'You are not allowed to access this endpoint'
-      return `TomTom denied access (403): ${detail}. Your API key must include the right products — for Corridors, enable Route Monitoring (and Routing for map preview) in the TomTom developer portal, or use a trial key that includes those APIs.`
+      return (
+        `TomTom denied access (403): ${detail}. ` +
+        `If Route Monitoring and Routing are enabled on your key but map tiles still work, check TomTom Developer Portal → your API key → allowed domains / URL locking: ` +
+        `this app calls TomTom from the server (no browser referrer), so restricted keys often fail here while tiles work in the browser. ` +
+        `Fix: allow server-side use (no referrer restriction / include your API host), or use a separate unrestricted key for Corridors. ` +
+        `Otherwise enable Route Monitoring + Routing products on the key.`
+      )
     }
 
     const detailed =
@@ -67,7 +73,11 @@ export function formatTomTomApiError(data, httpStatus) {
   }
 
   if (httpStatus === 403) {
-    return `HTTP ${httpStatus}: forbidden — this API may not be enabled for your TomTom key (Route Monitoring often needs a separate product / Move trial).`
+    return (
+      `HTTP ${httpStatus}: forbidden — TomTom blocked this request. ` +
+      `Either the key lacks Route Monitoring / Routing, or (common) the key is locked to browser referrers only while Corridors calls TomTom from your server. ` +
+      `Relax URL/domain restrictions for that key or use one without referrer locking.`
+    )
   }
   if (httpStatus === 401) {
     return `HTTP ${httpStatus}: invalid or expired API key.`
