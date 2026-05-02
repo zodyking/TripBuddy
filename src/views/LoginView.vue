@@ -2,6 +2,7 @@
 import { ref, computed, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { getAuthStatus, postAuthLogin, postLoginAccessLog } from '../api.js'
+import { hydrateTomtomTrafficKeyFromServer } from '../stores/trafficTileKey.js'
 import LoginAckMap from '../components/LoginAckMap.vue'
 import { useMapVehicleId } from '../composables/useMapVehicleId.js'
 
@@ -188,6 +189,7 @@ async function onSubmit() {
   submitting.value = true
   try {
     await postAuthLogin({ username: u, password: p })
+    await hydrateTomtomTrafficKeyFromServer()
     const target = redirectTarget()
     if (typeof window !== 'undefined') {
       const base = import.meta.env.BASE_URL || '/'

@@ -331,12 +331,29 @@ export async function getPublicGeoFenceCheck() {
 }
 
 /**
- * @param {{ includeLinehaulBearer?: boolean }} [opts]
+ * @param {{ includeLinehaulBearer?: boolean, includeTomtomApiKey?: boolean }} [opts]
  * When includeLinehaulBearer, response includes decrypted Linehaul JWT for Settings only.
+ * When includeTomtomApiKey, response includes decrypted TomTom key for Settings only.
  */
 export async function getCredentials(opts = {}) {
-  const q = opts.includeLinehaulBearer ? '?includeLinehaulBearer=1' : ''
-  const r = await apiFetch(`/api/settings/credentials${q}`)
+  const q = new URLSearchParams()
+  if (opts.includeLinehaulBearer) q.set('includeLinehaulBearer', '1')
+  if (opts.includeTomtomApiKey) q.set('includeTomtomApiKey', '1')
+  const qs = q.toString()
+  const r = await apiFetch(`/api/settings/credentials${qs ? `?${qs}` : ''}`)
+  return handleJson(r)
+}
+
+/**
+ * Persist TomTom API key for the signed-in user (encrypted server-side).
+ * @param {{ tomtomApiKey?: string }} body Empty string clears the stored key.
+ */
+export async function putTomtomApiKey(body) {
+  const r = await apiFetch('/api/settings/tomtom-api-key', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body ?? {}),
+  })
   return handleJson(r)
 }
 

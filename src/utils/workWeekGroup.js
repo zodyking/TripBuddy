@@ -63,8 +63,9 @@ export function workWeekInclusiveDayCount(startDay, endDay) {
  *   workWeekStartDay: number,
  *   workWeekEndDay: number,
  *   shiftStartMins?: number,
- *   shiftEndMins?: number
- * }} [opts]
+ *   shiftEndMins?: number,
+ *   groupLabelMode?: 'default' | 'fedexPaySchedule'
+ * }} [opts] groupLabelMode `fedexPaySchedule` uses FedEx payout wording (Sun–Sat calendar week).
  * @returns {{ key: string, endMs: number, groupLabel: string, weekStart: number, spanDays: number } | null}
  */
 export function workWeekGroupMeta(
@@ -98,7 +99,10 @@ export function workWeekGroupMeta(
   const ymd = (t) => `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, '0')}-${String(t.getDate()).padStart(2, '0')}`
   const key = `ww-${ymd(wStart)}`
   const dowL = workWeekDowLabel(st, en)
-  const groupLabel = `Work week (${dowL}) — ${fmt(wStart)} – ${fmt(wEnd)}`
+  const labelMode = opts?.groupLabelMode === 'fedexPaySchedule' ? 'fedexPaySchedule' : 'default'
+  const weekTitle =
+    labelMode === 'fedexPaySchedule' ? 'FedEx pay schedule' : 'Work week'
+  const groupLabel = `${weekTitle} (${dowL}) — ${fmt(wStart)} – ${fmt(wEnd)}`
 
   return { key, endMs, groupLabel, weekStart: wStart.getTime(), spanDays }
 }
