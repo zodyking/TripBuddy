@@ -2,6 +2,7 @@ import crypto from 'node:crypto'
 import { accountKeyForUsername } from './account-identity.mjs'
 import { getLastActiveAccountKey, setLastActiveAccountKey } from './active-account.mjs'
 import { readKeyJson, writeKeyJson } from './kv-store.mjs'
+import { setTomtomApiKeyForAccount } from './user-profile-pg.mjs'
 import { requestAsyncLocalStorage } from './request-context.mjs'
 import { getDataAccountKey, keyForUser } from './scope-kv.mjs'
 
@@ -442,6 +443,11 @@ export async function clearCredentials() {
     shiftEndMins: 1439,
   }
   await writeKeyJson(credsKey(acc), empty)
+  try {
+    await setTomtomApiKeyForAccount(acc, '')
+  } catch {
+    /* ignore profile clear errors */
+  }
 }
 
 /**

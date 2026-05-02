@@ -14,6 +14,43 @@ import {
 } from './tomtom-route-monitoring.mjs'
 import { formatTomTomApiError } from './tomtom-errors.mjs'
 import { getCalculateRoutePolyline } from './tomtom-routing-calculate.mjs'
+import { getTomtomApiKeyForAccount } from './user-profile-pg.mjs'
+
+/**
+ * @param {unknown} body
+ * @param {string} [accountKey]
+ */
+async function resolveTomtomKey(body, accountKey) {
+  const fromClient = tomtomKeyFromBody(body)
+  if (fromClient) return fromClient
+  const ak =
+    typeof accountKey === 'string' && accountKey.trim() ? accountKey.trim() : ''
+  if (ak) {
+    try {
+      const fromDb = await getTomtomApiKeyForAccount(ak)
+      const k = sanitizeTomtomApiKey(fromDb)
+      if (k) return k
+    } catch {
+      /* ignore */
+    }
+  }
+  return ''
+}
+
+/**
+ * @param {import('fastify').FastifyRequest} req
+ */
+async function resolveTomtomKeyForRequest(req) {
+  const body =
+    req.method === 'GET' && req.query && typeof req.query === 'object'
+      ? req.query
+      : (req.body ?? {})
+  const ak =
+    req && typeof req === 'object' && /** @type {any} */ (req).credentialAccountKey
+      ? String(/** @type {any} */ (req).credentialAccountKey)
+      : ''
+  return resolveTomtomKey(body, ak)
+}
 
 function randomLocalId() {
   return `mr_${randomBytes(12).toString('hex')}`
@@ -78,7 +115,7 @@ function routeMonitoringPreviewHasPolyline(data) {
  */
 export function registerTrafficMonitoredRoutes(app) {
   app.post('/api/traffic/monitored-routes/preview', async (req, reply) => {
-    const key = tomtomKeyFromBody(req.body)
+    const key = await resolveTomtomKeyForRequest(req)
     if (!key) {
       return reply.code(400).send({
         ok: false,
@@ -130,7 +167,7 @@ export function registerTrafficMonitoredRoutes(app) {
   })
 
   app.post('/api/traffic/monitored-routes', async (req, reply) => {
-    const key = tomtomKeyFromBody(req.body)
+    const key = await resolveTomtomKeyForRequest(req)
     if (!key) {
       return reply.code(400).send({
         ok: false,
@@ -184,9 +221,7 @@ export function registerTrafficMonitoredRoutes(app) {
   app.get('/api/traffic/monitored-routes', async (req, reply) => {
     try {
       const stored = await readMonitoredRoutesForUser()
-      const key = tomtomKeyFromBody(
-        req.query && typeof req.query === 'object' ? req.query : {},
-      )
+      const key = await resolveTomtomKeyForRequest(req)
       if (stored.length === 0) {
         return { ok: true, fetchedAt: Date.now(), routes: [] }
       }
@@ -221,7 +256,7 @@ export function registerTrafficMonitoredRoutes(app) {
   })
 
   app.post('/api/traffic/monitored-routes/sync', async (req, reply) => {
-    const key = tomtomKeyFromBody(req.body)
+    const key = await resolveTomtomKeyForRequest(req)
     if (!key) {
       return reply.code(400).send({
         ok: false,
@@ -256,7 +291,8 @@ export function registerTrafficMonitoredRoutes(app) {
 
   /** POST body `{ tomtomKey }` — avoids DELETE bodies that some clients omit. */
   app.post('/api/traffic/monitored-routes/:localId/remove', async (req, reply) => {
-    const key = tomtomKeyFromBody(req.body ?? {})
+    const ak = /** @type {any} */ (req).credentialAccountKey
+    const key = await resolveTomtomKey(req.body ?? {}, typeof ak === 'string' ? ak : '')
     if (!key) {
       return reply.code(400).send({
         ok: false,

@@ -10,6 +10,12 @@ import { API_PORT, UPLOADS_DIR, PERSISTENCE_DATA_ROOT, LOCAL_DIR } from './confi
 import { runDataMigrationOnStartup } from './data-migration.mjs'
 import { requirePostgresOrThrow } from './kv-pg.mjs'
 import {
+  ensureUserProfileTable,
+  getTomtomApiKeyForAccount,
+  setTomtomApiKeyForAccount,
+} from './user-profile-pg.mjs'
+import { sanitizeTomtomApiKey } from './tomtom-key.mjs'
+import {
   isAuthEnabled,
   createSession,
   destroySession,
@@ -590,9 +596,16 @@ app.get('/api/settings/credentials', async (req) => {
   if (includeBearer) {
     fedexLinehaulBearer = await getDecryptedLinehaulBearer()
   }
+  const includeTomtom = req.query?.includeTomtomApiKey === '1'
+  const ak = req.credentialAccountKey
+  let tomtomApiKey = undefined
+  if (includeTomtom && typeof ak === 'string' && ak.trim()) {
+    tomtomApiKey = (await getTomtomApiKeyForAccount(ak)) || ''
+  }
   return {
     ...meta,
     ...(includeBearer ? { fedexLinehaulBearer } : {}),
+    ...(includeTomtom ? { tomtomApiKey } : {}),
     secretHint: process.env.FEDEX_TOOL_SECRET ? null : TOOL_SECRET_HINT,
   }
 })
@@ -601,6 +614,31 @@ app.put('/api/settings/credentials', async (req, reply) => {
   try {
     const meta = await saveCredentials(req.body ?? {})
     return meta
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e)
+    return reply.code(400).send({ error: msg })
+  }
+})
+
+app.put('/api/settings/tomtom-api-key', async (req, reply) => {
+  try {
+    const ak = req.credentialAccountKey
+    if (typeof ak !== 'string' || !ak.trim()) {
+      return reply.code(400).send({ error: 'No account in session.' })
+    }
+    const body = req.body ?? {}
+    const raw =
+      typeof body.tomtomApiKey === 'string'
+        ? body.tomtomApiKey
+        : typeof body.key === 'string'
+          ? body.key
+          : ''
+    const sanitized = sanitizeTomtomApiKey(raw)
+    if (raw.trim() && !sanitized) {
+      return reply.code(400).send({ error: 'Invalid TomTom API key format.' })
+    }
+    await setTomtomApiKeyForAccount(ak, sanitized)
+    return { ok: true, hasTomtomApiKey: Boolean(sanitized) }
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e)
     return reply.code(400).send({ error: msg })
@@ -1414,6 +1452,7 @@ try {
 }
 try {
   await requirePostgresOrThrow()
+  await ensureUserProfileTable()
 } catch (e) {
   console.error('[postgres]', (e && e.message) || e)
   process.exit(1)

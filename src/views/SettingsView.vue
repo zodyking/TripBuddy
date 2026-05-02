@@ -5,6 +5,7 @@ import {
   getAssignment,
   getCredentials,
   putCredentials,
+  putTomtomApiKey,
   deleteCredentials,
   putAssignment,
   getHealth,
@@ -330,10 +331,21 @@ const credMsg = ref(null)
 /** TomTom Traffic Raster API key (Traffic map overlay). Free developer account: developer.tomtom.com */
 const tomtomTrafficDraft = ref('')
 const tomtomTrafficMsg = ref('')
+const tomtomTrafficBusy = ref(false)
 
-function saveTomtomTrafficKey() {
-  setTomtomTrafficKey(tomtomTrafficDraft.value)
-  tomtomTrafficMsg.value = 'Map traffic key saved in this browser.'
+async function saveTomtomTrafficKey() {
+  if (!(await requireApi())) return
+  tomtomTrafficBusy.value = true
+  tomtomTrafficMsg.value = ''
+  try {
+    await putTomtomApiKey({ tomtomApiKey: tomtomTrafficDraft.value })
+    setTomtomTrafficKey(tomtomTrafficDraft.value)
+    tomtomTrafficMsg.value = 'TomTom key saved to your account (encrypted on the server).'
+  } catch (e) {
+    tomtomTrafficMsg.value = e instanceof Error ? e.message : String(e)
+  } finally {
+    tomtomTrafficBusy.value = false
+  }
 }
 
 const screenshotModal = ref(null)
@@ -391,7 +403,10 @@ async function loadAssignmentState() {
 
 async function loadCredentials() {
   try {
-    credMeta.value = await getCredentials({ includeLinehaulBearer: true })
+    credMeta.value = await getCredentials({
+      includeLinehaulBearer: true,
+      includeTomtomApiKey: true,
+    })
     credUser.value = credMeta.value.username || ''
     credTractor.value = String(credMeta.value.tractorNumber ?? '')
       .replace(/\D/g, '')
@@ -434,9 +449,13 @@ async function loadCredentials() {
       typeof credMeta.value.fedexLinehaulBearer === 'string'
         ? credMeta.value.fedexLinehaulBearer
         : ''
-  } catch {
+    const tk =
+      typeof credMeta.value.tomtomApiKey === 'string' ? credMeta.value.tomtomApiKey.trim() : ''
+    if (tk) setTomtomTrafficKey(tk)
+    tomtomTrafficDraft.value = trafficTomtomKeyOverride.value
     credMeta.value = null
     credLinehaulToken.value = ''
+    tomtomTrafficDraft.value = trafficTomtomKeyOverride.value
   }
 }
 
@@ -498,6 +517,8 @@ async function clearCredentials() {
     credTractor.value = ''
     credLinehaulToken.value = ''
     credPass.value = ''
+    setTomtomTrafficKey('')
+    tomtomTrafficDraft.value = ''
     await loadCredentials()
     pushLiveLog({ type: 'info', message: 'Credentials cleared', ts: Date.now() })
   } catch (e) {
@@ -987,8 +1008,7 @@ onUnmounted(() => {
             rel="noopener noreferrer"
             class="ext-link"
           >TomTom Traffic</a>
-          (free developer tier, API key). Paste your key here — it is stored only in
-          <strong>this browser</strong> and is sent to this app’s API for traffic tiles and TomTom Route Monitoring (not stored on the server).
+          (free developer tier, API key). Your key is stored encrypted for your account on the server and cached in this browser for faster map loads.
         </p>
         <p class="cred-hint">
           <strong>Traffic → Corridors</strong> uses the same key for
@@ -1022,10 +1042,19 @@ onUnmounted(() => {
           placeholder="Paste API key"
           :aria-describedby="'tomtom-hint'"
         />
-        <p id="tomtom-hint" class="cred-hint">In-browser key: {{ trafficTomtomKeyOverride ? 'on file' : 'empty' }}</p>
+        <p id="tomtom-hint" class="cred-hint">
+          Active key: {{ trafficTomtomKeyOverride ? 'saved (server + this browser)' : 'empty' }}
+        </p>
         <p v-if="tomtomTrafficMsg" class="cred-msg">{{ tomtomTrafficMsg }}</p>
         <div class="btn-row">
-          <button type="button" class="btn primary tap" @click="saveTomtomTrafficKey">Save traffic key</button>
+          <button
+            type="button"
+            class="btn primary tap"
+            :disabled="tomtomTrafficBusy"
+            @click="saveTomtomTrafficKey"
+          >
+            {{ tomtomTrafficBusy ? 'Saving…' : 'Save TomTom key' }}
+          </button>
         </div>
       </SettingsSection>
 

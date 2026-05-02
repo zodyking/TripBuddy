@@ -28,6 +28,30 @@ const workWeekFromCred = ref({
   shiftEndMins: 1439,
 })
 
+/** `workWeek`: Settings work week. `paySchedule`: Sun–Sat (FedEx-style payout window), same shift boundaries. */
+const historyWeekViewMode = ref(/** @type {'workWeek' | 'paySchedule'} */ ('workWeek'))
+
+const historyGroupingOpts = computed(() => {
+  const sh = workWeekFromCred.value.shiftStartMins
+  const eh = workWeekFromCred.value.shiftEndMins
+  if (historyWeekViewMode.value === 'paySchedule') {
+    return {
+      workWeekStartDay: 0,
+      workWeekEndDay: 6,
+      shiftStartMins: sh,
+      shiftEndMins: eh,
+      groupLabelMode: /** @type {'fedexPaySchedule'} */ ('fedexPaySchedule'),
+    }
+  }
+  return {
+    workWeekStartDay: workWeekFromCred.value.workWeekStartDay,
+    workWeekEndDay: workWeekFromCred.value.workWeekEndDay,
+    shiftStartMins: sh,
+    shiftEndMins: eh,
+    groupLabelMode: /** @type {'default'} */ ('default'),
+  }
+})
+
 /** FedEx pay-period estimate card — off until we bring per-period totals back */
 const SHOW_PAY_TOTAL_SECTION = false
 
@@ -539,12 +563,7 @@ function monthKeysOverlappingTripWorkWeek(e, opts) {
 
 const monthByKey = computed(() => {
   const list = sorted.value
-  const wwOpts = {
-    workWeekStartDay: workWeekFromCred.value.workWeekStartDay,
-    workWeekEndDay: workWeekFromCred.value.workWeekEndDay,
-    shiftStartMins: workWeekFromCred.value.shiftStartMins,
-    shiftEndMins: workWeekFromCred.value.shiftEndMins,
-  }
+  const wwOpts = { ...historyGroupingOpts.value }
   const m = new Map()
   for (const e of list) {
     const t = e.displayDate
@@ -602,8 +621,8 @@ const weekFilteredItems = computed(() => {
     const t = /** @type {number} */(e.displayDate)
     const k2 = shiftDateKeyForEventMs(
       t,
-      workWeekFromCred.value.shiftStartMins,
-      workWeekFromCred.value.shiftEndMins,
+      historyGroupingOpts.value.shiftStartMins,
+      historyGroupingOpts.value.shiftEndMins,
     )
     return k2 === filterDayKey.value
   })
@@ -625,6 +644,7 @@ const weekFilteredItems = computed(() => {
  *   key: string,
  *   groupLabel: string,
  *   weekStartMs: number,
+ *   spanDays: number,
  *   items: LedgerEntry[],
  *   tripCount: number,
  *   tripsWithMileage: number,
@@ -640,12 +660,7 @@ const tripsByWorkWeek = computed(() => {
   const items = weekFilteredItems.value
   if (!items.length) return out
 
-  const wwOpts = {
-    workWeekStartDay: workWeekFromCred.value.workWeekStartDay,
-    workWeekEndDay: workWeekFromCred.value.workWeekEndDay,
-    shiftStartMins: workWeekFromCred.value.shiftStartMins,
-    shiftEndMins: workWeekFromCred.value.shiftEndMins,
-  }
+  const wwOpts = { ...historyGroupingOpts.value }
 
   /** @type {Map<string, { meta: NonNullable<ReturnType<typeof workWeekGroupMeta>>, items: LedgerEntry[] }>} */
   const map = new Map()
@@ -679,8 +694,8 @@ const tripsByWorkWeek = computed(() => {
         typeof t === 'number' && Number.isFinite(t) && t > 0
           ? shiftDateKeyForEventMs(
               t,
-              workWeekFromCred.value.shiftStartMins,
-              workWeekFromCred.value.shiftEndMins,
+              historyGroupingOpts.value.shiftStartMins,
+              historyGroupingOpts.value.shiftEndMins,
             )
           : ''
       const dayKey = dk || '_unknown'
@@ -733,6 +748,13 @@ const tripsByWorkWeek = computed(() => {
       key,
       groupLabel: g.meta.groupLabel,
       weekStartMs: g.meta.weekStart,
+      spanDays:
+        typeof g.meta.spanDays === 'number' &&
+        Number.isFinite(g.meta.spanDays) &&
+        g.meta.spanDays >= 1 &&
+        g.meta.spanDays <= 7
+          ? g.meta.spanDays
+          : 7,
       items: g.items,
       tripCount: g.items.length,
       tripsWithMileage,
@@ -761,10 +783,10 @@ const fedExEstimatePayRowsForWeek = computed(() => {
   for (const wg of tripsByWorkWeek.value) {
     const periods = entriesByFedExPayPeriod(wg.items)
     const ws = wg.weekStartMs
-    const spanDays = workWeekInclusiveDayCount(
-      workWeekFromCred.value.workWeekStartDay,
-      workWeekFromCred.value.workWeekEndDay,
-    )
+    const spanDays =
+      typeof wg.spanDays === 'number' && Number.isFinite(wg.spanDays) && wg.spanDays >= 1 && wg.spanDays <= 7
+        ? wg.spanDays
+        : 7
     const we = ws + spanDays * 24 * 60 * 60 * 1000 - 1
     out[wg.key] = periods.map((g) => {
       const est = computeWeekPayEstimate(g.items)
@@ -865,6 +887,10 @@ function bindDayDetailsEl(weekKey, shiftDayKey) {
   }
 }
 
+watch(historyWeekViewMode, () => {
+  filterDayKey.value = ''
+})
+
 watch(filterDayKey, async (k) => {
   const dayKey = String(k || '').trim()
   if (!dayKey) return
@@ -894,15 +920,15 @@ const viewMonthGrid = computed(() => {
     if (!e.displayDate) continue
     const k = shiftDateKeyForEventMs(
       /** @type {number} */(e.displayDate),
-      workWeekFromCred.value.shiftStartMins,
-      workWeekFromCred.value.shiftEndMins,
+      historyGroupingOpts.value.shiftStartMins,
+      historyGroupingOpts.value.shiftEndMins,
     )
     if (!k) continue
     counts[k] = (counts[k] || 0) + 1
   }
   return monthGridForCalendarMonth(/** @type {number} */(g.y), g.m0, counts, {
-    shiftStartMins: workWeekFromCred.value.shiftStartMins,
-    shiftEndMins: workWeekFromCred.value.shiftEndMins,
+    shiftStartMins: historyGroupingOpts.value.shiftStartMins,
+    shiftEndMins: historyGroupingOpts.value.shiftEndMins,
   })
 })
 
@@ -1171,6 +1197,33 @@ onUnmounted(() => {
         >
           →
         </button>
+      </div>
+      <div class="history-week-mode" role="group" aria-label="Week grouping">
+        <span
+          class="history-week-mode__lab"
+          :class="{ 'history-week-mode__lab--on': historyWeekViewMode === 'workWeek' }"
+        >Work week</span>
+        <button
+          type="button"
+          class="history-week-mode__switch tap"
+          role="switch"
+          :aria-checked="historyWeekViewMode === 'paySchedule'"
+          :title="
+            historyWeekViewMode === 'workWeek'
+              ? 'Switch to FedEx pay schedule (Sun–Sat)'
+              : 'Switch to your Settings work week'
+          "
+          @click="
+            historyWeekViewMode =
+              historyWeekViewMode === 'workWeek' ? 'paySchedule' : 'workWeek'
+          "
+        >
+          <span class="history-week-mode__thumb" aria-hidden="true" />
+        </button>
+        <span
+          class="history-week-mode__lab"
+          :class="{ 'history-week-mode__lab--on': historyWeekViewMode === 'paySchedule' }"
+        >Pay schedule</span>
       </div>
       <div
         v-if="viewMonthGrid.cells.length"
@@ -1635,6 +1688,70 @@ onUnmounted(() => {
   width: 100%;
   padding: 0.35rem 0.25rem;
   margin-bottom: 0.15rem;
+}
+
+.history-week-mode {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.45rem;
+  width: 100%;
+  padding: 0.15rem 0.35rem 0.45rem;
+  flex-wrap: wrap;
+}
+
+.history-week-mode__lab {
+  font-size: 0.58rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #6e6e7e;
+  white-space: nowrap;
+}
+
+.history-week-mode__lab--on {
+  color: #c8c4dc;
+}
+
+.history-week-mode__switch {
+  position: relative;
+  width: 2.65rem;
+  height: 1.35rem;
+  padding: 0;
+  border-radius: 999px;
+  border: 1px solid #3a3a48;
+  background: #1e1e28;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background 120ms ease, border-color 120ms ease;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.history-week-mode__switch:focus-visible {
+  outline: 2px solid rgba(255, 255, 255, 0.55);
+  outline-offset: 2px;
+}
+
+.history-week-mode__switch[aria-checked='true'] {
+  background: rgba(99, 102, 241, 0.35);
+  border-color: rgba(129, 140, 248, 0.65);
+}
+
+.history-week-mode__thumb {
+  position: absolute;
+  top: 50%;
+  left: 0.12rem;
+  width: 1.05rem;
+  height: 1.05rem;
+  border-radius: 50%;
+  background: #f4f4f8;
+  transform: translateY(-50%);
+  transition: transform 160ms ease;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.35);
+}
+
+.history-week-mode__switch[aria-checked='true'] .history-week-mode__thumb {
+  transform: translate(1.28rem, -50%);
 }
 
 .history-mnav {

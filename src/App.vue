@@ -2,6 +2,7 @@
 import { onMounted } from 'vue'
 import { useRoute } from 'vue-router'
 import { postVisitPing, getAuthStatus, getPublicGeoFenceCheck } from './api.js'
+import { hydrateTomtomTrafficKeyFromServer } from './stores/trafficTileKey.js'
 
 /** One IP capture per tab session when the SPA loads (security audit). */
 const VISIT_PING_KEY = 'fedextool-visit-ping-v1'
@@ -18,6 +19,7 @@ onMounted(() => {
     /* private mode — still try ping */
   }
   void postVisitPing().catch(() => {})
+  void hydrateTomtomTrafficKeyFromServer()
 
   void (async () => {
     try {
