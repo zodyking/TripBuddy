@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto'
 import { readKeyJson, writeKeyJson } from './kv-store.mjs'
 import { userScopeKey } from './scope-kv.mjs'
 import { getLastActiveAccountKey } from './active-account.mjs'
+import { isSkippableInAppNotification } from './in-app-notification-noise.mjs'
 
 const MAX = 100
 
@@ -62,6 +63,10 @@ export async function appendInAppNotification(
   if (!t) return { ok: false, skipped: 'empty', inbox: { items: [] } }
   const ak = forceAccount || accountKey
   if (!ak) return { ok: false, skipped: 'no_account', inbox: { items: [] } }
+  if (isSkippableInAppNotification(t, source)) {
+    const prev = await readInAppInbox(ak)
+    return { ok: true, skipped: 'filtered_noise', inbox: prev }
+  }
   const prev = await readInAppInbox(ak)
   const now = Date.now()
   const item = /** @type {InAppItem} */({
@@ -123,5 +128,22 @@ export async function markInAppAllRead(ak) {
   const items = (prev.items || []).map((e) => (e ? { ...e, read: true } : e))
   const inbox = { ...prev, items }
   await writeKeyJson(keyFor(ak), inbox)
+  return inbox
+}
+
+/**
+ * Remove legacy noisy rows (e.g. bridge poll “refreshed”) from persisted inbox.
+ * @param {string} accountKey
+ */
+export async function purgeNoisyInAppItems(accountKey) {
+  if (!accountKey) return { items: [] }
+  const prev = await readInAppInbox(accountKey)
+  const raw = /** @type {InAppItem[]} */((prev.items || []).filter(Boolean))
+  const kept = raw.filter(
+    (x) => !isSkippableInAppNotification(x.message, x.source),
+  )
+  if (kept.length === raw.length) return prev
+  const inbox = { ...prev, items: trim(kept) }
+  await writeKeyJson(keyFor(accountKey), inbox)
   return inbox
 }

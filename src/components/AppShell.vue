@@ -1,5 +1,5 @@
 <script setup>
-import { onMounted, onUnmounted, watch, nextTick, Teleport } from 'vue'
+import { onMounted, onUnmounted, watch, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { postAuthLogout } from '../api.js'
 import { resetLinehaulSession } from '../stores/linehaulSnapshotStore.js'
@@ -11,7 +11,6 @@ import {
 } from '../stores/liveLogStore.js'
 import {
   items,
-  toasts,
   menuOpen,
   unreadCount,
   fetchInAppInbox,
@@ -168,26 +167,6 @@ onUnmounted(() => {
         </div>
       </div>
     </header>
-
-    <Teleport to="body">
-      <div
-        v-if="route.name !== 'login' && toasts.length"
-        class="inapp-toast-host"
-        role="status"
-        aria-live="polite"
-      >
-        <button
-          v-for="t in toasts"
-          :key="t.id"
-          type="button"
-          class="inapp-toast tap"
-          @click="markInAppItemRead(t.id)"
-        >
-          <span class="inapp-toast-txt">{{ t.message }}</span>
-        </button>
-        <p class="inapp-toast-hint">Tap to dismiss</p>
-      </div>
-    </Teleport>
 
     <div class="app-body">
       <div v-if="apiOk === false" class="offline-banner">
@@ -510,74 +489,6 @@ onUnmounted(() => {
   font-size: 0.75rem;
   color: #6a6a78;
   text-align: center;
-}
-
-/* Teleported — fixed; tap-to-dismiss, no X */
-:global(.inapp-toast-host) {
-  position: fixed;
-  z-index: 2200;
-  left: 0;
-  right: 0;
-  top: calc(3.1rem + env(safe-area-inset-top, 0px));
-  max-width: var(--app-content-max, 40rem);
-  width: 100%;
-  margin-inline: auto;
-  display: flex;
-  flex-direction: column;
-  align-items: stretch;
-  gap: 0.35rem;
-  padding: 0 0.9rem;
-  pointer-events: none;
-}
-:global(.inapp-toast-hint) {
-  margin: 0;
-  font-size: 0.55rem;
-  text-align: right;
-  color: rgba(200, 200, 220, 0.45);
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  font-weight: 600;
-  pointer-events: none;
-  padding: 0 0.1rem 0.15rem 0;
-}
-:global(.inapp-toast) {
-  display: block;
-  width: 100%;
-  text-align: left;
-  padding: 0.55rem 0.7rem 0.6rem;
-  border: 1px solid rgba(99, 102, 241, 0.45);
-  border-radius: 10px;
-  background: linear-gradient(135deg, #262636 0%, #1a1a28 100%);
-  color: #e4e4f0;
-  font-size: 0.78rem;
-  line-height: 1.35;
-  font-weight: 500;
-  cursor: pointer;
-  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.4);
-  pointer-events: auto;
-  animation: inapp-in 0.2s ease-out;
-}
-:global(.inapp-toast:hover) {
-  border-color: rgba(167, 139, 250, 0.6);
-  background: linear-gradient(135deg, #2e2e3e 0%, #202030 100%);
-}
-:global(.inapp-toast-txt) {
-  display: block;
-}
-@keyframes inapp-in {
-  from {
-    opacity: 0;
-    transform: translateY(-6px);
-  }
-  to {
-    opacity: 1;
-    transform: none;
-  }
-}
-@media (prefers-reduced-motion: reduce) {
-  :global(.inapp-toast) {
-    animation: none;
-  }
 }
 
 .header-sign-out {

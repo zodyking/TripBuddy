@@ -111,7 +111,9 @@ import {
   readInAppInbox,
   markInAppRead,
   markInAppAllRead,
+  purgeNoisyInAppItems,
 } from './in-app-notifications-store.mjs'
+import { isSkippableInAppNotification } from './in-app-notification-noise.mjs'
 import {
   addOrTouchDolly,
   readDollyRegistry,
@@ -503,7 +505,7 @@ app.get('/api/notifications', async (req) => {
   if (!ak) {
     return { ok: true, items: [], unreadCount: 0 }
   }
-  const d = await readInAppInbox(ak)
+  const d = await purgeNoisyInAppItems(ak)
   const list = Array.isArray(d.items) ? d.items : []
   const unreadCount = list.filter((x) => x && !x.read).length
   return { ok: true, items: list, unreadCount }

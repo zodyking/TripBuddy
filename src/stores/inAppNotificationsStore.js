@@ -7,15 +7,12 @@ import {
 /** @typedef {{ id: string, message: string, type?: string, source?: string, ts: number, read?: boolean, extra?: object }} InAppItem */
 
 const items = ref(/** @type {InAppItem[]} */ ([]))
-const toasts = ref(/** @type {Array<{ id: string, message: string, ts: number }> */ ([]))
 const menuOpen = ref(false)
 const loading = ref(false)
 
 const unreadCount = computed(
   () => items.value.filter((i) => i && !i.read).length,
 )
-
-const MAX_TOASTS = 3
 
 /**
  * @param {InAppItem} raw
@@ -35,17 +32,6 @@ export function pushInAppFromStream(raw) {
   }
   const list = [n, ...items.value.filter((x) => x.id !== n.id)]
   items.value = list.slice(0, 100)
-  toasts.value = [
-    { id: n.id, message: m, ts: n.ts },
-    ...toasts.value.filter((t) => t.id !== n.id).slice(0, MAX_TOASTS - 1),
-  ]
-}
-
-/**
- * @param {string} id
- */
-function dismissToast(id) {
-  toasts.value = toasts.value.filter((t) => t.id !== id)
 }
 
 export async function fetchInAppInbox() {
@@ -74,8 +60,6 @@ export async function markInAppItemRead(id) {
     }
   } catch {
     /* */
-  } finally {
-    dismissToast(id)
   }
 }
 
@@ -87,16 +71,12 @@ export async function markInAppAllRead() {
     }
   } catch {
     /* */
-  } finally {
-    toasts.value = []
   }
 }
 
 export {
   items,
-  toasts,
   menuOpen,
   loading,
   unreadCount,
-  dismissToast,
 }
