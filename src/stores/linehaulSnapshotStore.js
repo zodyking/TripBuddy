@@ -651,6 +651,15 @@ async function refreshLinehaulApisImpl(attempt) {
     }
   }
 
+  /** Pre-plan must be a different leg than the live merged trip (never duplicate seq). */
+  if (linehaulTripsBody.value && typeof linehaulTripsBody.value === 'object') {
+    const mergedSeq = tripBodyDailySeq(linehaulTripsBody.value)
+    const preSeq = tripBodyDailySeq(prePlanTripSnapshot.value)
+    if (mergedSeq && preSeq && mergedSeq === preSeq) {
+      prePlanTripSnapshot.value = null
+    }
+  }
+
   if (linehaulTripsBody.value && typeof linehaulTripsBody.value === 'object') {
     const seqU = tripBodyDailySeq(linehaulTripsBody.value)
     if (seqU) {

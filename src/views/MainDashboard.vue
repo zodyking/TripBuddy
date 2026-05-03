@@ -166,6 +166,17 @@ const mergedDispatchInstructions = computed(() => {
   return fromApi || fromAssignment
 })
 
+/** Same merge rule for the active Dispatch carousel slide (current vs pre-plan). */
+const mergedDispatchInstructionsForSlide = computed(() => {
+  const fromAssignment = String(instructions.value ?? '').trim()
+  if (dispatchSlideIndex.value === 1 && prePlanTripSnapshot.value) {
+    const fromApi = extractTripDispatchInstructions(prePlanTripSnapshot.value)
+    if (fromApi && fromAssignment) return `${fromAssignment}\n\n${fromApi}`
+    return fromApi || fromAssignment
+  }
+  return mergedDispatchInstructions.value
+})
+
 const automationPreview = ref(null)
 const automationPreviewHidden = ref(false)
 let previewPollTimer = null
@@ -253,6 +264,29 @@ const prePlanTripLegSeq = computed(() =>
   tripBodyDailySeq(prePlanTripSnapshot.value),
 )
 
+/** Trip JSON shown in Trip Details (matches Dispatch carousel). */
+const tripDetailsBodyForSlide = computed(() => {
+  if (
+    dispatchSlideIndex.value === 1 &&
+    prePlanTripSnapshot.value &&
+    typeof prePlanTripSnapshot.value === 'object'
+  ) {
+    return /** @type {Record<string, unknown>} */ (prePlanTripSnapshot.value)
+  }
+  const m = linehaulTripsBody.value
+  return m && typeof m === 'object' ? /** @type {Record<string, unknown>} */ (m) : null
+})
+
+watch([hasPrePlanTrip, dispatchSlideIndex], () => {
+  if (!hasPrePlanTrip.value && dispatchSlideIndex.value !== 0) {
+    dispatchSlideIndex.value = 0
+  }
+})
+
+watch(dispatchSlideIndex, () => {
+  expandedTrailers.value = {}
+})
+
 const activeDispatchTripSeq = computed(() => {
   if (dispatchSlideIndex.value === 1 && prePlanTripLegSeq.value) {
     return prePlanTripLegSeq.value
@@ -267,13 +301,13 @@ const activeDispatchTripSeq = computed(() => {
 })
 
 const tripTrailerCards = computed(() =>
-  buildEnhancedTrailerCards(linehaulTripsBody.value),
+  buildEnhancedTrailerCards(tripDetailsBodyForSlide.value),
 )
 
 const expandedTrailers = ref({})
 
 const tripDollySection = computed(() =>
-  buildDollySection(linehaulTripsBody.value),
+  buildDollySection(tripDetailsBodyForSlide.value),
 )
 
 const copyToast = ref('')
@@ -292,7 +326,7 @@ function dollySix(raw) {
 }
 
 const primaryDollyOnTrip = computed(() => {
-  const b = linehaulTripsBody.value
+  const b = tripDetailsBodyForSlide.value
   if (!b || typeof b !== 'object' || Array.isArray(b)) return ''
   const o = /** @type {Record<string, unknown>} */ (b)
   return dollySix(o.dollyNumber1) || dollySix(o.dollyNumber2) || ''
@@ -384,7 +418,9 @@ function displayOrDash(value) {
 }
 
 function tripDetailsCompleteSeq() {
+  const slideSeq = tripBodyDailySeq(tripDetailsBodyForSlide.value)
   return (
+    slideSeq ||
     currentTripLegSeq.value ||
     tripBodyDailySeq(cachedTripSnapshot.value) ||
     (typeof lastDailyTripLegSequence.value === 'string' && /^\d+$/.test(lastDailyTripLegSequence.value.trim())
@@ -559,17 +595,17 @@ async function confirmTripCompleted() {
 
 /** Trip destination location number for v2 transportation-network API (path param). */
 const tripDestLocationId = computed(() => {
-  const b = linehaulTripsBody.value
+  const b = tripDetailsBodyForSlide.value
   if (!b || typeof b !== 'object') return ''
   const n = /** @type {Record<string, unknown>} */ (b).tripDestNumber
   return n != null && String(n).trim() !== '' ? String(n).trim() : ''
 })
 
-/** originId header for Linehaul calls: tractor snapshot, else trip current location. */
+/** originId header for Linehaul calls: tractor snapshot, else trip current location (active slide). */
 const linehaulOriginIdForApi = computed(() => {
   const tid = linehaulTractorBody.value?.locationId
   if (tid != null && String(tid).trim() !== '') return String(tid).trim()
-  const b = linehaulTripsBody.value
+  const b = tripDetailsBodyForSlide.value
   if (b && typeof b === 'object') {
     const o = /** @type {Record<string, unknown>} */ (b)
     const cur = o.originLocation ?? o.currentLocationNumber
@@ -644,7 +680,7 @@ function tryStartTripProximityWatch() {
   tripProximityWatchId = navigator.geolocation.watchPosition(
     (pos) => {
       if (!trailerGpsModalOpen.value) return
-      const body = linehaulTripsBody.value
+      const body = tripDetailsBodyForSlide.value
       if (!body || typeof body !== 'object') return
       const tr = /** @type {Record<string, unknown>} */ (body).trailers
       if (!Array.isArray(tr)) return
@@ -992,7 +1028,7 @@ watch(tripPhase, (newPhase, oldPhase) => {
 
 watch(
   () => {
-    const body = linehaulTripsBody.value
+    const body = tripDetailsBodyForSlide.value
     if (!body || typeof body !== 'object') return null
     const trailers = /** @type {Record<string, unknown>} */ (body).trailers
     return Array.isArray(trailers) ? trailers : null
@@ -2094,15 +2130,15 @@ onUnmounted(() => {
           </div>
         </div>
       </div>
-      <p v-if="!mergedDispatchInstructions.trim()" class="empty">No instructions yet.</p>
+      <p v-if="!mergedDispatchInstructionsForSlide.trim()" class="empty">No instructions yet.</p>
       <button
         v-else
         type="button"
         class="read dispatch-instructions-body copyable-block tap"
         title="Tap to copy"
-        @click.stop="copyTripDetailValue(mergedDispatchInstructions, 'Instructions')"
+        @click.stop="copyTripDetailValue(mergedDispatchInstructionsForSlide, 'Instructions')"
       >
-        {{ mergedDispatchInstructions }}
+        {{ mergedDispatchInstructionsForSlide }}
       </button>
     </section>
 
@@ -2117,12 +2153,14 @@ onUnmounted(() => {
       @dblclick="onTripPanelDblClick"
     >
       <h2>Trip Details</h2>
-      <p v-if="hasPrePlanTrip" class="trip-details-swipe-hint">Swipe left or right to match Dispatch (current vs pre-plan)</p>
+      <p v-if="hasPrePlanTrip" class="trip-details-swipe-hint">
+        Swipe Dispatch above (or here) to switch equipment for current vs pre-plan.
+      </p>
       <p
         v-if="
-          linehaulTripsBody &&
-          typeof linehaulTripsBody === 'object' &&
-          linehaulTripsBody.tripStatus === 'DSPCH'
+          tripDetailsBodyForSlide &&
+          typeof tripDetailsBodyForSlide === 'object' &&
+          tripDetailsBodyForSlide.tripStatus === 'DSPCH'
         "
         class="hint"
       >
@@ -2338,7 +2376,7 @@ onUnmounted(() => {
           </div>
         </div>
 
-        <template v-if="linehaulTripsBody">
+        <template v-if="tripDetailsBodyForSlide">
           <div
             v-for="card in tripTrailerCards"
             :key="card.id"
