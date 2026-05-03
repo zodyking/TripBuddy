@@ -45,7 +45,6 @@ const emit = defineEmits(['select'])
 const containerRef = ref(/** @type {HTMLElement | null} */ (null))
 
 const {
-  isTracking: compassTracking,
   smoothHeading,
   showCompassToggle,
   permissionState: compassPermission,
@@ -588,9 +587,6 @@ watch(compassModeActive, (active) => {
       <p v-else-if="geoDenied" class="directory-map-locate-hint is-warn">
         Enable location in your browser settings, then try again.
       </p>
-      <p v-else-if="compassModeActive && compassTracking" class="directory-map-locate-hint is-compass">
-        Compass mode · map follows your heading
-      </p>
       <p v-else-if="geoTracking && hasUserFix" class="directory-map-locate-hint">
         Live updates while this page is open.
       </p>
@@ -650,11 +646,6 @@ watch(compassModeActive, (active) => {
 
 .directory-map-locate-hint.is-warn {
   color: #fca5a5;
-}
-
-.directory-map-locate-hint.is-compass {
-  color: #c4b5fd;
-  border-color: rgba(167, 139, 250, 0.35);
 }
 
 .map-control-btn--compass {

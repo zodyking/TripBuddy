@@ -40,7 +40,6 @@ const emit = defineEmits(['select'])
 const containerRef = ref(/** @type {HTMLElement | null} */ (null))
 
 const {
-  isTracking: compassTracking,
   smoothHeading,
   showCompassToggle,
   permissionState: compassPermission,
@@ -575,7 +574,6 @@ watch(compassModeActive, (active) => {
       >Traffic hidden on Sat — switch to map</p>
       <p v-if="geoPending" class="bridge-map-hint">Location…</p>
       <p v-else-if="geoDenied" class="bridge-map-hint is-warn">Location denied</p>
-      <p v-else-if="compassModeActive && compassTracking" class="bridge-map-hint is-compass">Compass mode</p>
       <p v-if="compassError" class="bridge-map-hint is-warn">{{ compassError }}</p>
     </div>
     <div class="bridge-map-toolbar" role="toolbar" aria-label="Map display">
@@ -761,11 +759,6 @@ watch(compassModeActive, (active) => {
 }
 .bridge-map-hint.is-warn {
   color: #fb923c;
-}
-
-.bridge-map-hint.is-compass {
-  color: #c4b5fd;
-  border: 1px solid rgba(167, 139, 250, 0.35);
 }
 
 .map-control-btn--compass {

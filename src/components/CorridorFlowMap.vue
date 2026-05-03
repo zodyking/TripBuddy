@@ -50,7 +50,6 @@ const emit = defineEmits(['waypointsChange', 'removeWaypoint', 'addWaypoint'])
 const containerRef = ref(/** @type {HTMLElement | null} */ (null))
 
 const {
-  isTracking: compassTracking,
   smoothHeading,
   showCompassToggle,
   permissionState: compassPermission,
@@ -666,7 +665,6 @@ watch(compassModeActive, (active) => {
       <p v-else-if="activeBaseLayer === 'satellite' && trafficOn" class="corridor-map-foot" role="note">Traffic hidden on satellite</p>
       <p v-if="geoPending" class="corridor-map-hint">Location…</p>
       <p v-else-if="geoDenied" class="corridor-map-hint is-warn">Location denied</p>
-      <p v-else-if="compassModeActive && compassTracking" class="corridor-map-hint is-compass">Compass mode</p>
       <p v-if="compassError" class="corridor-map-hint is-warn">{{ compassError }}</p>
     </div>
     <div class="corridor-map-toolbar" role="toolbar" aria-label="Map display">
@@ -879,11 +877,6 @@ watch(compassModeActive, (active) => {
 
 .corridor-map-hint.is-warn {
   color: #fca5a5;
-}
-
-.corridor-map-hint.is-compass {
-  color: #c4b5fd;
-  border: 1px solid rgba(167, 139, 250, 0.35);
 }
 
 .map-control-btn--compass {

@@ -48,7 +48,6 @@ const props = defineProps({
 const containerRef = ref(null)
 
 const {
-  isTracking: compassTracking,
   smoothHeading,
   showCompassToggle,
   permissionState: compassPermission,
@@ -680,16 +679,10 @@ watch(compassModeActive, (active) => {
       Location unavailable — trailers only. Check site permission in browser settings.
     </p>
     <p
-      v-if="hasUserFix && !compassModeActive"
+      v-if="hasUserFix"
       class="trailer-loc-hint is-live"
     >
       Live location updates while this map is open.
-    </p>
-    <p
-      v-if="compassModeActive && compassTracking"
-      class="trailer-loc-hint is-compass"
-    >
-      Compass mode · map follows your heading
     </p>
     <p
       v-if="compassError"
@@ -846,11 +839,6 @@ watch(compassModeActive, (active) => {
 
 .trailer-loc-hint.is-live {
   color: #0369a1;
-}
-
-.trailer-loc-hint.is-compass {
-  color: #7c3aed;
-  border: 1px solid rgba(139, 92, 246, 0.35);
 }
 
 .trailer-loc-hint.is-warn {
