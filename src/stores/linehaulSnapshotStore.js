@@ -660,7 +660,12 @@ async function refreshLinehaulApisImpl(attempt) {
     }
   }
 
-  if (linehaulTripsBody.value && typeof linehaulTripsBody.value === 'object') {
+  /** History ledger: only after dispatch (en route). Skip APRVD / pre-plan snapshots. */
+  if (
+    linehaulTripsBody.value &&
+    typeof linehaulTripsBody.value === 'object' &&
+    tripPhase.value === 'dispatched'
+  ) {
     const seqU = tripBodyDailySeq(linehaulTripsBody.value)
     if (seqU) {
       const fromAssign = String(assignmentInstructions ?? '').trim()
@@ -690,7 +695,7 @@ async function refreshLinehaulApisImpl(attempt) {
             })
             lastHistoryUpsertOkFingerprint = fp
           } catch {
-            /* offline / 401: retry on next refresh */
+            /* offline / 401: retry on next poll */
           }
         })()
       }

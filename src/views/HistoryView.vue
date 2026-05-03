@@ -429,6 +429,30 @@ async function load() {
       const byLeg = new Map()
       for (const x of raw) {
         if (!x || typeof x !== 'object') continue
+        const sourceStr0 = typeof x.source === 'string' ? x.source : 'complete'
+        /** Hide APRVD-only Linehaul snapshots (pre-plans / assigned-before-dispatch); history is enroute + completed trips only. */
+        if (sourceStr0 === 'linehaul') {
+          const dh0 =
+            x.dispatchHeader && typeof x.dispatchHeader === 'object'
+              ? /** @type {Record<string, unknown>} */ (x.dispatchHeader)
+              : null
+          const dhTs = dh0
+            ? String(dh0.tripStatusText ?? '')
+                .trim()
+                .toUpperCase()
+            : ''
+          const td0 =
+            x.tripDetails && typeof x.tripDetails === 'object'
+              ? /** @type {Record<string, unknown>} */ (x.tripDetails)
+              : null
+          const tdTs = td0
+            ? String(td0.tripStatus ?? '')
+                .trim()
+                .toUpperCase()
+            : ''
+          const linehaulStat = dhTs && dhTs !== '—' ? dhTs : tdTs
+          if (linehaulStat === 'APRVD') continue
+        }
         const comp =
           typeof x.completedAt === 'number' && Number.isFinite(x.completedAt)
             ? x.completedAt
@@ -437,7 +461,7 @@ async function load() {
           typeof x.recordedAt === 'number' && Number.isFinite(x.recordedAt)
             ? x.recordedAt
             : 0
-        const sourceStr = typeof x.source === 'string' ? x.source : 'complete'
+        const sourceStr = sourceStr0
         const displayDate =
           sourceStr === 'linehaul' && rec > 0
             ? rec
