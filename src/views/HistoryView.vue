@@ -2,6 +2,11 @@
 import { ref, computed, watch, onMounted, onUnmounted, nextTick, Teleport } from 'vue'
 import { getAssignment, getCredentials, patchTripHistoryOutcome } from '../api.js'
 import {
+  tripPhase,
+  linehaulTripsBody,
+  tripBodyDailySeq,
+} from '../stores/linehaulSnapshotStore.js'
+import {
   monthGridForCalendarMonth,
   workWeekGroupMeta,
   workWeekInclusiveDayCount,
@@ -54,6 +59,31 @@ const outcomeMenuOpts = [
   { k: 'rejected', t: 'Rejected' },
   { k: 'removed', t: 'Removed' },
 ]
+
+/** Leg # FedEx reports as active on Home (same as History row). */
+const activeTripLegSeqForHistory = computed(() => {
+  const s = tripBodyDailySeq(linehaulTripsBody.value)
+  return s && /^\d+$/.test(String(s).trim()) ? String(s).trim() : ''
+})
+
+function isHistoryRowActiveOngoingTrip(e) {
+  const leg = String(e?.dailyTripLegSequence ?? '').trim()
+  if (!leg || !activeTripLegSeqForHistory.value) return false
+  if (leg !== activeTripLegSeqForHistory.value) return false
+  return tripPhase.value === 'assigned' || tripPhase.value === 'dispatched'
+}
+
+/**
+ * Pill value for styling / menus: ongoing API trip shows as `current` when outcome still default.
+ * @param {LedgerEntry} e
+ */
+function historyOutcomeUiSelectKey(e) {
+  if (isHistoryRowActiveOngoingTrip(e)) {
+    const o = outcomeSelectValue(e)
+    if (o === 'delivered' || o === 'none') return 'current'
+  }
+  return outcomeSelectValue(e)
+}
 
 /**
  * @param {unknown} x
@@ -965,6 +995,7 @@ function sourceLabel(src) {
 
 const outcomeLabel = (o) => {
   const t = str(o)
+  if (t === 'current') return 'Current'
   if (t === 'delivered') return 'Delivered'
   if (t === 'rejected') return 'Rejected'
   if (t === 'removed') return 'Removed'
@@ -1022,6 +1053,7 @@ function closeOutcomeMenu() {
 function toggleOutcomeMenu(row, id, ev) {
   ev?.stopPropagation()
   if (!/^\d+$/.test(row.dailyTripLegSequence)) return
+  if (isHistoryRowActiveOngoingTrip(row)) return
   if (outcomeMenuOpen.value === id) {
     closeOutcomeMenu()
     return
@@ -1075,6 +1107,7 @@ let lastDblSeq = ''
  */
 function onRowDoubleClick(e) {
   if (!/^\d+$/.test(e.dailyTripLegSequence)) return
+  if (isHistoryRowActiveOngoingTrip(e)) return
   const now = Date.now()
   if (
     lastDblT &&
@@ -1315,14 +1348,21 @@ onUnmounted(() => {
                                   <button
                                     type="button"
                                     class="history-outcome-pill history-outcome-pill--trip tap"
-                                    :class="`history-outcome--${outcomeSelectValue(e)}`"
-                                    :disabled="historySavingId === `seq-${e.dailyTripLegSequence}`"
-                                    :title="'Tap to change: ' + outcomeLabel(outcomeSelectValue(e))"
+                                    :class="`history-outcome--${historyOutcomeUiSelectKey(e)}`"
+                                    :disabled="
+                                      historySavingId === `seq-${e.dailyTripLegSequence}` ||
+                                      isHistoryRowActiveOngoingTrip(e)
+                                    "
+                                    :title="
+                                      isHistoryRowActiveOngoingTrip(e)
+                                        ? 'This leg matches your current trip — set outcome after FedEx clears it'
+                                        : 'Tap to change: ' + outcomeLabel(historyOutcomeUiSelectKey(e))
+                                    "
                                     :aria-expanded="outcomeMenuOpen === e.id"
                                     aria-haspopup="listbox"
                                     @click="toggleOutcomeMenu(e, e.id, $event)"
                                   >
-                                    <span class="history-outcome-pill__txt">{{ outcomeLabel(outcomeSelectValue(e)) }}</span>
+                                    <span class="history-outcome-pill__txt">{{ outcomeLabel(historyOutcomeUiSelectKey(e)) }}</span>
                                     <span class="history-outcome-pill__chev" aria-hidden="true">▾</span>
                                   </button>
                                 </div>
@@ -2650,6 +2690,11 @@ onUnmounted(() => {
   border-color: #166534;
   color: #86efac;
   background: rgba(22, 101, 52, 0.25);
+}
+.history-outcome-pill.history-outcome--current {
+  border-color: #6d28d9;
+  color: #ddd6fe;
+  background: rgba(109, 40, 217, 0.22);
 }
 .history-outcome-pill.history-outcome--rejected {
   border-color: #991b1b;

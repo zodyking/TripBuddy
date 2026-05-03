@@ -360,20 +360,34 @@ export function setTripTtsEnabled(enabled) {
   setTripAlertMode(enabled ? 'tts' : 'off')
 }
 
-let lastTripPhase = ''
+/** Last stable phase committed after debounce — avoids TTS on Linehaul poll flicker. */
+let lastStablePhaseForVoice = ''
 
 /**
- * Announce trip status phase changes (none → assigned → dispatched → none).
+ * Set phase baseline without speaking (e.g. after first snapshot seed).
  * @param {'none' | 'assigned' | 'dispatched'} phase
  */
-export function maybeAnnounceStatusChange(phase) {
+export function seedTripPhaseVoiceTracking(phase) {
+  lastStablePhaseForVoice = phase || 'none'
+}
+
+/**
+ * Call after debouncing `tripPhase` (~850ms stable). Announces real lifecycle transitions only.
+ * @param {'none' | 'assigned' | 'dispatched'} phase
+ */
+export function syncTripPhaseVoiceStable(phase) {
   if (typeof window === 'undefined') return
-  pushLiveLog({ type: 'info', message: `[TripVoice] maybeAnnounceStatusChange: ${lastTripPhase} -> ${phase}`, ts: Date.now() })
-  if (phase === lastTripPhase) return
-  const prev = lastTripPhase
-  lastTripPhase = phase
+  const p = phase || 'none'
+  pushLiveLog({
+    type: 'info',
+    message: `[TripVoice] syncTripPhaseVoiceStable: ${lastStablePhaseForVoice} -> ${p}`,
+    ts: Date.now(),
+  })
+  if (p === lastStablePhaseForVoice) return
+  const prev = lastStablePhaseForVoice
+  lastStablePhaseForVoice = p
   if (!prev) {
-    pushLiveLog({ type: 'info', message: `[TripVoice] skipping: no previous phase`, ts: Date.now() })
+    pushLiveLog({ type: 'info', message: `[TripVoice] phase baseline set (no speech)`, ts: Date.now() })
     return
   }
 
@@ -388,17 +402,17 @@ export function maybeAnnounceStatusChange(phase) {
   }
 
   let text = ''
-  if (phase === 'assigned' && prev !== 'assigned') {
+  if (p === 'assigned' && prev !== 'assigned') {
     text = 'Trip status changed to assigned.'
-  } else if (phase === 'dispatched' && prev !== 'dispatched') {
+  } else if (p === 'dispatched' && prev !== 'dispatched') {
     text = 'Trip status changed to dispatched.'
-  } else if (phase === 'none' && prev !== 'none') {
+  } else if (p === 'none' && prev !== 'none') {
     text = 'Trip completed.'
   }
 
   if (text) {
     pushLiveLog({ type: 'info', message: `[TripVoice] announcing status change: ${text}`, ts: Date.now() })
-    enqueueAnnouncement(text, { bell: mode === 'both', category: `statusChange:${phase}` })
+    enqueueAnnouncement(text, { bell: mode === 'both', category: `statusChange:${p}` })
   }
 }
 
@@ -531,6 +545,57 @@ function gpsKey(lat, lng) {
 }
 
 /**
+ * Prime fingerprint maps so the first Linehaul poll after load does not speak
+ * "new trip" / trailer transitions for unchanged data.
+ *
+ * @param {unknown} tripsBody
+ * @param {boolean} noActiveTrip
+ * @param {unknown} prePlanBody
+ */
+export function seedTripVoiceFromSnapshot(tripsBody, noActiveTrip, prePlanBody) {
+  if (typeof window === 'undefined') return
+  evaluateGestureGate()
+
+  if (noActiveTrip || tripsBody == null) {
+    lastFingerprint = ''
+    pendingAnnouncement = null
+  } else if (hasTripOriginAndDestination(tripsBody)) {
+    const { origin, destination } = extractOriginDest(tripsBody)
+    const leg = legSeqKey(tripsBody)
+    lastFingerprint = `${leg}|||${origin}|||${destination}`
+  }
+
+  if (prePlanBody == null) {
+    lastPrePlanFingerprint = ''
+  } else if (hasTripOriginAndDestination(prePlanBody)) {
+    const { origin, destination } = extractOriginDest(prePlanBody)
+    const leg = legSeqKey(prePlanBody)
+    lastPrePlanFingerprint = `preplan:${leg}|||${origin}|||${destination}`
+  }
+
+  prevTrailerStatuses.clear()
+  prevTrailerGps.clear()
+  if (tripsBody != null && typeof tripsBody === 'object' && !Array.isArray(tripsBody)) {
+    const trailers = /** @type {Record<string, unknown>} */ (tripsBody).trailers
+    if (Array.isArray(trailers)) {
+      for (const t of trailers) {
+        if (!t || typeof t !== 'object') continue
+        const tr = /** @type {Record<string, unknown>} */ (t)
+        const order = String(tr.trlrOrder ?? '').trim()
+        if (!order) continue
+        const status = String(tr.detlCodeLoadStatus ?? '').toUpperCase()
+        prevTrailerStatuses.set(order, status)
+        const lat = tr.latitude != null ? Number(tr.latitude) : NaN
+        const lng = tr.longitude != null ? Number(tr.longitude) : NaN
+        if (!Number.isNaN(lat) && !Number.isNaN(lng)) {
+          prevTrailerGps.set(order, gpsKey(lat, lng))
+        }
+      }
+    }
+  }
+}
+
+/**
  * After trailers finish loading, announce when a trailer's lat/lng changes meaningfully.
  * @param {unknown[]} trailers
  */
@@ -621,7 +686,7 @@ export function clearTrailerGpsTracking() {
  * Reset trip phase tracking (call on unmount).
  */
 export function clearTripPhaseTracking() {
-  lastTripPhase = ''
+  lastStablePhaseForVoice = ''
 }
 
 /**

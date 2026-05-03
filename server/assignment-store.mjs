@@ -578,6 +578,20 @@ export async function writeAssignment(body) {
       set.add(one)
       hiddenDailyTripLegSequences = Array.from(set)
     }
+  } else if (typeof body.removeHiddenDailyTripLegSequence === 'string') {
+    const one = body.removeHiddenDailyTripLegSequence.trim()
+    if (/^\d+$/.test(one)) {
+      hiddenDailyTripLegSequences = hiddenDailyTripLegSequences.filter((x) => String(x) !== one)
+    }
+  } else if (Array.isArray(body.removeHiddenDailyTripLegSequences)) {
+    const drop = new Set(
+      body.removeHiddenDailyTripLegSequences
+        .map((x) => String(x).trim())
+        .filter((s) => /^\d+$/.test(s)),
+    )
+    if (drop.size) {
+      hiddenDailyTripLegSequences = hiddenDailyTripLegSequences.filter((x) => !drop.has(String(x)))
+    }
   }
 
   let persistedLinehaulTripSnapshot = prev.persistedLinehaulTripSnapshot ?? null

@@ -85,7 +85,8 @@ import {
   tripVoiceShowUnlockHint,
   isTripAlertEnabled,
   isTrailerGpsTtsEnabled,
-  maybeAnnounceStatusChange,
+  syncTripPhaseVoiceStable,
+  seedTripVoiceFromSnapshot,
   maybeAnnounceTrailerStatusChange,
   maybeAnnounceTrailerRelocated,
   maybeAnnounceNearTrailer,
@@ -392,9 +393,27 @@ function tripDetailsCompleteSeq() {
   )
 }
 
+const tripRemovalBlockedReason = computed(() => {
+  const p = tripPhase.value
+  if (p === 'assigned') {
+    return 'This trip is assigned — finish or wait for dispatch before removing it from Home.'
+  }
+  if (p === 'dispatched') {
+    return 'This trip is en route / dispatched — it cannot be removed from Home until FedEx clears it.'
+  }
+  return ''
+})
+
 function registerDispatchDoubleComplete() {
   const seq = activeDispatchTripSeq.value
   if (!seq) return
+  if (tripRemovalBlockedReason.value) {
+    copyToast.value = tripRemovalBlockedReason.value
+    window.setTimeout(() => {
+      copyToast.value = ''
+    }, 3200)
+    return
+  }
   const now = Date.now()
   if (dispatchFirstTapAt && now - dispatchFirstTapAt < DOUBLE_TAP_MS) {
     dispatchFirstTapAt = 0
@@ -409,6 +428,13 @@ function registerDispatchDoubleComplete() {
 function registerTripDoubleComplete() {
   const seq = tripDetailsCompleteSeq()
   if (!seq) return
+  if (tripRemovalBlockedReason.value) {
+    copyToast.value = tripRemovalBlockedReason.value
+    window.setTimeout(() => {
+      copyToast.value = ''
+    }, 3200)
+    return
+  }
   const now = Date.now()
   if (tripFirstTapAt && now - tripFirstTapAt < DOUBLE_TAP_MS) {
     tripFirstTapAt = 0
@@ -510,6 +536,15 @@ async function confirmTripCompleted() {
   const seq = tripCompleteTargetSeq.value
   if (!seq) {
     tripCompleteDialog.value = false
+    return
+  }
+  if (tripRemovalBlockedReason.value) {
+    tripCompleteDialog.value = false
+    tripCompleteTargetSeq.value = ''
+    copyToast.value = tripRemovalBlockedReason.value
+    window.setTimeout(() => {
+      copyToast.value = ''
+    }, 3200)
     return
   }
   tripCompleteBusy.value = true
@@ -919,8 +954,13 @@ watch(
 )
 
 watch(
-  [linehaulTripsBody, linehaulTripsNoActive, prePlanTripSnapshot],
+  [linehaulTripsBody, linehaulTripsNoActive, prePlanTripSnapshot, linehaulLastFetchAt],
   () => {
+    seedTripVoiceFromSnapshot(
+      linehaulTripsBody.value,
+      linehaulTripsNoActive.value,
+      prePlanTripSnapshot.value,
+    )
     maybeAnnounceNewTrip(
       linehaulTripsBody.value,
       linehaulTripsNoActive.value,
@@ -934,18 +974,21 @@ watch(linehaulLastFetchAt, () => {
   void loadDollyRegistry()
 })
 
-watch(
-  tripPhase,
-  (newPhase, oldPhase) => {
-    if (oldPhase != null) {
-      maybeAnnounceStatusChange(newPhase)
-    }
-    if (newPhase === 'none' && oldPhase !== 'none') {
-      clearTrailerStatusTracking()
-      clearTrailerGpsTracking()
-    }
-  },
-)
+/** Debounce phase TTS so Linehaul poll flicker does not spam speech. */
+/** @type {ReturnType<typeof setTimeout> | null} */
+let tripPhaseVoiceTimer = null
+watch(tripPhase, (newPhase, oldPhase) => {
+  if (tripPhaseVoiceTimer) clearTimeout(tripPhaseVoiceTimer)
+  tripPhaseVoiceTimer = setTimeout(() => {
+    tripPhaseVoiceTimer = null
+    syncTripPhaseVoiceStable(newPhase)
+  }, 850)
+
+  if (newPhase === 'none' && oldPhase !== 'none') {
+    clearTrailerStatusTracking()
+    clearTrailerGpsTracking()
+  }
+})
 
 watch(
   () => {
@@ -1337,6 +1380,10 @@ onActivated(() => {
 })
 
 onUnmounted(() => {
+  if (tripPhaseVoiceTimer) {
+    clearTimeout(tripPhaseVoiceTimer)
+    tripPhaseVoiceTimer = null
+  }
   stopTripProximityWatch()
   cancelTripVoiceAnnouncement()
   cancelAllAlerts()
@@ -1376,12 +1423,15 @@ onUnmounted(() => {
             the trip from the home screen. Trips you load already appear in History. FedEx can still
             return the same leg; use again if the trip reappears.
           </p>
+          <p v-if="tripRemovalBlockedReason" class="trip-complete-blocked" role="status">{{
+            tripRemovalBlockedReason
+          }}</p>
           <div class="trip-complete-actions">
             <button type="button" class="btn tap" @click="tripCompleteDialog = false">Cancel</button>
             <button
               type="button"
               class="btn primary tap"
-              :disabled="tripCompleteBusy"
+              :disabled="tripCompleteBusy || Boolean(tripRemovalBlockedReason)"
               @click="confirmTripCompleted"
             >
               {{ tripCompleteBusy ? 'Saving…' : 'Remove from home' }}
@@ -3329,6 +3379,12 @@ button.trailer-nbr.copyable-inline {
   font-size: 0.88rem;
   line-height: 1.45;
   color: var(--muted, #a8a8b8);
+}
+.trip-complete-blocked {
+  margin: -0.35rem 0 1rem;
+  font-size: 0.82rem;
+  line-height: 1.4;
+  color: #fbbf24;
 }
 .trip-complete-actions {
   display: flex;

@@ -160,6 +160,35 @@ export async function markTripLegSequenceCompleted(dailyTripLegSequence) {
 }
 
 /**
+ * FedEx still reports this leg — remove it from the hidden list so Home shows the assignment again.
+ * @param {string[]} dailyTripLegSequences
+ */
+export async function unhideTripLegSequencesIfHidden(dailyTripLegSequences) {
+  const raw = Array.isArray(dailyTripLegSequences) ? dailyTripLegSequences : []
+  const want = new Set(
+    raw.map((x) => String(x).trim()).filter((s) => /^\d+$/.test(s)),
+  )
+  if (!want.size) return
+  const hidden = new Set(
+    hiddenDailyTripLegSequences.value.map((s) => String(s).trim()).filter(Boolean),
+  )
+  const toRemove = [...want].filter((s) => hidden.has(s))
+  if (!toRemove.length) return
+  try {
+    const a = await putAssignment({
+      removeHiddenDailyTripLegSequences: toRemove,
+    })
+    hiddenDailyTripLegSequences.value = Array.isArray(a.hiddenDailyTripLegSequences)
+      ? a.hiddenDailyTripLegSequences.map(String)
+      : []
+    applyHiddenTripFilter()
+    await persistLinehaulTripSnapshotsNow()
+  } catch {
+    /* offline */
+  }
+}
+
+/**
  * Hydrate trip UI from server-stored JSON (another device may have saved it).
  * @param {Record<string, unknown>} assign
  */
@@ -706,6 +735,20 @@ async function refreshLinehaulApisImpl(attempt) {
       })
     }
   }
+
+  /** FedEx still reports these legs — clear stale "hidden from home" so assignments stay visible. */
+  const legsFromApi = new Set()
+  for (const b of [
+    linehaulTripsBody.value,
+    prePlanTripSnapshot.value,
+    cachedTripSnapshot.value,
+    aprvdBody,
+    dspchBody,
+  ]) {
+    const s = tripBodyDailySeq(b)
+    if (s) legsFromApi.add(s)
+  }
+  await unhideTripLegSequencesIfHidden([...legsFromApi])
 
   applyHiddenTripFilter()
   schedulePersistLinehaulTripSnapshots()
