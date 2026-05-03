@@ -2,6 +2,7 @@
 import { ref, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
+import 'leaflet-rotate'
 import { userLocationTruckIcon } from '../utils/mapMarkers.js'
 
 const DEFAULT_CENTER = [40.7128, -74.006]
@@ -88,6 +89,9 @@ function initMap() {
     zoomControl: false,
     scrollWheelZoom: true,
     attributionControl: true,
+    rotate: true,
+    bearing: 0,
+    touchRotate: true,
   })
   map.setView(DEFAULT_CENTER, DEFAULT_ZOOM)
   L.control.zoom({ position: 'topright' }).addTo(map)

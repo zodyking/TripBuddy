@@ -2,9 +2,11 @@
 import { ref, watch, computed, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
+import 'leaflet-rotate'
 import { tomtomKeyEffective } from '../stores/trafficTileKey.js'
 import { closestPointOnPolyline, pointDistanceM } from '../utils/polylineSnap.js'
 import { userLocationTruckIcon } from '../utils/mapMarkers.js'
+import { useCompassOrientation } from '../composables/useCompassOrientation.js'
 
 const DEFAULT_CENTER = Object.freeze([40.661, -73.915])
 const DEFAULT_ZOOM = 12
@@ -46,6 +48,18 @@ const props = defineProps({
 const emit = defineEmits(['waypointsChange', 'removeWaypoint', 'addWaypoint'])
 
 const containerRef = ref(/** @type {HTMLElement | null} */ (null))
+
+const {
+  isTracking: compassTracking,
+  smoothHeading,
+  showCompassToggle,
+  permissionState: compassPermission,
+  errorMessage: compassError,
+  toggleTracking: toggleCompass,
+  getMarkerRotationTransform,
+} = useCompassOrientation()
+
+const compassModeActive = ref(false)
 
 /** @type {L.Map | null} */
 let map = null
@@ -397,6 +411,42 @@ function syncUserOverlay() {
     userMarker.setLatLng(ll)
     userMarker.setIcon(userLocationTruckIcon(props.vehicleId || ''))
   }
+  applyUserMarkerRotation()
+}
+
+function applyUserMarkerRotation() {
+  if (!userMarker) return
+  const el = userMarker.getElement()
+  if (!el) return
+
+  if (compassModeActive.value && smoothHeading.value !== null) {
+    const mapBearing = map && typeof map.getBearing === 'function' ? map.getBearing() : 0
+    const transform = getMarkerRotationTransform(smoothHeading.value, mapBearing)
+    el.style.transform = el.style.transform.replace(/rotate\([^)]*\)/g, '') + ` ${transform}`
+    el.style.transformOrigin = 'center center'
+  }
+}
+
+function applyMapCompassRotation() {
+  if (!map || !compassModeActive.value || smoothHeading.value === null) return
+  if (typeof map.setBearing === 'function') {
+    map.setBearing(smoothHeading.value)
+  }
+}
+
+async function handleCompassToggle() {
+  if (compassModeActive.value) {
+    compassModeActive.value = false
+    if (map && typeof map.setBearing === 'function') {
+      map.setBearing(0)
+    }
+    return
+  }
+
+  const started = await toggleCompass()
+  if (started) {
+    compassModeActive.value = true
+  }
 }
 
 /**
@@ -480,7 +530,13 @@ function setTrafficLayerFromKey() {
 
 function initMap() {
   if (!containerRef.value) return
-  map = L.map(containerRef.value, { zoomControl: false, scrollWheelZoom: true })
+  map = L.map(containerRef.value, {
+    zoomControl: false,
+    scrollWheelZoom: true,
+    rotate: true,
+    bearing: 0,
+    touchRotate: true,
+  })
   map.setView(DEFAULT_CENTER, DEFAULT_ZOOM)
   L.control.zoom({ position: 'bottomright' }).addTo(map)
   streetLayer = L.tileLayer(
@@ -580,6 +636,19 @@ watch(tomtomKeyEffective, () => {
     applyTrafficToMap()
   }
 })
+
+watch(smoothHeading, () => {
+  if (compassModeActive.value) {
+    applyMapCompassRotation()
+    applyUserMarkerRotation()
+  }
+})
+
+watch(compassModeActive, (active) => {
+  if (!active && map && typeof map.setBearing === 'function') {
+    map.setBearing(0)
+  }
+})
 </script>
 
 <template>
@@ -597,6 +666,8 @@ watch(tomtomKeyEffective, () => {
       <p v-else-if="activeBaseLayer === 'satellite' && trafficOn" class="corridor-map-foot" role="note">Traffic hidden on satellite</p>
       <p v-if="geoPending" class="corridor-map-hint">Location…</p>
       <p v-else-if="geoDenied" class="corridor-map-hint is-warn">Location denied</p>
+      <p v-else-if="compassModeActive && compassTracking" class="corridor-map-hint is-compass">Compass mode</p>
+      <p v-if="compassError" class="corridor-map-hint is-warn">{{ compassError }}</p>
     </div>
     <div class="corridor-map-toolbar" role="toolbar" aria-label="Map display">
       <button
@@ -640,6 +711,34 @@ watch(tomtomKeyEffective, () => {
           <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41" />
         </svg>
         <span class="sr-only">My location</span>
+      </button>
+      <button
+        v-if="showCompassToggle"
+        type="button"
+        class="map-control-btn map-control-btn--compass tap"
+        :class="{
+          'is-on': compassModeActive,
+          'is-denied': compassPermission === 'denied',
+        }"
+        :aria-pressed="compassModeActive"
+        :title="
+          compassPermission === 'denied'
+            ? 'Compass blocked — enable in device settings'
+            : compassModeActive
+              ? 'Exit compass mode'
+              : 'Compass mode (rotate map to heading)'
+        "
+        @click="handleCompassToggle"
+      >
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+          <circle cx="12" cy="12" r="10" />
+          <polygon points="12,2 14,10 12,8 10,10" fill="currentColor" stroke="none" />
+          <polygon points="12,22 10,14 12,16 14,14" fill="currentColor" stroke="none" opacity="0.4" />
+          <circle cx="12" cy="12" r="2" />
+        </svg>
+        <span class="sr-only">
+          {{ compassModeActive ? 'Exit compass mode' : 'Compass mode' }}
+        </span>
       </button>
     </div>
   </div>
@@ -780,6 +879,37 @@ watch(tomtomKeyEffective, () => {
 
 .corridor-map-hint.is-warn {
   color: #fca5a5;
+}
+
+.corridor-map-hint.is-compass {
+  color: #c4b5fd;
+  border: 1px solid rgba(167, 139, 250, 0.35);
+}
+
+.map-control-btn--compass {
+  position: relative;
+}
+
+.map-control-btn--compass.is-on {
+  background: linear-gradient(145deg, #8b5cf6, #6d28d9);
+  border-color: rgba(139, 92, 246, 0.65);
+  color: #faf5ff;
+  box-shadow:
+    0 0 0 2px rgba(139, 92, 246, 0.25),
+    0 2px 6px rgba(139, 92, 246, 0.35);
+}
+
+.map-control-btn--compass.is-on svg {
+  animation: compass-pulse 2s ease-in-out infinite;
+}
+
+.map-control-btn--compass.is-denied {
+  opacity: 0.55;
+}
+
+@keyframes compass-pulse {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.08); }
 }
 
 :deep(.leaflet-container .leaflet-bottom.leaflet-right) {
