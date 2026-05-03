@@ -1,4 +1,4 @@
-import { getTomtomKeyEffective } from './stores/trafficTileKey.js'
+import { getTomtomKeyEffective, getHereKeyEffective } from './stores/trafficTileKey.js'
 
 /**
  * All API calls include cookies (session auth). Use for `/api/*` only.
@@ -159,12 +159,12 @@ export async function getBridgesPanynj() {
 }
 
 /**
- * TomTom Route Monitoring: list stored routes + live status per route.
- * @see https://developer.tomtom.com/route-monitoring/documentation/routes-service/routes
+ * HERE Traffic API: list stored routes + live traffic flow per route.
+ * @see https://developer.here.com/documentation/traffic-api/dev_guide/topics/send-request-readme.html
  */
 export async function getTrafficMonitoredRoutes() {
-  const k = getTomtomKeyEffective().trim()
-  const qs = k ? `?${new URLSearchParams({ tomtomKey: k }).toString()}` : ''
+  const k = getHereKeyEffective().trim()
+  const qs = k ? `?${new URLSearchParams({ hereKey: k }).toString()}` : ''
   const r = await apiFetch(`/api/traffic/monitored-routes${qs}`)
   return handleJson(r)
 }
@@ -174,11 +174,11 @@ export async function getTrafficMonitoredRoutes() {
  * @returns {Promise<Record<string, unknown>>}
  */
 export async function postTrafficMonitoredRoutesSync() {
-  const k = getTomtomKeyEffective().trim()
+  const k = getHereKeyEffective().trim()
   const r = await apiFetch('/api/traffic/monitored-routes/sync', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(k ? { tomtomKey: k } : {}),
+    body: JSON.stringify(k ? { hereKey: k } : {}),
   })
   return handleJson(r)
 }
@@ -188,46 +188,45 @@ export async function postTrafficMonitoredRoutesSync() {
  * @param {{ name?: string, pathPoints: Array<{ lat: number, lng: number }> }} body
  */
 export async function postTrafficMonitoredRoutePreview(body) {
-  const k = getTomtomKeyEffective().trim()
+  const k = getHereKeyEffective().trim()
   const r = await apiFetch('/api/traffic/monitored-routes/preview', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       ...(body && typeof body === 'object' ? body : {}),
-      ...(k ? { tomtomKey: k } : {}),
+      ...(k ? { hereKey: k } : {}),
     }),
   })
   return handleJson(r)
 }
 
 /**
- * Create a monitored route (TomTom POST /routemonitoring/3/routes).
+ * Create a monitored route (HERE stateless - stored locally).
  * @param {{ name: string, pathPoints: Array<{ lat: number, lng: number }> }} body
  */
 export async function postTrafficMonitoredRouteCreate(body) {
-  const k = getTomtomKeyEffective().trim()
+  const k = getHereKeyEffective().trim()
   const r = await apiFetch('/api/traffic/monitored-routes', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       ...(body && typeof body === 'object' ? body : {}),
-      ...(k ? { tomtomKey: k } : {}),
+      ...(k ? { hereKey: k } : {}),
     }),
   })
   return handleJson(r)
 }
 
 /**
- * Remove route from app storage and TomTom (POST …/remove).
+ * Remove route from app storage (HERE is stateless, no remote cleanup needed).
  * @param {string} localId
  */
 export async function postTrafficMonitoredRouteRemove(localId) {
-  const k = getTomtomKeyEffective().trim()
   const id = encodeURIComponent(localId)
   const r = await apiFetch(`/api/traffic/monitored-routes/${id}/remove`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(k ? { tomtomKey: k } : {}),
+    body: JSON.stringify({}),
   })
   return handleJson(r)
 }
@@ -331,14 +330,16 @@ export async function getPublicGeoFenceCheck() {
 }
 
 /**
- * @param {{ includeLinehaulBearer?: boolean, includeTomtomApiKey?: boolean }} [opts]
+ * @param {{ includeLinehaulBearer?: boolean, includeTomtomApiKey?: boolean, includeHereApiKey?: boolean }} [opts]
  * When includeLinehaulBearer, response includes decrypted Linehaul JWT for Settings only.
  * When includeTomtomApiKey, response includes decrypted TomTom key for Settings only.
+ * When includeHereApiKey, response includes decrypted HERE key for Settings only.
  */
 export async function getCredentials(opts = {}) {
   const q = new URLSearchParams()
   if (opts.includeLinehaulBearer) q.set('includeLinehaulBearer', '1')
   if (opts.includeTomtomApiKey) q.set('includeTomtomApiKey', '1')
+  if (opts.includeHereApiKey) q.set('includeHereApiKey', '1')
   const qs = q.toString()
   const r = await apiFetch(`/api/settings/credentials${qs ? `?${qs}` : ''}`)
   return handleJson(r)
@@ -350,6 +351,19 @@ export async function getCredentials(opts = {}) {
  */
 export async function putTomtomApiKey(body) {
   const r = await apiFetch('/api/settings/tomtom-api-key', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body ?? {}),
+  })
+  return handleJson(r)
+}
+
+/**
+ * Persist HERE API key for the signed-in user (encrypted server-side).
+ * @param {{ hereApiKey?: string }} body Empty string clears the stored key.
+ */
+export async function putHereApiKey(body) {
+  const r = await apiFetch('/api/settings/here-api-key', {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body ?? {}),

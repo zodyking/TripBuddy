@@ -13,8 +13,11 @@ import {
   ensureUserProfileTable,
   getTomtomApiKeyForAccount,
   setTomtomApiKeyForAccount,
+  getHereApiKeyForAccount,
+  setHereApiKeyForAccount,
 } from './user-profile-pg.mjs'
 import { sanitizeTomtomApiKey } from './tomtom-key.mjs'
+import { sanitizeHereApiKey } from './here-traffic-api.mjs'
 import {
   isAuthEnabled,
   createSession,
@@ -597,15 +600,21 @@ app.get('/api/settings/credentials', async (req) => {
     fedexLinehaulBearer = await getDecryptedLinehaulBearer()
   }
   const includeTomtom = req.query?.includeTomtomApiKey === '1'
+  const includeHere = req.query?.includeHereApiKey === '1'
   const ak = req.credentialAccountKey
   let tomtomApiKey = undefined
+  let hereApiKey = undefined
   if (includeTomtom && typeof ak === 'string' && ak.trim()) {
     tomtomApiKey = (await getTomtomApiKeyForAccount(ak)) || ''
+  }
+  if (includeHere && typeof ak === 'string' && ak.trim()) {
+    hereApiKey = (await getHereApiKeyForAccount(ak)) || ''
   }
   return {
     ...meta,
     ...(includeBearer ? { fedexLinehaulBearer } : {}),
     ...(includeTomtom ? { tomtomApiKey } : {}),
+    ...(includeHere ? { hereApiKey } : {}),
     secretHint: process.env.FEDEX_TOOL_SECRET ? null : TOOL_SECRET_HINT,
   }
 })
@@ -639,6 +648,31 @@ app.put('/api/settings/tomtom-api-key', async (req, reply) => {
     }
     await setTomtomApiKeyForAccount(ak, sanitized)
     return { ok: true, hasTomtomApiKey: Boolean(sanitized) }
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e)
+    return reply.code(400).send({ error: msg })
+  }
+})
+
+app.put('/api/settings/here-api-key', async (req, reply) => {
+  try {
+    const ak = req.credentialAccountKey
+    if (typeof ak !== 'string' || !ak.trim()) {
+      return reply.code(400).send({ error: 'No account in session.' })
+    }
+    const body = req.body ?? {}
+    const raw =
+      typeof body.hereApiKey === 'string'
+        ? body.hereApiKey
+        : typeof body.key === 'string'
+          ? body.key
+          : ''
+    const sanitized = sanitizeHereApiKey(raw)
+    if (raw.trim() && !sanitized) {
+      return reply.code(400).send({ error: 'Invalid HERE API key format.' })
+    }
+    await setHereApiKeyForAccount(ak, sanitized)
+    return { ok: true, hasHereApiKey: Boolean(sanitized) }
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e)
     return reply.code(400).send({ error: msg })

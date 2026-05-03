@@ -8,9 +8,10 @@ import {
   postTrafficMonitoredRoutePreview,
   postTrafficMonitoredRouteRemove,
   postTrafficMonitoredRoutesSync,
+  getAuthStatus,
 } from '../api.js'
 import { useMapVehicleId } from '../composables/useMapVehicleId.js'
-import { getTomtomKeyEffective } from '../stores/trafficTileKey.js'
+import { getHereKeyEffective, hydrateHereApiKeyFromServer } from '../stores/trafficTileKey.js'
 import { bestWaypointInsertionIndex } from '../utils/polylineSnap.js'
 
 defineOptions({ name: 'TrafficCorridorsContent' })
@@ -22,8 +23,8 @@ const POLL_MS = 60 * 1000
  *   localId: string,
  *   name: string,
  *   pathPoints: LatLng[],
+ *   polyline?: string,
  *   createdAt: number,
- *   tomtomRouteId: number,
  *   status: Record<string, unknown> | null,
  *   statusOk: boolean,
  *   statusError: string | null,
@@ -50,9 +51,23 @@ const createBusy = ref(false)
 /** @type {ReturnType<typeof setTimeout> | null} */
 let previewTimer = null
 
-const needsTomtomKey = computed(() =>
-  /tomtom api key required/i.test(String(configError.value || '')),
+const needsHereKey = computed(() =>
+  /here api key required/i.test(String(configError.value || '')),
 )
+
+/**
+ * HERE key in client mirror, or authenticated session (server reads key from Settings / PostgreSQL).
+ */
+async function hereKeyFromSettingsOrClient() {
+  await hydrateHereApiKeyFromServer()
+  if (getHereKeyEffective().trim()) return true
+  try {
+    const st = await getAuthStatus()
+    return st.authEnabled === true && st.authenticated === true
+  } catch {
+    return false
+  }
+}
 
 const routesList = computed(() => {
   const arr = syncPayload.value?.routes
@@ -125,6 +140,7 @@ async function loadRoutes() {
   error.value = ''
   configError.value = ''
   try {
+    await hydrateHereApiKeyFromServer()
     const r = await getTrafficMonitoredRoutes()
     if (r && typeof r === 'object' && r.ok === false) {
       configError.value =
@@ -143,7 +159,7 @@ async function loadRoutes() {
 }
 
 async function pollSync() {
-  if (getTomtomKeyEffective().trim().length === 0) return
+  if (!(await hereKeyFromSettingsOrClient())) return
   if (!routesList.value.length) return
   try {
     const r = await postTrafficMonitoredRoutesSync()
@@ -205,14 +221,42 @@ function fmtMeters(m) {
 }
 
 /**
+ * Get jam factor color class.
+ * @param {number} jamFactor 0-10 scale
+ */
+function jamFactorClass(jamFactor) {
+  if (jamFactor < 3) return 'jam-low'
+  if (jamFactor < 6) return 'jam-medium'
+  if (jamFactor < 8) return 'jam-high'
+  return 'jam-severe'
+}
+
+/**
  * @param {unknown} row
  */
 function routeStatusLabel(row) {
   if (!row || typeof row !== 'object') return '—'
   const st = /** @type {Record<string, unknown>} */ (row).status
   if (!st || typeof st !== 'object') return '—'
-  const s = st.routeStatus
-  return typeof s === 'string' ? s : '—'
+  const jam = st.avgJamFactor
+  if (typeof jam === 'number' && Number.isFinite(jam)) {
+    if (jam < 3) return 'Free flow'
+    if (jam < 6) return 'Moderate'
+    if (jam < 8) return 'Slow'
+    return 'Congested'
+  }
+  return '—'
+}
+
+/**
+ * Format speed in mph.
+ * @param {number} mps meters per second
+ */
+function fmtSpeedMph(mps) {
+  const n = Number(mps)
+  if (!Number.isFinite(n) || n < 0) return '—'
+  const mph = n * 2.237
+  return `${Math.round(mph)} mph`
 }
 
 /**
@@ -222,18 +266,21 @@ function routeSummaryCards(row) {
   if (!row || typeof row !== 'object') return []
   const st = /** @type {Record<string, unknown>} */ (row).status
   if (!st || typeof st !== 'object') return []
-  const tt = st.travelTime
-  const delay = st.delayTime
-  const typical = st.typicalTravelTime
-  const len = st.routeLength
-  const complete = st.completeness
-  const pass = st.passable
+  
+  const tt = st.travelTimeSeconds
+  const delay = st.delaySeconds
+  const freeFlow = st.freeFlowTimeSeconds
+  const len = st.totalLengthMeters
+  const jam = st.avgJamFactor
+  const speed = st.avgSpeedMps
+  const freeFlowSpeed = st.avgFreeFlowMps
+  
   const cards = [
     {
       key: 'tt',
       lab: 'Travel time',
       val: fmtSec(tt),
-      sub: 'Current (Route Monitoring)',
+      sub: 'Current (HERE Traffic)',
     },
     {
       key: 'delay',
@@ -242,10 +289,22 @@ function routeSummaryCards(row) {
       sub: 'vs free-flow traffic',
     },
     {
-      key: 'typ',
-      lab: 'Typical time',
-      val: fmtSec(typical),
-      sub: 'Speed profiles / typical',
+      key: 'jam',
+      lab: 'Jam factor',
+      val: typeof jam === 'number' ? jam.toFixed(1) : '—',
+      sub: '0 = free flow, 10 = standstill',
+    },
+    {
+      key: 'speed',
+      lab: 'Current speed',
+      val: fmtSpeedMph(speed),
+      sub: 'Average along route',
+    },
+    {
+      key: 'freeFlow',
+      lab: 'Free-flow speed',
+      val: fmtSpeedMph(freeFlowSpeed),
+      sub: 'Expected without traffic',
     },
     {
       key: 'len',
@@ -254,22 +313,6 @@ function routeSummaryCards(row) {
       sub: 'Along monitored path',
     },
   ]
-  if (Number.isFinite(Number(complete))) {
-    cards.push({
-      key: 'cov',
-      lab: 'Live coverage',
-      val: `${Math.round(Number(complete))}%`,
-      sub: 'Traffic data completeness',
-    })
-  }
-  if (typeof pass === 'boolean') {
-    cards.push({
-      key: 'pass',
-      lab: 'Passable',
-      val: pass ? 'Yes' : 'No',
-      sub: 'TomTom route status',
-    })
-  }
   return cards
 }
 
@@ -277,7 +320,7 @@ function routeSummaryCards(row) {
  * @param {unknown} data
  * @returns {LatLng[]}
  */
-function polylineFromTomTomPreview(data) {
+function polylineFromPreview(data) {
   if (!data || typeof data !== 'object') return []
   const o = /** @type {Record<string, unknown>} */ (data)
   const candidates = [o.routedPathPoints, o.pathPoints, o.routePathPoints]
@@ -311,16 +354,16 @@ async function runPreview(pts) {
     previewSource.value = ''
     return
   }
-  if (getTomtomKeyEffective().trim().length === 0) return
+  if (!(await hereKeyFromSettingsOrClient())) return
   previewBusy.value = true
   error.value = ''
   previewSource.value = ''
   try {
     const r = await postTrafficMonitoredRoutePreview({ pathPoints: pts })
     if (r && typeof r === 'object' && r.ok === true && r.preview) {
-      previewPolyline.value = polylineFromTomTomPreview(r.preview)
+      previewPolyline.value = polylineFromPreview(r.preview)
       previewSource.value =
-        typeof r.previewSource === 'string' ? r.previewSource : 'route-monitoring'
+        typeof r.previewSource === 'string' ? r.previewSource : 'here-routing'
     } else {
       previewPolyline.value = []
       previewSource.value = ''
@@ -453,7 +496,7 @@ async function removeSelected() {
   if (!sel || typeof sel !== 'object') return
   const id = String(/** @type {any} */ (sel).localId || '')
   if (!id) return
-  if (typeof window !== 'undefined' && !window.confirm('Remove this monitored route from TomTom and this account?')) {
+  if (typeof window !== 'undefined' && !window.confirm('Remove this monitored route?')) {
     return
   }
   try {
@@ -496,10 +539,10 @@ async function removeSelected() {
         <div class="corridor-bar">
           <h1 class="corridor-h1">Route monitoring</h1>
           <p class="corridor-sub">
-            TomTom Route Monitoring — create routes from waypoints, then poll live travel time and delay
+            HERE Traffic API — create routes from waypoints, then poll live speed, jam factor, and travel time
             (<a
               class="corridor-doc-link"
-              href="https://developer.tomtom.com/route-monitoring/documentation/routes-service/routes"
+              href="https://developer.here.com/documentation/traffic-api/dev_guide/topics/send-request-readme.html"
               target="_blank"
               rel="noopener noreferrer"
             >API docs</a>).
@@ -525,11 +568,11 @@ async function removeSelected() {
         </div>
 
         <p v-if="configError" class="corridor-warn" role="status">{{ configError }}</p>
-        <p v-if="needsTomtomKey" class="corridor-setup-hint">
-          <RouterLink class="corridor-setup-link tap" :to="{ name: 'settings', hash: '#tomtom' }">
-            Open Settings → TomTom key
+        <p v-if="needsHereKey" class="corridor-setup-hint">
+          <RouterLink class="corridor-setup-link tap" :to="{ name: 'settings', hash: '#here' }">
+            Open Settings → HERE key
           </RouterLink>
-          <span class="corridor-setup-sub">Route Monitoring and map tiles use the same key.</span>
+          <span class="corridor-setup-sub">HERE Traffic API for route monitoring (separate from TomTom map tiles).</span>
         </p>
         <p v-else-if="error" class="corridor-err" role="alert">{{ error }}</p>
 
@@ -546,9 +589,8 @@ async function removeSelected() {
               autocomplete="off"
             />
             <p class="corridor-hint">
-              After two points, the app shows a <strong>road-snapped</strong> path (TomTom Route Monitoring preview when available, otherwise Routing calculateRoute for the map only).
-              <span v-if="previewSource === 'routing-calculateRoute'" class="corridor-inline-status">Preview: Routing API</span>
-              <span v-else-if="previewPolyline.length" class="corridor-inline-status">Preview: Route Monitoring</span>
+              After two points, the app shows a <strong>road-snapped</strong> path using HERE Routing API.
+              <span v-if="previewPolyline.length" class="corridor-inline-status">Preview: HERE Routing</span>
               <span v-if="previewBusy" class="corridor-inline-status">Updating…</span>
             </p>
             <div class="corridor-create-actions">

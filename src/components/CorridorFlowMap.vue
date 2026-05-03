@@ -4,6 +4,7 @@ import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 import { tomtomKeyEffective } from '../stores/trafficTileKey.js'
 import { closestPointOnPolyline, pointDistanceM } from '../utils/polylineSnap.js'
+import { userLocationTruckIcon } from '../utils/mapMarkers.js'
 
 const DEFAULT_CENTER = Object.freeze([40.661, -73.915])
 const DEFAULT_ZOOM = 12

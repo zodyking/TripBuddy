@@ -5,6 +5,7 @@ import {
   tripPhase,
   linehaulTripsBody,
   tripBodyDailySeq,
+  stableTripState,
 } from '../stores/linehaulSnapshotStore.js'
 import {
   monthGridForCalendarMonth,
@@ -86,6 +87,11 @@ const outcomeMenuOpts = [
 
 /** Leg # FedEx reports as active on Home (same as History row). */
 const activeTripLegSeqForHistory = computed(() => {
+  // Use stableTripState first (more reliable), fallback to raw body
+  const stableSeq = stableTripState.value.dailyTripLegSequence
+  if (stableSeq && /^\d+$/.test(String(stableSeq).trim())) {
+    return String(stableSeq).trim()
+  }
   const s = tripBodyDailySeq(linehaulTripsBody.value)
   return s && /^\d+$/.test(String(s).trim()) ? String(s).trim() : ''
 })

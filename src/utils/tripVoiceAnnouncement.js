@@ -436,15 +436,16 @@ const TRAILER_LOAD_STATUS_SPEECH = {
  * @returns {string}
  */
 /**
- * Speak trailer IDs digit-by-digit so "821055" is not read as eight hundred thousand.
+ * Speak trailer IDs digit-by-digit with pauses so "821055" is read slowly as "8, 2, 1, 0, 5, 5".
+ * Commas create natural pauses in TTS engines.
  * @param {string | number} raw
  * @returns {string}
  */
 export function trailerNumberForSpeech(raw) {
   const s = String(raw ?? '').trim()
   if (!s) return ''
-  if (/^\d+$/.test(s)) return s.split('').join(' ')
-  return [...s].join(' ')
+  if (/^\d+$/.test(s)) return s.split('').join(', ')
+  return [...s].join(', ')
 }
 
 function trailerLoadStatusSpeechLabel(code) {

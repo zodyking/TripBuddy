@@ -5,10 +5,11 @@ import { userScopeKey } from './scope-kv.mjs'
  * @typedef {{ lat: number, lng: number }} LatLng
  * @typedef {{
  *   localId: string,
- *   tomtomRouteId: number,
  *   name: string,
  *   pathPoints: LatLng[],
+ *   polyline?: string,
  *   createdAt: number,
+ *   tomtomRouteId?: number,
  * }} StoredMonitoredRoute
  */
 
@@ -40,8 +41,8 @@ export async function readMonitoredRoutesForUser() {
     if (!row || typeof row !== 'object') continue
     const r = /** @type {Record<string, unknown>} */ (row)
     const localId = typeof r.localId === 'string' ? r.localId.trim() : ''
-    const tomtomRouteId = Number(r.tomtomRouteId)
     const name = typeof r.name === 'string' ? r.name.trim() : ''
+    const polyline = typeof r.polyline === 'string' ? r.polyline.trim() : ''
     const pp = r.pathPoints
     const pathPoints = Array.isArray(pp)
       ? pp.filter((p) => isLatLng(p)).map((p) => {
@@ -53,21 +54,19 @@ export async function readMonitoredRoutesForUser() {
         })
       : []
     const createdAt = Number(r.createdAt)
-    if (
-      !localId ||
-      !Number.isFinite(tomtomRouteId) ||
-      tomtomRouteId <= 0 ||
-      !name ||
-      pathPoints.length < 2
-    ) {
+    // Legacy tomtomRouteId (optional for migration)
+    const tomtomRouteId = typeof r.tomtomRouteId === 'number' ? r.tomtomRouteId : undefined
+
+    if (!localId || !name || pathPoints.length < 2) {
       continue
     }
     out.push({
       localId,
-      tomtomRouteId,
       name,
       pathPoints,
+      polyline: polyline || undefined,
       createdAt: Number.isFinite(createdAt) ? createdAt : Date.now(),
+      tomtomRouteId,
     })
   }
   return out
@@ -103,4 +102,20 @@ export async function removeMonitoredRouteByLocalId(localId) {
   const [removed] = prev.splice(idx, 1)
   await writeMonitoredRoutesForUser(prev)
   return removed || null
+}
+
+/**
+ * Update route's polyline (for routes created before polyline support).
+ * @param {string} localId
+ * @param {string} polyline
+ */
+export async function updateMonitoredRoutePolyline(localId, polyline) {
+  const id = String(localId || '').trim()
+  if (!id) return
+  const routes = await readMonitoredRoutesForUser()
+  const route = routes.find((r) => r.localId === id)
+  if (route) {
+    route.polyline = polyline
+    await writeMonitoredRoutesForUser(routes)
+  }
 }

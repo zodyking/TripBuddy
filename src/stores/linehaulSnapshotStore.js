@@ -22,6 +22,531 @@ import {
   extractTripOrgIds,
 } from '../utils/tripDetailsDisplay.js'
 
+/**
+ * ============================================================================
+ * STABLE TRIP STATE - Gated state object for Trip/Dispatch data
+ * ============================================================================
+ * API responses flow through logic gates before updating this object.
+ * This guarantees:
+ * - Trailers/dolly never cleared by sparse DSPCH responses
+ * - Watchers only fire when data actually changes
+ * - History always receives complete data
+ */
+export const stableTripState = ref({
+  dailyTripLegSequence: null,
+  tripStatus: '',
+  origin: { number: '', name: '', abbrv: '', display: '—' },
+  destination: { number: '', name: '', abbrv: '', display: '—' },
+  trailers: [],
+  dolly: { number1: '', number2: '', seq1: '', seq2: '' },
+  tractorNumber: '',
+  instructions: '',
+  _fingerprint: '',
+  _lastUpdatedAt: null,
+  _updateReason: '',
+})
+
+/** Raw API body for debugging - UI should read from stableTripState instead */
+export const _rawApiBody = ref(null)
+
+/** Last fingerprint used in processApiResponse - prevents re-processing identical data */
+let _lastProcessedFingerprint = ''
+
+/**
+ * Compute stable fingerprint for change detection.
+ * Captures meaningful fields, ignores timestamps and whitespace.
+ * @param {unknown} body
+ * @returns {string}
+ */
+function computeTripFingerprint(body) {
+  if (!body || typeof body !== 'object') return 'empty'
+  const b = /** @type {Record<string, unknown>} */ (body)
+
+  const seq = String(b.dailyTripLegSequence ?? '')
+  const status = String(b.tripStatus ?? '').toUpperCase()
+  const dest = String(b.tripDestNumber ?? '')
+  const origin = String(b.currentLocationNumber ?? b.originLocation ?? '')
+
+  const trailers = Array.isArray(b.trailers) ? b.trailers : []
+  const trailerFp = trailers
+    .map((t) => {
+      const tr = t && typeof t === 'object' ? /** @type {Record<string, unknown>} */ (t) : {}
+      return `${tr.trlrNbr ?? ''}:${tr.sealNumber ?? ''}:${tr.pkgWeight ?? ''}`
+    })
+    .sort()
+    .join('|')
+
+  const dollyFp = `${b.dollyNumber1 ?? ''}:${b.dollyNumber2 ?? ''}`
+
+  const instrFp = String(b.dispatchInstructions ?? b.specialInstructions ?? '')
+    .trim()
+    .toLowerCase()
+    .slice(0, 100)
+
+  return `${seq}||${status}||${origin}->${dest}||${trailerFp}||${dollyFp}||${instrFp}`
+}
+
+/**
+ * Compute fingerprint from stableTripState format
+ * @param {typeof stableTripState.value} state
+ * @returns {string}
+ */
+function computeStateFingerprint(state) {
+  const trailerFp = (state.trailers || [])
+    .map((t) => {
+      const tr = t && typeof t === 'object' ? /** @type {Record<string, unknown>} */ (t) : {}
+      return `${tr.trlrNbr ?? ''}:${tr.sealNumber ?? ''}:${tr.pkgWeight ?? ''}`
+    })
+    .sort()
+    .join('|')
+
+  const dollyFp = `${state.dolly?.number1 ?? ''}:${state.dolly?.number2 ?? ''}`
+
+  return `${state.dailyTripLegSequence ?? ''}||${state.tripStatus}||${state.origin?.number ?? ''}->${state.destination?.number ?? ''}||${trailerFp}||${dollyFp}||${state.instructions?.trim().toLowerCase().slice(0, 100) ?? ''}`
+}
+
+/**
+ * Score trailer array richness (for comparing data quality)
+ * @param {unknown[]} trailers
+ * @returns {number}
+ */
+function scoreTrailerRichness(trailers) {
+  let score = 0
+  for (const t of trailers) {
+    if (!t || typeof t !== 'object') continue
+    const tr = /** @type {Record<string, unknown>} */ (t)
+    if (tr.sealNumber) score += 3
+    if (tr.pkgWeight != null && tr.pkgWeight !== '') score += 2
+    if (tr.latitude != null && tr.longitude != null) score += 2
+    if (tr.loadDestNumber) score += 1
+    if (tr.dueDate) score += 1
+    if (tr.trlrNbr) score += 1
+  }
+  return score
+}
+
+/**
+ * Merge trailers by trlrNbr, keeping richer data from each source
+ * @param {unknown[]} current
+ * @param {unknown[]} incoming
+ * @returns {unknown[]}
+ */
+function mergeTrailersByNbr(current, incoming) {
+  const map = new Map()
+
+  for (const t of current) {
+    if (!t || typeof t !== 'object' || Array.isArray(t)) continue
+    const tr = /** @type {Record<string, unknown>} */ (t)
+    const key = String(tr.trlrNbr ?? '')
+    if (key) map.set(key, { ...tr })
+  }
+
+  for (const t of incoming) {
+    if (!t || typeof t !== 'object' || Array.isArray(t)) continue
+    const tr = /** @type {Record<string, unknown>} */ (t)
+    const key = String(tr.trlrNbr ?? '')
+    if (!key) continue
+
+    const existing = map.get(key)
+    if (existing) {
+      for (const [k, v] of Object.entries(tr)) {
+        if (v !== null && v !== undefined && v !== '') {
+          existing[k] = v
+        }
+      }
+    } else {
+      map.set(key, { ...tr })
+    }
+  }
+
+  return Array.from(map.values())
+}
+
+/**
+ * TRAILER GATE - Core preservation logic
+ * @param {unknown} incoming
+ * @param {unknown[]} current
+ * @returns {{ update: boolean, value: unknown[], reason: string }}
+ */
+function gateTrailers(incoming, current) {
+  const inc = Array.isArray(incoming) ? incoming : []
+  const cur = Array.isArray(current) ? current : []
+
+  if (inc.length === 0) {
+    return { update: false, value: cur, reason: 'preserve_existing' }
+  }
+
+  if (cur.length === 0) {
+    return { update: true, value: inc, reason: 'first_data' }
+  }
+
+  const incNbrs = new Set(inc.map((t) => String(/** @type {Record<string, unknown>} */ (t)?.trlrNbr ?? '')).filter(Boolean))
+  const curNbrs = new Set(cur.map((t) => String(/** @type {Record<string, unknown>} */ (t)?.trlrNbr ?? '')).filter(Boolean))
+  const sameTrailers = incNbrs.size === curNbrs.size && [...incNbrs].every((n) => curNbrs.has(n))
+
+  if (sameTrailers) {
+    const merged = mergeTrailersByNbr(cur, inc)
+    // Always update with merged data - allows field changes (like detlCodeLoadStatus)
+    // to flow through even when richness score doesn't improve
+    return { update: true, value: merged, reason: 'same_trailers_merged' }
+  }
+
+  return { update: true, value: inc, reason: 'new_trailers' }
+}
+
+/**
+ * DOLLY GATE
+ * @param {unknown} incoming
+ * @param {{ number1: string, number2: string, seq1: string, seq2: string }} current
+ * @returns {{ update: boolean, value?: { number1: string, number2: string, seq1: string, seq2: string }, reason: string }}
+ */
+function gateDolly(incoming, current) {
+  if (!incoming || typeof incoming !== 'object') {
+    return { update: false, reason: 'no_incoming' }
+  }
+  const inc = /** @type {Record<string, unknown>} */ (incoming)
+  const inc1 = String(inc.dollyNumber1 ?? '').trim()
+  const inc2 = String(inc.dollyNumber2 ?? '').trim()
+  const incHas = Boolean(inc1 || inc2)
+
+  const curHas = Boolean(current.number1 || current.number2)
+
+  if (!incHas && curHas) {
+    return { update: false, reason: 'preserve_existing' }
+  }
+
+  if (incHas) {
+    const newDolly = {
+      number1: inc1,
+      number2: inc2,
+      seq1: String(inc.dollyEquipmentSequence1 ?? '').trim(),
+      seq2: String(inc.dollyEquipmentSequence2 ?? '').trim(),
+    }
+    if (newDolly.number1 !== current.number1 || newDolly.number2 !== current.number2) {
+      return { update: true, value: newDolly, reason: 'new_dolly' }
+    }
+  }
+
+  return { update: false, reason: 'no_change' }
+}
+
+/**
+ * ROUTE GATE - Origin/Destination
+ * @param {unknown} incoming
+ * @param {typeof stableTripState.value} prev
+ * @returns {{ updateOrigin: boolean, updateDestination: boolean, origin?: typeof prev.origin, destination?: typeof prev.destination }}
+ */
+function gateRoute(incoming, prev) {
+  const result = { updateOrigin: false, updateDestination: false }
+  if (!incoming || typeof incoming !== 'object') return result
+
+  const inc = /** @type {Record<string, unknown>} */ (incoming)
+  const incOriginNum = String(inc.currentLocationNumber ?? inc.originLocation ?? '').trim()
+  const incOriginName = String(inc.currentLocationName ?? inc.currentLocationAbbrv ?? '').trim()
+  const incDestNum = String(inc.tripDestNumber ?? '').trim()
+  const incDestName = String(inc.tripDest ?? inc.tripDestAbbrv ?? '').trim()
+
+  if (incOriginNum && incOriginNum !== prev.origin.number) {
+    result.updateOrigin = true
+    result.origin = {
+      number: incOriginNum,
+      name: incOriginName,
+      abbrv: String(inc.currentLocationAbbrv ?? '').trim(),
+      display: incOriginName ? `${incOriginNum} · ${incOriginName}` : incOriginNum,
+    }
+  } else if (!prev.origin.name && incOriginName && prev.origin.number) {
+    result.updateOrigin = true
+    result.origin = { ...prev.origin, name: incOriginName, display: `${prev.origin.number} · ${incOriginName}` }
+  }
+
+  if (incDestNum && incDestNum !== prev.destination.number) {
+    result.updateDestination = true
+    result.destination = {
+      number: incDestNum,
+      name: incDestName,
+      abbrv: String(inc.tripDestAbbrv ?? '').trim(),
+      display: incDestName ? `${incDestNum} · ${incDestName}` : incDestNum,
+    }
+  } else if (!prev.destination.name && incDestName && prev.destination.number) {
+    result.updateDestination = true
+    result.destination = { ...prev.destination, name: incDestName, display: `${prev.destination.number} · ${incDestName}` }
+  }
+
+  return result
+}
+
+/**
+ * INSTRUCTIONS GATE - Merge assignment + API, detect actual changes
+ * @param {unknown} incoming
+ * @param {string} assignmentInstructions
+ * @param {string} current
+ * @returns {{ update: boolean, value?: string }}
+ */
+function gateInstructions(incoming, assignmentInstructions, current) {
+  const fromApi = extractTripDispatchInstructions(incoming)
+  const fromAssign = String(assignmentInstructions ?? '').trim()
+
+  let merged = ''
+  if (fromAssign && fromApi) {
+    merged = `${fromAssign}\n\n${fromApi}`
+  } else {
+    merged = fromAssign || fromApi
+  }
+
+  const normalizedMerged = merged.replace(/\s+/g, ' ').trim()
+  const normalizedCurrent = current.replace(/\s+/g, ' ').trim()
+
+  if (normalizedMerged !== normalizedCurrent) {
+    return { update: true, value: merged }
+  }
+
+  return { update: false }
+}
+
+/**
+ * @param {unknown} body
+ * @returns {string | null}
+ */
+function _tripBodyDailySeq(body) {
+  if (body == null || typeof body !== 'object' || Array.isArray(body)) return null
+  const s = /** @type {Record<string, unknown>} */ (body).dailyTripLegSequence
+  if (s == null) return null
+  const str = String(s).trim()
+  return /^\d+$/.test(str) ? str : null
+}
+
+/**
+ * MASTER GATE: Process API response and update stableTripState
+ * @param {Record<string, unknown> | null} mergedApiBody
+ * @param {string} assignmentInstructions
+ * @param {{ prePlanSnapshot: unknown, hiddenSequences: string[] }} context
+ * @returns {{ changed: boolean, reason: string }}
+ */
+function processApiResponse(mergedApiBody, assignmentInstructions, context) {
+  _rawApiBody.value = mergedApiBody
+
+  if (!mergedApiBody || typeof mergedApiBody !== 'object') {
+    return { changed: false, reason: 'no_api_body' }
+  }
+
+  const incomingFp = computeTripFingerprint(mergedApiBody)
+  if (incomingFp === _lastProcessedFingerprint && incomingFp !== 'empty') {
+    return { changed: false, reason: 'identical_fingerprint' }
+  }
+
+  const prev = stableTripState.value
+  const next = { ...prev }
+  const updates = []
+
+  const incSeq = _tripBodyDailySeq(mergedApiBody)
+  const prePlanSeq = _tripBodyDailySeq(context.prePlanSnapshot)
+
+  if (prePlanSeq && incSeq === prePlanSeq) {
+    return { changed: false, reason: 'incoming_is_preplan' }
+  }
+
+  if (incSeq && incSeq !== prev.dailyTripLegSequence) {
+    const isNewTrip = prev.dailyTripLegSequence && incSeq !== prev.dailyTripLegSequence
+    next.dailyTripLegSequence = incSeq
+    updates.push('sequence')
+
+    if (isNewTrip) {
+      next.trailers = []
+      next.dolly = { number1: '', number2: '', seq1: '', seq2: '' }
+      next.origin = { number: '', name: '', abbrv: '', display: '—' }
+      next.destination = { number: '', name: '', abbrv: '', display: '—' }
+      updates.push('reset_for_new_trip')
+    }
+  }
+
+  const incStatus = String(mergedApiBody.tripStatus ?? '').trim().toUpperCase()
+  if (incStatus && incStatus !== prev.tripStatus) {
+    next.tripStatus = incStatus
+    updates.push('status')
+  }
+
+  const trailerGate = gateTrailers(mergedApiBody.trailers, prev.trailers)
+  if (trailerGate.update) {
+    next.trailers = trailerGate.value
+    updates.push(`trailers:${trailerGate.reason}`)
+  }
+
+  const dollyGate = gateDolly(mergedApiBody, prev.dolly)
+  if (dollyGate.update && dollyGate.value) {
+    next.dolly = dollyGate.value
+    updates.push(`dolly:${dollyGate.reason}`)
+  }
+
+  const routeGate = gateRoute(mergedApiBody, prev)
+  if (routeGate.updateOrigin && routeGate.origin) {
+    next.origin = routeGate.origin
+    updates.push('origin')
+  }
+  if (routeGate.updateDestination && routeGate.destination) {
+    next.destination = routeGate.destination
+    updates.push('destination')
+  }
+
+  const instrGate = gateInstructions(mergedApiBody, assignmentInstructions, prev.instructions)
+  if (instrGate.update && instrGate.value !== undefined) {
+    next.instructions = instrGate.value
+    updates.push('instructions')
+  }
+
+  const incTractor = String(mergedApiBody.tractorNumber ?? '').trim()
+  if (incTractor && incTractor !== prev.tractorNumber) {
+    next.tractorNumber = incTractor
+    updates.push('tractor')
+  }
+
+  if (updates.length > 0) {
+    next._fingerprint = computeStateFingerprint(next)
+    next._lastUpdatedAt = Date.now()
+    next._updateReason = updates.join(', ')
+    stableTripState.value = next
+    _lastProcessedFingerprint = incomingFp
+    return { changed: true, reason: next._updateReason }
+  }
+
+  _lastProcessedFingerprint = incomingFp
+  return { changed: false, reason: 'no_updates_passed_gates' }
+}
+
+/**
+ * Reset stableTripState to initial values
+ */
+function resetStableTripState() {
+  stableTripState.value = {
+    dailyTripLegSequence: null,
+    tripStatus: '',
+    origin: { number: '', name: '', abbrv: '', display: '—' },
+    destination: { number: '', name: '', abbrv: '', display: '—' },
+    trailers: [],
+    dolly: { number1: '', number2: '', seq1: '', seq2: '' },
+    tractorNumber: '',
+    instructions: '',
+    _fingerprint: '',
+    _lastUpdatedAt: null,
+    _updateReason: '',
+  }
+  _rawApiBody.value = null
+  _lastProcessedFingerprint = ''
+}
+
+/**
+ * HISTORY GATE - Determines if trip should be stored in history
+ * @param {typeof stableTripState.value} tripState
+ * @param {{ prePlanSnapshot: unknown, tripPhase: string, hiddenSequences: string[] }} context
+ * @returns {{ allow: boolean, reason: string }}
+ */
+function shouldUpsertToHistory(tripState, context) {
+  const { prePlanSnapshot, tripPhase, hiddenSequences } = context
+
+  if (tripPhase === 'none') {
+    return { allow: false, reason: 'trip_phase_none' }
+  }
+
+  const seq = tripState.dailyTripLegSequence
+  if (!seq || !/^\d+$/.test(seq)) {
+    return { allow: false, reason: 'invalid_sequence' }
+  }
+
+  const prePlanSeq = _tripBodyDailySeq(prePlanSnapshot)
+  if (prePlanSeq && seq === prePlanSeq) {
+    return { allow: false, reason: 'is_preplan' }
+  }
+
+  if (hiddenSequences.includes(seq)) {
+    return { allow: false, reason: 'user_hidden' }
+  }
+
+  if (!tripState.trailers?.length && !tripState.destination?.number) {
+    return { allow: false, reason: 'insufficient_data' }
+  }
+
+  return { allow: true, reason: 'passed_all_gates' }
+}
+
+/** History upsert queue - ensures serial execution */
+let _historyUpsertQueue = Promise.resolve()
+let _historyUpsertPending = null
+let _historyUpsertTimer = null
+const HISTORY_UPSERT_DEBOUNCE_MS = 1500
+
+/**
+ * Schedule a history upsert (debounced, serialized)
+ * @param {typeof stableTripState.value} tripState
+ * @param {string} assignmentInstructions
+ */
+function scheduleHistoryUpsert(tripState, assignmentInstructions) {
+  const fp = computeStateFingerprint(tripState)
+
+  if (fp === lastHistoryUpsertOkFingerprint) return
+
+  _historyUpsertPending = { tripState: { ...tripState }, fingerprint: fp, assignmentInstructions }
+
+  if (_historyUpsertTimer) clearTimeout(_historyUpsertTimer)
+  _historyUpsertTimer = setTimeout(() => {
+    const pending = _historyUpsertPending
+    _historyUpsertPending = null
+    _historyUpsertTimer = null
+
+    if (!pending) return
+
+    _historyUpsertQueue = _historyUpsertQueue
+      .then(() => executeHistoryUpsert(pending.tripState, pending.fingerprint, pending.assignmentInstructions))
+      .catch(() => {})
+  }, HISTORY_UPSERT_DEBOUNCE_MS)
+}
+
+/**
+ * Execute history upsert
+ * @param {typeof stableTripState.value} tripState
+ * @param {string} fingerprint
+ * @param {string} assignmentInstructions
+ */
+async function executeHistoryUpsert(tripState, fingerprint, assignmentInstructions) {
+  if (fingerprint === lastHistoryUpsertOkFingerprint) return
+
+  const seq = tripState.dailyTripLegSequence
+  if (!seq) return
+
+  const snapBody = {
+    dailyTripLegSequence: seq,
+    tripStatus: tripState.tripStatus,
+    trailers: tripState.trailers,
+    dollyNumber1: tripState.dolly?.number1,
+    dollyNumber2: tripState.dolly?.number2,
+    dollyEquipmentSequence1: tripState.dolly?.seq1,
+    dollyEquipmentSequence2: tripState.dolly?.seq2,
+    currentLocationNumber: tripState.origin?.number,
+    currentLocationName: tripState.origin?.name,
+    tripDestNumber: tripState.destination?.number,
+    tripDest: tripState.destination?.name,
+    tractorNumber: tripState.tractorNumber,
+  }
+
+  try {
+    await putAssignment({
+      upsertTripHistoryEntry: {
+        id: `h-${seq}`,
+        source: 'linehaul',
+        dailyTripLegSequence: seq,
+        recordedAt: Date.now(),
+        dispatchHeader: buildHistoryDispatchHeaderFromBody(snapBody, {
+          source: 'linehaul',
+          instructions: tripState.instructions,
+          instructionsFinal: true,
+        }),
+        tripDetails: buildHistoryTripDetailsFromBody(snapBody),
+      },
+    })
+    lastHistoryUpsertOkFingerprint = fingerprint
+  } catch {
+    /* offline / 401: retry on next refresh */
+  }
+}
+
 export const linehaulTractorBody = ref(null)
 export const linehaulDriverBody = ref(null)
 export const linehaulTractorError = ref(null)
@@ -75,6 +600,12 @@ export function resetLinehaulSession() {
   lastHistoryUpsertOkFingerprint = null
   prevDriverAvlStat = null
   lastTripMileageOkKey = ''
+  resetStableTripState()
+  if (_historyUpsertTimer) {
+    clearTimeout(_historyUpsertTimer)
+    _historyUpsertTimer = null
+  }
+  _historyUpsertPending = null
   if (persistTripDebounceTimer) {
     clearTimeout(persistTripDebounceTimer)
     persistTripDebounceTimer = null
@@ -229,6 +760,14 @@ function hydrateTripSnapshotsFromAssignment(assign) {
       prePlanTripSnapshot.value = /** @type {Record<string, unknown>} */ (pre)
     }
   }
+
+  // Duplicate check: clear pre-plan if it matches current trip sequence
+  const curSeq = tripBodyDailySeq(linehaulTripsBody.value)
+  const preSeq = tripBodyDailySeq(prePlanTripSnapshot.value)
+  if (curSeq && preSeq && curSeq === preSeq) {
+    prePlanTripSnapshot.value = null
+  }
+
   const c = assign.persistedCachedTripSnapshot
   if (c != null && typeof c === 'object' && !Array.isArray(c)) {
     const s = tripBodyDailySeq(/** @type {Record<string, unknown>} */ (c))
@@ -251,14 +790,15 @@ function hydrateTripSnapshotsFromAssignment(assign) {
  * None = no active trip.
  */
 export const tripPhase = computed(() => {
-  const tb = linehaulTripsBody.value
+  const stableState = stableTripState.value
   const dBody = linehaulDriverBody.value
   const tBody = linehaulTractorBody.value
 
-  const tripStatus =
-    tb != null && typeof tb === 'object' && !Array.isArray(tb)
-      ? /** @type {Record<string, unknown>} */ (tb).tripStatus
+  const tripStatus = stableState.tripStatus || (
+    linehaulTripsBody.value != null && typeof linehaulTripsBody.value === 'object' && !Array.isArray(linehaulTripsBody.value)
+      ? /** @type {Record<string, unknown>} */ (linehaulTripsBody.value).tripStatus
       : null
+  )
 
   const driverStat =
     dBody != null && typeof dBody === 'object'
@@ -276,10 +816,13 @@ export const tripPhase = computed(() => {
   ) {
     return 'dispatched'
   }
-  if (tripStatus === 'APRVD' && tb != null) {
+
+  const hasTrip = stableState.dailyTripLegSequence || linehaulTripsBody.value != null
+
+  if (tripStatus === 'APRVD' && hasTrip) {
     return 'assigned'
   }
-  if (tb != null) {
+  if (hasTrip) {
     return 'assigned'
   }
   return 'none'
@@ -588,21 +1131,15 @@ async function refreshLinehaulApisImpl(attempt) {
     }
   }
 
-  // Detect pre-plan trip vs normal caching
-  const currentSeq = tripBodyDailySeq(cachedTripSnapshot.value)
+  // Update cached trip if aprvdBody has trailer data (preserve rich data for merge)
   const incomingSeq = tripBodyDailySeq(aprvdBody)
+  const cachedSeq = tripBodyDailySeq(cachedTripSnapshot.value)
 
-  if (
-    cachedTripSnapshot.value != null &&
-    incomingSeq != null &&
-    currentSeq != null &&
-    incomingSeq !== currentSeq
-  ) {
-    // New trip with different sequence while current exists = pre-plan
-    prePlanTripSnapshot.value = { ...aprvdBody }
-  } else if (aprvdBody && Array.isArray(aprvdBody.trailers) && aprvdBody.trailers.length > 0) {
-    // Normal path: update cached trip
-    cachedTripSnapshot.value = { ...aprvdBody }
+  if (aprvdBody && Array.isArray(aprvdBody.trailers) && aprvdBody.trailers.length > 0) {
+    // Only update cached if same sequence or no cached trip yet
+    if (!cachedSeq || cachedSeq === incomingSeq) {
+      cachedTripSnapshot.value = { ...aprvdBody }
+    }
   }
 
   const cached =
@@ -611,9 +1148,9 @@ async function refreshLinehaulApisImpl(attempt) {
       ? /** @type {Record<string, unknown>} */ (cachedTripSnapshot.value)
       : null
 
-  // Aprvd list response is canonical for leg ID + O/D; merge cached/dspch first so
-  // APVRD (last) wins for route/destination fields (avoids stuck labels from an old cache).
-  const merged = deepMergeNonEmpty(cached, dspchBody, aprvdBody)
+  // Merge API responses - order: aprvdBody first (base), then dspchBody, then cached last
+  // Cached has the richest data and should win for trailers/equipment when present
+  const merged = deepMergeNonEmpty(aprvdBody, dspchBody, cached)
 
   if (merged != null) {
     linehaulTripsBody.value = merged
@@ -651,59 +1188,55 @@ async function refreshLinehaulApisImpl(attempt) {
     }
   }
 
-  /** Pre-plan must be a different leg than the live merged trip (never duplicate seq). */
-  if (linehaulTripsBody.value && typeof linehaulTripsBody.value === 'object') {
-    const mergedSeq = tripBodyDailySeq(linehaulTripsBody.value)
-    const preSeq = tripBodyDailySeq(prePlanTripSnapshot.value)
-    if (mergedSeq && preSeq && mergedSeq === preSeq) {
-      prePlanTripSnapshot.value = null
-    }
+  // PRE-PLAN DETECTION: Compare against MERGED body sequence (not stale cachedTripSnapshot)
+  // This prevents false positives when cachedTripSnapshot has stale data
+  const mergedSeq = tripBodyDailySeq(linehaulTripsBody.value)
+  const existingPrePlanSeq = tripBodyDailySeq(prePlanTripSnapshot.value)
+
+  if (
+    incomingSeq != null &&
+    mergedSeq != null &&
+    incomingSeq !== mergedSeq &&
+    existingPrePlanSeq !== incomingSeq
+  ) {
+    // aprvdBody has a different sequence than the merged current trip = pre-plan
+    prePlanTripSnapshot.value = { ...aprvdBody }
   }
 
-  if (linehaulTripsBody.value && typeof linehaulTripsBody.value === 'object') {
-    const seqU = tripBodyDailySeq(linehaulTripsBody.value)
-    if (seqU) {
-      const fromAssign = String(assignmentInstructions ?? '').trim()
-      const snapBody = /** @type {Record<string, unknown>} */ (linehaulTripsBody.value)
-      const fromApi = extractTripDispatchInstructions(snapBody)
-      const mergedInstr =
-        fromAssign && fromApi
-          ? `${fromAssign}\n\n${fromApi}`
-          : fromAssign || fromApi
-      const fp = historyLedgerFingerprint(seqU, fromAssign, snapBody)
-      if (fp !== lastHistoryUpsertOkFingerprint) {
-        void (async () => {
-          try {
-            await putAssignment({
-              upsertTripHistoryEntry: {
-                id: `h-${seqU}`,
-                source: 'linehaul',
-                dailyTripLegSequence: seqU,
-                recordedAt: Date.now(),
-                dispatchHeader: buildHistoryDispatchHeaderFromBody(snapBody, {
-                  source: 'linehaul',
-                  instructions: mergedInstr,
-                  instructionsFinal: true,
-                }),
-                tripDetails: buildHistoryTripDetailsFromBody(snapBody),
-              },
-            })
-            lastHistoryUpsertOkFingerprint = fp
-          } catch {
-            /* offline / 401: retry on next refresh */
-          }
-        })()
-      }
-    } else {
-      lastHistoryUpsertOkFingerprint = null
-    }
-  } else {
-    lastHistoryUpsertOkFingerprint = null
+  // Clear pre-plan if it now matches current trip (duplicate detection)
+  if (mergedSeq && existingPrePlanSeq && mergedSeq === existingPrePlanSeq) {
+    prePlanTripSnapshot.value = null
   }
 
-  if (linehaulTripsBody.value && typeof linehaulTripsBody.value === 'object') {
-    const s = tripBodyDailySeq(linehaulTripsBody.value)
-    void syncDollyFromLinehaul(s || '', linehaulTripsBody.value).catch(() => {})
+  // === GATED STATE UPDATE ===
+  // Process API response through logic gates to update stableTripState
+  const { changed: stateChanged, reason: updateReason } = processApiResponse(
+    /** @type {Record<string, unknown> | null} */ (linehaulTripsBody.value),
+    assignmentInstructions,
+    {
+      prePlanSnapshot: prePlanTripSnapshot.value,
+      hiddenSequences: hiddenDailyTripLegSequences.value,
+    },
+  )
+
+  // Only downstream effects if data actually changed through gates
+  if (stateChanged) {
+    // Schedule history upsert (debounced, gated, serialized)
+    const historyGate = shouldUpsertToHistory(stableTripState.value, {
+      prePlanSnapshot: prePlanTripSnapshot.value,
+      tripPhase: tripPhase.value,
+      hiddenSequences: hiddenDailyTripLegSequences.value,
+    })
+
+    if (historyGate.allow) {
+      scheduleHistoryUpsert(stableTripState.value, assignmentInstructions)
+    }
+
+    // Dolly sync
+    const seq = stableTripState.value.dailyTripLegSequence
+    if (seq) {
+      void syncDollyFromLinehaul(seq, stableTripState.value).catch(() => {})
+    }
   }
 
   void maybeFetchTripMileageAfterDispatched()
@@ -769,12 +1302,13 @@ async function refreshLinehaulApisImpl(attempt) {
  */
 async function maybeFetchTripMileageAfterDispatched() {
   if (tripPhase.value !== 'dispatched') return
-  const snapBody = linehaulTripsBody.value
-  if (snapBody == null || typeof snapBody !== 'object' || Array.isArray(snapBody)) {
-    return
-  }
-  const seq = tripBodyDailySeq(snapBody)
-  const { originId, destinationId } = extractTripOrgIds(snapBody)
+
+  // Use stableTripState for origin/destination IDs
+  const stable = stableTripState.value
+  const seq = stable.dailyTripLegSequence
+  const originId = stable.origin?.number || ''
+  const destinationId = stable.destination?.number || ''
+
   if (!seq || !originId || !destinationId) return
   const fetchKey = `${seq}|${originId}|${destinationId}`
   if (lastTripMileageOkKey === fetchKey) return

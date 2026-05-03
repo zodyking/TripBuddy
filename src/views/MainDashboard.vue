@@ -48,6 +48,7 @@ import {
   markTripLegSequenceCompleted,
   tripBodyDailySeq,
   lastDailyTripLegSequence,
+  stableTripState,
 } from '../stores/linehaulSnapshotStore.js'
 import {
   apiOk,
@@ -161,8 +162,14 @@ const instructions = ref('')
 /** 0 = current trip, 1 = pre-plan trip — must be declared before instruction computeds that read it. */
 const dispatchSlideIndex = ref(0)
 
-/** Merged: Settings assignment + FedEx instruction fields from Linehaul trip body */
+/** Merged: Settings assignment + FedEx instruction fields - now uses stableTripState */
 const mergedDispatchInstructions = computed(() => {
+  // Use stableTripState.instructions which is already merged and gated
+  const stable = stableTripState.value
+  if (stable.instructions) {
+    return stable.instructions
+  }
+  // Fallback to old behavior for compatibility
   try {
     const body = linehaulTripsBody.value
     const fromApi = extractTripDispatchInstructions(body)
@@ -178,13 +185,15 @@ const mergedDispatchInstructions = computed(() => {
 /** Same merge for the active Dispatch carousel slide (current vs pre-plan). */
 const mergedDispatchInstructionsForSlide = computed(() => {
   try {
-    const fromAssignment = String(instructions.value ?? '').trim()
+    // For pre-plan, still use the snapshot directly
     if (dispatchSlideIndex.value === 1 && prePlanTripSnapshot.value) {
+      const fromAssignment = String(instructions.value ?? '').trim()
       const body = prePlanTripSnapshot.value
       const fromApi = extractTripDispatchInstructions(body)
       if (fromApi && fromAssignment) return `${fromAssignment}\n\n${fromApi}`
       return fromApi || fromAssignment
     }
+    // For current trip, use stableTripState (already gated)
     return mergedDispatchInstructions.value
   } catch (e) {
     console.error('[mergedDispatchInstructionsForSlide]', e)
@@ -237,7 +246,18 @@ const tripStatusDetailTitle = computed(() => {
   return ''
 })
 
-const tripOriginDest = computed(() => extractOriginDest(linehaulTripsBody.value))
+const tripOriginDest = computed(() => {
+  // Use stableTripState for current trip origin/dest (always has best data)
+  const stable = stableTripState.value
+  if (stable.origin?.display && stable.origin.display !== '—') {
+    return {
+      origin: stable.origin.display,
+      destination: stable.destination?.display || '—',
+    }
+  }
+  // Fallback for compatibility
+  return extractOriginDest(linehaulTripsBody.value)
+})
 const prePlanOriginDest = computed(() => extractOriginDest(prePlanTripSnapshot.value))
 
 const dispatchPanelRef = ref(/** @type {HTMLElement | null} */ (null))
@@ -270,7 +290,7 @@ function isInteractiveEventTarget(target) {
 }
 
 const currentTripLegSeq = computed(() =>
-  tripBodyDailySeq(linehaulTripsBody.value),
+  stableTripState.value.dailyTripLegSequence || tripBodyDailySeq(linehaulTripsBody.value),
 )
 const prePlanTripLegSeq = computed(() =>
   tripBodyDailySeq(prePlanTripSnapshot.value),
@@ -285,6 +305,25 @@ const tripDetailsBodyForSlide = computed(() => {
   ) {
     return /** @type {Record<string, unknown>} */ (prePlanTripSnapshot.value)
   }
+  // For current trip, build a body from stableTripState (has gated, preserved data)
+  const stable = stableTripState.value
+  if (stable.dailyTripLegSequence) {
+    return {
+      dailyTripLegSequence: stable.dailyTripLegSequence,
+      tripStatus: stable.tripStatus,
+      trailers: stable.trailers,
+      dollyNumber1: stable.dolly?.number1,
+      dollyNumber2: stable.dolly?.number2,
+      dollyEquipmentSequence1: stable.dolly?.seq1,
+      dollyEquipmentSequence2: stable.dolly?.seq2,
+      currentLocationNumber: stable.origin?.number,
+      currentLocationName: stable.origin?.name,
+      tripDestNumber: stable.destination?.number,
+      tripDest: stable.destination?.name,
+      tractorNumber: stable.tractorNumber,
+    }
+  }
+  // Fallback to raw body
   const m = linehaulTripsBody.value
   return m && typeof m === 'object' ? /** @type {Record<string, unknown>} */ (m) : null
 })
@@ -1001,9 +1040,18 @@ watch(
   { deep: true },
 )
 
+/** Track last fingerprint to prevent false TTS triggers */
+let _lastVoiceTriggerFingerprint = ''
+
 watch(
-  [linehaulTripsBody, linehaulTripsNoActive, prePlanTripSnapshot, linehaulLastFetchAt],
-  () => {
+  [() => stableTripState.value._fingerprint, linehaulTripsNoActive, prePlanTripSnapshot, linehaulLastFetchAt],
+  ([newFp]) => {
+    // Only process if fingerprint actually changed (or on first load)
+    if (newFp && newFp === _lastVoiceTriggerFingerprint) {
+      return // Same data, skip TTS
+    }
+    _lastVoiceTriggerFingerprint = newFp || ''
+
     seedTripVoiceFromSnapshot(
       linehaulTripsBody.value,
       linehaulTripsNoActive.value,

@@ -6,6 +6,7 @@ import {
   getCredentials,
   putCredentials,
   putTomtomApiKey,
+  putHereApiKey,
   deleteCredentials,
   putAssignment,
   getHealth,
@@ -35,7 +36,12 @@ import SettingsSection from '../components/settings/SettingsSection.vue'
 import LeafletPinModal from '../components/LeafletPinModal.vue'
 import GeoFenceEditor from '../components/GeoFenceEditor.vue'
 import ApiStatusBadge from '../components/ApiStatusBadge.vue'
-import { trafficTomtomKeyOverride, setTomtomTrafficKey } from '../stores/trafficTileKey.js'
+import {
+  trafficTomtomKeyOverride,
+  setTomtomTrafficKey,
+  hereApiKeyOverride,
+  setHereApiKey,
+} from '../stores/trafficTileKey.js'
 import AutomationList from '../components/automation/AutomationList.vue'
 import AutomationEditor from '../components/automation/AutomationEditor.vue'
 import {
@@ -348,6 +354,26 @@ async function saveTomtomTrafficKey() {
   }
 }
 
+/** HERE API key (Route Monitoring / Traffic Flow). Free developer account: platform.here.com */
+const hereApiDraft = ref('')
+const hereApiMsg = ref('')
+const hereApiBusy = ref(false)
+
+async function saveHereApiKey() {
+  if (!(await requireApi())) return
+  hereApiBusy.value = true
+  hereApiMsg.value = ''
+  try {
+    await putHereApiKey({ hereApiKey: hereApiDraft.value })
+    setHereApiKey(hereApiDraft.value)
+    hereApiMsg.value = 'HERE key saved to your account (encrypted on the server).'
+  } catch (e) {
+    hereApiMsg.value = e instanceof Error ? e.message : String(e)
+  } finally {
+    hereApiBusy.value = false
+  }
+}
+
 const screenshotModal = ref(null)
 
 function openScreenshotModal(line) {
@@ -406,6 +432,7 @@ async function loadCredentials() {
     credMeta.value = await getCredentials({
       includeLinehaulBearer: true,
       includeTomtomApiKey: true,
+      includeHereApiKey: true,
     })
     credUser.value = credMeta.value.username || ''
     credTractor.value = String(credMeta.value.tractorNumber ?? '')
@@ -453,6 +480,10 @@ async function loadCredentials() {
       typeof credMeta.value.tomtomApiKey === 'string' ? credMeta.value.tomtomApiKey.trim() : ''
     if (tk) setTomtomTrafficKey(tk)
     tomtomTrafficDraft.value = trafficTomtomKeyOverride.value
+    const hk =
+      typeof credMeta.value.hereApiKey === 'string' ? credMeta.value.hereApiKey.trim() : ''
+    if (hk) setHereApiKey(hk)
+    hereApiDraft.value = hereApiKeyOverride.value
   } catch (e) {
     pushLiveLog({
       type: 'error',
@@ -522,6 +553,8 @@ async function clearCredentials() {
     credPass.value = ''
     setTomtomTrafficKey('')
     tomtomTrafficDraft.value = ''
+    setHereApiKey('')
+    hereApiDraft.value = ''
     await loadCredentials()
     pushLiveLog({ type: 'info', message: 'Credentials cleared', ts: Date.now() })
   } catch (e) {
@@ -739,10 +772,11 @@ async function runLinehaulTest() {
 
 function applySettingsRouteFragment() {
   const raw = typeof route.hash === 'string' ? route.hash.replace(/^#/, '').trim() : ''
-  if (raw !== 'tomtom') return
+  if (raw !== 'tomtom' && raw !== 'here') return
   settingsTab.value = 'general'
   nextTick(() => {
-    const el = document.getElementById('settings-tomtom')
+    const elId = raw === 'here' ? 'settings-here' : 'settings-tomtom'
+    const el = document.getElementById(elId)
     if (el instanceof HTMLDetailsElement) el.open = true
     el?.scrollIntoView({ behavior: 'smooth', block: 'start' })
   })
@@ -754,6 +788,7 @@ onMounted(() => {
   loadCredentials()
   loadAssignmentState()
   tomtomTrafficDraft.value = trafficTomtomKeyOverride.value
+  hereApiDraft.value = hereApiKeyOverride.value
   applySettingsRouteFragment()
 })
 
@@ -1057,6 +1092,50 @@ onUnmounted(() => {
             @click="saveTomtomTrafficKey"
           >
             {{ tomtomTrafficBusy ? 'Saving…' : 'Save TomTom key' }}
+          </button>
+        </div>
+      </SettingsSection>
+
+      <SettingsSection title="HERE Traffic API (Route Monitoring)" section-id="settings-here" :open="true">
+        <p class="cred-hint">
+          <strong>Traffic → Corridors</strong> uses
+          <a
+            href="https://platform.here.com/"
+            target="_blank"
+            rel="noopener noreferrer"
+            class="ext-link"
+          >HERE Traffic API v7</a>
+          for real-time traffic flow monitoring along your routes. Create a free account at HERE Platform.
+        </p>
+        <p class="cred-hint">
+          HERE provides: <strong>speed</strong> (current vs free-flow), <strong>jam factor</strong> (0–10), <strong>travel time</strong> estimates, and segment-level detail.
+          Free tier: <strong>250K transactions/month</strong> (legacy) or <strong>1K/day</strong> (new platform).
+        </p>
+        <p class="cred-hint">
+          To set up: Go to <a href="https://platform.here.com/" target="_blank" rel="noopener noreferrer" class="ext-link">platform.here.com</a> → Access Manager → Apps → Register new app → Create API Key. Enable <strong>Traffic API</strong> and <strong>Routing API</strong>.
+        </p>
+        <label class="lbl" for="here-api-key">HERE API key (for Route Monitoring)</label>
+        <input
+          id="here-api-key"
+          v-model="hereApiDraft"
+          class="inp tap"
+          type="password"
+          autocomplete="off"
+          placeholder="Paste HERE API key"
+          :aria-describedby="'here-hint'"
+        />
+        <p id="here-hint" class="cred-hint">
+          Active key: {{ hereApiKeyOverride ? 'saved (server + this browser)' : 'empty' }}
+        </p>
+        <p v-if="hereApiMsg" class="cred-msg">{{ hereApiMsg }}</p>
+        <div class="btn-row">
+          <button
+            type="button"
+            class="btn primary tap"
+            :disabled="hereApiBusy"
+            @click="saveHereApiKey"
+          >
+            {{ hereApiBusy ? 'Saving…' : 'Save HERE key' }}
           </button>
         </div>
       </SettingsSection>
