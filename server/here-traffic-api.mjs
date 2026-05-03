@@ -9,17 +9,19 @@
 const HERE_TRAFFIC_BASE = 'https://data.traffic.hereapi.com/v7'
 const HERE_ROUTING_BASE = 'https://router.hereapi.com/v8'
 
+/** HERE flexible polyline format version (see heremaps/flexible-polyline). */
+const FLEX_POLYLINE_FORMAT_VERSION = 1
+
 /**
  * Encode coordinates to HERE Flexible Polyline format.
- * Based on HERE's flexible-polyline algorithm.
+ * Matches HERE reference: version varint + header varint + deltas.
  * @see https://github.com/heremaps/flexible-polyline
- * 
- * Header format (version 1):
- * - Byte 1: (precision << 3) | (thirdDimType << 1) | thirdDimFlag
- * - If thirdDimFlag=1, Byte 2: thirdDimPrecision
- * 
+ *
+ * Header content: `(thirdDimPrecision << 7) | (type3d << 4) | precision2d`
+ * — 2D: type3d=0, thirdDimPrecision=0.
+ *
  * @param {Array<{ lat: number, lng: number } | { latitude: number, longitude: number }>} points
- * @param {number} [precision=5] - Coordinate precision (5 = ~1m accuracy)
+ * @param {number} [precision=5] - Lat/lng decimal digits (0–15)
  * @returns {string} Encoded flexible polyline
  */
 export function encodeFlexiblePolyline(points, precision = 5) {
@@ -37,30 +39,35 @@ export function encodeFlexiblePolyline(points, precision = 5) {
     return ''
   }
 
+  const prec = Math.min(15, Math.max(0, Math.floor(precision)))
   const ENCODING_TABLE = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_'
-  const multiplier = Math.pow(10, precision)
+  const multiplier = Math.pow(10, prec)
 
   /** @param {number} value */
   function encodeUnsignedVarint(value) {
+    let v = value >>> 0
     let result = ''
-    while (value > 0x1F) {
-      result += ENCODING_TABLE[(value & 0x1F) | 0x20]
-      value >>>= 5
+    while (v > 0x1F) {
+      result += ENCODING_TABLE[(v & 0x1F) | 0x20]
+      v >>>= 5
     }
-    result += ENCODING_TABLE[value]
+    result += ENCODING_TABLE[v]
     return result
   }
 
   /** @param {number} value */
   function encodeSignedVarint(value) {
-    let unsigned = value < 0 ? ~(value << 1) : (value << 1)
+    const unsigned = value < 0 ? ~(value << 1) : (value << 1)
     return encodeUnsignedVarint(unsigned)
   }
 
-  // Header: (precision << 3) | (thirdDimType << 1) | thirdDimFlag
-  // For 2D polyline: thirdDimType=0, thirdDimFlag=0
-  const headerValue = (precision << 3) | 0
-  let result = encodeUnsignedVarint(headerValue)
+  const type3d = 0
+  const thirdDimPrecision = 0
+  const headerContent = (thirdDimPrecision << 7) | (type3d << 4) | prec
+
+  let result =
+    encodeUnsignedVarint(FLEX_POLYLINE_FORMAT_VERSION) +
+    encodeUnsignedVarint(headerContent)
 
   let lastLat = 0
   let lastLng = 0
@@ -81,12 +88,6 @@ export function encodeFlexiblePolyline(points, precision = 5) {
 
 /**
  * Decode HERE Flexible Polyline to coordinates.
- * @see https://github.com/heremaps/flexible-polyline
- * 
- * Header format (version 1):
- * - Byte 1: (precision << 3) | (thirdDimType << 1) | thirdDimFlag
- * - If thirdDimFlag=1, Byte 2: thirdDimPrecision
- * 
  * @param {string} encoded
  * @returns {Array<{ lat: number, lng: number }>}
  */
@@ -120,34 +121,37 @@ export function decodeFlexiblePolyline(encoded) {
     return (unsigned & 1) ? ~(unsigned >>> 1) : (unsigned >>> 1)
   }
 
-  // Decode header: (precision << 3) | (thirdDimType << 1) | thirdDimFlag
-  const header = decodeUnsignedVarint()
-  const thirdDimFlag = header & 1
-  const thirdDimType = (header >> 1) & 0x07
-  const precision = (header >> 4) & 0x0F
-  const multiplier = Math.pow(10, precision)
-
-  // If 3D, decode third dimension precision (skip it for now)
-  let thirdDimPrecision = 0
-  if (thirdDimFlag) {
-    thirdDimPrecision = decodeUnsignedVarint()
-  }
-
-  const points = []
-  let lat = 0
-  let lng = 0
-  let thirdDim = 0
-
-  while (index < encoded.length) {
-    lat += decodeSignedVarint()
-    lng += decodeSignedVarint()
-    if (thirdDimFlag && thirdDimType !== 0) {
-      thirdDim += decodeSignedVarint()
+  /** @param {number} precision2d @param {boolean} hasThird */
+  function decodeCoordinatePairs(precision2d, hasThird) {
+    const mult = Math.pow(10, precision2d)
+    const pts = []
+    let lat = 0
+    let lng = 0
+    let z = 0
+    while (index < encoded.length) {
+      lat += decodeSignedVarint()
+      lng += decodeSignedVarint()
+      if (hasThird) z += decodeSignedVarint()
+      pts.push({ lat: lat / mult, lng: lng / mult })
     }
-    points.push({ lat: lat / multiplier, lng: lng / multiplier })
+    return pts
   }
 
-  return points
+  const first = decodeUnsignedVarint()
+  if (first === FLEX_POLYLINE_FORMAT_VERSION) {
+    const header = decodeUnsignedVarint()
+    const precision2d = header & 0x0f
+    const type3d = (header >> 4) & 0x07
+    const hasThird = type3d !== 0
+    return decodeCoordinatePairs(precision2d, hasThird)
+  }
+
+  // Legacy TripBuddy encoder: single varint `(precision << 3)` then 2D deltas (no version).
+  index = 0
+  const legacyHeader = decodeUnsignedVarint()
+  const precisionLegacy = (legacyHeader >> 3) & 0x0f
+  if (precisionLegacy < 0 || precisionLegacy > 15) return []
+  return decodeCoordinatePairs(precisionLegacy, false)
 }
 
 /**
