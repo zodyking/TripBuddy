@@ -241,8 +241,6 @@ export function parseTrailerMeta(trailer) {
     }
   }
 
-  const lbs = pkgWeightLbs()
-
   return {
     trlrNbr,
     size,

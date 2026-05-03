@@ -453,9 +453,12 @@ async function loadCredentials() {
       typeof credMeta.value.tomtomApiKey === 'string' ? credMeta.value.tomtomApiKey.trim() : ''
     if (tk) setTomtomTrafficKey(tk)
     tomtomTrafficDraft.value = trafficTomtomKeyOverride.value
-    credMeta.value = null
-    credLinehaulToken.value = ''
-    tomtomTrafficDraft.value = trafficTomtomKeyOverride.value
+  } catch (e) {
+    pushLiveLog({
+      type: 'error',
+      message: e instanceof Error ? e.message : String(e),
+      ts: Date.now(),
+    })
   }
 }
 
