@@ -29,6 +29,91 @@ const TRAILER_20_IMG_H = Math.round(TRAILER_20_IMG_W * (118 / 72))
 const TRAILER_53_IMG_W = 52
 const TRAILER_53_IMG_H = Math.round(TRAILER_53_IMG_W * (248 / 76))
 
+/** Real-world trailer dimensions in meters (length × width). */
+const TRAILER_20FT_LENGTH_M = 6.1
+const TRAILER_20FT_WIDTH_M = 2.44
+const TRAILER_53FT_LENGTH_M = 16.15
+const TRAILER_53FT_WIDTH_M = 2.6
+/** Truck dimensions — same as 20ft trailer for consistent scaling. */
+const TRUCK_LENGTH_M = TRAILER_20FT_LENGTH_M
+const TRUCK_WIDTH_M = TRAILER_20FT_WIDTH_M
+
+/**
+ * Calculate meters per pixel at a given latitude and zoom level.
+ * Based on Web Mercator projection (EPSG:3857).
+ * @param {number} lat - Latitude in degrees
+ * @param {number} zoom - Leaflet zoom level
+ * @returns {number} meters per pixel
+ */
+export function metersPerPixel(lat, zoom) {
+  const earthCircumference = 40075016.686
+  const latRad = lat * Math.PI / 180
+  return (earthCircumference * Math.cos(latRad)) / Math.pow(2, zoom + 8)
+}
+
+/**
+ * Convert meters to pixels at a given latitude and zoom.
+ * @param {number} meters - Real-world distance in meters
+ * @param {number} lat - Latitude in degrees
+ * @param {number} zoom - Leaflet zoom level
+ * @returns {number} pixels
+ */
+export function metersToPixels(meters, lat, zoom) {
+  const mpp = metersPerPixel(lat, zoom)
+  return meters / mpp
+}
+
+/**
+ * Get geo-scaled dimensions for a 20ft trailer at given lat/zoom.
+ * @param {number} lat
+ * @param {number} zoom
+ * @param {{ minWidth?: number, maxWidth?: number }} [opts]
+ * @returns {{ width: number, height: number }}
+ */
+export function getTrailer20ftGeoSize(lat, zoom, opts = {}) {
+  const { minWidth = 16, maxWidth = 200 } = opts
+  const widthPx = metersToPixels(TRAILER_20FT_WIDTH_M, lat, zoom)
+  const lengthPx = metersToPixels(TRAILER_20FT_LENGTH_M, lat, zoom)
+  const clampedW = Math.max(minWidth, Math.min(maxWidth, Math.round(widthPx)))
+  const aspectRatio = TRAILER_20FT_LENGTH_M / TRAILER_20FT_WIDTH_M
+  const clampedH = Math.round(clampedW * aspectRatio)
+  return { width: clampedW, height: clampedH }
+}
+
+/**
+ * Get geo-scaled dimensions for a 53ft trailer at given lat/zoom.
+ * @param {number} lat
+ * @param {number} zoom
+ * @param {{ minWidth?: number, maxWidth?: number }} [opts]
+ * @returns {{ width: number, height: number }}
+ */
+export function getTrailer53ftGeoSize(lat, zoom, opts = {}) {
+  const { minWidth = 16, maxWidth = 200 } = opts
+  const widthPx = metersToPixels(TRAILER_53FT_WIDTH_M, lat, zoom)
+  const lengthPx = metersToPixels(TRAILER_53FT_LENGTH_M, lat, zoom)
+  const clampedW = Math.max(minWidth, Math.min(maxWidth, Math.round(widthPx)))
+  const aspectRatio = TRAILER_53FT_LENGTH_M / TRAILER_53FT_WIDTH_M
+  const clampedH = Math.round(clampedW * aspectRatio)
+  return { width: clampedW, height: clampedH }
+}
+
+/**
+ * Get geo-scaled dimensions for a truck at given lat/zoom.
+ * @param {number} lat
+ * @param {number} zoom
+ * @param {{ minWidth?: number, maxWidth?: number }} [opts]
+ * @returns {{ width: number, height: number }}
+ */
+export function getTruckGeoSize(lat, zoom, opts = {}) {
+  const { minWidth = 16, maxWidth = 160 } = opts
+  const widthPx = metersToPixels(TRUCK_WIDTH_M, lat, zoom)
+  const lengthPx = metersToPixels(TRUCK_LENGTH_M, lat, zoom)
+  const clampedW = Math.max(minWidth, Math.min(maxWidth, Math.round(widthPx)))
+  const aspectRatio = TRUCK_LENGTH_M / TRUCK_WIDTH_M
+  const clampedH = Math.round(clampedW * aspectRatio)
+  return { width: clampedW, height: clampedH }
+}
+
 /** @param {string} svg */
 function svgDataUrl(svg) {
   return `data:image/svg+xml,${encodeURIComponent(svg.trim())}`
@@ -190,6 +275,58 @@ export function trailer20ftTopIcon(trailerNumber = '', opts = {}) {
 export function trailer53ftTopIcon(trailerNumber = '', opts = {}) {
   const pulse = opts.pulseHeavy ? 'map-marker-trailer-pulse-heavy' : ''
   return trailerTopDivIcon(trailer53ftTopImg, TRAILER_53_IMG_W, TRAILER_53_IMG_H, trailerNumber, pulse)
+}
+
+/**
+ * Geo-scaled 20′ trailer icon — size matches real-world dimensions at given lat/zoom.
+ * @param {string} [trailerNumber]
+ * @param {number} lat - marker latitude
+ * @param {number} zoom - current map zoom level
+ * @param {{ pulseHeavy?: boolean, minWidth?: number, maxWidth?: number }} [opts]
+ */
+export function trailer20ftTopIconGeoScaled(trailerNumber = '', lat, zoom, opts = {}) {
+  const { pulseHeavy, minWidth, maxWidth } = opts
+  const { width, height } = getTrailer20ftGeoSize(lat, zoom, { minWidth, maxWidth })
+  const pulse = pulseHeavy ? 'map-marker-trailer-pulse-heavy' : ''
+  return trailerTopDivIcon(trailer20ftTopImg, width, height, trailerNumber, pulse)
+}
+
+/**
+ * Geo-scaled 53′ trailer icon — size matches real-world dimensions at given lat/zoom.
+ * @param {string} [trailerNumber]
+ * @param {number} lat - marker latitude
+ * @param {number} zoom - current map zoom level
+ * @param {{ pulseHeavy?: boolean, minWidth?: number, maxWidth?: number }} [opts]
+ */
+export function trailer53ftTopIconGeoScaled(trailerNumber = '', lat, zoom, opts = {}) {
+  const { pulseHeavy, minWidth, maxWidth } = opts
+  const { width, height } = getTrailer53ftGeoSize(lat, zoom, { minWidth, maxWidth })
+  const pulse = pulseHeavy ? 'map-marker-trailer-pulse-heavy' : ''
+  return trailerTopDivIcon(trailer53ftTopImg, width, height, trailerNumber, pulse)
+}
+
+/**
+ * Geo-scaled truck icon — size matches real-world dimensions at given lat/zoom.
+ * @param {string} [vehicleId] tractor / unit number
+ * @param {number} lat - marker latitude
+ * @param {number} zoom - current map zoom level
+ * @param {{ minWidth?: number, maxWidth?: number }} [opts]
+ */
+export function userLocationTruckIconGeoScaled(vehicleId = '', lat, zoom, opts = {}) {
+  const { minWidth, maxWidth } = opts
+  const { width, height } = getTruckGeoSize(lat, zoom, { minWidth, maxWidth })
+  const chipH = RASTER_CHIP_H
+  const gap = RASTER_CHIP_GAP
+  const raw = String(vehicleId ?? '').trim()
+  const showChip = raw !== '' && directoryMarkerIdLabel(raw) !== ''
+  const boxH = showChip ? height + chipH + gap : height
+  return rasterMarkerDivIconBottomChip(
+    userLocationTruckImg,
+    { vw: width, vh: boxH, chipH },
+    raw,
+    'map-marker-raster-root--user-truck',
+    'map-marker-raster-chip--tractor',
+  )
 }
 
 /**

@@ -13,8 +13,11 @@ import 'leaflet-rotate'
 import {
   trailer20ftTopIcon,
   trailer53ftTopIcon,
+  trailer20ftTopIconGeoScaled,
+  trailer53ftTopIconGeoScaled,
   trailerFallbackPinIcon,
   userLocationTruckIcon,
+  userLocationTruckIconGeoScaled,
 } from '../utils/mapMarkers.js'
 import { useCompassOrientation } from '../composables/useCompassOrientation.js'
 
@@ -150,22 +153,76 @@ let geoStopped = false
 let watchStarted = false
 let didFitWithUser = false
 
+/** Whether to use geo-scaled (real-world sized) markers. */
+const useGeoScaledMarkers = ref(true)
+
 function prefersReducedMotion() {
   if (typeof window === 'undefined') return false
   return window.matchMedia('(prefers-reduced-motion: reduce)').matches
 }
 
+/**
+ * Create trailer icon — geo-scaled to real-world size when enabled.
+ * @param {TrailerMapPin} trailer
+ */
 function makeTrailerIcon(trailer) {
   const sz = String(trailer?.size ?? '').trim().toLowerCase()
   const num = String(trailer?.trlrNbr ?? '').trim()
   const pulse = Boolean(trailer?.highlightHeavy)
-  if (sz === '20ft' || sz === "20'") {
-    return trailer20ftTopIcon(num, { pulseHeavy: pulse })
-  }
-  if (sz === '53ft' || sz === "53'") {
-    return trailer53ftTopIcon(num, { pulseHeavy: pulse })
+  const lat = Number(trailer?.lat)
+  const zoom = map?.getZoom() ?? 15
+
+  if (useGeoScaledMarkers.value && Number.isFinite(lat)) {
+    if (sz === '20ft' || sz === "20'") {
+      return trailer20ftTopIconGeoScaled(num, lat, zoom, { pulseHeavy: pulse })
+    }
+    if (sz === '53ft' || sz === "53'") {
+      return trailer53ftTopIconGeoScaled(num, lat, zoom, { pulseHeavy: pulse })
+    }
+  } else {
+    if (sz === '20ft' || sz === "20'") {
+      return trailer20ftTopIcon(num, { pulseHeavy: pulse })
+    }
+    if (sz === '53ft' || sz === "53'") {
+      return trailer53ftTopIcon(num, { pulseHeavy: pulse })
+    }
   }
   return trailerFallbackPinIcon()
+}
+
+/**
+ * Create user truck icon — geo-scaled to real-world size when enabled.
+ */
+function makeUserTruckIcon() {
+  const vehicleId = props.userVehicleId || ''
+  if (!useGeoScaledMarkers.value || !userFix.value) {
+    return userLocationTruckIcon(vehicleId)
+  }
+  const lat = userFix.value.lat
+  const zoom = map?.getZoom() ?? 15
+  if (!Number.isFinite(lat)) {
+    return userLocationTruckIcon(vehicleId)
+  }
+  return userLocationTruckIconGeoScaled(vehicleId, lat, zoom)
+}
+
+/**
+ * Update all marker icons after zoom change (for geo-scaled sizing).
+ */
+function updateMarkersForZoom() {
+  if (!map || !useGeoScaledMarkers.value) return
+
+  for (const t of effectiveTrailers.value) {
+    const key = String(t.order)
+    const mk = trailerMarkers.get(key)
+    if (mk) {
+      mk.setIcon(makeTrailerIcon(t))
+    }
+  }
+
+  if (userMarker && userFix.value) {
+    userMarker.setIcon(makeUserTruckIcon())
+  }
 }
 
 function setBaseLayer(mode) {
@@ -208,7 +265,7 @@ function scheduleFitBounds() {
     }
     map.fitBounds(b, {
       padding: [56, 56],
-      maxZoom: 15,
+      maxZoom: 19,
       animate: motion,
     })
   }, 80)
@@ -230,7 +287,7 @@ function syncUserOverlay() {
 
   if (!userMarker) {
     userMarker = L.marker(ll, {
-      icon: userLocationTruckIcon(props.userVehicleId || ''),
+      icon: makeUserTruckIcon(),
       zIndexOffset: 600,
       title: 'Your location',
       rotationAngle: 0,
@@ -239,7 +296,7 @@ function syncUserOverlay() {
     userMarker.addTo(userLayer)
   } else {
     userMarker.setLatLng(ll)
-    userMarker.setIcon(userLocationTruckIcon(props.userVehicleId || ''))
+    userMarker.setIcon(makeUserTruckIcon())
   }
 
   applyUserMarkerRotation()
@@ -452,6 +509,8 @@ function initMap() {
   syncTrailerMarkers()
   applyUserCoordsFromProps()
 
+  map.on('zoomend', updateMarkersForZoom)
+
   nextTick(() => {
     map?.invalidateSize()
     setTimeout(() => map?.invalidateSize(), 320)
@@ -461,6 +520,9 @@ function initMap() {
 function destroyMap() {
   geoStopped = true
   stopWatch()
+  if (map) {
+    map.off('zoomend', updateMarkersForZoom)
+  }
   if (fitDebounce) {
     clearTimeout(fitDebounce)
     fitDebounce = null
