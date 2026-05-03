@@ -56,39 +56,55 @@ function detectSupport() {
 }
 
 /**
- * Get compass heading from DeviceOrientationEvent.
- * Handles differences between iOS (webkitCompassHeading) and Android (alpha).
+ * Screen / viewport twist in degrees (same idea as deprecated `window.orientation`).
+ * Used so map bearing stays correct in landscape, upside-down, etc.
+ * @returns {number}
+ */
+function getViewportOrientationDegrees() {
+  if (typeof window === 'undefined') return 0
+  const o = window.orientation
+  if (typeof o === 'number' && !Number.isNaN(o)) return o
+  const a = window.screen?.orientation?.angle
+  if (typeof a === 'number' && !Number.isNaN(a)) return a
+  return 0
+}
+
+/**
+ * Map bearing (degrees, 0–360) for “heading up” — aligned with leaflet-rotate’s
+ * built-in `L.Map.CompassBearing` math so rotation matches device + screen layout.
+ *
+ * @see node_modules/leaflet-rotate/src/map/handler/CompassBearing.js
  * @param {DeviceOrientationEvent} event
  * @returns {number | null}
  */
-function getCompassHeading(event) {
-  let compassHeading = null
-
-  if (
+function getMapBearingFromDeviceOrientation(event) {
+  const hasWebkit =
     'webkitCompassHeading' in event &&
     typeof event.webkitCompassHeading === 'number' &&
     Number.isFinite(event.webkitCompassHeading)
-  ) {
-    compassHeading = event.webkitCompassHeading
 
-    if (typeof window !== 'undefined' && 'orientation' in window) {
-      const screenOrientation = Number(window.orientation) || 0
-      compassHeading = (compassHeading + screenOrientation + 360) % 360
-    }
-  } else if (
-    event.absolute === true &&
-    typeof event.alpha === 'number' &&
-    Number.isFinite(event.alpha)
-  ) {
-    compassHeading = (360 - event.alpha) % 360
-  } else if (
-    typeof event.alpha === 'number' &&
-    Number.isFinite(event.alpha)
-  ) {
-    compassHeading = (360 - event.alpha) % 360
+  let angle = null
+  if (hasWebkit) {
+    angle = Number(event.webkitCompassHeading)
+  } else if (typeof event.alpha === 'number' && Number.isFinite(event.alpha)) {
+    angle = Number(event.alpha)
   }
 
-  return compassHeading
+  if (angle == null) return null
+
+  // Safari / WebKit: same rule as leaflet-rotate CompassBearing
+  if (!event.absolute && hasWebkit) {
+    angle = 360 - angle
+  }
+
+  let deviceOrientation = 0
+  if (!event.absolute) {
+    deviceOrientation = getViewportOrientationDegrees()
+  }
+
+  let bearing = angle - deviceOrientation
+  bearing = ((bearing % 360) + 360) % 360
+  return bearing
 }
 
 /**
@@ -110,16 +126,18 @@ function applySmoothHeading(newHeading) {
 
 /** @type {((event: DeviceOrientationEvent) => void) | null} */
 let orientationHandler = null
+/** @type {string | null} */
+let orientationEventName = null
 
 /**
  * Handle device orientation events.
  * @param {DeviceOrientationEvent} event
  */
 function handleOrientation(event) {
-  const compassHeading = getCompassHeading(event)
-  if (compassHeading !== null) {
-    heading.value = compassHeading
-    applySmoothHeading(compassHeading)
+  const bearing = getMapBearingFromDeviceOrientation(event)
+  if (bearing !== null) {
+    heading.value = bearing
+    applySmoothHeading(bearing)
     errorMessage.value = null
   }
 }
@@ -182,15 +200,12 @@ async function startTracking() {
   }
 
   orientationHandler = handleOrientation
-  window.addEventListener('deviceorientation', orientationHandler, true)
-
-  if ('ondeviceorientationabsolute' in window) {
-    window.addEventListener(
-      'deviceorientationabsolute',
-      /** @type {EventListener} */ (orientationHandler),
-      true,
-    )
-  }
+  // One event source only (same as leaflet-rotate CompassBearing) — avoids double
+  // updates and mixed alpha vs absolute conventions.
+  const useAbsolute = 'ondeviceorientationabsolute' in window
+  const evt = useAbsolute ? 'deviceorientationabsolute' : 'deviceorientation'
+  window.addEventListener(evt, orientationHandler, true)
+  orientationEventName = evt
 
   isTracking.value = true
   return true
@@ -202,16 +217,12 @@ async function startTracking() {
 function stopTracking() {
   if (!isTracking.value || !orientationHandler) return
 
-  window.removeEventListener('deviceorientation', orientationHandler, true)
-  if ('ondeviceorientationabsolute' in window) {
-    window.removeEventListener(
-      'deviceorientationabsolute',
-      /** @type {EventListener} */ (orientationHandler),
-      true,
-    )
+  if (orientationEventName) {
+    window.removeEventListener(orientationEventName, orientationHandler, true)
   }
 
   orientationHandler = null
+  orientationEventName = null
   isTracking.value = false
   heading.value = null
   smoothHeading.value = null
