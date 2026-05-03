@@ -44,6 +44,8 @@ const draftWaypoints = ref([])
 const draftName = ref('')
 /** @type {import('vue').Ref<LatLng[]>} */
 const previewPolyline = ref([])
+/** Encoded polyline string from preview (for passing to create) */
+const previewPolylineEncoded = ref('')
 const previewSource = ref('')
 const previewBusy = ref(false)
 const createBusy = ref(false)
@@ -351,6 +353,7 @@ function schedulePreview(pts) {
 async function runPreview(pts) {
   if (pts.length < 2) {
     previewPolyline.value = []
+    previewPolylineEncoded.value = ''
     previewSource.value = ''
     return
   }
@@ -362,10 +365,17 @@ async function runPreview(pts) {
     const r = await postTrafficMonitoredRoutePreview({ pathPoints: pts })
     if (r && typeof r === 'object' && r.ok === true && r.preview) {
       previewPolyline.value = polylineFromPreview(r.preview)
+      // Store encoded polyline string for passing to create endpoint
+      const prev = r.preview
+      previewPolylineEncoded.value =
+        prev && typeof prev === 'object' && typeof prev.polyline === 'string'
+          ? prev.polyline
+          : ''
       previewSource.value =
         typeof r.previewSource === 'string' ? r.previewSource : 'here-routing'
     } else {
       previewPolyline.value = []
+      previewPolylineEncoded.value = ''
       previewSource.value = ''
       if (r && typeof r === 'object' && r.ok === false && typeof r.error === 'string') {
         error.value = r.error
@@ -373,6 +383,7 @@ async function runPreview(pts) {
     }
   } catch (e) {
     previewPolyline.value = []
+    previewPolylineEncoded.value = ''
     previewSource.value = ''
     error.value = e instanceof Error ? e.message : 'Preview failed'
   } finally {
@@ -447,11 +458,13 @@ function cancelCreate() {
   mode.value = 'list'
   draftWaypoints.value = []
   previewPolyline.value = []
+  previewPolylineEncoded.value = ''
 }
 
 function clearDraftPoints() {
   draftWaypoints.value = []
   previewPolyline.value = []
+  previewPolylineEncoded.value = ''
   previewSource.value = ''
 }
 
@@ -472,7 +485,15 @@ async function submitCreate() {
   createBusy.value = true
   error.value = ''
   try {
-    const r = await postTrafficMonitoredRouteCreate({ name, pathPoints: pts })
+    // Send the snapped preview path if available (avoids re-routing on server)
+    const payload = {
+      name,
+      pathPoints: pts,
+      // Include the routed/snapped path from preview so server doesn't re-route
+      routedPathPoints: previewPolyline.value.length >= 2 ? previewPolyline.value : undefined,
+      polyline: previewPolylineEncoded.value || undefined,
+    }
+    const r = await postTrafficMonitoredRouteCreate(payload)
     if (r && typeof r === 'object' && r.ok === true) {
       cancelCreate()
       await loadRoutes()
@@ -589,9 +610,9 @@ async function removeSelected() {
               autocomplete="off"
             />
             <p class="corridor-hint">
-              Click along the road to draw your exact route. Traffic stats are calculated for roads within 200m of your drawn path.
-              <span v-if="previewPolyline.length" class="corridor-inline-status">✓ Path ready</span>
-              <span v-if="previewBusy" class="corridor-inline-status">Checking…</span>
+              Click waypoints on the map. The route auto-snaps to roads via HERE Routing.
+              <span v-if="previewPolyline.length" class="corridor-inline-status">✓ Route snapped</span>
+              <span v-if="previewBusy" class="corridor-inline-status">Routing…</span>
             </p>
             <div class="corridor-create-actions">
               <button type="button" class="corridor-btn tap" :disabled="createBusy" @click="clearDraftPoints">

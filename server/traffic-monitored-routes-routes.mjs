@@ -7,6 +7,7 @@ import {
 import {
   encodeFlexiblePolyline,
   getTrafficFlowCorridor,
+  getRoutedPolyline,
   parseTrafficFlowResponse,
   formatHereApiError,
   sanitizeHereApiKey,
@@ -79,12 +80,13 @@ function routeNameFromBody(body) {
 /**
  * Normalize path points to { lat, lng } format.
  * @param {unknown} body
+ * @param {string} [fieldName='pathPoints']
  * @returns {Array<{ lat: number, lng: number }>}
  */
-function pathPointsFromBody(body) {
+function pathPointsFromBody(body, fieldName = 'pathPoints') {
   const b = body && typeof body === 'object' && !Array.isArray(body) ? body : {}
   const o = /** @type {Record<string, unknown>} */ (b)
-  const pp = o.pathPoints
+  const pp = o[fieldName]
   if (!Array.isArray(pp)) return []
 
   return pp
@@ -100,10 +102,21 @@ function pathPointsFromBody(body) {
 }
 
 /**
+ * Get polyline string from body if provided.
+ * @param {unknown} body
+ * @returns {string}
+ */
+function polylineFromBody(body) {
+  const b = body && typeof body === 'object' && !Array.isArray(body) ? body : {}
+  const o = /** @type {Record<string, unknown>} */ (b)
+  return typeof o.polyline === 'string' ? o.polyline.trim() : ''
+}
+
+/**
  * @param {import('fastify').FastifyInstance} app
  */
 export function registerTrafficMonitoredRoutes(app) {
-  // Preview: encode drawn path and get traffic stats (NO routing - uses exact drawn path)
+  // Preview: route waypoints via HERE Routing API (snap-to-road)
   app.post('/api/traffic/monitored-routes/preview', async (req, reply) => {
     const key = await resolveHereKeyForRequest(req)
     if (!key) {
@@ -120,48 +133,32 @@ export function registerTrafficMonitoredRoutes(app) {
         .send({ ok: false, error: 'At least two path points are required.' })
     }
 
-    // Encode the user's drawn path directly (no routing)
-    const polyline = encodeFlexiblePolyline(pathPoints)
-    if (!polyline) {
-      return reply
-        .code(400)
-        .send({ ok: false, error: 'Could not encode path points.' })
-    }
+    // Route waypoints via HERE Routing API to get road-snapped path
+    const routeResult = await getRoutedPolyline(key, pathPoints)
 
-    // Get traffic flow along the drawn corridor (larger radius to capture nearby roads)
-    const flowResult = await getTrafficFlowCorridor(key, polyline, 200)
-
-    if (!flowResult.ok) {
+    if (!routeResult.ok || !routeResult.points || routeResult.points.length < 2) {
       return reply
-        .code(flowResult.status >= 400 && flowResult.status < 600 ? flowResult.status : 502)
+        .code(routeResult.status >= 400 && routeResult.status < 600 ? routeResult.status : 502)
         .send({
           ok: false,
-          error: formatHereApiError(flowResult.data, flowResult.status),
-          here: flowResult.data,
+          error: formatHereApiError(routeResult.data, routeResult.status),
+          here: routeResult.data,
         })
     }
-
-    const parsed = parseTrafficFlowResponse(flowResult.data)
 
     return {
       ok: true,
       preview: {
-        routedPathPoints: pathPoints,
-        polyline,
-        trafficStats: {
-          totalLengthMeters: parsed.totalLengthMeters,
-          avgSpeedMph: parsed.avgSpeedMps * 2.237,
-          avgFreeFlowMph: parsed.avgFreeFlowMps * 2.237,
-          avgJamFactor: parsed.avgJamFactor,
-          travelTimeSeconds: parsed.travelTimeSeconds,
-          delaySeconds: parsed.delaySeconds,
-        },
+        routedPathPoints: routeResult.points,
+        polyline: routeResult.polyline,
       },
-      previewSource: 'drawn-path',
+      previewSource: 'here-routing',
     }
   })
 
-  // Create: store route locally using exact drawn path (no routing)
+  // Create: store route using the client-provided snapped path (from preview)
+  // If client provides polyline + routedPathPoints, use those directly (no re-routing)
+  // Otherwise fall back to routing the waypoints
   app.post('/api/traffic/monitored-routes', async (req, reply) => {
     const key = await resolveHereKeyForRequest(req)
     if (!key) {
@@ -172,27 +169,50 @@ export function registerTrafficMonitoredRoutes(app) {
       })
     }
     const name = routeNameFromBody(req.body) || 'Monitored route'
-    const pathPoints = pathPointsFromBody(req.body)
-    if (pathPoints.length < 2) {
-      return reply
-        .code(400)
-        .send({ ok: false, error: 'At least two path points are required.' })
+    
+    // Check if client sent the already-snapped path from preview
+    const clientPolyline = polylineFromBody(req.body)
+    const routedPathPoints = pathPointsFromBody(req.body, 'routedPathPoints')
+    
+    let finalPolyline = ''
+    let finalPathPoints = []
+    
+    if (clientPolyline && routedPathPoints.length >= 2) {
+      // Use the client-provided snapped path (from preview) - NO re-routing
+      finalPolyline = clientPolyline
+      finalPathPoints = routedPathPoints
+    } else {
+      // Fallback: route the waypoints if no preview data provided
+      const waypoints = pathPointsFromBody(req.body)
+      if (waypoints.length < 2) {
+        return reply
+          .code(400)
+          .send({ ok: false, error: 'At least two path points are required.' })
+      }
+      
+      const routeResult = await getRoutedPolyline(key, waypoints)
+      if (routeResult.ok && routeResult.points && routeResult.points.length >= 2) {
+        finalPolyline = routeResult.polyline || encodeFlexiblePolyline(routeResult.points)
+        finalPathPoints = routeResult.points
+      } else {
+        // Last resort: use raw waypoints
+        finalPolyline = encodeFlexiblePolyline(waypoints)
+        finalPathPoints = waypoints
+      }
     }
 
-    // Encode the user's drawn path directly (no routing)
-    const polyline = encodeFlexiblePolyline(pathPoints)
-    if (!polyline) {
+    if (!finalPolyline || finalPathPoints.length < 2) {
       return reply
         .code(400)
-        .send({ ok: false, error: 'Could not encode path points.' })
+        .send({ ok: false, error: 'Could not create route polyline.' })
     }
 
     const localId = randomLocalId()
     await appendMonitoredRoute({
       localId,
       name,
-      pathPoints,
-      polyline,
+      pathPoints: finalPathPoints,
+      polyline: finalPolyline,
       createdAt: Date.now(),
     })
 
@@ -201,8 +221,8 @@ export function registerTrafficMonitoredRoutes(app) {
       route: {
         localId,
         name,
-        pathPoints,
-        polyline,
+        pathPoints: finalPathPoints,
+        polyline: finalPolyline,
       },
     }
   })
