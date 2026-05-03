@@ -69,6 +69,7 @@ import {
   hasTripOriginAndDestination,
   buildEnhancedTrailerCards,
   buildDollySection,
+  formatTripEquipmentDispatchAppendix,
 } from '../utils/tripDetailsDisplay.js'
 import {
   formatLinehaulLocationForDisplay,
@@ -158,21 +159,37 @@ const trailerGpsData = ref(null)
 
 const instructions = ref('')
 
-/** Merged: Settings assignment text + any instruction-like fields from Linehaul trip body */
+/** Merged: Settings assignment + FedEx instruction fields + equipment/seal summary (survives DSPCH when API clears text). */
 const mergedDispatchInstructions = computed(() => {
-  const fromApi = extractTripDispatchInstructions(linehaulTripsBody.value)
+  const body = linehaulTripsBody.value
+  const fromApi = extractTripDispatchInstructions(body)
   const fromAssignment = String(instructions.value ?? '').trim()
-  if (fromApi && fromAssignment) return `${fromAssignment}\n\n${fromApi}`
-  return fromApi || fromAssignment
+  const equip = formatTripEquipmentDispatchAppendix(body)
+  let core = ''
+  if (fromApi && fromAssignment) core = `${fromAssignment}\n\n${fromApi}`
+  else core = fromApi || fromAssignment
+  if (equip) {
+    if (core.trim()) return `${core.trim()}\n\n${equip}`
+    return equip
+  }
+  return core
 })
 
 /** Same merge rule for the active Dispatch carousel slide (current vs pre-plan). */
 const mergedDispatchInstructionsForSlide = computed(() => {
   const fromAssignment = String(instructions.value ?? '').trim()
   if (dispatchSlideIndex.value === 1 && prePlanTripSnapshot.value) {
-    const fromApi = extractTripDispatchInstructions(prePlanTripSnapshot.value)
-    if (fromApi && fromAssignment) return `${fromAssignment}\n\n${fromApi}`
-    return fromApi || fromAssignment
+    const body = prePlanTripSnapshot.value
+    const fromApi = extractTripDispatchInstructions(body)
+    const equip = formatTripEquipmentDispatchAppendix(body)
+    let core = ''
+    if (fromApi && fromAssignment) core = `${fromAssignment}\n\n${fromApi}`
+    else core = fromApi || fromAssignment
+    if (equip) {
+      if (core.trim()) return `${core.trim()}\n\n${equip}`
+      return equip
+    }
+    return core
   }
   return mergedDispatchInstructions.value
 })
