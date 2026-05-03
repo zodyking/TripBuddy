@@ -592,7 +592,7 @@ watch(tomtomKeyEffective, () => {
     <div class="corridor-map-stage">
       <div ref="containerRef" class="corridor-map-el" />
       <p v-if="editMode" class="corridor-map-foot corridor-map-foot--edit" role="note"
-      >Tap map to add points · drag to adjust</p>
+      >Click along road to trace route · drag to adjust</p>
       <p v-else-if="!hasTomtomTraffic" class="corridor-map-foot" role="note">TomTom key in Settings for traffic tiles</p>
       <p v-else-if="activeBaseLayer === 'satellite' && trafficOn" class="corridor-map-foot" role="note">Traffic hidden on satellite</p>
       <p v-if="geoPending" class="corridor-map-hint">Location…</p>

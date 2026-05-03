@@ -589,9 +589,9 @@ async function removeSelected() {
               autocomplete="off"
             />
             <p class="corridor-hint">
-              After two points, the app shows a <strong>road-snapped</strong> path using HERE Routing API.
-              <span v-if="previewPolyline.length" class="corridor-inline-status">Preview: HERE Routing</span>
-              <span v-if="previewBusy" class="corridor-inline-status">Updating…</span>
+              Click along the road to draw your exact route. Traffic stats are calculated for roads within 200m of your drawn path.
+              <span v-if="previewPolyline.length" class="corridor-inline-status">✓ Path ready</span>
+              <span v-if="previewBusy" class="corridor-inline-status">Checking…</span>
             </p>
             <div class="corridor-create-actions">
               <button type="button" class="corridor-btn tap" :disabled="createBusy" @click="clearDraftPoints">
