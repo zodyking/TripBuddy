@@ -1,6 +1,6 @@
 <script setup>
 import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue'
-import { fetchDirectory, patchDirectoryPhone } from '../api.js'
+import { fetchDirectory, patchDirectoryPhone, saveLocationToDirectory } from '../api.js'
 import DirectoryMap from '../components/DirectoryMap.vue'
 import { useMapVehicleId } from '../composables/useMapVehicleId.js'
 
@@ -29,6 +29,13 @@ const phoneEditingId = ref('')
 /** Brief “Copied” feedback after copying phone (location id). */
 const phoneCopiedForId = ref('')
 let phoneCopiedTimer = 0
+
+/** Manual add location modal state */
+const addLocationOpen = ref(false)
+const addLocationId = ref('')
+const addLocationPhone = ref('')
+const addLocationSaving = ref(false)
+const addLocationError = ref('')
 
 /**
  * Sort directory entries by numeric location id when possible (312 before 3117).
@@ -225,6 +232,65 @@ async function savePhoneForLocation(loc) {
 
 function digitsOnlyPhone(phone) {
   return String(phone ?? '').replace(/\D/g, '')
+}
+
+function openAddLocationModal() {
+  addLocationId.value = ''
+  addLocationPhone.value = ''
+  addLocationError.value = ''
+  addLocationOpen.value = true
+}
+
+function closeAddLocationModal() {
+  addLocationOpen.value = false
+  addLocationId.value = ''
+  addLocationPhone.value = ''
+  addLocationError.value = ''
+}
+
+async function submitAddLocation() {
+  const rawId = addLocationId.value.trim()
+  if (!rawId) {
+    addLocationError.value = 'Location ID is required'
+    return
+  }
+  if (locations.value.some((l) => l.locationId === rawId)) {
+    addLocationError.value = 'Location ID already exists'
+    return
+  }
+  addLocationSaving.value = true
+  addLocationError.value = ''
+  try {
+    await saveLocationToDirectory({
+      locationId: rawId,
+      locationName: '',
+      abbreviation: '',
+      address: '',
+      phone: addLocationPhone.value.trim(),
+      latitude: null,
+      longitude: null,
+      timeZone: '',
+    })
+    locations.value = [
+      ...locations.value,
+      {
+        locationId: rawId,
+        locationName: '',
+        abbreviation: '',
+        address: '',
+        phone: addLocationPhone.value.trim(),
+        latitude: null,
+        longitude: null,
+        timeZone: '',
+        lastUpdated: new Date().toISOString(),
+      },
+    ].sort(compareLocationIdNumeric)
+    closeAddLocationModal()
+  } catch (e) {
+    addLocationError.value = e instanceof Error ? e.message : String(e)
+  } finally {
+    addLocationSaving.value = false
+  }
 }
 
 /**
@@ -506,16 +572,26 @@ onUnmounted(() => {
             <h1 class="directory-title">Directory</h1>
             <p class="directory-subtitle">Updates automatically</p>
           </div>
-          <button
-            v-if="locations.length"
-            type="button"
-            class="directory-vcard-btn tap"
-            :disabled="!hasVcardPhones || loading"
-            title="Download one .vcf with all location numbers"
-            @click="downloadDirectoryVcard"
-          >
-            Download contacts
-          </button>
+          <div class="directory-header-actions">
+            <button
+              type="button"
+              class="directory-add-btn tap"
+              title="Manually add a location by ID and phone"
+              @click="openAddLocationModal"
+            >
+              + Add
+            </button>
+            <button
+              v-if="locations.length"
+              type="button"
+              class="directory-vcard-btn tap"
+              :disabled="!hasVcardPhones || loading"
+              title="Download one .vcf with all location numbers"
+              @click="downloadDirectoryVcard"
+            >
+              Download contacts
+            </button>
+          </div>
         </header>
     <div class="search-bar">
       <svg
@@ -756,6 +832,69 @@ onUnmounted(() => {
     </p>
       </div>
     </div>
+
+    <!-- Add Location Modal -->
+    <Teleport to="body">
+      <div
+        v-if="addLocationOpen"
+        class="add-location-overlay"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="add-location-title"
+        @click.self="closeAddLocationModal"
+      >
+        <div class="add-location-modal">
+          <h2 id="add-location-title" class="add-location-heading">Add Location</h2>
+          <p class="add-location-desc">
+            Enter a location ID and optional phone. Details will fill in automatically when
+            you route to this location.
+          </p>
+          <form class="add-location-form" @submit.prevent="submitAddLocation">
+            <div class="add-location-field">
+              <label for="add-loc-id">Location ID <span class="required">*</span></label>
+              <input
+                id="add-loc-id"
+                v-model="addLocationId"
+                type="text"
+                placeholder="e.g. 89"
+                autocomplete="off"
+                required
+              />
+            </div>
+            <div class="add-location-field">
+              <label for="add-loc-phone">Phone</label>
+              <input
+                id="add-loc-phone"
+                v-model="addLocationPhone"
+                type="tel"
+                placeholder="e.g. (555) 123-4567"
+                autocomplete="off"
+              />
+            </div>
+            <p v-if="addLocationError" class="add-location-error" role="alert">
+              {{ addLocationError }}
+            </p>
+            <div class="add-location-actions">
+              <button
+                type="button"
+                class="add-location-cancel tap"
+                :disabled="addLocationSaving"
+                @click="closeAddLocationModal"
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                class="add-location-submit tap"
+                :disabled="addLocationSaving || !addLocationId.trim()"
+              >
+                {{ addLocationSaving ? 'Adding...' : 'Add' }}
+              </button>
+            </div>
+          </form>
+        </div>
+      </div>
+    </Teleport>
   </div>
 </template>
 
@@ -872,6 +1011,159 @@ onUnmounted(() => {
 
 .directory-vcard-btn:disabled {
   opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.directory-header-actions {
+  display: flex;
+  gap: var(--space-2, 0.5rem);
+  flex-shrink: 0;
+  align-self: flex-start;
+}
+
+.directory-add-btn {
+  padding: var(--space-2, 0.5rem) var(--space-3, 0.75rem);
+  font-size: var(--text-xs, 0.6875rem);
+  font-weight: var(--weight-semibold, 600);
+  text-transform: uppercase;
+  letter-spacing: var(--tracking-wide, 0.03em);
+  color: var(--color-text-primary, #f4f4f8);
+  background: rgba(34, 197, 94, 0.25);
+  border: 1px solid rgba(34, 197, 94, 0.45);
+  border-radius: var(--radius-md, 0.5rem);
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.directory-add-btn:hover {
+  background: rgba(34, 197, 94, 0.35);
+  border-color: rgba(34, 197, 94, 0.65);
+}
+
+/* Add Location Modal */
+.add-location-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-4, 1rem);
+  background: rgba(0, 0, 0, 0.7);
+  backdrop-filter: blur(4px);
+}
+
+.add-location-modal {
+  width: 100%;
+  max-width: 22rem;
+  padding: var(--space-5, 1.25rem);
+  background: var(--color-surface, #1c1c24);
+  border: 1px solid var(--color-border, rgba(255, 255, 255, 0.08));
+  border-radius: var(--radius-lg, 0.75rem);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+}
+
+.add-location-heading {
+  margin: 0 0 var(--space-2, 0.5rem);
+  font-size: var(--text-lg, 1.125rem);
+  font-weight: var(--weight-bold, 700);
+  color: var(--color-text-primary, #f4f4f8);
+}
+
+.add-location-desc {
+  margin: 0 0 var(--space-4, 1rem);
+  font-size: var(--text-sm, 0.875rem);
+  color: var(--color-text-secondary, #9898a8);
+  line-height: 1.45;
+}
+
+.add-location-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3, 0.75rem);
+}
+
+.add-location-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1, 0.25rem);
+}
+
+.add-location-field label {
+  font-size: var(--text-sm, 0.875rem);
+  font-weight: var(--weight-medium, 500);
+  color: var(--color-text-secondary, #9898a8);
+}
+
+.add-location-field label .required {
+  color: var(--color-error, #f87171);
+}
+
+.add-location-field input {
+  padding: var(--space-2, 0.5rem) var(--space-3, 0.75rem);
+  font-size: var(--text-base, 1rem);
+  color: var(--color-text-primary, #f4f4f8);
+  background: var(--color-surface-raised, #22222c);
+  border: 1px solid var(--color-border, rgba(255, 255, 255, 0.08));
+  border-radius: var(--radius-md, 0.5rem);
+  outline: none;
+  transition: border-color 0.15s ease;
+}
+
+.add-location-field input:focus {
+  border-color: rgba(123, 77, 181, 0.6);
+}
+
+.add-location-field input::placeholder {
+  color: var(--color-text-tertiary, #6e6e7e);
+}
+
+.add-location-error {
+  margin: 0;
+  font-size: var(--text-sm, 0.875rem);
+  color: var(--color-error, #f87171);
+}
+
+.add-location-actions {
+  display: flex;
+  gap: var(--space-3, 0.75rem);
+  margin-top: var(--space-2, 0.5rem);
+}
+
+.add-location-cancel,
+.add-location-submit {
+  flex: 1;
+  padding: var(--space-2, 0.5rem) var(--space-3, 0.75rem);
+  font-size: var(--text-sm, 0.875rem);
+  font-weight: var(--weight-semibold, 600);
+  border-radius: var(--radius-md, 0.5rem);
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.add-location-cancel {
+  color: var(--color-text-secondary, #9898a8);
+  background: transparent;
+  border: 1px solid var(--color-border, rgba(255, 255, 255, 0.12));
+}
+
+.add-location-cancel:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.add-location-submit {
+  color: #fff;
+  background: rgba(34, 197, 94, 0.5);
+  border: 1px solid rgba(34, 197, 94, 0.65);
+}
+
+.add-location-submit:hover:not(:disabled) {
+  background: rgba(34, 197, 94, 0.65);
+}
+
+.add-location-submit:disabled,
+.add-location-cancel:disabled {
+  opacity: 0.5;
   cursor: not-allowed;
 }
 

@@ -1171,6 +1171,10 @@ function onHistoryTripSummaryPointerDown(e, ev) {
   if (ev.pointerType === 'mouse' && ev.button !== 0) return
   if (!/^\d+$/.test(e.dailyTripLegSequence)) return
   if (isHistoryRowActiveOngoingTrip(e)) return
+  const t = ev.target
+  if (t instanceof Element && t.closest?.('button, a, input, select, textarea, .history-outcome-wrap')) {
+    return
+  }
   clearHistoryHeaderLongPressTimer()
   historyHeaderLongPressStartX = ev.clientX
   historyHeaderLongPressStartY = ev.clientY
