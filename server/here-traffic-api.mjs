@@ -14,6 +14,10 @@ const HERE_ROUTING_BASE = 'https://router.hereapi.com/v8'
  * Based on HERE's flexible-polyline algorithm.
  * @see https://github.com/heremaps/flexible-polyline
  * 
+ * Header format (version 1):
+ * - Byte 1: (precision << 3) | (thirdDimType << 1) | thirdDimFlag
+ * - If thirdDimFlag=1, Byte 2: thirdDimPrecision
+ * 
  * @param {Array<{ lat: number, lng: number } | { latitude: number, longitude: number }>} points
  * @param {number} [precision=5] - Coordinate precision (5 = ~1m accuracy)
  * @returns {string} Encoded flexible polyline
@@ -53,8 +57,10 @@ export function encodeFlexiblePolyline(points, precision = 5) {
     return encodeUnsignedVarint(unsigned)
   }
 
-  // Header: precision and 2D (no elevation)
-  let result = ENCODING_TABLE[(precision << 1) | 0]
+  // Header: (precision << 3) | (thirdDimType << 1) | thirdDimFlag
+  // For 2D polyline: thirdDimType=0, thirdDimFlag=0
+  const headerValue = (precision << 3) | 0
+  let result = encodeUnsignedVarint(headerValue)
 
   let lastLat = 0
   let lastLng = 0
@@ -75,6 +81,12 @@ export function encodeFlexiblePolyline(points, precision = 5) {
 
 /**
  * Decode HERE Flexible Polyline to coordinates.
+ * @see https://github.com/heremaps/flexible-polyline
+ * 
+ * Header format (version 1):
+ * - Byte 1: (precision << 3) | (thirdDimType << 1) | thirdDimFlag
+ * - If thirdDimFlag=1, Byte 2: thirdDimPrecision
+ * 
  * @param {string} encoded
  * @returns {Array<{ lat: number, lng: number }>}
  */
@@ -108,18 +120,30 @@ export function decodeFlexiblePolyline(encoded) {
     return (unsigned & 1) ? ~(unsigned >>> 1) : (unsigned >>> 1)
   }
 
-  // Decode header
+  // Decode header: (precision << 3) | (thirdDimType << 1) | thirdDimFlag
   const header = decodeUnsignedVarint()
-  const precision = header >> 1
+  const thirdDimFlag = header & 1
+  const thirdDimType = (header >> 1) & 0x07
+  const precision = (header >> 4) & 0x0F
   const multiplier = Math.pow(10, precision)
+
+  // If 3D, decode third dimension precision (skip it for now)
+  let thirdDimPrecision = 0
+  if (thirdDimFlag) {
+    thirdDimPrecision = decodeUnsignedVarint()
+  }
 
   const points = []
   let lat = 0
   let lng = 0
+  let thirdDim = 0
 
   while (index < encoded.length) {
     lat += decodeSignedVarint()
     lng += decodeSignedVarint()
+    if (thirdDimFlag && thirdDimType !== 0) {
+      thirdDim += decodeSignedVarint()
+    }
     points.push({ lat: lat / multiplier, lng: lng / multiplier })
   }
 

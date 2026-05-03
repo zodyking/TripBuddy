@@ -258,6 +258,18 @@ export async function patchTripHistoryOutcome(p) {
   })
 }
 
+/**
+ * Delete a trip from the history ledger by its dailyTripLegSequence.
+ * @param {{ dailyTripLegSequence: string }} p
+ */
+export async function deleteTripHistoryEntry(p) {
+  return putAssignment({
+    deleteTripHistoryEntry: {
+      dailyTripLegSequence: String(p.dailyTripLegSequence),
+    },
+  })
+}
+
 export async function getInAppNotifications() {
   const r = await apiFetch('/api/notifications')
   return handleJson(r)

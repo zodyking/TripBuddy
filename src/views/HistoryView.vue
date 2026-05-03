@@ -1,6 +1,6 @@
 <script setup>
 import { ref, computed, watch, onMounted, onUnmounted, nextTick, Teleport } from 'vue'
-import { getAssignment, getCredentials, patchTripHistoryOutcome } from '../api.js'
+import { getAssignment, getCredentials, patchTripHistoryOutcome, deleteTripHistoryEntry } from '../api.js'
 import {
   tripPhase,
   linehaulTripsBody,
@@ -85,6 +85,13 @@ const outcomeMenuOpts = [
   { k: 'removed', t: 'Removed' },
 ]
 
+/** Delete confirmation modal state */
+const deleteTarget = ref(/** @type {LedgerEntry | null} */ (null))
+const deleteUsernameInput = ref('')
+const deleteError = ref('')
+const deleteBusy = ref(false)
+const storedUsername = ref('')
+
 /** Leg # FedEx reports as active on Home (same as History row). */
 const activeTripLegSeqForHistory = computed(() => {
   // Use stableTripState first (more reliable), fallback to raw body
@@ -168,6 +175,9 @@ function stateMilesLabel(row) {
  * @returns {number | null}
  */
 function tripPaidMiles(e) {
+  // Only include delivered trips in totals (not rejected/removed/current)
+  const outcome = historyOutcomeUiSelectKey(e)
+  if (outcome !== 'delivered') return null
   const mb = mileageBlock(e)
   if (!mb?.total) return null
   const n = parseFloat(String(mb.total).replace(/,/g, '').trim())
@@ -201,13 +211,13 @@ function formatShiftDayHeading(shiftDayKey) {
 }
 
 /**
- * One-line mileage for headers (paid mi sum and trip count).
+ * One-line mileage for headers (paid mi sum and delivered trip count).
  * @param {number} sum
- * @param {number} totalTrips
+ * @param {number} deliveredTrips - only trips marked delivered
  */
-function mileageHeaderLine(sum, totalTrips) {
+function mileageHeaderLine(sum, deliveredTrips) {
   const s = Number.isFinite(sum) ? sum : 0
-  const n = Number.isFinite(totalTrips) ? Math.max(0, Math.floor(totalTrips)) : 0
+  const n = Number.isFinite(deliveredTrips) ? Math.max(0, Math.floor(deliveredTrips)) : 0
   return `${formatMilesSum(s)} mi · ${n} ${n === 1 ? 'trip' : 'trips'}`
 }
 
@@ -422,6 +432,7 @@ async function load() {
       shiftStartMins: ssm,
       shiftEndMins: sem,
     }
+    storedUsername.value = typeof c.username === 'string' ? c.username.trim() : ''
   } catch {
     /* use defaults */
   }
@@ -1148,11 +1159,58 @@ function onRowDoubleClick(e) {
   ) {
     lastDblT = 0
     lastDblSeq = ''
-    void cycleOutcome(e)
+    openDeleteModal(e)
     return
   }
   lastDblT = now
   lastDblSeq = e.dailyTripLegSequence
+}
+
+/**
+ * Open the delete confirmation modal for a trip.
+ * @param {LedgerEntry} e
+ */
+function openDeleteModal(e) {
+  deleteTarget.value = e
+  deleteUsernameInput.value = ''
+  deleteError.value = ''
+  deleteBusy.value = false
+}
+
+function closeDeleteModal() {
+  deleteTarget.value = null
+  deleteUsernameInput.value = ''
+  deleteError.value = ''
+  deleteBusy.value = false
+}
+
+async function confirmDeleteTrip() {
+  if (!deleteTarget.value) return
+  const inputVal = deleteUsernameInput.value.trim().toLowerCase()
+  const storedVal = storedUsername.value.trim().toLowerCase()
+  if (!storedVal) {
+    deleteError.value = 'No username found in Settings. Cannot verify.'
+    return
+  }
+  if (inputVal !== storedVal) {
+    deleteError.value = 'Username does not match. Please enter your Driver ID from Settings.'
+    return
+  }
+  deleteBusy.value = true
+  deleteError.value = ''
+  try {
+    await deleteTripHistoryEntry({
+      dailyTripLegSequence: deleteTarget.value.dailyTripLegSequence,
+    })
+    entries.value = entries.value.filter(
+      (x) => x.dailyTripLegSequence !== deleteTarget.value?.dailyTripLegSequence,
+    )
+    closeDeleteModal()
+  } catch (err) {
+    deleteError.value = err instanceof Error ? err.message : 'Failed to delete trip'
+  } finally {
+    deleteBusy.value = false
+  }
 }
 
 /**
@@ -1341,7 +1399,7 @@ onUnmounted(() => {
                 <h3 class="history-ww-title">{{ wg.groupLabel }}</h3>
                 <div class="history-head-metrics">
                   <span class="history-mile-pill">{{
-                    mileageHeaderLine(wg.mileageSum, wg.tripCount)
+                    mileageHeaderLine(wg.mileageSum, wg.tripsWithMileage)
                   }}</span>
                 </div>
               </div>
@@ -1360,7 +1418,7 @@ onUnmounted(() => {
                     <h4 class="history-day-title">{{ dg.dayLabel }}</h4>
                     <div class="history-head-metrics">
                       <span class="history-mile-pill history-mile-pill--sm">{{
-                        mileageHeaderLine(dg.mileageSum, dg.tripCount)
+                        mileageHeaderLine(dg.mileageSum, dg.tripsWithMileage)
                       }}</span>
                     </div>
                   </div>
@@ -1690,6 +1748,59 @@ onUnmounted(() => {
           </button>
         </li>
       </ul>
+    </Teleport>
+
+    <Teleport to="body">
+      <div
+        v-if="deleteTarget"
+        class="delete-modal-overlay"
+        @click.self="closeDeleteModal"
+      >
+        <div class="delete-modal" role="dialog" aria-modal="true" aria-labelledby="delete-modal-title">
+          <h2 id="delete-modal-title" class="delete-modal-title">Delete Trip</h2>
+          <p class="delete-modal-desc">
+            Are you sure you want to delete this trip?
+          </p>
+          <p class="delete-modal-trip">
+            <strong>{{ str(deleteTarget.dispatchHeader?.origin) || '—' }}</strong>
+            →
+            <strong>{{ str(deleteTarget.dispatchHeader?.destination) || '—' }}</strong>
+            <span v-if="deleteTarget.dailyTripLegSequence" class="delete-modal-seq">
+              (Leg {{ deleteTarget.dailyTripLegSequence }})
+            </span>
+          </p>
+          <p class="delete-modal-warn">
+            To confirm, enter your Driver ID (username from Settings):
+          </p>
+          <input
+            v-model="deleteUsernameInput"
+            type="text"
+            class="delete-modal-input"
+            placeholder="Enter your Driver ID"
+            autocomplete="off"
+            @keyup.enter="confirmDeleteTrip"
+          />
+          <p v-if="deleteError" class="delete-modal-error">{{ deleteError }}</p>
+          <div class="delete-modal-actions">
+            <button
+              type="button"
+              class="delete-modal-btn delete-modal-btn--cancel"
+              :disabled="deleteBusy"
+              @click="closeDeleteModal"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              class="delete-modal-btn delete-modal-btn--confirm"
+              :disabled="deleteBusy || !deleteUsernameInput.trim()"
+              @click="confirmDeleteTrip"
+            >
+              {{ deleteBusy ? 'Deleting…' : 'Delete Trip' }}
+            </button>
+          </div>
+        </div>
+      </div>
     </Teleport>
   </div>
 </template>
@@ -3129,5 +3240,124 @@ onUnmounted(() => {
   color: var(--color-text-primary, #eaeaf0);
   text-align: right;
   word-break: break-word;
+}
+
+.delete-modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 10000;
+  background: rgba(0, 0, 0, 0.75);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+}
+
+.delete-modal {
+  background: #18181f;
+  border-radius: 14px;
+  border: 1px solid #3a3a48;
+  padding: 1.25rem 1.35rem;
+  max-width: 22rem;
+  width: 100%;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+}
+
+.delete-modal-title {
+  margin: 0 0 0.65rem;
+  font-size: 1rem;
+  font-weight: 700;
+  color: #f87171;
+}
+
+.delete-modal-desc {
+  margin: 0 0 0.5rem;
+  font-size: 0.82rem;
+  color: #c8c8d4;
+  line-height: 1.4;
+}
+
+.delete-modal-trip {
+  margin: 0 0 0.75rem;
+  font-size: 0.78rem;
+  color: #e4e4f0;
+  padding: 0.5rem;
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 8px;
+}
+
+.delete-modal-seq {
+  display: block;
+  margin-top: 0.25rem;
+  font-size: 0.68rem;
+  color: #8a8a9c;
+}
+
+.delete-modal-warn {
+  margin: 0 0 0.5rem;
+  font-size: 0.72rem;
+  color: #fbbf24;
+  line-height: 1.4;
+}
+
+.delete-modal-input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 0.55rem 0.65rem;
+  border-radius: 8px;
+  border: 1px solid #3a3a48;
+  background: #0e0e14;
+  color: #f4f4f8;
+  font-size: 0.85rem;
+  margin-bottom: 0.5rem;
+}
+
+.delete-modal-input:focus {
+  outline: none;
+  border-color: #a78bfa;
+}
+
+.delete-modal-error {
+  margin: 0 0 0.5rem;
+  font-size: 0.72rem;
+  color: #f87171;
+  line-height: 1.35;
+}
+
+.delete-modal-actions {
+  display: flex;
+  gap: 0.5rem;
+  justify-content: flex-end;
+  margin-top: 0.75rem;
+}
+
+.delete-modal-btn {
+  padding: 0.5rem 0.85rem;
+  border-radius: 8px;
+  border: 1px solid transparent;
+  font-size: 0.78rem;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.delete-modal-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.delete-modal-btn--cancel {
+  background: #2a2a34;
+  color: #c8c8d4;
+  border-color: #3a3a48;
+}
+
+.delete-modal-btn--confirm {
+  background: rgba(239, 68, 68, 0.2);
+  color: #fca5a5;
+  border-color: rgba(239, 68, 68, 0.4);
+}
+
+.delete-modal-btn--confirm:hover:not(:disabled) {
+  background: rgba(239, 68, 68, 0.3);
 }
 </style>

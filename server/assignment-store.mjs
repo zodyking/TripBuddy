@@ -764,6 +764,14 @@ export async function writeAssignment(body) {
         })
         .slice(0, MAX_TRIP_HISTORY)
     }
+  } else if (body.deleteTripHistoryEntry && typeof body.deleteTripHistoryEntry === 'object') {
+    const p = body.deleteTripHistoryEntry
+    const seq = String(p.dailyTripLegSequence ?? '').trim()
+    if (/^\d+$/.test(seq)) {
+      tripHistoryLedger = tripHistoryLedger.filter(
+        (x) => !x || String(x.dailyTripLegSequence) !== seq,
+      )
+    }
   }
 
   const odFill = applyPriorOdMileageBackfill(tripHistoryLedger)
