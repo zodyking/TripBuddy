@@ -159,28 +159,15 @@ const trailerGpsData = ref(null)
 
 const instructions = ref('')
 
+/** 0 = current trip, 1 = pre-plan trip — must be declared before instruction computeds that read it. */
+const dispatchSlideIndex = ref(0)
+
 /** Merged: Settings assignment + FedEx instruction fields + equipment/seal summary (survives DSPCH when API clears text). */
 const mergedDispatchInstructions = computed(() => {
-  const body = linehaulTripsBody.value
-  const fromApi = extractTripDispatchInstructions(body)
-  const fromAssignment = String(instructions.value ?? '').trim()
-  const equip = formatTripEquipmentDispatchAppendix(body)
-  let core = ''
-  if (fromApi && fromAssignment) core = `${fromAssignment}\n\n${fromApi}`
-  else core = fromApi || fromAssignment
-  if (equip) {
-    if (core.trim()) return `${core.trim()}\n\n${equip}`
-    return equip
-  }
-  return core
-})
-
-/** Same merge rule for the active Dispatch carousel slide (current vs pre-plan). */
-const mergedDispatchInstructionsForSlide = computed(() => {
-  const fromAssignment = String(instructions.value ?? '').trim()
-  if (dispatchSlideIndex.value === 1 && prePlanTripSnapshot.value) {
-    const body = prePlanTripSnapshot.value
+  try {
+    const body = linehaulTripsBody.value
     const fromApi = extractTripDispatchInstructions(body)
+    const fromAssignment = String(instructions.value ?? '').trim()
     const equip = formatTripEquipmentDispatchAppendix(body)
     let core = ''
     if (fromApi && fromAssignment) core = `${fromAssignment}\n\n${fromApi}`
@@ -190,8 +177,34 @@ const mergedDispatchInstructionsForSlide = computed(() => {
       return equip
     }
     return core
+  } catch (e) {
+    console.error('[mergedDispatchInstructions]', e)
+    return String(instructions.value ?? '').trim()
   }
-  return mergedDispatchInstructions.value
+})
+
+/** Same merge rule for the active Dispatch carousel slide (current vs pre-plan). */
+const mergedDispatchInstructionsForSlide = computed(() => {
+  try {
+    const fromAssignment = String(instructions.value ?? '').trim()
+    if (dispatchSlideIndex.value === 1 && prePlanTripSnapshot.value) {
+      const body = prePlanTripSnapshot.value
+      const fromApi = extractTripDispatchInstructions(body)
+      const equip = formatTripEquipmentDispatchAppendix(body)
+      let core = ''
+      if (fromApi && fromAssignment) core = `${fromAssignment}\n\n${fromApi}`
+      else core = fromApi || fromAssignment
+      if (equip) {
+        if (core.trim()) return `${core.trim()}\n\n${equip}`
+        return equip
+      }
+      return core
+    }
+    return mergedDispatchInstructions.value
+  } catch (e) {
+    console.error('[mergedDispatchInstructionsForSlide]', e)
+    return String(instructions.value ?? '').trim()
+  }
 })
 
 const automationPreview = ref(null)
@@ -241,9 +254,6 @@ const tripStatusDetailTitle = computed(() => {
 
 const tripOriginDest = computed(() => extractOriginDest(linehaulTripsBody.value))
 const prePlanOriginDest = computed(() => extractOriginDest(prePlanTripSnapshot.value))
-
-/** 0 = current trip, 1 = pre-plan trip */
-const dispatchSlideIndex = ref(0)
 
 const dispatchPanelRef = ref(/** @type {HTMLElement | null} */ (null))
 const tripDetailsPanelRef = ref(/** @type {HTMLElement | null} */ (null))
