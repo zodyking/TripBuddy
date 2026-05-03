@@ -69,7 +69,21 @@ const entries = ref([])
 /** Viewed calendar month (prev/next, no year cap). */
 const viewYear = ref(/** @type {number} */(new Date().getFullYear()))
 const viewMonth0 = ref(/** @type {number} */(new Date().getMonth()))
-const DOUBLE_CLICK_MS = 500
+/** Long-press duration (ms) on trip card header to open delete confirmation. */
+const HISTORY_HEADER_LONG_PRESS_MS = 550
+/** Ignore stray clicks after long-press (details toggle). */
+const HISTORY_HEADER_SUPPRESS_CLICK_MS = 900
+/** Cancel long-press if pointer moves beyond this (px) from start. */
+const HISTORY_HEADER_LONG_PRESS_MOVE_PX = 14
+
+/** @type {ReturnType<typeof setTimeout> | null} */
+let historyHeaderLongPressTimer = null
+/** @type {number} */
+let historyHeaderLongPressStartX = 0
+/** @type {number} */
+let historyHeaderLongPressStartY = 0
+/** @type {number} */
+let suppressHistorySummaryToggleUntil = 0
 
 /** YYYY-MM-DD; empty = show all days in the month / full weeks */
 const filterDayKey = ref('')
@@ -1142,28 +1156,82 @@ function pickOutcomeFromMenu(e, o, ev) {
   })
 }
 
-let lastDblT = 0
-let lastDblSeq = ''
+function clearHistoryHeaderLongPressTimer() {
+  if (historyHeaderLongPressTimer != null) {
+    clearTimeout(historyHeaderLongPressTimer)
+    historyHeaderLongPressTimer = null
+  }
+}
 
 /**
  * @param {LedgerEntry} e
+ * @param {PointerEvent} ev
  */
-function onRowDoubleClick(e) {
+function onHistoryTripSummaryPointerDown(e, ev) {
+  if (ev.pointerType === 'mouse' && ev.button !== 0) return
   if (!/^\d+$/.test(e.dailyTripLegSequence)) return
   if (isHistoryRowActiveOngoingTrip(e)) return
-  const now = Date.now()
-  if (
-    lastDblT &&
-    now - lastDblT < DOUBLE_CLICK_MS &&
-    lastDblSeq === e.dailyTripLegSequence
-  ) {
-    lastDblT = 0
-    lastDblSeq = ''
-    openDeleteModal(e)
-    return
+  clearHistoryHeaderLongPressTimer()
+  historyHeaderLongPressStartX = ev.clientX
+  historyHeaderLongPressStartY = ev.clientY
+  const el = ev.currentTarget
+  if (el instanceof HTMLElement) {
+    try {
+      el.setPointerCapture(ev.pointerId)
+    } catch {
+      /* ignore */
+    }
   }
-  lastDblT = now
-  lastDblSeq = e.dailyTripLegSequence
+  historyHeaderLongPressTimer = setTimeout(() => {
+    historyHeaderLongPressTimer = null
+    openDeleteModal(e)
+    suppressHistorySummaryToggleUntil = Date.now() + HISTORY_HEADER_SUPPRESS_CLICK_MS
+    if (typeof navigator !== 'undefined' && typeof navigator.vibrate === 'function') {
+      try {
+        navigator.vibrate(35)
+      } catch {
+        /* ignore */
+      }
+    }
+  }, HISTORY_HEADER_LONG_PRESS_MS)
+}
+
+/** @param {PointerEvent} ev */
+function onHistoryTripSummaryPointerMove(ev) {
+  if (historyHeaderLongPressTimer == null) return
+  const dx = ev.clientX - historyHeaderLongPressStartX
+  const dy = ev.clientY - historyHeaderLongPressStartY
+  if (dx * dx + dy * dy > HISTORY_HEADER_LONG_PRESS_MOVE_PX * HISTORY_HEADER_LONG_PRESS_MOVE_PX) {
+    clearHistoryHeaderLongPressTimer()
+  }
+}
+
+/** @param {PointerEvent} ev */
+function onHistoryTripSummaryPointerEnd(ev) {
+  clearHistoryHeaderLongPressTimer()
+  const el = ev.currentTarget
+  if (el instanceof HTMLElement) {
+    try {
+      if (el.hasPointerCapture(ev.pointerId)) el.releasePointerCapture(ev.pointerId)
+    } catch {
+      /* ignore */
+    }
+  }
+}
+
+/**
+ * Prevent `<details>` from toggling when delete modal was opened via long-press.
+ * @param {MouseEvent} ev
+ */
+function onHistoryTripSummaryClickCapture(ev) {
+  const t = ev.target
+  if (t instanceof Element) {
+    if (t.closest?.('button, a, input, select, textarea, .history-outcome-wrap')) return
+  }
+  if (Date.now() < suppressHistorySummaryToggleUntil) {
+    ev.preventDefault()
+    ev.stopPropagation()
+  }
 }
 
 /**
@@ -1211,22 +1279,6 @@ async function confirmDeleteTrip() {
   } finally {
     deleteBusy.value = false
   }
-}
-
-/**
- * @param {LedgerEntry} e
- */
-function cycleOutcome(e) {
-  const s = e.dailyTripLegSequence
-  if (!/^\d+$/.test(s)) return
-  const cur = outcomeSelectValue(e)
-  const next =
-    cur === 'delivered'
-      ? 'rejected'
-      : cur === 'rejected'
-        ? 'removed'
-        : 'delivered'
-  void setOutcome(s, next)
 }
 
 let docClickOutcome = (/** @type {Event} */ e) => {
@@ -1434,7 +1486,18 @@ onUnmounted(() => {
                     <details class="history-drop history-trip-fold">
                       <summary
                         class="history-card-summary history-trip-summary history-fold__summary"
-                        @dblclick.stop.prevent="onRowDoubleClick(e)"
+                        :title="
+                          e.dailyTripLegSequence
+                            ? 'Tap to expand. Press and hold this header about half a second to delete this trip (you will confirm with your Driver ID).'
+                            : 'Tap to expand.'
+                        "
+                        @pointerdown="(ev) => onHistoryTripSummaryPointerDown(e, ev)"
+                        @pointermove="onHistoryTripSummaryPointerMove"
+                        @pointerup="onHistoryTripSummaryPointerEnd"
+                        @pointercancel="onHistoryTripSummaryPointerEnd"
+                        @pointerleave="clearHistoryHeaderLongPressTimer"
+                        @click.capture="onHistoryTripSummaryClickCapture"
+                        @contextmenu.prevent
                       >
                         <div class="history-trip-head">
                           <div class="history-trip-row-a">
@@ -1490,7 +1553,7 @@ onUnmounted(() => {
                             class="history-trip-meta-strip"
                             :title="
                               e.dailyTripLegSequence
-                                ? `Double-tap header: cycle status · Leg #${e.dailyTripLegSequence}`
+                                ? `Press & hold header to delete trip · Leg #${e.dailyTripLegSequence}`
                                 : ''
                             "
                           >
