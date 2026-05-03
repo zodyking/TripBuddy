@@ -504,6 +504,30 @@ body {
   border-color: rgba(196, 181, 253, 0.45);
 }
 
+/* Trailer location map: pulse heavier trailer marker red ↔ dark */
+@keyframes trailer-marker-heavy-pulse {
+  0%,
+  100% {
+    filter: drop-shadow(0 0 6px rgba(239, 68, 68, 0.95));
+    opacity: 1;
+  }
+  50% {
+    filter: drop-shadow(0 0 2px rgba(0, 0, 0, 0.85));
+    opacity: 0.72;
+  }
+}
+
+.map-marker-trailer-pulse-heavy .map-marker-raster-img {
+  animation: trailer-marker-heavy-pulse 2.8s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .map-marker-trailer-pulse-heavy .map-marker-raster-img {
+    animation: none;
+    filter: drop-shadow(0 0 5px rgba(239, 68, 68, 0.85));
+  }
+}
+
 /* Focus ring */
 .focus-ring:focus-visible {
   outline: none;

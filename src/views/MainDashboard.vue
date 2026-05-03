@@ -1169,12 +1169,44 @@ function openTrailerGpsModal(card) {
   const hasGeo =
     typeof navigator !== 'undefined' && !!navigator.geolocation
 
+  const all = tripTrailerCards.value.filter(
+    (c) => c.hasGps && c.lat != null && c.lng != null,
+  )
+  /** @type {{ lat: number, lng: number, order: string, trlrNbr: string, size: string }[]} */
+  const trailerMapPins = all.map((c) => ({
+    lat: /** @type {number} */ (c.lat),
+    lng: /** @type {number} */ (c.lng),
+    order: String(c.order),
+    trlrNbr: String(c.trlrNbr ?? '').trim(),
+    size: String(c.size ?? '').trim(),
+  }))
+
+  const withWeight = all.filter(
+    (c) =>
+      c.pkgWeightLbs != null &&
+      Number.isFinite(/** @type {number} */ (c.pkgWeightLbs)),
+  )
+  let heavyTrailerOrder = ''
+  if (withWeight.length) {
+    const maxW = Math.max(
+      ...withWeight.map((c) => /** @type {number} */ (c.pkgWeightLbs)),
+    )
+    const top = withWeight.filter((c) => c.pkgWeightLbs === maxW)
+    if (top.length === 1) heavyTrailerOrder = String(top[0].order)
+  }
+  if (!heavyTrailerOrder && all.length >= 2) {
+    const ft53 = all.filter((c) => c.size === '53ft')
+    if (ft53.length === 1) heavyTrailerOrder = String(ft53[0].order)
+  }
+
   trailerGpsData.value = {
     order: card.order,
     trlrNbr: card.trlrNbr,
     size: card.size,
     lat: card.lat,
     lng: card.lng,
+    trailerMapPins,
+    heavyTrailerOrder,
     userLat: null,
     userLng: null,
     userGpsPending: hasGeo,
@@ -1699,15 +1731,13 @@ onUnmounted(() => {
           </div>
           <div class="trailer-gps-map-wrap">
             <TrailerLocationMap
-              :lat="trailerGpsData.lat"
-              :lng="trailerGpsData.lng"
+              :trailers="trailerGpsData.trailerMapPins || []"
+              :heavy-trailer-order="trailerGpsData.heavyTrailerOrder || ''"
               :user-lat="trailerGpsData.userLat"
               :user-lng="trailerGpsData.userLng"
               :user-location-pending="trailerGpsData.userGpsPending"
               :user-location-denied="trailerGpsData.userGeoDenied"
               :user-vehicle-id="trailerGpsData.userVehicleId || ''"
-              :trailer-size="trailerGpsData.size || ''"
-              :trailer-number="trailerGpsData.trlrNbr ? String(trailerGpsData.trlrNbr) : ''"
               :trailer-label="`Trailer ${trailerGpsData.order}${trailerGpsData.trlrNbr ? ` · #${trailerGpsData.trlrNbr}` : ''}`"
             />
           </div>

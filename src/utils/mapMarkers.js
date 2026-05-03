@@ -140,7 +140,7 @@ export function userLocationTruckIcon(vehicleId = '') {
  * @param {number} imgH drawable height for the PNG column (chip stacks below)
  * @param {string} trailerNumber
  */
-function trailerTopDivIcon(rasterHref, vw, imgH, trailerNumber = '') {
+function trailerTopDivIcon(rasterHref, vw, imgH, trailerNumber = '', pulseClass = '') {
   const chipH = RASTER_CHIP_H
   const gap = RASTER_CHIP_GAP
   const raw = String(trailerNumber ?? '')
@@ -156,7 +156,11 @@ function trailerTopDivIcon(rasterHref, vw, imgH, trailerNumber = '') {
         )}</div>`
       : ''
   const boxH = labelRaw !== '' ? imgH + chipH + gap : imgH
-  const html = `<div class="map-marker-raster-root map-marker-raster-root--trailer" style="width:${vw}px;height:${boxH}px"><img class="map-marker-raster-img" src="${escapeHtmlAttr(
+  const pulse =
+    pulseClass && String(pulseClass).trim()
+      ? ` ${escapeHtmlAttr(String(pulseClass).trim())}`
+      : ''
+  const html = `<div class="map-marker-raster-root map-marker-raster-root--trailer${pulse}" style="width:${vw}px;height:${boxH}px"><img class="map-marker-raster-img" src="${escapeHtmlAttr(
     rasterHref,
   )}" alt="" role="presentation" decoding="async" width="${vw}" height="${imgH}"/>${chipHtml}</div>`
   return L.divIcon({
@@ -171,17 +175,21 @@ function trailerTopDivIcon(rasterHref, vw, imgH, trailerNumber = '') {
 /**
  * 20′ trailer top PNG + optional number chip (`src/assets/map-markers/20ft.png`).
  * @param {string} [trailerNumber]
+ * @param {{ pulseHeavy?: boolean }} [opts]
  */
-export function trailer20ftTopIcon(trailerNumber = '') {
-  return trailerTopDivIcon(trailer20ftTopImg, TRAILER_20_IMG_W, TRAILER_20_IMG_H, trailerNumber)
+export function trailer20ftTopIcon(trailerNumber = '', opts = {}) {
+  const pulse = opts.pulseHeavy ? 'map-marker-trailer-pulse-heavy' : ''
+  return trailerTopDivIcon(trailer20ftTopImg, TRAILER_20_IMG_W, TRAILER_20_IMG_H, trailerNumber, pulse)
 }
 
 /**
  * 53′ trailer top PNG + optional number chip (`src/assets/map-markers/53ft.png`).
  * @param {string} [trailerNumber]
+ * @param {{ pulseHeavy?: boolean }} [opts]
  */
-export function trailer53ftTopIcon(trailerNumber = '') {
-  return trailerTopDivIcon(trailer53ftTopImg, TRAILER_53_IMG_W, TRAILER_53_IMG_H, trailerNumber)
+export function trailer53ftTopIcon(trailerNumber = '', opts = {}) {
+  const pulse = opts.pulseHeavy ? 'map-marker-trailer-pulse-heavy' : ''
+  return trailerTopDivIcon(trailer53ftTopImg, TRAILER_53_IMG_W, TRAILER_53_IMG_H, trailerNumber, pulse)
 }
 
 /**

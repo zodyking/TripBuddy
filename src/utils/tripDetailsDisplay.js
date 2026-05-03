@@ -241,6 +241,8 @@ export function parseTrailerMeta(trailer) {
     }
   }
 
+  const lbs = pkgWeightLbs()
+
   return {
     trlrNbr,
     size,
@@ -256,6 +258,8 @@ export function parseTrailerMeta(trailer) {
     sealNumber,
     loadDest,
     pkgWeight,
+    /** Numeric lbs when API sends pkgWeight; null if unknown */
+    pkgWeightLbs: lbs,
     dueDate,
   }
 }
@@ -324,6 +328,7 @@ function trailerCardSortKey(tr, index) {
  *   hasGps: boolean,
  *   lat: number | null,
  *   lng: number | null,
+ *   pkgWeightLbs: number | null,
  *   summaryRows: { label: string, value: string }[],
  *   detailRows: { label: string, value: string }[]
  * }[]}
@@ -401,6 +406,7 @@ export function buildEnhancedTrailerCards(body) {
         hasGps: meta.hasGps,
         lat: meta.lat,
         lng: meta.lng,
+        pkgWeightLbs: meta.pkgWeightLbs,
         summaryRows,
         detailRows,
       }

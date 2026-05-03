@@ -9,31 +9,39 @@ import {
 } from 'vue'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
-import { trailer20ftTopIcon, trailer53ftTopIcon, trailerFallbackPinIcon, userLocationTruckIcon } from '../utils/mapMarkers.js'
+import {
+  trailer20ftTopIcon,
+  trailer53ftTopIcon,
+  trailerFallbackPinIcon,
+  userLocationTruckIcon,
+} from '../utils/mapMarkers.js'
+
+/**
+ * @typedef {{ lat: number, lng: number, order?: string, trlrNbr?: string, size?: string, highlightHeavy?: boolean }} TrailerMapPin
+ */
 
 const props = defineProps({
-  lat: { type: Number, required: true },
-  lng: { type: Number, required: true },
-  /** '20ft' | '53ft' | '' — top-down PNG + number chip when known */
+  /** When set, show all pins on one map (preferred). */
+  trailers: { type: Array, default: () => [] },
+  /** `trlrOrder` of the trailer with highest pkg weight (or sole 53′ fallback). */
+  heavyTrailerOrder: { type: String, default: '' },
+  /** @deprecated Use `trailers` — single trailer fallback */
+  lat: { type: Number, default: NaN },
+  /** @deprecated */
+  lng: { type: Number, default: NaN },
+  /** '20ft' | '53ft' | '' — used only for legacy single-trailer props */
   trailerSize: { type: String, default: '' },
-  /** Trailer number for marker chip (e.g. trlrNbr) */
   trailerNumber: { type: String, default: '' },
-  /** Popup / accessibility title for trailer pin */
   trailerLabel: { type: String, default: '' },
-  /** From parent: first fix after synchronous getCurrentPosition (WebKit gesture). */
   userLat: { type: Number, default: null },
   userLng: { type: Number, default: null },
-  /** Parent still waiting on first geolocation callback */
   userLocationPending: { type: Boolean, default: false },
-  /** Parent could not obtain a fix */
   userLocationDenied: { type: Boolean, default: false },
-  /** Tractor / unit number chip under “your location” truck on this map */
   userVehicleId: { type: String, default: '' },
 })
 
 const containerRef = ref(null)
 
-/** Latest user fix (from props + live watch). */
 const userFix = ref(
   /** @type {{ lat: number, lng: number, accuracyM: number } | null} */ (null),
 )
@@ -41,6 +49,68 @@ const userFix = ref(
 const hasUserFix = computed(() => {
   const u = userFix.value
   return u != null && Number.isFinite(u.lat) && Number.isFinite(u.lng)
+})
+
+/** Pins to draw: `trailers` prop or legacy lat/lng. */
+const effectiveTrailers = computed(() => {
+  const arr = props.trailers
+  if (Array.isArray(arr) && arr.length > 0) {
+    const heavy = String(props.heavyTrailerOrder ?? '').trim()
+    return arr
+      .map((raw, i) => {
+        if (!raw || typeof raw !== 'object') return null
+        const o = /** @type {Record<string, unknown>} */ (raw)
+        const lat = Number(o.lat)
+        const lng = Number(o.lng)
+        if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null
+        const order = o.order != null ? String(o.order) : String(i + 1)
+        const trlrNbr = o.trlrNbr != null ? String(o.trlrNbr) : ''
+        const size = o.size != null ? String(o.size) : ''
+        const highlightHeavy =
+          Boolean(o.highlightHeavy) ||
+          (heavy !== '' && order === heavy)
+        return /** @type {TrailerMapPin} */ ({
+          lat,
+          lng,
+          order,
+          trlrNbr,
+          size,
+          highlightHeavy,
+        })
+      })
+      .filter(Boolean)
+  }
+  const la = Number(props.lat)
+  const ln = Number(props.lng)
+  if (Number.isFinite(la) && Number.isFinite(ln)) {
+    return [
+      /** @type {TrailerMapPin} */ ({
+        lat: la,
+        lng: ln,
+        order: '1',
+        trlrNbr: String(props.trailerNumber ?? '').trim(),
+        size: String(props.trailerSize ?? '').trim(),
+        highlightHeavy: false,
+      }),
+    ]
+  }
+  return []
+})
+
+/** Bottom-left legend: Trailer 1 / 2 with large numbers. */
+const trailerNumRows = computed(() => {
+  const list = [...effectiveTrailers.value].sort((a, b) => {
+    const na = Number(a.order)
+    const nb = Number(b.order)
+    if (Number.isFinite(na) && Number.isFinite(nb) && na !== nb) return na - nb
+    return String(a.order).localeCompare(String(b.order), undefined, { numeric: true })
+  })
+  return list.map((t, i) => ({
+    key: `${t.order}-${i}`,
+    slot: i + 1,
+    nbr: String(t.trlrNbr ?? '').trim() || '—',
+    heavy: Boolean(t.highlightHeavy),
+  }))
 })
 
 /** @type {L.Map | null} */
@@ -54,8 +124,8 @@ const activeBaseLayer = ref(/** @type {'street' | 'satellite'} */ ('street'))
 let overlayLayer = null
 /** @type {L.LayerGroup | null} */
 let userLayer = null
-/** @type {L.Marker | null} */
-let trailerMarker = null
+/** @type {Map<string, L.Marker>} */
+const trailerMarkers = new Map()
 /** @type {L.Marker | null} */
 let userMarker = null
 /** @type {number | null} */
@@ -64,7 +134,6 @@ let geoWatchId = null
 let fitDebounce = null
 let geoStopped = false
 let watchStarted = false
-/** Fit map to trailer+user only once when user first appears (not every GPS tick). */
 let didFitWithUser = false
 
 function prefersReducedMotion() {
@@ -72,18 +141,15 @@ function prefersReducedMotion() {
   return window.matchMedia('(prefers-reduced-motion: reduce)').matches
 }
 
-function trailerLatLng() {
-  return L.latLng(props.lat, props.lng)
-}
-
-function makeTrailerIcon() {
-  const sz = String(props.trailerSize ?? '').trim().toLowerCase()
-  const num = String(props.trailerNumber ?? '').trim()
+function makeTrailerIcon(trailer) {
+  const sz = String(trailer?.size ?? '').trim().toLowerCase()
+  const num = String(trailer?.trlrNbr ?? '').trim()
+  const pulse = Boolean(trailer?.highlightHeavy)
   if (sz === '20ft' || sz === "20'") {
-    return trailer20ftTopIcon(num)
+    return trailer20ftTopIcon(num, { pulseHeavy: pulse })
   }
   if (sz === '53ft' || sz === "53'") {
-    return trailer53ftTopIcon(num)
+    return trailer53ftTopIcon(num, { pulseHeavy: pulse })
   }
   return trailerFallbackPinIcon()
 }
@@ -105,33 +171,32 @@ function toggleSatellite() {
 }
 
 function scheduleFitBounds() {
-  if (!map || !trailerMarker) return
+  if (!map || !overlayLayer) return
+  const pins = effectiveTrailers.value
+  if (!pins.length) return
   if (fitDebounce) clearTimeout(fitDebounce)
   fitDebounce = setTimeout(() => {
     fitDebounce = null
-    if (!map || !trailerMarker) return
-    const t = trailerMarker.getLatLng()
+    if (!map || !pins.length) return
     const motion = !prefersReducedMotion()
+    let b = L.latLngBounds(pins.map((p) => [p.lat, p.lng]))
     if (userMarker && userFix.value) {
-      const u = L.latLng(userFix.value.lat, userFix.value.lng)
-      let b = L.latLngBounds([t, u])
-      const ne = b.getNorthEast()
-      const sw = b.getSouthWest()
-      const latSpan = Math.abs(ne.lat - sw.lat)
-      const lngSpan = Math.abs(ne.lng - sw.lng)
-      if (latSpan < 1e-8 && lngSpan < 1e-8) {
-        b = b.pad(0.004)
-      } else {
-        b = b.pad(0.14)
-      }
-      map.fitBounds(b, {
-        padding: [56, 56],
-        maxZoom: 15,
-        animate: motion,
-      })
-    } else {
-      map.setView(t, 15, { animate: motion })
+      b.extend(L.latLng(userFix.value.lat, userFix.value.lng))
     }
+    const ne = b.getNorthEast()
+    const sw = b.getSouthWest()
+    const latSpan = Math.abs(ne.lat - sw.lat)
+    const lngSpan = Math.abs(ne.lng - sw.lng)
+    if (latSpan < 1e-8 && lngSpan < 1e-8) {
+      b = b.pad(0.004)
+    } else {
+      b = b.pad(0.14)
+    }
+    map.fitBounds(b, {
+      padding: [56, 56],
+      maxZoom: 15,
+      animate: motion,
+    })
   }, 80)
 }
 
@@ -176,7 +241,7 @@ function setUserFixFromLatLng(lat, lng, accuracyM = 40, fitCamera = false) {
     accuracyM: Number.isFinite(accuracyM) && accuracyM > 0 ? accuracyM : 40,
   }
   syncUserOverlay()
-  if (fitCamera && map && trailerMarker && !didFitWithUser) {
+  if (fitCamera && map && effectiveTrailers.value.length && !didFitWithUser) {
     didFitWithUser = true
     scheduleFitBounds()
   }
@@ -230,7 +295,6 @@ function startWatchForLiveUpdates() {
   )
 }
 
-/** Sync initial fix from parent (getCurrentPosition in openTrailerGpsModal). */
 function applyUserCoordsFromProps() {
   const la = props.userLat
   const ln = props.userLng
@@ -247,6 +311,46 @@ function applyUserCoordsFromProps() {
     userFix.value = null
     syncUserOverlay()
     didFitWithUser = false
+  }
+}
+
+function syncTrailerMarkers() {
+  if (!map || !overlayLayer) return
+  const pins = effectiveTrailers.value
+  const nextKeys = new Set(pins.map((p) => String(p.order)))
+
+  for (const [k, m] of trailerMarkers) {
+    if (!nextKeys.has(k)) {
+      overlayLayer.removeLayer(m)
+      trailerMarkers.delete(k)
+    }
+  }
+
+  for (const t of pins) {
+    const key = String(t.order)
+    const ll = L.latLng(t.lat, t.lng)
+    const label =
+      props.trailerLabel.trim() ||
+      `Trailer ${key}${t.trlrNbr ? ` · #${t.trlrNbr}` : ''}`
+    const icon = makeTrailerIcon(t)
+    let mk = trailerMarkers.get(key)
+    if (!mk) {
+      mk = L.marker(ll, { icon, title: label, zIndexOffset: t.highlightHeavy ? 450 : 400 })
+        .bindPopup(label)
+        .addTo(overlayLayer)
+      trailerMarkers.set(key, mk)
+    } else {
+      mk.setLatLng(ll)
+      mk.setIcon(icon)
+      mk.setPopupContent(label)
+      mk.setZIndexOffset(t.highlightHeavy ? 450 : 400)
+    }
+  }
+
+  if (!didFitWithUser) {
+    scheduleFitBounds()
+  } else if (pins.length && userFix.value) {
+    scheduleFitBounds()
   }
 }
 
@@ -289,7 +393,7 @@ function initMap() {
   overlayLayer = L.layerGroup().addTo(map)
   userLayer = L.layerGroup().addTo(map)
 
-  syncTrailerMarker()
+  syncTrailerMarkers()
   applyUserCoordsFromProps()
 
   nextTick(() => {
@@ -305,7 +409,7 @@ function destroyMap() {
     clearTimeout(fitDebounce)
     fitDebounce = null
   }
-  trailerMarker = null
+  trailerMarkers.clear()
   userMarker = null
   userFix.value = null
   overlayLayer = null
@@ -315,31 +419,6 @@ function destroyMap() {
   if (map) {
     map.remove()
     map = null
-  }
-}
-
-function syncTrailerMarker() {
-  if (!map || !overlayLayer) return
-  const ll = trailerLatLng()
-  if (!Number.isFinite(ll.lat) || !Number.isFinite(ll.lng)) return
-
-  const label = props.trailerLabel.trim() || 'Trailer'
-  const icon = makeTrailerIcon()
-  if (!trailerMarker) {
-    trailerMarker = L.marker(ll, {
-      icon,
-      title: label,
-    })
-      .bindPopup(label)
-      .addTo(overlayLayer)
-  } else {
-    trailerMarker.setLatLng(ll)
-    trailerMarker.setIcon(icon)
-    trailerMarker.setPopupContent(label)
-  }
-  /* Trailer moved — refit if we do not have user yet */
-  if (!didFitWithUser) {
-    scheduleFitBounds()
   }
 }
 
@@ -354,11 +433,20 @@ onBeforeUnmount(() => {
 })
 
 watch(
-  () => [props.lat, props.lng, props.trailerLabel, props.trailerSize, props.trailerNumber],
+  () => [
+    props.trailers,
+    props.heavyTrailerOrder,
+    props.lat,
+    props.lng,
+    props.trailerLabel,
+    props.trailerSize,
+    props.trailerNumber,
+  ],
   () => {
-    syncTrailerMarker()
+    syncTrailerMarkers()
     nextTick(() => map?.invalidateSize())
   },
+  { deep: true },
 )
 
 watch(
@@ -376,7 +464,7 @@ watch(
 </script>
 
 <template>
-  <div class="trailer-loc-root" role="region" aria-label="Trailer and your location map">
+  <div class="trailer-loc-root" role="region" aria-label="Trailers and your location map">
     <div ref="containerRef" class="trailer-loc-el" />
     <div class="map-controls-stack trailer-loc-controls">
       <button
@@ -398,12 +486,27 @@ watch(
     <div class="trailer-loc-legend" aria-hidden="true">
       <span class="trailer-loc-legend-item">
         <span class="trailer-loc-dot is-trailer" />
-        Trailer
+        Trailer(s)
       </span>
       <span class="trailer-loc-legend-item">
         <span class="trailer-loc-dot is-user" />
         You
       </span>
+    </div>
+    <div
+      v-if="trailerNumRows.length"
+      class="trailer-loc-big-nums"
+      aria-label="Trailer numbers"
+    >
+      <div
+        v-for="row in trailerNumRows"
+        :key="row.key"
+        class="trailer-loc-big-num-row"
+        :class="{ 'is-heavy': row.heavy }"
+      >
+        <span class="trailer-loc-big-num-label">Trailer {{ row.slot }}</span>
+        <span class="trailer-loc-big-num-val">{{ row.nbr }}</span>
+      </div>
     </div>
     <p
       v-if="userLocationPending && !hasUserFix"
@@ -415,7 +518,7 @@ watch(
       v-if="userLocationDenied && !hasUserFix && !userLocationPending"
       class="trailer-loc-hint is-muted"
     >
-      Location unavailable — trailer only. Check site permission in browser settings.
+      Location unavailable — trailers only. Check site permission in browser settings.
     </p>
     <p
       v-if="hasUserFix"
@@ -495,6 +598,57 @@ watch(
 }
 .trailer-loc-dot.is-user {
   background: #0284c7;
+}
+
+.trailer-loc-big-nums {
+  position: absolute;
+  z-index: 1001;
+  left: 0.5rem;
+  bottom: 3.25rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  max-width: min(16rem, calc(100% - 1rem));
+  pointer-events: none;
+}
+
+.trailer-loc-big-num-row {
+  padding: 0.4rem 0.65rem 0.5rem;
+  border-radius: 10px;
+  background: rgba(15, 23, 42, 0.88);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
+}
+
+.trailer-loc-big-num-row.is-heavy {
+  border-color: rgba(239, 68, 68, 0.55);
+  box-shadow:
+    0 4px 14px rgba(0, 0, 0, 0.35),
+    0 0 0 1px rgba(239, 68, 68, 0.25);
+}
+
+.trailer-loc-big-num-label {
+  display: block;
+  font-size: 0.65rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: rgba(226, 232, 240, 0.85);
+  margin-bottom: 0.12rem;
+}
+
+.trailer-loc-big-num-val {
+  display: block;
+  font-size: clamp(1.35rem, 4.5vw, 1.85rem);
+  font-weight: 800;
+  line-height: 1.1;
+  font-variant-numeric: tabular-nums;
+  color: #f8fafc;
+  letter-spacing: 0.02em;
+}
+
+.trailer-loc-big-num-row.is-heavy .trailer-loc-big-num-val {
+  color: #fecaca;
 }
 
 .trailer-loc-hint {
