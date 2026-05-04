@@ -446,6 +446,7 @@ export async function getHighwayTrafficPayload(accountKey) {
       name: hw.name,
       shortName: hw.shortName,
       route: hw.route,
+      waypoints: hw.waypoints,
       trend: trendFromSeries(series),
       series: recent,
       live: {

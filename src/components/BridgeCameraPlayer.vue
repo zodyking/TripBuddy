@@ -37,8 +37,10 @@ const usingFallbackImage = ref(false)
 let hls = null
 let retryCount = 0
 let retryTimer = null
+let backgroundRetryTimer = null
 const MAX_RETRIES = 2
 const RETRY_DELAY_MS = 3000
+const BACKGROUND_RETRY_MS = 10000
 
 const youtubeEmbedSrc = computed(() => {
   const id = props.youtubeVideoId?.trim()
@@ -89,6 +91,7 @@ function scheduleRetry() {
       usingFallbackImage.value = true
       hasError.value = false
       isLoading.value = false
+      scheduleBackgroundRetry()
     }
     return
   }
@@ -98,11 +101,32 @@ function scheduleRetry() {
   }, RETRY_DELAY_MS)
 }
 
+function scheduleBackgroundRetry() {
+  clearBackgroundRetryTimer()
+  backgroundRetryTimer = setTimeout(() => {
+    retryCount = 0
+    usingFallbackImage.value = false
+    initVideo()
+  }, BACKGROUND_RETRY_MS)
+}
+
+function clearBackgroundRetryTimer() {
+  if (backgroundRetryTimer) {
+    clearTimeout(backgroundRetryTimer)
+    backgroundRetryTimer = null
+  }
+}
+
 function clearRetryTimer() {
   if (retryTimer) {
     clearTimeout(retryTimer)
     retryTimer = null
   }
+}
+
+function clearAllTimers() {
+  clearRetryTimer()
+  clearBackgroundRetryTimer()
 }
 
 async function initVideo() {
@@ -121,6 +145,7 @@ async function initVideo() {
     const onLoadedMeta = () => {
       isLoading.value = false
       retryCount = 0
+      clearBackgroundRetryTimer()
       tryAutoplay()
     }
     const onError = () => {
@@ -159,6 +184,7 @@ async function initVideo() {
       hls.on(Hls.Events.MANIFEST_PARSED, () => {
         isLoading.value = false
         retryCount = 0
+        clearBackgroundRetryTimer()
         tryAutoplay()
       })
       
@@ -235,12 +261,12 @@ function retryStream() {
   retryCount = 0
   hasError.value = false
   usingFallbackImage.value = false
-  clearRetryTimer()
+  clearAllTimers()
   initVideo()
 }
 
 watch(() => props.videoUrl, () => {
-  clearRetryTimer()
+  clearAllTimers()
   retryCount = 0
   destroyHls()
   if (props.videoUrl && !props.youtubeVideoId?.trim()) {
@@ -251,7 +277,7 @@ watch(() => props.videoUrl, () => {
 watch(
   () => props.youtubeVideoId,
   () => {
-    clearRetryTimer()
+    clearAllTimers()
     retryCount = 0
     destroyHls()
     if (props.youtubeVideoId?.trim()) {
@@ -277,7 +303,7 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
-  clearRetryTimer()
+  clearAllTimers()
   destroyHls()
 })
 </script>

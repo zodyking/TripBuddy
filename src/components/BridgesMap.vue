@@ -33,6 +33,8 @@ const props = defineProps({
   fillHeight: { type: Boolean, default: false },
   /** Tractor / unit number chip under “my location” truck (optional). */
   vehicleId: { type: String, default: '' },
+  /** Highway polylines to render on the map */
+  highwayPolylines: { type: Array, default: () => [] },
 })
 
 const emit = defineEmits(['select'])
@@ -71,6 +73,13 @@ let userLayer = null
 let userMarker = null
 /** @type {Map<string, L.Marker>} */
 const markersById = new Map()
+
+/** @type {L.LayerGroup | null} */
+let highwayLayer = null
+/** @type {Map<string, L.Polyline>} */
+const highwaysById = new Map()
+/** @type {Map<string, L.Marker>} */
+const highwayLabelsById = new Map()
 
 /** Sorted route id list — when this changes, we fit bounds to pins (e.g. To NY ↔ To NJ) */
 let lastStructureKey = ''
@@ -431,6 +440,104 @@ function syncMarkers() {
   })
 }
 
+/**
+ * Color for highway polyline based on delay tier.
+ * @param {'green' | 'orange' | 'red' | undefined} tier
+ */
+function highwayPolylineColor(tier) {
+  if (tier === 'green') return '#4ade80'
+  if (tier === 'red') return '#f87171'
+  return '#fb923c'
+}
+
+/**
+ * Create a DivIcon for highway label.
+ * @param {string} shortName
+ * @param {'green' | 'orange' | 'red' | undefined} tier
+ */
+function highwayLabelIcon(shortName, tier) {
+  const color = highwayPolylineColor(tier)
+  const bgColor = tier === 'green' ? 'rgba(22, 101, 52, 0.85)' 
+    : tier === 'red' ? 'rgba(127, 29, 29, 0.85)' 
+    : 'rgba(154, 52, 18, 0.85)'
+  return L.divIcon({
+    className: 'hw-label-icon',
+    html: `<div class="hw-label" style="background:${bgColor};border-color:${color}">${esc(shortName)}</div>`,
+    iconSize: [0, 0],
+    iconAnchor: [0, 0],
+  })
+}
+
+function syncHighwayPolylines() {
+  if (!map || !highwayLayer) return
+
+  const polylines = props.highwayPolylines || []
+  const wantIds = new Set(polylines.map((p) => String(p.id)))
+
+  for (const [id, pl] of [...highwaysById]) {
+    if (wantIds.has(id)) continue
+    highwayLayer.removeLayer(pl)
+    highwaysById.delete(id)
+    const label = highwayLabelsById.get(id)
+    if (label) {
+      highwayLayer.removeLayer(label)
+      highwayLabelsById.delete(id)
+    }
+  }
+
+  for (const hw of polylines) {
+    const id = String(hw.id)
+    const waypoints = Array.isArray(hw.waypoints) ? hw.waypoints : []
+    if (waypoints.length < 2) continue
+
+    const latlngs = waypoints
+      .map((w) => {
+        const la = Number(w.lat)
+        const ln = Number(w.lng)
+        if (!Number.isFinite(la) || !Number.isFinite(ln)) return null
+        return L.latLng(la, ln)
+      })
+      .filter((ll) => ll !== null)
+
+    if (latlngs.length < 2) continue
+
+    const color = highwayPolylineColor(hw.delayTier)
+    const existing = highwaysById.get(id)
+
+    if (existing) {
+      existing.setLatLngs(latlngs)
+      existing.setStyle({ color })
+    } else {
+      const polyline = L.polyline(latlngs, {
+        color,
+        weight: 4,
+        opacity: 0.7,
+        lineCap: 'round',
+        lineJoin: 'round',
+      })
+      polyline.addTo(highwayLayer)
+      highwaysById.set(id, polyline)
+    }
+
+    const midIdx = Math.floor(latlngs.length / 2)
+    const midPoint = latlngs[midIdx]
+    const existingLabel = highwayLabelsById.get(id)
+
+    if (existingLabel) {
+      existingLabel.setLatLng(midPoint)
+      existingLabel.setIcon(highwayLabelIcon(hw.shortName || id, hw.delayTier))
+    } else {
+      const labelMarker = L.marker(midPoint, {
+        icon: highwayLabelIcon(hw.shortName || id, hw.delayTier),
+        interactive: false,
+        zIndexOffset: 300,
+      })
+      labelMarker.addTo(highwayLayer)
+      highwayLabelsById.set(id, labelMarker)
+    }
+  }
+}
+
 function getTomtomKeyStr() {
   return String(tomtomKeyEffective.value || '').trim()
 }
@@ -479,10 +586,12 @@ function initMap() {
   activeBaseLayer.value = 'street'
   streetLayer.addTo(map)
   applyTrafficToMap()
+  highwayLayer = L.layerGroup().addTo(map)
   markerLayer = L.layerGroup().addTo(map)
   userLayer = L.layerGroup().addTo(map)
   lastStructureKey = ''
   syncMarkers()
+  syncHighwayPolylines()
   nextTick(() => {
     map?.invalidateSize()
   })
@@ -493,13 +602,19 @@ function destroyMap() {
   if (markerLayer) {
     markerLayer.clearLayers()
   }
+  if (highwayLayer) {
+    highwayLayer.clearLayers()
+  }
   markersById.clear()
+  highwaysById.clear()
+  highwayLabelsById.clear()
   userMarker = null
   if (map) {
     map.remove()
     map = null
   }
   markerLayer = null
+  highwayLayer = null
   userLayer = null
   streetLayer = null
   satelliteLayer = null
@@ -534,6 +649,14 @@ watch(
   () => {
     syncMarkers()
     syncUserOverlay()
+  },
+  { deep: true },
+)
+
+watch(
+  () => props.highwayPolylines,
+  () => {
+    syncHighwayPolylines()
   },
   { deep: true },
 )
@@ -892,5 +1015,25 @@ watch(compassModeActive, (active) => {
   overflow: hidden;
   text-overflow: ellipsis;
   max-width: 11rem;
+}
+
+:deep(.hw-label-icon) {
+  overflow: visible !important;
+}
+
+:deep(.hw-label) {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  padding: 0.2rem 0.4rem;
+  border-radius: 5px;
+  font-size: 0.55rem;
+  font-weight: 800;
+  color: #fff;
+  white-space: nowrap;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  border: 1px solid;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.4);
+  pointer-events: none;
 }
 </style>

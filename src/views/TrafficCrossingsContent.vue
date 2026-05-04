@@ -1,6 +1,6 @@
 <script setup>
 import { ref, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
-import { getBridgesPanynj, getNy511Cameras, getVerrazzanoTraffic } from '../api.js'
+import { getBridgesPanynj, getNy511Cameras, getVerrazzanoTraffic, getHighwayTraffic } from '../api.js'
 import { getBridgeAnchorForRouteId } from '../bridges/bridgeRouteAnchors.js'
 import { findVerrazzanoCamera, resolveBridgeCameraFeed } from '../bridges/bridgeCameraMapping.js'
 import BridgesMap from '../components/BridgesMap.vue'
@@ -20,6 +20,10 @@ const POLL_MS = 5 * 60 * 1000
 /** @type {import('vue').Ref<TravelDir>} */
 const direction = ref('ToNY')
 
+/** @typedef {'crossings' | 'highways'} ViewMode */
+/** @type {import('vue').Ref<ViewMode>} */
+const viewMode = ref('crossings')
+
 const loading = ref(true)
 const error = ref('')
 
@@ -34,6 +38,11 @@ const camerasError = ref('')
 /** @type {import('vue').Ref<any | null>} */
 const verrazzanoPayload = ref(null)
 const verrazzanoLoading = ref(false)
+
+/** @type {import('vue').Ref<any | null>} */
+const highwayPayload = ref(null)
+const highwayLoading = ref(false)
+const highwayError = ref('')
 
 let tick = 0
 /** @type {ReturnType<typeof setInterval> | null} */
@@ -729,6 +738,256 @@ async function loadVerrazzano() {
   }
 }
 
+async function loadHighways() {
+  highwayError.value = ''
+  const first = !highwayPayload.value
+  if (first) highwayLoading.value = true
+  try {
+    const p = await getHighwayTraffic()
+    highwayPayload.value = p
+  } catch (e) {
+    highwayError.value = e instanceof Error ? e.message : 'Failed to load highways'
+  } finally {
+    highwayLoading.value = false
+  }
+}
+
+/**
+ * Highway travel minutes helper.
+ * @param {unknown} hw
+ */
+function hwTravelMinutes(hw) {
+  if (hw == null || typeof hw !== 'object') return Number.POSITIVE_INFINITY
+  const live = /** @type {Record<string, unknown>} */(hw).live
+  if (!live || typeof live !== 'object') return Number.POSITIVE_INFINITY
+  const m = /** @type {Record<string, unknown>} */(live).routeTravelTime
+  if (typeof m === 'number' && Number.isFinite(m)) return m
+  return Number.POSITIVE_INFINITY
+}
+
+/**
+ * @param {unknown} hw
+ */
+function hwFiniteTravelMinutes(hw) {
+  const m = hwTravelMinutes(hw)
+  return Number.isFinite(m) && m !== Number.POSITIVE_INFINITY ? m : null
+}
+
+/**
+ * @param {unknown} hw
+ */
+function hwDelayTier(hw) {
+  const fm = hwFiniteTravelMinutes(hw)
+  return fm != null ? bridgeDelayTier(fm) : 'orange'
+}
+
+/**
+ * @param {unknown} hw
+ */
+function hwTrendInfo(hw) {
+  if (hw == null || typeof hw !== 'object') {
+    return { short: '·', cls: 't--unk', full: 'Not enough data yet' }
+  }
+  const t = /** @type {Record<string, unknown>} */(hw).trend
+  if (t === 'worse') {
+    return { short: '▲', cls: 't--worse', full: 'Slower than last check' }
+  }
+  if (t === 'better') {
+    return { short: '▼', cls: 't--better', full: 'Faster than last check' }
+  }
+  if (t === 'neutral') {
+    return { short: '—', cls: 't--neutral', full: 'About the same' }
+  }
+  return { short: '·', cls: 't--unk', full: 'Not enough data yet' }
+}
+
+/**
+ * @param {unknown} hw
+ */
+function hwSeriesForHighway(hw) {
+  if (hw == null || typeof hw !== 'object') return []
+  const s = /** @type {Record<string, unknown>} */(hw).series
+  return Array.isArray(s) ? s : []
+}
+
+/**
+ * @param {unknown} hw
+ */
+function hwChartStrokeColor(hw) {
+  const t = hwDelayTier(hw)
+  if (t === 'green') return '#4ade80'
+  if (t === 'red') return '#f87171'
+  return '#fb923c'
+}
+
+/**
+ * @param {unknown} hw
+ */
+function hwChartModel(hw) {
+  const vb = {
+    w: 268,
+    h: 52,
+    plotL: 14,
+    plotR: 266,
+    plotT: 7,
+    plotB: 34,
+  }
+  const pw = vb.plotR - vb.plotL
+  const ph = vb.plotB - vb.plotT
+  const strokeColor = hwChartStrokeColor(hw)
+
+  const raw = hwSeriesForHighway(hw)
+  let pts = downsampleSeries(raw, MAX_CHART_POINTS)
+    .slice()
+    .sort((a, b) => a.t - b.t)
+  if (pts.length === 1) {
+    const p0 = pts[0]
+    pts = [{ t: p0.t - 5 * 60 * 1000, m: p0.m, s: p0.s }, p0]
+  }
+  if (pts.length < 2) {
+    return { hasPath: false, strokeColor, vb }
+  }
+
+  const tMin = pts[0].t
+  const tMax = pts[pts.length - 1].t
+  const spanT = Math.max(tMax - tMin, 60_000)
+
+  const vals = pts.map((p) => p.m).filter((v) => Number.isFinite(v))
+  if (vals.length === 0) {
+    return { hasPath: false, strokeColor, vb }
+  }
+
+  let minM = Math.min(...vals)
+  let maxM = Math.max(...vals)
+  const pad = Math.max((maxM - minM) * 0.12, 0.85)
+  minM = Math.max(0, minM - pad)
+  maxM = maxM + pad
+  if (maxM - minM < 1.25) {
+    const c = (minM + maxM) / 2
+    minM = Math.max(0, c - 1)
+    maxM = c + 1
+  }
+  const spanM = Math.max(maxM - minM, 0.75)
+
+  const xOf = /** @param {number} t */ (t) => vb.plotL + pw * ((t - tMin) / spanT)
+  const yOf = /** @param {number} m */ (m) => vb.plotT + ph * (1 - (m - minM) / spanM)
+
+  const pathPts = pts.map((pt) => ({
+    x: xOf(pt.t),
+    y: yOf(Number.isFinite(pt.m) ? pt.m : minM),
+  }))
+
+  const dLine = pathPts
+    .map((p, i) => `${i === 0 ? 'M' : 'L'}${p.x.toFixed(2)},${p.y.toFixed(2)}`)
+    .join('')
+
+  const yBase = vb.plotB
+  const dArea =
+    `M${pathPts[0].x.toFixed(2)},${yBase.toFixed(2)}` +
+    pathPts.map((p) => `L${p.x.toFixed(2)},${p.y.toFixed(2)}`).join('') +
+    `L${pathPts[pathPts.length - 1].x.toFixed(2)},${yBase.toFixed(2)}Z`
+
+  const last = pathPts[pathPts.length - 1]
+
+  const fmtCrossMin = (v) => {
+    const r = Math.round(v)
+    if (Math.abs(v - r) < 0.08) return String(r)
+    return `${v.toFixed(1)}`.replace(/\.0$/, '')
+  }
+  const yLevels = [maxM, maxM - spanM / 3, maxM - (2 * spanM) / 3, minM]
+  /** @type {{ y: number, lab: string }[]} */
+  const yTicks = []
+  const seenYLab = new Set()
+  for (const v of yLevels) {
+    let lab = fmtCrossMin(v)
+    if (seenYLab.has(lab)) lab = `${v.toFixed(1)}`.replace(/\.0$/, '')
+    seenYLab.add(lab)
+    yTicks.push({ y: yOf(v), lab })
+  }
+
+  const fmtHour = (ts) => {
+    try {
+      return new Date(ts).toLocaleTimeString(undefined, {
+        hour: 'numeric',
+        minute: '2-digit',
+      })
+    } catch {
+      return ''
+    }
+  }
+
+  const FOUR_MS = 4 * 60 * 60 * 1000
+  /** @type {number[]} */
+  let xTickTs = []
+  {
+    const d = new Date(tMin)
+    d.setMinutes(0, 0, 0)
+    d.setMilliseconds(0)
+    const h = d.getHours()
+    let nextH = Math.ceil(h / 4) * 4
+    if (nextH >= 24) {
+      d.setDate(d.getDate() + 1)
+      d.setHours(0, 0, 0, 0)
+    } else {
+      d.setHours(nextH, 0, 0, 0)
+    }
+    let t = d.getTime()
+    while (t < tMin) t += FOUR_MS
+    while (t <= tMax) {
+      xTickTs.push(t)
+      t += FOUR_MS
+    }
+    if (xTickTs.length === 0) {
+      xTickTs = [tMin, tMax]
+    }
+  }
+  /** @type {{ x: number, lab: string }[]} */
+  const xTicks = xTickTs.map((ts) => ({ x: xOf(ts), lab: fmtHour(ts) }))
+  if (xTicks.length === 0) {
+    xTicks.push({ x: xOf(tMin), lab: fmtHour(tMin) })
+    if (tMax !== tMin) xTicks.push({ x: xOf(tMax), lab: fmtHour(tMax) })
+  }
+
+  /** @type {{ x1: number, y1: number, x2: number, y2: number }[]} */
+  const hGrids = yTicks.map((tk) => ({
+    x1: vb.plotL,
+    y1: tk.y,
+    x2: vb.plotR,
+    y2: tk.y,
+  }))
+
+  return {
+    hasPath: true,
+    vb,
+    dLine,
+    dArea,
+    lastCx: last.x,
+    lastCy: last.y,
+    yTicks,
+    xTicks,
+    hGrids,
+    strokeColor,
+  }
+}
+
+const rankedHighways = computed(() => {
+  const highways = highwayPayload.value?.highways
+  if (!Array.isArray(highways)) return []
+  return [...highways].sort((a, b) => hwTravelMinutes(a) - hwTravelMinutes(b))
+})
+
+const highwayPolylinesForMap = computed(() => {
+  if (viewMode.value !== 'highways') return []
+  const highways = highwayPayload.value?.highways
+  if (!Array.isArray(highways)) return []
+  return highways.map((hw) => ({
+    id: hw.id,
+    shortName: hw.shortName || hw.name,
+    waypoints: Array.isArray(hw.waypoints) ? hw.waypoints : [],
+    delayTier: hwDelayTier(hw),
+  }))
+})
+
 /**
  * 511NY stream or GWB YouTube embed.
  * @param {unknown} row
@@ -751,6 +1010,16 @@ function onDirToggleChange(e) {
   }
 }
 
+/**
+ * @param {Event} e
+ */
+function onViewToggleChange(e) {
+  const t = e.target
+  if (t instanceof HTMLInputElement) {
+    viewMode.value = t.checked ? 'highways' : 'crossings'
+  }
+}
+
 onMounted(() => {
   updateLandscapeSplit()
   if (typeof window !== 'undefined' && window.matchMedia) {
@@ -760,9 +1029,11 @@ onMounted(() => {
   void load()
   void loadCameras()
   void loadVerrazzano()
+  void loadHighways()
   intervalId = setInterval(() => {
     void load()
     void loadVerrazzano()
+    void loadHighways()
   }, POLL_MS)
 })
 
@@ -788,6 +1059,7 @@ onUnmounted(() => {
           :highlight-id="highlightId"
           :fill-height="isLandscapeSplit"
           :vehicle-id="mapVehicleId"
+          :highway-polylines="highwayPolylinesForMap"
           @select="onMapSelect"
         />
         <div
@@ -802,44 +1074,73 @@ onUnmounted(() => {
       <div class="bridges-list-inner">
         <div class="bridges-bar">
           <div class="bridges-bar-top">
-            <h1 class="bridges-h1">Crossings</h1>
-            <p v-if="payload?.fetchError" class="bridges-warn" role="status">
+            <h1 class="bridges-h1">{{ viewMode === 'crossings' ? 'Crossings' : 'Highways' }}</h1>
+            <p v-if="viewMode === 'crossings' && payload?.fetchError" class="bridges-warn" role="status">
               Data may be stale · {{ payload.fetchError }}
+            </p>
+            <p v-else-if="viewMode === 'highways' && highwayPayload?.error" class="bridges-warn" role="status">
+              {{ highwayPayload.error }}
             </p>
             <p v-else class="bridges-pill">
               <span>Fastest first</span>
-              <span v-if="payload?.fetchedAt" class="bridges-time"
+              <span v-if="viewMode === 'crossings' && payload?.fetchedAt" class="bridges-time"
               >· {{ fmtTime(payload.fetchedAt) }}</span>
-              <span class="bridges-note">· Tunnels off</span>
+              <span v-if="viewMode === 'highways' && highwayPayload?.fetchedAt" class="bridges-time"
+              >· {{ fmtTime(highwayPayload.fetchedAt) }}</span>
+              <span v-if="viewMode === 'crossings'" class="bridges-note">· Tunnels off</span>
             </p>
           </div>
 
-          <div class="bridges-dir-row">
-            <span class="dir-toggle-caption">Direction</span>
-            <div class="bridges-dir-toggle" role="group" aria-label="Travel direction">
-              <span class="dir-toggle-lab" :class="{ 'is-on': direction === 'ToNY' }">NY</span>
-              <label class="dir-toggle-switch tap">
-                <input
-                  type="checkbox"
-                  class="dir-toggle-input"
-                  :checked="direction === 'ToNJ'"
-                  aria-label="Toggle direction: New York or New Jersey"
-                  @change="onDirToggleChange"
-                />
-                <span class="dir-toggle-track" aria-hidden="true">
-                  <span class="dir-toggle-thumb" />
-                </span>
-              </label>
-              <span class="dir-toggle-lab" :class="{ 'is-on': direction === 'ToNJ' }">NJ</span>
+          <div class="bridges-toggles-row">
+            <div class="bridges-dir-toggle-wrap">
+              <span class="dir-toggle-caption">Direction</span>
+              <div class="bridges-dir-toggle" role="group" aria-label="Travel direction">
+                <span class="dir-toggle-lab" :class="{ 'is-on': direction === 'ToNY' }">NY</span>
+                <label class="dir-toggle-switch tap">
+                  <input
+                    type="checkbox"
+                    class="dir-toggle-input"
+                    :checked="direction === 'ToNJ'"
+                    aria-label="Toggle direction: New York or New Jersey"
+                    @change="onDirToggleChange"
+                  />
+                  <span class="dir-toggle-track" aria-hidden="true">
+                    <span class="dir-toggle-thumb" />
+                  </span>
+                </label>
+                <span class="dir-toggle-lab" :class="{ 'is-on': direction === 'ToNJ' }">NJ</span>
+              </div>
+            </div>
+            <div class="bridges-view-toggle-wrap">
+              <span class="dir-toggle-caption">View</span>
+              <div class="bridges-dir-toggle" role="group" aria-label="View mode">
+                <span class="dir-toggle-lab" :class="{ 'is-on': viewMode === 'crossings' }">Crossings</span>
+                <label class="dir-toggle-switch tap">
+                  <input
+                    type="checkbox"
+                    class="dir-toggle-input"
+                    :checked="viewMode === 'highways'"
+                    aria-label="Toggle view: Crossings or Highways"
+                    @change="onViewToggleChange"
+                  />
+                  <span class="dir-toggle-track" aria-hidden="true">
+                    <span class="dir-toggle-thumb" />
+                  </span>
+                </label>
+                <span class="dir-toggle-lab" :class="{ 'is-on': viewMode === 'highways' }">Highways</span>
+              </div>
             </div>
           </div>
         </div>
 
-        <p v-if="error" class="bridges-err">{{ error }}</p>
-        <div v-if="loading && !payload" class="bridges-skel" aria-busy="true">Loading…</div>
+        <p v-if="viewMode === 'crossings' && error" class="bridges-err">{{ error }}</p>
+        <p v-if="viewMode === 'highways' && highwayError" class="bridges-err">{{ highwayError }}</p>
+        <div v-if="viewMode === 'crossings' && loading && !payload" class="bridges-skel" aria-busy="true">Loading…</div>
+        <div v-if="viewMode === 'highways' && highwayLoading && !highwayPayload" class="bridges-skel" aria-busy="true">Loading…</div>
 
+        <!-- Crossings cards -->
         <div
-          v-else
+          v-if="viewMode === 'crossings'"
           class="bridges-content-panel"
           aria-label="Crossing times list"
         >
@@ -1007,6 +1308,145 @@ onUnmounted(() => {
           
           <p v-else-if="!rankedRows.length" class="bridges-no-crossings">No bridge data for this direction</p>
         </div>
+
+        <!-- Highway cards -->
+        <div
+          v-else-if="viewMode === 'highways'"
+          class="bridges-content-panel"
+          aria-label="Highway traffic list"
+        >
+          <h2 v-if="rankedHighways.length" class="bridges-trips-h2">Major Highways</h2>
+          <ul v-if="rankedHighways.length" class="bridge-grid" aria-label="Highways, fastest first">
+            <li
+              v-for="(hw, idx) in rankedHighways"
+              :key="hw.id"
+              class="bridge-tile"
+              :class="{
+                'bridge-tile--d-green': hwDelayTier(hw) === 'green',
+                'bridge-tile--d-orange': hwDelayTier(hw) === 'orange',
+                'bridge-tile--d-red': hwDelayTier(hw) === 'red',
+              }"
+            >
+              <div class="bridge-tile-inner">
+                <div class="bridge-data-col">
+                  <div class="bridge-card-head">
+                    <div class="bridge-card-id">
+                      <span class="bridge-rank" aria-hidden="true">{{ idx + 1 }}</span>
+                      <div class="highway-title-wrap">
+                        <h2 class="bridge-title">{{ hw.name }}</h2>
+                        <span class="highway-route">{{ hw.route }}</span>
+                      </div>
+                    </div>
+                    <div
+                      class="bridge-trend ico"
+                      :class="[hwTrendInfo(hw).cls, `bridge-trend--delay-${hwDelayTier(hw)}`]"
+                      :title="hwTrendInfo(hw).full"
+                    >{{ hwTrendInfo(hw).short }}</div>
+                  </div>
+                  <div class="bridge-card-metrics">
+                    <div class="bridge-kpi bridge-kpi--cross">
+                      <span class="bridge-kpi-lab">Travel time</span>
+                      <div class="bridge-kpi-row">
+                        <span class="bridge-kpi-num">
+                          <template v-if="hw.live?.routeTravelTime != null">{{ hw.live.routeTravelTime }}</template>
+                          <template v-else>—</template>
+                        </span>
+                        <span class="bridge-kpi-unit">min</span>
+                      </div>
+                    </div>
+                    <div class="bridge-kpi-divider" aria-hidden="true" />
+                    <div class="bridge-kpi bridge-kpi--speed">
+                      <span class="bridge-kpi-lab">Avg speed</span>
+                      <div class="bridge-kpi-row bridge-kpi-row--speed">
+                        <template v-if="hw.live?.routeSpeed != null">
+                          <span class="bridge-kpi-num">{{ hw.live.routeSpeed }}</span>
+                          <span class="bridge-kpi-unit">mph</span>
+                        </template>
+                        <template v-else>
+                          <span class="bridge-kpi-num bridge-kpi-num--muted">—</span>
+                        </template>
+                      </div>
+                    </div>
+                  </div>
+                  <div v-if="hwChartModel(hw).hasPath" class="bridge-chart-shell">
+                    <div class="bridge-chart-head">
+                      <span class="bridge-chart-title">History</span>
+                      <span class="bridge-chart-sub">Minutes · local time</span>
+                    </div>
+                    <div class="bridge-chart-panel">
+                      <svg
+                        class="bridge-chart-svg"
+                        :viewBox="`0 0 ${hwChartModel(hw).vb.w} ${hwChartModel(hw).vb.h}`"
+                        preserveAspectRatio="xMidYMid meet"
+                        width="100%"
+                        :style="{ aspectRatio: `${hwChartModel(hw).vb.w} / ${hwChartModel(hw).vb.h}` }"
+                        role="img"
+                        :aria-label="`Travel time history for ${hw.name}`"
+                      >
+                        <defs>
+                          <linearGradient :id="`hcg-${hw.id}`" x1="0" y1="0" x2="0" y2="1">
+                            <stop offset="0%" :stop-color="hwChartModel(hw).strokeColor" stop-opacity="0.14" />
+                            <stop offset="100%" :stop-color="hwChartModel(hw).strokeColor" stop-opacity="0.02" />
+                          </linearGradient>
+                        </defs>
+                        <template v-if="hwChartModel(hw).hasPath">
+                          <text
+                            v-for="(yt, yi) in hwChartModel(hw).yTicks"
+                            :key="`yt-${yi}`"
+                            class="bridge-chart-axis-title"
+                            x="6"
+                            :y="yt.y + 3.5"
+                            text-anchor="start"
+                          >{{ yt.lab }}</text>
+                          <line
+                            v-for="(g, gi) in hwChartModel(hw).hGrids"
+                            :key="`hg-${gi}`"
+                            :x1="g.x1"
+                            :y1="g.y1"
+                            :x2="g.x2"
+                            :y2="g.y2"
+                            class="bridge-chart-grid"
+                          />
+                          <path :d="hwChartModel(hw).dArea" :fill="`url(#hcg-${hw.id})`" />
+                          <path
+                            :d="hwChartModel(hw).dLine"
+                            fill="none"
+                            :stroke="hwChartModel(hw).strokeColor"
+                            stroke-width="0.95"
+                            stroke-linecap="round"
+                            stroke-linejoin="round"
+                            opacity="0.82"
+                          />
+                          <circle
+                            :cx="hwChartModel(hw).lastCx"
+                            :cy="hwChartModel(hw).lastCy"
+                            r="1.35"
+                            :fill="hwChartModel(hw).strokeColor"
+                            stroke="#0f0f14"
+                            stroke-width="0.45"
+                            opacity="0.9"
+                          />
+                          <text
+                            v-for="(tk, ti) in hwChartModel(hw).xTicks"
+                            :key="`xt-${ti}`"
+                            class="bridge-chart-tick-x"
+                            :x="tk.x"
+                            :y="hwChartModel(hw).vb.h - 5"
+                            text-anchor="middle"
+                          >{{ tk.lab }}</text>
+                        </template>
+                      </svg>
+                    </div>
+                  </div>
+                  <div v-else class="bridge-chart-empty" role="status">Collecting history…</div>
+                </div>
+              </div>
+            </li>
+          </ul>
+          <p v-else-if="!highwayLoading" class="bridges-no-crossings">
+            No highway traffic data. Configure a HERE or TomTom API key in Settings.
+          </p>
+        </div>
       </div>
     </div>
   </div>
@@ -1153,12 +1593,20 @@ onUnmounted(() => {
   font-weight: 600;
 }
 
-.bridges-dir-row {
+.bridges-toggles-row {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
-  gap: 0.65rem;
+  gap: 0.85rem;
   flex-wrap: wrap;
+}
+
+.bridges-dir-toggle-wrap,
+.bridges-view-toggle-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.25rem;
 }
 
 .dir-toggle-caption {
@@ -1682,6 +2130,35 @@ onUnmounted(() => {
   font-size: 4.25px;
   font-weight: 600;
   font-family: var(--font-sans, system-ui, sans-serif);
+}
+
+.highway-title-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 0.08rem;
+  min-width: 0;
+}
+
+.highway-route {
+  font-size: 0.55rem;
+  font-weight: 650;
+  color: #8b8b9a;
+  letter-spacing: 0.02em;
+}
+
+.bridge-chart-empty {
+  min-height: 52px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.5rem 0.35rem;
+  font-size: 0.62rem;
+  font-weight: 600;
+  color: #5c5c6e;
+  letter-spacing: 0.04em;
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.38);
+  border: 1px solid rgba(255, 255, 255, 0.05);
 }
 
 </style>
