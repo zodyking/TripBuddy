@@ -893,6 +893,21 @@ function deepMergeNonEmpty(base, ...sources) {
 }
 
 /**
+ * Avoid merging `trailers` across different daily legs — `mergeTrailerArrays` unions by
+ * `trlrOrder`, so a pre-plan leg plus cached prior leg produced phantom extra trailers.
+ * @param {unknown} body
+ * @param {string | null} primarySeq active trip leg # for this merge
+ */
+function bodyOmitTrailersIfDifferentLeg(body, primarySeq) {
+  if (body == null || typeof body !== 'object' || Array.isArray(body)) return body
+  if (!primarySeq) return body
+  const seq = tripBodyDailySeq(body)
+  if (!seq || seq === primarySeq) return body
+  const { trailers: _omit, ...rest } = /** @type {Record<string, unknown>} */ (body)
+  return rest
+}
+
+/**
  * @param {unknown} body
  * @returns {string | null}
  */
@@ -1148,9 +1163,19 @@ async function refreshLinehaulApisImpl(attempt) {
       ? /** @type {Record<string, unknown>} */ (cachedTripSnapshot.value)
       : null
 
-  // Merge API responses - order: aprvdBody first (base), then dspchBody, then cached last
-  // Cached has the richest data and should win for trailers/equipment when present
-  const merged = deepMergeNonEmpty(aprvdBody, dspchBody, cached)
+  /** Prefer DSPCH leg detail, else cached APRVD snapshot, else list APRVD (pre-plan seq may differ). */
+  const mergePrimarySeq =
+    tripBodyDailySeq(dspchBody) ||
+    tripBodyDailySeq(cached) ||
+    tripBodyDailySeq(aprvdBody)
+
+  // Merge API responses — order: APRVD base, DSPCH overlay, cached last (richest equipment wins).
+  // Do not union trailers across legs (omit trailers when dailyTripLegSequence ≠ mergePrimarySeq).
+  const merged = deepMergeNonEmpty(
+    bodyOmitTrailersIfDifferentLeg(aprvdBody, mergePrimarySeq),
+    bodyOmitTrailersIfDifferentLeg(dspchBody, mergePrimarySeq),
+    bodyOmitTrailersIfDifferentLeg(cached, mergePrimarySeq),
+  )
 
   if (merged != null) {
     linehaulTripsBody.value = merged

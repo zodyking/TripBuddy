@@ -246,6 +246,24 @@ const tripStatusDetailTitle = computed(() => {
   return ''
 })
 
+/** FedEx reports driver + tractor available — allow manual “trip complete” without dispatch-phase API. */
+const driverAndVehicleAvailable = computed(() => {
+  const d = linehaulDriverBody.value
+  const t = linehaulTractorBody.value
+  if (!d || typeof d !== 'object' || !t || typeof t !== 'object') return false
+  const ds = String(
+    /** @type {Record<string, unknown>} */ (d).driverAvlStat ?? '',
+  )
+    .trim()
+    .toUpperCase()
+  const ts = String(
+    /** @type {Record<string, unknown>} */ (t).detlCodeAvailStat ?? '',
+  )
+    .trim()
+    .toUpperCase()
+  return ds === 'AVL' && ts === 'AVL'
+})
+
 const tripOriginDest = computed(() => {
   // Use stableTripState for current trip origin/dest (always has best data)
   const stable = stableTripState.value
@@ -481,6 +499,7 @@ function tripDetailsCompleteSeq() {
 }
 
 const tripRemovalBlockedReason = computed(() => {
+  if (driverAndVehicleAvailable.value) return ''
   const p = tripPhase.value
   if (p === 'assigned') {
     return 'This trip is assigned — finish or wait for dispatch before removing it from Home.'
@@ -490,6 +509,22 @@ const tripRemovalBlockedReason = computed(() => {
   }
   return ''
 })
+
+function openDispatchTripCompleteDialog() {
+  const seq = activeDispatchTripSeq.value
+  if (!seq) return
+  if (tripRemovalBlockedReason.value) {
+    copyToast.value = tripRemovalBlockedReason.value
+    window.setTimeout(() => {
+      copyToast.value = ''
+    }, 3200)
+    return
+  }
+  dispatchFirstTapAt = 0
+  tripFirstTapAt = 0
+  tripCompleteTargetSeq.value = seq
+  tripCompleteDialog.value = true
+}
 
 function registerDispatchDoubleComplete() {
   const seq = activeDispatchTripSeq.value
@@ -503,10 +538,7 @@ function registerDispatchDoubleComplete() {
   }
   const now = Date.now()
   if (dispatchFirstTapAt && now - dispatchFirstTapAt < DOUBLE_TAP_MS) {
-    dispatchFirstTapAt = 0
-    tripFirstTapAt = 0
-    tripCompleteTargetSeq.value = seq
-    tripCompleteDialog.value = true
+    openDispatchTripCompleteDialog()
   } else {
     dispatchFirstTapAt = now
   }
@@ -573,6 +605,12 @@ function onDispatchPanelPointerCancel() {
 function onDispatchPanelDblClick(e) {
   if (isInteractiveEventTarget(e.target)) return
   e.preventDefault()
+  openDispatchTripCompleteDialog()
+}
+
+/** Instructions are a nested control — panel pointer handlers never run here. */
+function onDispatchInstructionsPointerUp(e) {
+  if (e.button !== 0) return
   registerDispatchDoubleComplete()
 }
 
@@ -2203,8 +2241,10 @@ onUnmounted(() => {
         v-else
         type="button"
         class="read dispatch-instructions-body copyable-block tap"
-        title="Tap to copy"
+        title="Tap to copy; double-tap to mark trip complete when driver and tractor are AVL"
         @click.stop="copyTripDetailValue(mergedDispatchInstructionsForSlide, 'Instructions')"
+        @pointerup.stop="onDispatchInstructionsPointerUp"
+        @dblclick.stop.prevent="openDispatchTripCompleteDialog"
       >
         {{ mergedDispatchInstructionsForSlide }}
       </button>
