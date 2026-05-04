@@ -154,8 +154,8 @@ let geoStopped = false
 let watchStarted = false
 let didFitWithUser = false
 
-/** Whether to use geo-scaled (real-world sized) markers. */
-const useGeoScaledMarkers = ref(true)
+/** Use fixed-pixel markers on the trailer map (readable); geo mode can skew huge before clamp. */
+const useGeoScaledMarkers = ref(false)
 
 function prefersReducedMotion() {
   if (typeof window === 'undefined') return false

@@ -67,54 +67,70 @@ export function metersToPixels(meters, lat, zoom) {
 }
 
 /**
+ * Clamp pixel box from “meters at lat/zoom” while preserving aspect ratio
+ * and respecting min/max width plus a hard max height (tall 53′ trailers
+ * otherwise produce multi‑thousand‑px icons that anchor off-screen).
+ * @param {number} widthPx raw width in pixels from metersToPixels
+ * @param {number} aspect height / width (long side / short side on map)
+ * @param {{ minWidth?: number, maxWidth?: number, maxHeight?: number }} [opts]
+ * @returns {{ width: number, height: number }}
+ */
+function clampGeoRasterBox(widthPx, aspect, opts = {}) {
+  const minW = Math.max(8, Math.floor(Number(opts.minWidth) || 56))
+  const maxW = Math.max(minW, Math.floor(Number(opts.maxWidth) || 200))
+  const maxH = Math.max(32, Math.floor(Number(opts.maxHeight) || 280))
+  const wByHeight = Math.floor(maxH / Math.max(aspect, 0.01))
+  let w = Math.round(widthPx)
+  w = Math.max(minW, Math.min(maxW, w))
+  w = Math.min(w, wByHeight)
+  if (w < minW) {
+    w = Math.min(maxW, Math.max(minW, wByHeight))
+  }
+  let h = Math.round(w * aspect)
+  if (h > maxH) {
+    w = Math.max(20, Math.min(maxW, Math.floor(maxH / Math.max(aspect, 0.01))))
+    h = Math.min(maxH, Math.round(w * aspect))
+  }
+  return { width: w, height: h }
+}
+
+/**
  * Get geo-scaled dimensions for a 20ft trailer at given lat/zoom.
  * @param {number} lat
  * @param {number} zoom
- * @param {{ minWidth?: number, maxWidth?: number }} [opts]
+ * @param {{ minWidth?: number, maxWidth?: number, maxHeight?: number }} [opts]
  * @returns {{ width: number, height: number }}
  */
 export function getTrailer20ftGeoSize(lat, zoom, opts = {}) {
-  const { minWidth = 56, maxWidth = 320 } = opts
   const widthPx = metersToPixels(TRAILER_20FT_WIDTH_M, lat, zoom)
-  const lengthPx = metersToPixels(TRAILER_20FT_LENGTH_M, lat, zoom)
-  const clampedW = Math.max(minWidth, Math.min(maxWidth, Math.round(widthPx)))
   const aspectRatio = TRAILER_20FT_LENGTH_M / TRAILER_20FT_WIDTH_M
-  const clampedH = Math.round(clampedW * aspectRatio)
-  return { width: clampedW, height: clampedH }
+  return clampGeoRasterBox(widthPx, aspectRatio, opts)
 }
 
 /**
  * Get geo-scaled dimensions for a 53ft trailer at given lat/zoom.
  * @param {number} lat
  * @param {number} zoom
- * @param {{ minWidth?: number, maxWidth?: number }} [opts]
+ * @param {{ minWidth?: number, maxWidth?: number, maxHeight?: number }} [opts]
  * @returns {{ width: number, height: number }}
  */
 export function getTrailer53ftGeoSize(lat, zoom, opts = {}) {
-  const { minWidth = 56, maxWidth = 320 } = opts
   const widthPx = metersToPixels(TRAILER_53FT_WIDTH_M, lat, zoom)
-  const lengthPx = metersToPixels(TRAILER_53FT_LENGTH_M, lat, zoom)
-  const clampedW = Math.max(minWidth, Math.min(maxWidth, Math.round(widthPx)))
   const aspectRatio = TRAILER_53FT_LENGTH_M / TRAILER_53FT_WIDTH_M
-  const clampedH = Math.round(clampedW * aspectRatio)
-  return { width: clampedW, height: clampedH }
+  return clampGeoRasterBox(widthPx, aspectRatio, opts)
 }
 
 /**
  * Get geo-scaled dimensions for a truck at given lat/zoom.
  * @param {number} lat
  * @param {number} zoom
- * @param {{ minWidth?: number, maxWidth?: number }} [opts]
+ * @param {{ minWidth?: number, maxWidth?: number, maxHeight?: number }} [opts]
  * @returns {{ width: number, height: number }}
  */
 export function getTruckGeoSize(lat, zoom, opts = {}) {
-  const { minWidth = 56, maxWidth = 280 } = opts
   const widthPx = metersToPixels(TRUCK_WIDTH_M, lat, zoom)
-  const lengthPx = metersToPixels(TRUCK_LENGTH_M, lat, zoom)
-  const clampedW = Math.max(minWidth, Math.min(maxWidth, Math.round(widthPx)))
   const aspectRatio = TRUCK_LENGTH_M / TRUCK_WIDTH_M
-  const clampedH = Math.round(clampedW * aspectRatio)
-  return { width: clampedW, height: clampedH }
+  return clampGeoRasterBox(widthPx, aspectRatio, opts)
 }
 
 /** @param {string} svg */
