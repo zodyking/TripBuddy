@@ -33,7 +33,12 @@ const youtubeWrapRef = ref(null)
 const isLoading = ref(true)
 const hasError = ref(false)
 const errorMsg = ref('')
+const usingFallbackImage = ref(false)
 let hls = null
+let retryCount = 0
+let retryTimer = null
+const MAX_RETRIES = 2
+const RETRY_DELAY_MS = 3000
 
 const youtubeEmbedSrc = computed(() => {
   const id = props.youtubeVideoId?.trim()
@@ -52,7 +57,8 @@ const youtubeEmbedSrc = computed(() => {
 
 const effectiveSource = computed(() => {
   if (props.youtubeVideoId?.trim()) return { type: 'youtube' }
-  if (props.videoUrl) return { type: 'video', url: props.videoUrl }
+  if (usingFallbackImage.value && props.imageUrl) return { type: 'image', url: props.imageUrl }
+  if (props.videoUrl && !hasError.value) return { type: 'video', url: props.videoUrl }
   if (props.imageUrl) return { type: 'image', url: props.imageUrl }
   return null
 })
@@ -62,7 +68,7 @@ const isDisabled = computed(() => {
 })
 
 async function loadHls() {
-  if (typeof window === 'undefined') return
+  if (typeof window === 'undefined') return null
   try {
     const { default: Hls } = await import('hls.js')
     return Hls
@@ -77,55 +83,121 @@ function tryAutoplay() {
   video.play().catch(() => {})
 }
 
+function scheduleRetry() {
+  if (retryCount >= MAX_RETRIES) {
+    if (props.imageUrl) {
+      usingFallbackImage.value = true
+      hasError.value = false
+      isLoading.value = false
+    }
+    return
+  }
+  retryCount++
+  retryTimer = setTimeout(() => {
+    initVideo()
+  }, RETRY_DELAY_MS)
+}
+
+function clearRetryTimer() {
+  if (retryTimer) {
+    clearTimeout(retryTimer)
+    retryTimer = null
+  }
+}
+
 async function initVideo() {
   if (!props.videoUrl || !videoRef.value) return
   
   isLoading.value = true
   hasError.value = false
   errorMsg.value = ''
+  usingFallbackImage.value = false
   
   const video = videoRef.value
   
   if (video.canPlayType('application/vnd.apple.mpegurl')) {
     video.src = props.videoUrl
-    video.addEventListener('loadedmetadata', () => {
+    
+    const onLoadedMeta = () => {
       isLoading.value = false
+      retryCount = 0
       tryAutoplay()
-    })
-    video.addEventListener('error', () => {
+    }
+    const onError = () => {
       hasError.value = true
       errorMsg.value = 'Video playback failed'
       isLoading.value = false
-    })
+      scheduleRetry()
+    }
+    
+    video.removeEventListener('loadedmetadata', onLoadedMeta)
+    video.removeEventListener('error', onError)
+    video.addEventListener('loadedmetadata', onLoadedMeta, { once: true })
+    video.addEventListener('error', onError, { once: true })
   } else {
     const Hls = await loadHls()
     if (Hls && Hls.isSupported()) {
+      destroyHls()
+      
       hls = new Hls({
-        maxBufferLength: 10,
-        maxMaxBufferLength: 20,
-        maxBufferSize: 1 * 1000 * 1000,
+        maxBufferLength: 15,
+        maxMaxBufferLength: 30,
+        maxBufferSize: 2 * 1000 * 1000,
         enableWorker: true,
         lowLatencyMode: false,
+        fragLoadingTimeOut: 10000,
+        manifestLoadingTimeOut: 10000,
+        levelLoadingTimeOut: 10000,
+        fragLoadingMaxRetry: 3,
+        manifestLoadingMaxRetry: 3,
+        levelLoadingMaxRetry: 3,
       })
+      
       hls.loadSource(props.videoUrl)
       hls.attachMedia(video)
+      
       hls.on(Hls.Events.MANIFEST_PARSED, () => {
         isLoading.value = false
+        retryCount = 0
         tryAutoplay()
       })
+      
       hls.on(Hls.Events.ERROR, (event, data) => {
         if (data.fatal) {
-          hasError.value = true
-          errorMsg.value = 'Stream unavailable'
-          isLoading.value = false
-          hls.destroy()
-          hls = null
+          switch (data.type) {
+            case Hls.ErrorTypes.NETWORK_ERROR:
+              if (retryCount < MAX_RETRIES) {
+                hls.startLoad()
+                retryCount++
+              } else {
+                hasError.value = true
+                errorMsg.value = 'Stream unavailable'
+                isLoading.value = false
+                destroyHls()
+                scheduleRetry()
+              }
+              break
+            case Hls.ErrorTypes.MEDIA_ERROR:
+              hls.recoverMediaError()
+              break
+            default:
+              hasError.value = true
+              errorMsg.value = 'Stream unavailable'
+              isLoading.value = false
+              destroyHls()
+              scheduleRetry()
+              break
+          }
         }
       })
     } else {
       hasError.value = true
       errorMsg.value = 'HLS not supported'
       isLoading.value = false
+      if (props.imageUrl) {
+        usingFallbackImage.value = true
+        hasError.value = false
+      }
     }
   }
 }
@@ -159,7 +231,17 @@ function onYoutubeLoad() {
   isLoading.value = false
 }
 
+function retryStream() {
+  retryCount = 0
+  hasError.value = false
+  usingFallbackImage.value = false
+  clearRetryTimer()
+  initVideo()
+}
+
 watch(() => props.videoUrl, () => {
+  clearRetryTimer()
+  retryCount = 0
   destroyHls()
   if (props.videoUrl && !props.youtubeVideoId?.trim()) {
     initVideo()
@@ -169,10 +251,13 @@ watch(() => props.videoUrl, () => {
 watch(
   () => props.youtubeVideoId,
   () => {
+    clearRetryTimer()
+    retryCount = 0
     destroyHls()
     if (props.youtubeVideoId?.trim()) {
       isLoading.value = true
       hasError.value = false
+      usingFallbackImage.value = false
     } else if (props.videoUrl) {
       initVideo()
     } else {
@@ -192,6 +277,7 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
+  clearRetryTimer()
   destroyHls()
 })
 </script>
@@ -248,6 +334,9 @@ onUnmounted(() => {
         <div v-if="hasError" class="camera-error">
           <span class="camera-error-icon">⚠</span>
           <span class="camera-error-text">{{ errorMsg }}</span>
+          <button type="button" class="camera-retry-btn" @click="retryStream">
+            Retry
+          </button>
         </div>
         <button
           v-if="!isLoading && !hasError"
@@ -262,13 +351,17 @@ onUnmounted(() => {
         </button>
       </div>
       
-      <div v-else class="camera-image-wrap">
+      <div v-else-if="effectiveSource.type === 'image'" class="camera-image-wrap">
         <img
           :src="effectiveSource.url"
           :alt="`${bridgeName} camera`"
           class="camera-image"
           loading="lazy"
         />
+        <div v-if="usingFallbackImage && videoUrl" class="camera-fallback-badge">
+          <span class="camera-fallback-text">Still image</span>
+          <button type="button" class="camera-retry-link" @click="retryStream">Retry stream</button>
+        </div>
       </div>
     </template>
     
@@ -374,6 +467,59 @@ onUnmounted(() => {
 .camera-error-text {
   font-size: 0.65rem;
   font-weight: 600;
+}
+
+.camera-retry-btn {
+  margin-top: 0.35rem;
+  padding: 0.3rem 0.65rem;
+  border-radius: 6px;
+  border: 1px solid rgba(248, 113, 113, 0.4);
+  background: rgba(127, 29, 29, 0.4);
+  color: #fecaca;
+  font-size: 0.6rem;
+  font-weight: 650;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.camera-retry-btn:hover {
+  background: rgba(127, 29, 29, 0.6);
+}
+
+.camera-fallback-badge {
+  position: absolute;
+  bottom: 6px;
+  left: 6px;
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.2rem 0.45rem;
+  border-radius: 5px;
+  background: rgba(0, 0, 0, 0.7);
+  z-index: 2;
+}
+
+.camera-fallback-text {
+  font-size: 0.52rem;
+  font-weight: 600;
+  color: #9a9ab0;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.camera-retry-link {
+  border: none;
+  background: none;
+  color: #a78bfa;
+  font-size: 0.52rem;
+  font-weight: 650;
+  cursor: pointer;
+  padding: 0;
+  text-decoration: underline;
+}
+
+.camera-retry-link:hover {
+  color: #c4b5fd;
 }
 
 .camera-fs-btn {
