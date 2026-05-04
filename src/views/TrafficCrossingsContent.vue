@@ -147,6 +147,48 @@ function gwbMatchRouteForToggle(row, d) {
   return n === 12
 }
 
+const hasVerrazzanoCamera = computed(() => {
+  return findVerrazzanoCamera(direction.value, cameras.value) !== null
+})
+
+const verrazzanoLiveData = computed(() => {
+  const dir = direction.value
+  const bd = verrazzanoPayload.value?.byDirection
+  if (!bd || !bd[dir]) return null
+  return bd[dir].live
+})
+
+const verrazzanoHasLiveData = computed(() => {
+  const live = verrazzanoLiveData.value
+  return live && live.routeTravelTime != null
+})
+
+const verrazzanoTrendInfo = computed(() => {
+  const dir = direction.value
+  const bd = verrazzanoPayload.value?.byDirection
+  if (!bd || !bd[dir]) {
+    return { short: '·', cls: 't--unk', full: 'Not enough data yet' }
+  }
+  const t = bd[dir].trend
+  if (t === 'worse') {
+    return { short: '▲', cls: 't--worse', full: 'Slower than last check' }
+  }
+  if (t === 'better') {
+    return { short: '▼', cls: 't--better', full: 'Faster than last check' }
+  }
+  if (t === 'neutral') {
+    return { short: '—', cls: 't--neutral', full: 'About the same' }
+  }
+  return { short: '·', cls: 't--unk', full: 'Not enough data yet' }
+})
+
+const verrazzanoSeries = computed(() => {
+  const dir = direction.value
+  const bd = verrazzanoPayload.value?.byDirection
+  if (!bd || !bd[dir] || !Array.isArray(bd[dir].series)) return []
+  return bd[dir].series
+})
+
 const rankedRows = computed(() => {
   const live = payload.value?.live
   const d = direction.value
@@ -698,50 +740,6 @@ function getBridgeCameraFeed(row) {
   }
   return resolveBridgeCameraFeed(row, direction.value, cameras.value)
 }
-
-const hasVerrazzanoCamera = computed(() => {
-  return findVerrazzanoCamera(direction.value, cameras.value) !== null
-})
-
-const verrazzanoLiveData = computed(() => {
-  const dir = direction.value
-  const bd = verrazzanoPayload.value?.byDirection
-  if (!bd || !bd[dir]) return null
-  return bd[dir].live
-})
-
-const verrazzanoHasLiveData = computed(() => {
-  const live = verrazzanoLiveData.value
-  return live && live.routeTravelTime != null
-})
-
-const verrazzanoTrendInfo = computed(() => {
-  const dir = direction.value
-  const bd = verrazzanoPayload.value?.byDirection
-  if (!bd || !bd[dir]) {
-    return { short: '·', cls: 't--unk', full: 'Not enough data yet' }
-  }
-  const t = bd[dir].trend
-  if (t === 'worse') {
-    return { short: '▲', cls: 't--worse', full: 'Slower than last check' }
-  }
-  if (t === 'better') {
-    return { short: '▼', cls: 't--better', full: 'Faster than last check' }
-  }
-  if (t === 'neutral') {
-    return { short: '—', cls: 't--neutral', full: 'About the same' }
-  }
-  return { short: '·', cls: 't--unk', full: 'Not enough data yet' }
-})
-
-const verrazzanoSeries = computed(() => {
-  const dir = direction.value
-  const bd = verrazzanoPayload.value?.byDirection
-  if (!bd || !bd[dir] || !Array.isArray(bd[dir].series)) return []
-  return bd[dir].series
-})
-
-
 
 /**
  * @param {Event} e
