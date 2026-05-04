@@ -350,6 +350,21 @@ function deepMergeNonEmpty(base, ...sources) {
 }
 
 /**
+ * Avoid merging `trailers` across different daily legs — `mergeTrailerArrays` unions by
+ * `trlrOrder`, so a pre-plan leg plus cached prior leg produced phantom extra trailers.
+ * @param {unknown} body
+ * @param {string | null} primarySeq active trip leg # for this merge
+ */
+function bodyOmitTrailersIfDifferentLeg(body, primarySeq) {
+  if (body == null || typeof body !== 'object' || Array.isArray(body)) return body
+  if (!primarySeq) return body
+  const seq = tripBodyDailySeq(body)
+  if (!seq || seq === primarySeq) return body
+  const { trailers: _omit, ...rest } = /** @type {Record<string, unknown>} */ (body)
+  return rest
+}
+
+/**
  * @param {unknown} body
  * @returns {string | null}
  */
@@ -611,9 +626,19 @@ async function refreshLinehaulApisImpl(attempt) {
       ? /** @type {Record<string, unknown>} */ (cachedTripSnapshot.value)
       : null
 
+  /** Prefer DSPCH leg detail, else cached APRVD snapshot, else list APRVD (pre-plan may differ). */
+  const mergePrimarySeq =
+    tripBodyDailySeq(dspchBody) ||
+    tripBodyDailySeq(cached) ||
+    tripBodyDailySeq(aprvdBody)
+
   // Aprvd list response is canonical for leg ID + O/D; merge cached/dspch first so
   // APVRD (last) wins for route/destination fields (avoids stuck labels from an old cache).
-  const merged = deepMergeNonEmpty(cached, dspchBody, aprvdBody)
+  const merged = deepMergeNonEmpty(
+    bodyOmitTrailersIfDifferentLeg(cached, mergePrimarySeq),
+    bodyOmitTrailersIfDifferentLeg(dspchBody, mergePrimarySeq),
+    bodyOmitTrailersIfDifferentLeg(aprvdBody, mergePrimarySeq),
+  )
 
   if (merged != null) {
     linehaulTripsBody.value = merged
