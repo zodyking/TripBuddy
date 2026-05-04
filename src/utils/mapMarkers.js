@@ -15,18 +15,21 @@ const userLocationTruckImg = truckMarkerUrl
 const trailer20ftTopImg = trailer20MarkerUrl
 const trailer53ftTopImg = trailer53MarkerUrl
 
-/** Display width for bundled truck PNG (~bridge marker width). */
-const USER_MARKER_IMG_W = 52
+/**
+ * Screen-pixel size for truck + trailer rasters (not map-meter scale).
+ * Larger so tractor / trailer numbers stay readable on phone maps.
+ */
+const USER_MARKER_IMG_W = 88
 /** Cab silhouette height at map scale (chip stacks below). */
-const USER_MARKER_IMG_H = 56
-const RASTER_CHIP_H = 13
-const RASTER_CHIP_GAP = 2
+const USER_MARKER_IMG_H = 94
+const RASTER_CHIP_H = 22
+const RASTER_CHIP_GAP = 3
 
-/** 20′ trailer column (~same width cap as bridges). */
-const TRAILER_20_IMG_W = 52
+/** 20′ trailer column — same static pixel width as user truck for consistency. */
+const TRAILER_20_IMG_W = 88
 const TRAILER_20_IMG_H = Math.round(TRAILER_20_IMG_W * (118 / 72))
 /** 53′ trailer — taller column, same width cap. */
-const TRAILER_53_IMG_W = 52
+const TRAILER_53_IMG_W = 88
 const TRAILER_53_IMG_H = Math.round(TRAILER_53_IMG_W * (248 / 76))
 
 /** Real-world trailer dimensions in meters (length × width). */
@@ -71,7 +74,7 @@ export function metersToPixels(meters, lat, zoom) {
  * @returns {{ width: number, height: number }}
  */
 export function getTrailer20ftGeoSize(lat, zoom, opts = {}) {
-  const { minWidth = 16, maxWidth = 200 } = opts
+  const { minWidth = 56, maxWidth = 320 } = opts
   const widthPx = metersToPixels(TRAILER_20FT_WIDTH_M, lat, zoom)
   const lengthPx = metersToPixels(TRAILER_20FT_LENGTH_M, lat, zoom)
   const clampedW = Math.max(minWidth, Math.min(maxWidth, Math.round(widthPx)))
@@ -88,7 +91,7 @@ export function getTrailer20ftGeoSize(lat, zoom, opts = {}) {
  * @returns {{ width: number, height: number }}
  */
 export function getTrailer53ftGeoSize(lat, zoom, opts = {}) {
-  const { minWidth = 16, maxWidth = 200 } = opts
+  const { minWidth = 56, maxWidth = 320 } = opts
   const widthPx = metersToPixels(TRAILER_53FT_WIDTH_M, lat, zoom)
   const lengthPx = metersToPixels(TRAILER_53FT_LENGTH_M, lat, zoom)
   const clampedW = Math.max(minWidth, Math.min(maxWidth, Math.round(widthPx)))
@@ -105,7 +108,7 @@ export function getTrailer53ftGeoSize(lat, zoom, opts = {}) {
  * @returns {{ width: number, height: number }}
  */
 export function getTruckGeoSize(lat, zoom, opts = {}) {
-  const { minWidth = 16, maxWidth = 160 } = opts
+  const { minWidth = 56, maxWidth = 280 } = opts
   const widthPx = metersToPixels(TRUCK_WIDTH_M, lat, zoom)
   const lengthPx = metersToPixels(TRUCK_LENGTH_M, lat, zoom)
   const clampedW = Math.max(minWidth, Math.min(maxWidth, Math.round(widthPx)))
@@ -148,8 +151,8 @@ function escapeHtmlAttr(s) {
 function directoryMarkerIdLabel(raw) {
   const s = String(raw ?? '').trim()
   if (!s) return ''
-  if (s.length <= 7) return s
-  return `${s.slice(0, 6)}…`
+  if (s.length <= 10) return s
+  return `${s.slice(0, 9)}…`
 }
 
 /**
@@ -173,7 +176,7 @@ function rasterMarkerDivIconBottomChip(
     .replace(/^#/, '')
   const idRaw = raw ? directoryMarkerIdLabel(raw) : ''
   const fsPx =
-    idRaw.length === 0 ? 0 : idRaw.length <= 5 ? 7.5 : idRaw.length <= 7 ? 6.5 : 6
+    idRaw.length === 0 ? 0 : idRaw.length <= 5 ? 12 : idRaw.length <= 9 ? 10.5 : 9
   const chipExtraClass = chipClass ? ` ${chipClass}` : ''
   const chipHtml =
     idRaw !== ''
@@ -233,7 +236,7 @@ function trailerTopDivIcon(rasterHref, vw, imgH, trailerNumber = '', pulseClass 
     .replace(/^#/, '')
   const labelRaw = raw ? directoryMarkerIdLabel(raw) : ''
   const fsPx =
-    labelRaw.length === 0 ? 0 : labelRaw.length <= 5 ? 7.5 : labelRaw.length <= 7 ? 6.5 : 6
+    labelRaw.length === 0 ? 0 : labelRaw.length <= 5 ? 12 : labelRaw.length <= 9 ? 10.5 : 9
   const chipHtml =
     labelRaw !== ''
       ? `<div class="map-marker-raster-chip map-marker-raster-chip--trailer" style="font-size:${fsPx}px">${escapeHtmlText(
@@ -568,7 +571,7 @@ export function bridgesCrossingIcon(p) {
 
 /** Semi-trailer pin — fallback when trailer size is unknown / not 20′ or 53′ */
 function trailerSemiSvg() {
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="56" height="56" viewBox="0 0 56 56">
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="72" height="72" viewBox="0 0 56 56">
   <defs>
     <linearGradient id="trlPinG" x1="28" y1="4" x2="28" y2="52">
       <stop offset="0%" stop-color="#fb923c"/>
@@ -597,9 +600,9 @@ function trailerSemiSvg() {
 export function trailerFallbackPinIcon() {
   return L.icon({
     iconUrl: svgDataUrl(trailerSemiSvg()),
-    iconSize: [56, 56],
-    iconAnchor: [28, 56],
-    popupAnchor: [0, -50],
+    iconSize: [72, 72],
+    iconAnchor: [36, 72],
+    popupAnchor: [0, -64],
     className: 'map-marker-img-icon map-marker-img-icon--trailer',
   })
 }

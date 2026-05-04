@@ -148,6 +148,8 @@ let userMarker = null
 let geoWatchId = null
 /** @type {ReturnType<typeof setTimeout> | null} */
 let fitDebounce = null
+/** @type {(() => void) | null} */
+let detachZoomHandlers = null
 let geoStopped = false
 let watchStarted = false
 let didFitWithUser = false
@@ -240,6 +242,64 @@ function toggleSatellite() {
   setBaseLayer(activeBaseLayer.value === 'street' ? 'satellite' : 'street')
 }
 
+/** Center for zoom when no user GPS: centroid of trailer pins. */
+function trailerPinsCenterLatLng() {
+  const pins = effectiveTrailers.value
+  if (!pins.length) return null
+  let sumLat = 0
+  let sumLng = 0
+  for (const p of pins) {
+    sumLat += p.lat
+    sumLng += p.lng
+  }
+  return L.latLng(sumLat / pins.length, sumLng / pins.length)
+}
+
+function zoomTowardTruckOrTrailers(delta) {
+  if (!map) return
+  const motion = !prefersReducedMotion()
+  const z = map.getZoom() + delta
+  const clamped = Math.max(map.getMinZoom(), Math.min(map.getMaxZoom(), z))
+  if (hasUserFix.value && userFix.value) {
+    const ll = L.latLng(userFix.value.lat, userFix.value.lng)
+    map.setView(ll, clamped, { animate: motion })
+    return
+  }
+  const center = trailerPinsCenterLatLng()
+  if (center) {
+    map.setView(center, clamped, { animate: motion })
+  }
+}
+
+/**
+ * Leaflet zoom buttons default to map center; anchor zoom on user truck
+ * or trailer pin centroid when GPS is unavailable.
+ */
+function wireZoomControlsToTruck() {
+  if (!map) return
+  const el = map.zoomControl?.getContainer?.()
+  if (!el) return
+  const plus = el.querySelector('a.leaflet-control-zoom-in')
+  const minus = el.querySelector('a.leaflet-control-zoom-out')
+  const onPlus = (e) => {
+    e.preventDefault()
+    e.stopPropagation()
+    zoomTowardTruckOrTrailers(1)
+  }
+  const onMinus = (e) => {
+    e.preventDefault()
+    e.stopPropagation()
+    zoomTowardTruckOrTrailers(-1)
+  }
+  plus?.addEventListener('click', onPlus, true)
+  minus?.addEventListener('click', onMinus, true)
+  detachZoomHandlers = () => {
+    plus?.removeEventListener('click', onPlus, true)
+    minus?.removeEventListener('click', onMinus, true)
+    detachZoomHandlers = null
+  }
+}
+
 function scheduleFitBounds() {
   if (!map || !overlayLayer) return
   const pins = effectiveTrailers.value
@@ -284,6 +344,8 @@ function syncUserOverlay() {
 
   const ll = L.latLng(u.lat, u.lng)
 
+  const markerExisted = !!userMarker
+
   if (!userMarker) {
     userMarker = L.marker(ll, {
       icon: makeUserTruckIcon(),
@@ -296,6 +358,9 @@ function syncUserOverlay() {
   } else {
     userMarker.setLatLng(ll)
     userMarker.setIcon(makeUserTruckIcon())
+    if (map && markerExisted && !compassModeActive.value) {
+      map.panTo(ll, { animate: !prefersReducedMotion() })
+    }
   }
 
   applyUserMarkerRotation()
@@ -479,6 +544,7 @@ function initMap() {
   })
 
   L.control.zoom({ position: 'topright' }).addTo(map)
+  wireZoomControlsToTruck()
 
   streetLayer = L.tileLayer(
     'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png',
@@ -529,6 +595,9 @@ function destroyMap() {
   trailerMarkers.clear()
   userMarker = null
   userFix.value = null
+  if (detachZoomHandlers) {
+    detachZoomHandlers()
+  }
   overlayLayer = null
   userLayer = null
   streetLayer = null
