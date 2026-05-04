@@ -22,15 +22,34 @@ const props = defineProps({
     type: Boolean,
     default: false,
   },
+  youtubeVideoId: {
+    type: String,
+    default: null,
+  },
 })
 
 const videoRef = ref(null)
+const youtubeWrapRef = ref(null)
 const isLoading = ref(true)
 const hasError = ref(false)
 const errorMsg = ref('')
 let hls = null
 
+const youtubeEmbedSrc = computed(() => {
+  const id = props.youtubeVideoId?.trim()
+  if (!id) return ''
+  const q = new URLSearchParams({
+    autoplay: '1',
+    mute: '1',
+    playsinline: '1',
+    rel: '0',
+    modestbranding: '1',
+  })
+  return `https://www.youtube.com/embed/${encodeURIComponent(id)}?${q}`
+})
+
 const effectiveSource = computed(() => {
+  if (props.youtubeVideoId?.trim()) return { type: 'youtube' }
   if (props.videoUrl) return { type: 'video', url: props.videoUrl }
   if (props.imageUrl) return { type: 'image', url: props.imageUrl }
   return null
@@ -117,6 +136,12 @@ function destroyHls() {
 }
 
 function enterFullscreen() {
+  if (effectiveSource.value?.type === 'youtube' && youtubeWrapRef.value) {
+    const el = youtubeWrapRef.value
+    if (el.requestFullscreen) el.requestFullscreen().catch(() => {})
+    else if (el.webkitRequestFullscreen) el.webkitRequestFullscreen()
+    return
+  }
   const video = videoRef.value
   if (!video) return
   if (video.requestFullscreen) {
@@ -128,15 +153,36 @@ function enterFullscreen() {
   }
 }
 
+function onYoutubeLoad() {
+  isLoading.value = false
+}
+
 watch(() => props.videoUrl, () => {
   destroyHls()
-  if (props.videoUrl) {
+  if (props.videoUrl && !props.youtubeVideoId?.trim()) {
     initVideo()
   }
 })
 
+watch(
+  () => props.youtubeVideoId,
+  () => {
+    destroyHls()
+    if (props.youtubeVideoId?.trim()) {
+      isLoading.value = true
+      hasError.value = false
+    } else if (props.videoUrl) {
+      initVideo()
+    } else {
+      isLoading.value = false
+    }
+  },
+)
+
 onMounted(() => {
-  if (props.videoUrl) {
+  if (props.youtubeVideoId?.trim()) {
+    isLoading.value = true
+  } else if (props.videoUrl) {
     initVideo()
   } else {
     isLoading.value = false
@@ -156,7 +202,36 @@ onUnmounted(() => {
     </div>
     
     <template v-else-if="effectiveSource">
-      <div v-if="effectiveSource.type === 'video'" class="camera-video-wrap">
+      <div
+        v-if="effectiveSource.type === 'youtube'"
+        ref="youtubeWrapRef"
+        class="camera-youtube-wrap"
+      >
+        <iframe
+          v-if="youtubeEmbedSrc"
+          class="camera-youtube-iframe"
+          :src="youtubeEmbedSrc"
+          title="Live bridge camera"
+          allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+          allowfullscreen
+          @load="onYoutubeLoad"
+        />
+        <div v-if="isLoading" class="camera-loading">
+          <span class="camera-loading-spinner" />
+        </div>
+        <button
+          v-if="!isLoading"
+          type="button"
+          class="camera-fs-btn"
+          title="Fullscreen"
+          @click="enterFullscreen"
+        >
+          <svg class="camera-fs-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3" />
+          </svg>
+        </button>
+      </div>
+      <div v-else-if="effectiveSource.type === 'video'" class="camera-video-wrap">
         <video
           ref="videoRef"
           class="camera-video"
@@ -225,10 +300,26 @@ onUnmounted(() => {
 }
 
 .camera-video-wrap,
-.camera-image-wrap {
+.camera-image-wrap,
+.camera-youtube-wrap {
   position: relative;
   width: 100%;
   height: 100%;
+}
+
+.camera-youtube-wrap {
+  overflow: hidden;
+  background: #0a0a10;
+}
+
+.camera-youtube-iframe {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  border: 0;
+  transform: scale(1.08);
+  transform-origin: center center;
 }
 
 .camera-video,
@@ -246,6 +337,7 @@ onUnmounted(() => {
   align-items: center;
   justify-content: center;
   background: rgba(0, 0, 0, 0.5);
+  z-index: 2;
 }
 
 .camera-loading-spinner {
@@ -298,6 +390,7 @@ onUnmounted(() => {
   justify-content: center;
   transition: background 0.15s ease;
   -webkit-tap-highlight-color: transparent;
+  z-index: 3;
 }
 
 .camera-fs-btn:hover {

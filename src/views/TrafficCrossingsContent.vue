@@ -2,7 +2,7 @@
 import { ref, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
 import { getBridgesPanynj, getNy511Cameras, getVerrazzanoTraffic } from '../api.js'
 import { getBridgeAnchorForRouteId } from '../bridges/bridgeRouteAnchors.js'
-import { findCameraForBridgeRow, findVerrazzanoCamera } from '../bridges/bridgeCameraMapping.js'
+import { findVerrazzanoCamera, resolveBridgeCameraFeed } from '../bridges/bridgeCameraMapping.js'
 import BridgesMap from '../components/BridgesMap.vue'
 import BridgeCameraPlayer from '../components/BridgeCameraPlayer.vue'
 import {
@@ -642,11 +642,11 @@ async function loadVerrazzano() {
 }
 
 /**
- * Get camera data for a bridge row.
+ * 511NY stream or GWB YouTube embed.
  * @param {unknown} row
  */
-function getCameraForRow(row) {
-  return findCameraForBridgeRow(row, cameras.value)
+function getBridgeCameraFeed(row) {
+  return resolveBridgeCameraFeed(row, direction.value, cameras.value)
 }
 
 /**
@@ -730,7 +730,11 @@ function verrazzanoChartModel() {
   const strokeColor = verrazzanoChartStrokeColor.value
 
   const raw = verrazzanoSeries.value
-  const pts = raw.slice(-96).sort((a, b) => a.t - b.t)
+  let pts = raw.slice(-96).sort((a, b) => a.t - b.t)
+  if (pts.length === 1) {
+    const p0 = pts[0]
+    pts = [{ t: p0.t - 5 * 60 * 1000, m: p0.m, s: p0.s }, p0]
+  }
   if (pts.length < 2) {
     return { hasPath: false, strokeColor, vb }
   }
@@ -981,12 +985,13 @@ onUnmounted(() => {
               }"
               @click="onListTileClick(row)"
             >
-              <div class="bridge-tile-inner" :class="{ 'has-camera': getCameraForRow(row) }">
-                <div v-if="getCameraForRow(row)" class="bridge-camera-col">
+              <div class="bridge-tile-inner" :class="{ 'has-camera': getBridgeCameraFeed(row) }">
+                <div v-if="getBridgeCameraFeed(row)" class="bridge-camera-col">
                   <BridgeCameraPlayer
-                    :video-url="getCameraForRow(row)?.videoUrl"
-                    :image-url="getCameraForRow(row)?.imageUrl"
-                    :status="getCameraForRow(row)?.status || 'Unknown'"
+                    :youtube-video-id="getBridgeCameraFeed(row)?.youtubeVideoId || undefined"
+                    :video-url="getBridgeCameraFeed(row)?.youtubeVideoId ? null : (getBridgeCameraFeed(row)?.videoUrl ?? null)"
+                    :image-url="getBridgeCameraFeed(row)?.youtubeVideoId ? null : (getBridgeCameraFeed(row)?.imageUrl ?? null)"
+                    :status="getBridgeCameraFeed(row)?.status || 'Unknown'"
                     :bridge-name="displayTitle(row)"
                     fill-column
                   />
@@ -1122,7 +1127,7 @@ onUnmounted(() => {
           </ul>
           
           <div v-if="hasVerrazzanoCamera || verrazzanoHasLiveData" class="verrazzano-section">
-            <h2 class="verrazzano-h2">MTA Bridge</h2>
+            <h2 class="bridges-trips-h2">MTA Bridge</h2>
             <div
               class="bridge-tile verrazzano-tile"
               :class="{
@@ -1163,7 +1168,7 @@ onUnmounted(() => {
                     </div>
                     <div class="bridge-kpi-divider" aria-hidden="true" />
                     <div class="bridge-kpi bridge-kpi--speed">
-                      <span class="bridge-kpi-lab">Estimated speed</span>
+                      <span class="bridge-kpi-lab">Observed speed</span>
                       <div class="bridge-kpi-row bridge-kpi-row--speed">
                         <template v-if="verrazzanoLiveData?.routeSpeed != null">
                           <span class="bridge-kpi-num">{{ verrazzanoLiveData.routeSpeed }}</span>
@@ -1179,13 +1184,14 @@ onUnmounted(() => {
                     <p class="verrazzano-note">Live camera feed</p>
                     <p class="verrazzano-hint">Traffic data requires HERE or TomTom API key in Settings</p>
                   </div>
-                  <div v-if="verrazzanoChartModel().hasPath" class="bridge-chart-shell">
+                  <div v-if="verrazzanoHasLiveData" class="bridge-chart-shell">
                     <div class="bridge-chart-head">
                       <span class="bridge-chart-title">History</span>
                       <span class="bridge-chart-sub">Minutes · local time</span>
                     </div>
                     <div class="bridge-chart-panel">
                       <svg
+                        v-if="verrazzanoChartModel().hasPath"
                         class="bridge-chart-svg"
                         :viewBox="`0 0 ${verrazzanoChartModel().vb.w} ${verrazzanoChartModel().vb.h}`"
                         preserveAspectRatio="xMidYMid meet"
@@ -1208,56 +1214,59 @@ onUnmounted(() => {
                             <stop offset="100%" :stop-color="verrazzanoChartModel().strokeColor" stop-opacity="0.02" />
                           </linearGradient>
                         </defs>
-                        <template v-if="verrazzanoChartModel().hasPath">
-                          <text
-                            v-for="(yt, yi) in verrazzanoChartModel().yTicks"
-                            :key="`vzt-${yi}`"
-                            class="bridge-chart-axis-title"
-                            x="6"
-                            :y="yt.y + 3.5"
-                            text-anchor="start"
-                          >{{ yt.lab }}</text>
-                          <line
-                            v-for="(g, gi) in verrazzanoChartModel().hGrids"
-                            :key="`vzg-${gi}`"
-                            :x1="g.x1"
-                            :y1="g.y1"
-                            :x2="g.x2"
-                            :y2="g.y2"
-                            class="bridge-chart-grid"
-                          />
-                          <path
-                            :d="verrazzanoChartModel().dArea"
-                            fill="url(#bcg-verrazzano)"
-                          />
-                          <path
-                            :d="verrazzanoChartModel().dLine"
-                            fill="none"
-                            :stroke="verrazzanoChartModel().strokeColor"
-                            stroke-width="0.95"
-                            stroke-linecap="round"
-                            stroke-linejoin="round"
-                            opacity="0.82"
-                          />
-                          <circle
-                            :cx="verrazzanoChartModel().lastCx"
-                            :cy="verrazzanoChartModel().lastCy"
-                            r="1.35"
-                            :fill="verrazzanoChartModel().strokeColor"
-                            stroke="#0f0f14"
-                            stroke-width="0.45"
-                            opacity="0.9"
-                          />
-                          <text
-                            v-for="(tk, ti) in verrazzanoChartModel().xTicks"
-                            :key="`vzx-${ti}`"
-                            class="bridge-chart-tick-x"
-                            :x="tk.x"
-                            :y="verrazzanoChartModel().vb.h - 5"
-                            text-anchor="middle"
-                          >{{ tk.lab }}</text>
-                        </template>
+                        <text
+                          v-for="(yt, yi) in verrazzanoChartModel().yTicks"
+                          :key="`vzt-${yi}`"
+                          class="bridge-chart-axis-title"
+                          x="6"
+                          :y="yt.y + 3.5"
+                          text-anchor="start"
+                        >{{ yt.lab }}</text>
+                        <line
+                          v-for="(g, gi) in verrazzanoChartModel().hGrids"
+                          :key="`vzg-${gi}`"
+                          :x1="g.x1"
+                          :y1="g.y1"
+                          :x2="g.x2"
+                          :y2="g.y2"
+                          class="bridge-chart-grid"
+                        />
+                        <path
+                          :d="verrazzanoChartModel().dArea"
+                          fill="url(#bcg-verrazzano)"
+                        />
+                        <path
+                          :d="verrazzanoChartModel().dLine"
+                          fill="none"
+                          :stroke="verrazzanoChartModel().strokeColor"
+                          stroke-width="0.95"
+                          stroke-linecap="round"
+                          stroke-linejoin="round"
+                          opacity="0.82"
+                        />
+                        <circle
+                          :cx="verrazzanoChartModel().lastCx"
+                          :cy="verrazzanoChartModel().lastCy"
+                          r="1.35"
+                          :fill="verrazzanoChartModel().strokeColor"
+                          stroke="#0f0f14"
+                          stroke-width="0.45"
+                          opacity="0.9"
+                        />
+                        <text
+                          v-for="(tk, ti) in verrazzanoChartModel().xTicks"
+                          :key="`vzx-${ti}`"
+                          class="bridge-chart-tick-x"
+                          :x="tk.x"
+                          :y="verrazzanoChartModel().vb.h - 5"
+                          text-anchor="middle"
+                        >{{ tk.lab }}</text>
                       </svg>
+                      <div
+                        v-else
+                        class="bridge-chart-empty"
+                        role="status"
+                      >Collecting history…</div>
                     </div>
                   </div>
                   <p v-if="verrazzanoPayload?.source" class="verrazzano-source">
@@ -1907,6 +1916,18 @@ onUnmounted(() => {
   min-width: 0;
 }
 
+.bridge-chart-empty {
+  min-height: 52px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.5rem 0.35rem;
+  font-size: 0.62rem;
+  font-weight: 600;
+  color: #5c5c6e;
+  letter-spacing: 0.04em;
+}
+
 .bridge-chart-svg {
   display: block;
   width: 100%;
@@ -1941,15 +1962,6 @@ onUnmounted(() => {
   border-top: 1px solid rgba(255, 255, 255, 0.06);
 }
 
-.verrazzano-h2 {
-  margin: 0 0 0.4rem 0.15rem;
-  font-size: 0.65rem;
-  font-weight: 800;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-  color: #6e6e7e;
-}
-
 .verrazzano-tile {
   cursor: default;
 }
@@ -1960,7 +1972,8 @@ onUnmounted(() => {
 }
 
 .verrazzano-rank {
-  font-size: 0.65rem;
+  font-size: 0.42rem;
+  letter-spacing: 0.02em;
 }
 
 .bridge-camera-col--verrazzano {
@@ -1996,11 +2009,6 @@ onUnmounted(() => {
   color: #5a5a6a;
   letter-spacing: 0.04em;
   text-transform: uppercase;
-}
-
-.verrazzano-rank {
-  font-size: 0.42rem;
-  letter-spacing: 0.02em;
 }
 
 @media (max-width: 520px) {

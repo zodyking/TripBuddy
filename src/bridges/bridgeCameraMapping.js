@@ -15,6 +15,26 @@ const CAMERA_BRIDGE_KEYS = Object.freeze({
   'Verrazzano-ToNY': 'Verrazzano-ToNY',
 })
 
+/** GWB upper deck only (matches TrafficCrossingsContent filters): live YouTube embed. */
+export const GWB_YOUTUBE_VIDEO_ID = '2K2tW3cRlWQ'
+
+/**
+ * George Washington Bridge upper deck row for the active direction toggle.
+ * To NY: routeId 211. To NJ: routeId 12.
+ * @param {unknown} row
+ * @param {'ToNY' | 'ToNJ'} direction
+ */
+export function isGwbUpperDeckRow(row, direction) {
+  if (row == null || typeof row !== 'object') return false
+  const o = /** @type {Record<string, unknown>} */ (row)
+  const name = String(o.crossingDisplayName ?? '')
+  if (!/george washington bridge/i.test(name)) return false
+  const rid = o.routeId
+  const n = typeof rid === 'number' ? rid : Number(rid)
+  if (direction === 'ToNY') return n === 211
+  return n === 12
+}
+
 /**
  * Maps PANYNJ routeIds to camera bridge keys.
  * Some bridges have multiple routeIds for different directions/decks.
@@ -107,6 +127,37 @@ export function findVerrazzanoCamera(direction, cameras) {
   if (!Array.isArray(cameras)) return null
   const key = getVerrazzanoCameraKey(direction)
   return cameras.find((c) => c.bridge === key) || null
+}
+
+/**
+ * 511NY camera row or GWB YouTube live stream for the crossings UI.
+ * @param {unknown} row
+ * @param {'ToNY' | 'ToNJ'} direction
+ * @param {Array<{ bridge: string, videoUrl: string | null, imageUrl: string | null, status: string }>} cameras
+ * @returns {{
+ *   youtubeVideoId: string | null,
+ *   videoUrl: string | null,
+ *   imageUrl: string | null,
+ *   status: string,
+ * } | null}
+ */
+export function resolveBridgeCameraFeed(row, direction, cameras) {
+  if (isGwbUpperDeckRow(row, direction)) {
+    return {
+      youtubeVideoId: GWB_YOUTUBE_VIDEO_ID,
+      videoUrl: null,
+      imageUrl: null,
+      status: 'Unknown',
+    }
+  }
+  const cam = findCameraForBridgeRow(row, cameras)
+  if (!cam) return null
+  return {
+    youtubeVideoId: null,
+    videoUrl: cam.videoUrl,
+    imageUrl: cam.imageUrl,
+    status: cam.status || 'Unknown',
+  }
 }
 
 export { CAMERA_BRIDGE_KEYS }
