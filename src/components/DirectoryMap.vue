@@ -587,9 +587,6 @@ watch(compassModeActive, (active) => {
       <p v-else-if="geoDenied" class="directory-map-locate-hint is-warn">
         Enable location in your browser settings, then try again.
       </p>
-      <p v-else-if="geoTracking && hasUserFix" class="directory-map-locate-hint">
-        Live updates while this page is open.
-      </p>
       <p v-if="compassError" class="directory-map-locate-hint is-warn">{{ compassError }}</p>
     </div>
   </div>

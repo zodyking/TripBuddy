@@ -679,12 +679,6 @@ watch(compassModeActive, (active) => {
       Location unavailable — trailers only. Check site permission in browser settings.
     </p>
     <p
-      v-if="hasUserFix"
-      class="trailer-loc-hint is-live"
-    >
-      Live location updates while this map is open.
-    </p>
-    <p
       v-if="compassError"
       class="trailer-loc-hint is-warn"
     >
@@ -835,10 +829,6 @@ watch(compassModeActive, (active) => {
 
 .trailer-loc-hint.is-muted {
   color: #64748b;
-}
-
-.trailer-loc-hint.is-live {
-  color: #0369a1;
 }
 
 .trailer-loc-hint.is-warn {
