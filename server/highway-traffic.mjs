@@ -15,9 +15,11 @@ import { getHereApiKeyForAccount, getTomtomApiKeyForAccount } from './user-profi
 import { getCalculateRoutePolyline } from './tomtom-routing-calculate.mjs'
 
 const KEY = G('traffic:highways:series')
+const SNAPPED_KEY = G('traffic:highways:snapped')
 const MAX_POINTS_PER_HIGHWAY = 500
 const MPS_TO_MPH = 2.23694
 const CACHE_TTL_MS = 90 * 1000
+const SNAPPED_CACHE_TTL_MS = 24 * 60 * 60 * 1000
 
 /**
  * Highway definitions with polyline waypoints.
@@ -173,6 +175,7 @@ const HIGHWAYS = {
 /**
  * @typedef {{ t: number, m: number, s: number }} DataPoint
  * @typedef {{ lastAppendTs: number, pointsByHighway: Record<string, DataPoint[]> }} SeriesState
+ * @typedef {{ fetchedAt: number, snappedByHighway: Record<string, Array<{ lat: number, lng: number }>> }} SnappedState
  */
 
 /**
@@ -183,6 +186,95 @@ async function readState() {
     lastAppendTs: 0,
     pointsByHighway: {},
   }))
+}
+
+/**
+ * @returns {Promise<SnappedState>}
+ */
+async function readSnappedState() {
+  return readKeyJson(SNAPPED_KEY, () => ({
+    fetchedAt: 0,
+    snappedByHighway: {},
+  }))
+}
+
+/**
+ * @param {SnappedState} st
+ */
+async function writeSnappedState(st) {
+  await writeKeyJson(SNAPPED_KEY, st)
+}
+
+/**
+ * Fetch snapped waypoints for a highway using TomTom Routing API.
+ * @param {string} tomtomApiKey
+ * @param {string} highwayId
+ * @returns {Promise<Array<{ lat: number, lng: number }> | null>}
+ */
+async function fetchSnappedWaypoints(tomtomApiKey, highwayId) {
+  const hw = HIGHWAYS[highwayId]
+  if (!hw || !Array.isArray(hw.waypoints) || hw.waypoints.length < 2) {
+    return null
+  }
+
+  const pathPoints = hw.waypoints.map((w) => ({
+    latitude: w.lat,
+    longitude: w.lng,
+  }))
+
+  const res = await getCalculateRoutePolyline(tomtomApiKey, pathPoints)
+  if (!res.ok || !res.points || res.points.length < 2) {
+    return null
+  }
+
+  return res.points.map((p) => ({
+    lat: p.latitude,
+    lng: p.longitude,
+  }))
+}
+
+/**
+ * Get or fetch snapped waypoints for all highways.
+ * Caches results in KV storage for 24 hours.
+ * @param {string} accountKey
+ * @returns {Promise<Record<string, Array<{ lat: number, lng: number }>>>}
+ */
+async function getSnappedWaypoints(accountKey) {
+  const snappedState = await readSnappedState()
+  const now = Date.now()
+
+  if (
+    snappedState.fetchedAt > 0 &&
+    now - snappedState.fetchedAt < SNAPPED_CACHE_TTL_MS &&
+    Object.keys(snappedState.snappedByHighway).length > 0
+  ) {
+    return snappedState.snappedByHighway
+  }
+
+  const ak = String(accountKey || '').trim()
+  const tomtomKey = ak ? await getTomtomApiKeyForAccount(ak) : ''
+
+  if (!tomtomKey) {
+    return snappedState.snappedByHighway || {}
+  }
+
+  const newSnapped = { ...snappedState.snappedByHighway }
+
+  for (const highwayId of Object.keys(HIGHWAYS)) {
+    if (newSnapped[highwayId] && newSnapped[highwayId].length > 0) {
+      continue
+    }
+    const snapped = await fetchSnappedWaypoints(tomtomKey, highwayId)
+    if (snapped && snapped.length > 0) {
+      newSnapped[highwayId] = snapped
+    }
+  }
+
+  snappedState.fetchedAt = now
+  snappedState.snappedByHighway = newSnapped
+  await writeSnappedState(snappedState)
+
+  return newSnapped
 }
 
 /**
@@ -431,8 +523,9 @@ export async function getHighwayTrafficPayload(accountKey) {
   }
 
   const st = await readState()
+  const snappedWaypoints = await getSnappedWaypoints(accountKey)
   
-  /** @type {Array<{ id: string, name: string, shortName: string, route: string, trend: string, series: DataPoint[], live: { routeTravelTime: number | null, routeSpeed: number | null } }>} */
+  /** @type {Array<{ id: string, name: string, shortName: string, route: string, waypoints: Array<{ lat: number, lng: number }>, trend: string, series: DataPoint[], live: { routeTravelTime: number | null, routeSpeed: number | null } }>} */
   const highways = []
 
   for (const highwayId of Object.keys(HIGHWAYS)) {
@@ -440,13 +533,14 @@ export async function getHighwayTrafficPayload(accountKey) {
     const series = st.pointsByHighway?.[highwayId] || []
     const recent = series.slice(-288)
     const live = lastLive?.[highwayId] || { travelMinutes: null, speedMph: null }
+    const waypoints = snappedWaypoints[highwayId] || hw.waypoints
     
     highways.push({
       id: highwayId,
       name: hw.name,
       shortName: hw.shortName,
       route: hw.route,
-      waypoints: hw.waypoints,
+      waypoints,
       trend: trendFromSeries(series),
       series: recent,
       live: {
