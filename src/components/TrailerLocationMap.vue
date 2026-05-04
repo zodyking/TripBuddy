@@ -817,7 +817,15 @@ watch(compassModeActive, (active) => {
         "
         @click="onBigNumClick(row, $event)"
       >
-        <span class="trailer-loc-big-num-label">{{ bigNumLabel(row) }}</span>
+        <span class="trailer-loc-big-num-label">
+          <template v-if="modeForOrder(row.orderKey) === 'seal'">
+            Seal<span
+              v-if="row.nbr && row.nbr !== '—'"
+              class="trailer-loc-big-num-label-trailer"
+            >&nbsp;{{ row.nbr }}</span>
+          </template>
+          <template v-else>{{ bigNumLabel(row) }}</template>
+        </span>
         <span class="trailer-loc-big-num-val">{{ bigNumDisplayValue(row) }}</span>
       </button>
     </div>
@@ -969,6 +977,13 @@ watch(compassModeActive, (active) => {
   text-transform: uppercase;
   color: rgba(226, 232, 240, 0.85);
   margin-bottom: 0.12rem;
+}
+
+.trailer-loc-big-num-label-trailer {
+  color: #ef4444;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: none;
 }
 
 .trailer-loc-big-num-val {
