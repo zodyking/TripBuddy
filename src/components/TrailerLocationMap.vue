@@ -72,7 +72,7 @@ const effectiveTrailers = computed(() => {
   const arr = props.trailers
   if (Array.isArray(arr) && arr.length > 0) {
     const heavy = String(props.heavyTrailerOrder ?? '').trim()
-    return arr
+    const mapped = arr
       .map((raw, i) => {
         if (!raw || typeof raw !== 'object') return null
         const o = /** @type {Record<string, unknown>} */ (raw)
@@ -95,6 +95,7 @@ const effectiveTrailers = computed(() => {
         })
       })
       .filter(Boolean)
+    if (mapped.length > 0) return mapped
   }
   const la = Number(props.lat)
   const ln = Number(props.lng)
@@ -160,6 +161,19 @@ const useGeoScaledMarkers = ref(false)
 function prefersReducedMotion() {
   if (typeof window === 'undefined') return false
   return window.matchMedia('(prefers-reduced-motion: reduce)').matches
+}
+
+/** Modal / flex parents often report 0×0 until paint — force Leaflet to re-measure. */
+function refreshMapLayout() {
+  if (!map) return
+  nextTick(() => {
+    map.invalidateSize()
+    requestAnimationFrame(() => {
+      map?.invalidateSize()
+    })
+    setTimeout(() => map?.invalidateSize(), 120)
+    setTimeout(() => map?.invalidateSize(), 400)
+  })
 }
 
 /**
@@ -526,6 +540,7 @@ function syncTrailerMarkers() {
   } else if (pins.length && userFix.value) {
     scheduleFitBounds()
   }
+  refreshMapLayout()
 }
 
 function initMap() {
@@ -579,6 +594,7 @@ function initMap() {
   nextTick(() => {
     map?.invalidateSize()
     setTimeout(() => map?.invalidateSize(), 320)
+    refreshMapLayout()
   })
 }
 
@@ -630,7 +646,7 @@ watch(
   ],
   () => {
     syncTrailerMarkers()
-    nextTick(() => map?.invalidateSize())
+    refreshMapLayout()
   },
   { deep: true },
 )
@@ -645,6 +661,13 @@ watch(
   ],
   () => {
     applyUserCoordsFromProps()
+  },
+)
+
+watch(
+  () => effectiveTrailers.value.length,
+  (n) => {
+    if (n > 0) refreshMapLayout()
   },
 )
 

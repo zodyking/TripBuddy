@@ -16,20 +16,18 @@ const trailer20ftTopImg = trailer20MarkerUrl
 const trailer53ftTopImg = trailer53MarkerUrl
 
 /**
- * Screen-pixel size for truck + trailer rasters (not map-meter scale).
- * Larger so tractor / trailer numbers stay readable on phone maps.
+ * Screen-pixel size for truck + trailer rasters (fixed on map zoom; readable but not huge).
  */
-const USER_MARKER_IMG_W = 88
-/** Cab silhouette height at map scale (chip stacks below). */
-const USER_MARKER_IMG_H = 94
-const RASTER_CHIP_H = 22
-const RASTER_CHIP_GAP = 3
+const USER_MARKER_IMG_W = 56
+/** Cab silhouette height (chip stacks below). */
+const USER_MARKER_IMG_H = 60
+const RASTER_CHIP_H = 16
+const RASTER_CHIP_GAP = 2
 
-/** 20′ trailer column — same static pixel width as user truck for consistency. */
-const TRAILER_20_IMG_W = 88
+/** 20′ / 53′ trailer column — match truck width for visual consistency. */
+const TRAILER_20_IMG_W = 56
 const TRAILER_20_IMG_H = Math.round(TRAILER_20_IMG_W * (118 / 72))
-/** 53′ trailer — taller column, same width cap. */
-const TRAILER_53_IMG_W = 88
+const TRAILER_53_IMG_W = 56
 const TRAILER_53_IMG_H = Math.round(TRAILER_53_IMG_W * (248 / 76))
 
 /** Real-world trailer dimensions in meters (length × width). */
@@ -192,7 +190,7 @@ function rasterMarkerDivIconBottomChip(
     .replace(/^#/, '')
   const idRaw = raw ? directoryMarkerIdLabel(raw) : ''
   const fsPx =
-    idRaw.length === 0 ? 0 : idRaw.length <= 5 ? 12 : idRaw.length <= 9 ? 10.5 : 9
+    idRaw.length === 0 ? 0 : idRaw.length <= 5 ? 10 : idRaw.length <= 9 ? 9 : 8
   const chipExtraClass = chipClass ? ` ${chipClass}` : ''
   const chipHtml =
     idRaw !== ''
@@ -252,7 +250,7 @@ function trailerTopDivIcon(rasterHref, vw, imgH, trailerNumber = '', pulseClass 
     .replace(/^#/, '')
   const labelRaw = raw ? directoryMarkerIdLabel(raw) : ''
   const fsPx =
-    labelRaw.length === 0 ? 0 : labelRaw.length <= 5 ? 12 : labelRaw.length <= 9 ? 10.5 : 9
+    labelRaw.length === 0 ? 0 : labelRaw.length <= 5 ? 10 : labelRaw.length <= 9 ? 9 : 8
   const chipHtml =
     labelRaw !== ''
       ? `<div class="map-marker-raster-chip map-marker-raster-chip--trailer" style="font-size:${fsPx}px">${escapeHtmlText(
@@ -587,7 +585,7 @@ export function bridgesCrossingIcon(p) {
 
 /** Semi-trailer pin — fallback when trailer size is unknown / not 20′ or 53′ */
 function trailerSemiSvg() {
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="72" height="72" viewBox="0 0 56 56">
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 56 56">
   <defs>
     <linearGradient id="trlPinG" x1="28" y1="4" x2="28" y2="52">
       <stop offset="0%" stop-color="#fb923c"/>
@@ -616,9 +614,9 @@ function trailerSemiSvg() {
 export function trailerFallbackPinIcon() {
   return L.icon({
     iconUrl: svgDataUrl(trailerSemiSvg()),
-    iconSize: [72, 72],
-    iconAnchor: [36, 72],
-    popupAnchor: [0, -64],
+    iconSize: [64, 64],
+    iconAnchor: [32, 64],
+    popupAnchor: [0, -56],
     className: 'map-marker-img-icon map-marker-img-icon--trailer',
   })
 }
