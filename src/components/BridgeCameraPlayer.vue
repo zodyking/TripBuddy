@@ -18,13 +18,16 @@ const props = defineProps({
     type: String,
     default: 'Bridge',
   },
+  fillColumn: {
+    type: Boolean,
+    default: false,
+  },
 })
 
 const videoRef = ref(null)
 const isLoading = ref(true)
 const hasError = ref(false)
 const errorMsg = ref('')
-const isPlaying = ref(false)
 let hls = null
 
 const effectiveSource = computed(() => {
@@ -47,6 +50,12 @@ async function loadHls() {
   }
 }
 
+function tryAutoplay() {
+  const video = videoRef.value
+  if (!video) return
+  video.play().catch(() => {})
+}
+
 async function initVideo() {
   if (!props.videoUrl || !videoRef.value) return
   
@@ -60,6 +69,7 @@ async function initVideo() {
     video.src = props.videoUrl
     video.addEventListener('loadedmetadata', () => {
       isLoading.value = false
+      tryAutoplay()
     })
     video.addEventListener('error', () => {
       hasError.value = true
@@ -80,6 +90,7 @@ async function initVideo() {
       hls.attachMedia(video)
       hls.on(Hls.Events.MANIFEST_PARSED, () => {
         isLoading.value = false
+        tryAutoplay()
       })
       hls.on(Hls.Events.ERROR, (event, data) => {
         if (data.fatal) {
@@ -105,14 +116,15 @@ function destroyHls() {
   }
 }
 
-function togglePlay() {
-  if (!videoRef.value) return
-  if (isPlaying.value) {
-    videoRef.value.pause()
-    isPlaying.value = false
-  } else {
-    videoRef.value.play().catch(() => {})
-    isPlaying.value = true
+function enterFullscreen() {
+  const video = videoRef.value
+  if (!video) return
+  if (video.requestFullscreen) {
+    video.requestFullscreen().catch(() => {})
+  } else if (video.webkitEnterFullscreen) {
+    video.webkitEnterFullscreen()
+  } else if (video.webkitRequestFullscreen) {
+    video.webkitRequestFullscreen()
   }
 }
 
@@ -137,7 +149,7 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div class="camera-player" :class="{ 'camera-player--disabled': isDisabled }">
+  <div class="camera-player" :class="{ 'camera-player--disabled': isDisabled, 'camera-player--fill': fillColumn }">
     <div v-if="isDisabled" class="camera-offline">
       <span class="camera-offline-icon">📷</span>
       <span class="camera-offline-text">Camera offline</span>
@@ -152,7 +164,6 @@ onUnmounted(() => {
           playsinline
           loop
           :poster="imageUrl || undefined"
-          @click="togglePlay"
         />
         <div v-if="isLoading" class="camera-loading">
           <span class="camera-loading-spinner" />
@@ -164,11 +175,13 @@ onUnmounted(() => {
         <button
           v-if="!isLoading && !hasError"
           type="button"
-          class="camera-play-btn"
-          :class="{ 'is-playing': isPlaying }"
-          @click="togglePlay"
+          class="camera-fs-btn"
+          title="Fullscreen"
+          @click="enterFullscreen"
         >
-          {{ isPlaying ? '⏸' : '▶' }}
+          <svg class="camera-fs-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3" />
+          </svg>
         </button>
       </div>
       
@@ -198,6 +211,13 @@ onUnmounted(() => {
   border-radius: 8px;
   overflow: hidden;
   flex-shrink: 0;
+}
+
+.camera-player--fill {
+  aspect-ratio: unset;
+  flex: 1 1 auto;
+  min-height: 0;
+  height: 100%;
 }
 
 .camera-player--disabled {
@@ -262,17 +282,16 @@ onUnmounted(() => {
   font-weight: 600;
 }
 
-.camera-play-btn {
+.camera-fs-btn {
   position: absolute;
   bottom: 6px;
   right: 6px;
   width: 28px;
   height: 28px;
-  border-radius: 50%;
+  border-radius: 6px;
   border: none;
   background: rgba(0, 0, 0, 0.6);
   color: white;
-  font-size: 0.7rem;
   cursor: pointer;
   display: flex;
   align-items: center;
@@ -281,12 +300,13 @@ onUnmounted(() => {
   -webkit-tap-highlight-color: transparent;
 }
 
-.camera-play-btn:hover {
+.camera-fs-btn:hover {
   background: rgba(123, 77, 181, 0.7);
 }
 
-.camera-play-btn.is-playing {
-  background: rgba(123, 77, 181, 0.5);
+.camera-fs-icon {
+  width: 14px;
+  height: 14px;
 }
 
 .camera-offline,

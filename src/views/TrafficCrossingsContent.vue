@@ -1,6 +1,6 @@
 <script setup>
 import { ref, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
-import { getBridgesPanynj, getNy511Cameras } from '../api.js'
+import { getBridgesPanynj, getNy511Cameras, getVerrazzanoTraffic } from '../api.js'
 import { getBridgeAnchorForRouteId } from '../bridges/bridgeRouteAnchors.js'
 import { findCameraForBridgeRow, findVerrazzanoCamera } from '../bridges/bridgeCameraMapping.js'
 import BridgesMap from '../components/BridgesMap.vue'
@@ -30,6 +30,10 @@ const payload = ref(null)
 const cameras = ref([])
 const camerasLoading = ref(false)
 const camerasError = ref('')
+
+/** @type {import('vue').Ref<any | null>} */
+const verrazzanoPayload = ref(null)
+const verrazzanoLoading = ref(false)
 
 let tick = 0
 /** @type {ReturnType<typeof setInterval> | null} */
@@ -625,6 +629,18 @@ async function loadCameras() {
   }
 }
 
+async function loadVerrazzano() {
+  verrazzanoLoading.value = true
+  try {
+    const res = await getVerrazzanoTraffic()
+    verrazzanoPayload.value = res
+  } catch {
+    verrazzanoPayload.value = null
+  } finally {
+    verrazzanoLoading.value = false
+  }
+}
+
 /**
  * Get camera data for a bridge row.
  * @param {unknown} row
@@ -648,6 +664,200 @@ const hasVerrazzanoCamera = computed(() => {
   return verrazzanoCamera.value !== null
 })
 
+const verrazzanoLiveData = computed(() => {
+  const dir = direction.value
+  const bd = verrazzanoPayload.value?.byDirection
+  if (!bd || !bd[dir]) return null
+  return bd[dir].live
+})
+
+const verrazzanoHasLiveData = computed(() => {
+  const live = verrazzanoLiveData.value
+  return live && live.routeTravelTime != null
+})
+
+const verrazzanoTrendInfo = computed(() => {
+  const dir = direction.value
+  const bd = verrazzanoPayload.value?.byDirection
+  if (!bd || !bd[dir]) {
+    return { short: '·', cls: 't--unk', full: 'Not enough data yet' }
+  }
+  const t = bd[dir].trend
+  if (t === 'worse') {
+    return { short: '▲', cls: 't--worse', full: 'Slower than last check' }
+  }
+  if (t === 'better') {
+    return { short: '▼', cls: 't--better', full: 'Faster than last check' }
+  }
+  if (t === 'neutral') {
+    return { short: '—', cls: 't--neutral', full: 'About the same' }
+  }
+  return { short: '·', cls: 't--unk', full: 'Not enough data yet' }
+})
+
+const verrazzanoSeries = computed(() => {
+  const dir = direction.value
+  const bd = verrazzanoPayload.value?.byDirection
+  if (!bd || !bd[dir] || !Array.isArray(bd[dir].series)) return []
+  return bd[dir].series
+})
+
+const verrazzanoDelayTier = computed(() => {
+  const live = verrazzanoLiveData.value
+  if (!live || live.routeTravelTime == null) return 'orange'
+  const m = live.routeTravelTime
+  return bridgeDelayTier(m)
+})
+
+const verrazzanoChartStrokeColor = computed(() => {
+  const t = verrazzanoDelayTier.value
+  if (t === 'green') return '#4ade80'
+  if (t === 'red') return '#f87171'
+  return '#fb923c'
+})
+
+function verrazzanoChartModel() {
+  const vb = {
+    w: 268,
+    h: 52,
+    plotL: 14,
+    plotR: 266,
+    plotT: 7,
+    plotB: 34,
+  }
+  const pw = vb.plotR - vb.plotL
+  const ph = vb.plotB - vb.plotT
+  const strokeColor = verrazzanoChartStrokeColor.value
+
+  const raw = verrazzanoSeries.value
+  const pts = raw.slice(-96).sort((a, b) => a.t - b.t)
+  if (pts.length < 2) {
+    return { hasPath: false, strokeColor, vb }
+  }
+
+  const tMin = pts[0].t
+  const tMax = pts[pts.length - 1].t
+  const spanT = Math.max(tMax - tMin, 60_000)
+
+  const vals = pts.map((p) => p.m).filter((v) => Number.isFinite(v))
+  if (vals.length === 0) {
+    return { hasPath: false, strokeColor, vb }
+  }
+
+  let minM = Math.min(...vals)
+  let maxM = Math.max(...vals)
+  const pad = Math.max((maxM - minM) * 0.12, 0.85)
+  minM = Math.max(0, minM - pad)
+  maxM = maxM + pad
+  if (maxM - minM < 1.25) {
+    const c = (minM + maxM) / 2
+    minM = Math.max(0, c - 1)
+    maxM = c + 1
+  }
+  const spanM = Math.max(maxM - minM, 0.75)
+
+  const xOf = (t) => vb.plotL + pw * ((t - tMin) / spanT)
+  const yOf = (m) => vb.plotT + ph * (1 - (m - minM) / spanM)
+
+  const pathPts = pts.map((pt) => ({
+    x: xOf(pt.t),
+    y: yOf(Number.isFinite(pt.m) ? pt.m : minM),
+  }))
+
+  const dLine = pathPts
+    .map((p, i) => `${i === 0 ? 'M' : 'L'}${p.x.toFixed(2)},${p.y.toFixed(2)}`)
+    .join('')
+
+  const yBase = vb.plotB
+  const dArea =
+    `M${pathPts[0].x.toFixed(2)},${yBase.toFixed(2)}` +
+    pathPts.map((p) => `L${p.x.toFixed(2)},${p.y.toFixed(2)}`).join('') +
+    `L${pathPts[pathPts.length - 1].x.toFixed(2)},${yBase.toFixed(2)}Z`
+
+  const last = pathPts[pathPts.length - 1]
+
+  const fmtCrossMin = (v) => {
+    const r = Math.round(v)
+    if (Math.abs(v - r) < 0.08) return String(r)
+    return `${v.toFixed(1)}`.replace(/\.0$/, '')
+  }
+  const yLevels = [
+    maxM,
+    maxM - spanM / 3,
+    maxM - (2 * spanM) / 3,
+    minM,
+  ]
+  const yTicks = []
+  const seenYLab = new Set()
+  for (const v of yLevels) {
+    let lab = fmtCrossMin(v)
+    if (seenYLab.has(lab)) lab = `${v.toFixed(1)}`.replace(/\.0$/, '')
+    seenYLab.add(lab)
+    yTicks.push({ y: yOf(v), lab })
+  }
+
+  const fmtHour = (ts) => {
+    try {
+      return new Date(ts).toLocaleTimeString(undefined, {
+        hour: 'numeric',
+        minute: '2-digit',
+      })
+    } catch {
+      return ''
+    }
+  }
+
+  const FOUR_MS = 4 * 60 * 60 * 1000
+  let xTickTs = []
+  {
+    const d = new Date(tMin)
+    d.setMinutes(0, 0, 0)
+    d.setMilliseconds(0)
+    const h = d.getHours()
+    let nextH = Math.ceil(h / 4) * 4
+    if (nextH >= 24) {
+      d.setDate(d.getDate() + 1)
+      d.setHours(0, 0, 0, 0)
+    } else {
+      d.setHours(nextH, 0, 0, 0)
+    }
+    let t = d.getTime()
+    while (t < tMin) t += FOUR_MS
+    while (t <= tMax) {
+      xTickTs.push(t)
+      t += FOUR_MS
+    }
+    if (xTickTs.length === 0) {
+      xTickTs = [tMin, tMax]
+    }
+  }
+  const xTicks = xTickTs.map((ts) => ({ x: xOf(ts), lab: fmtHour(ts) }))
+  if (xTicks.length === 0) {
+    xTicks.push({ x: xOf(tMin), lab: fmtHour(tMin) })
+    if (tMax !== tMin) xTicks.push({ x: xOf(tMax), lab: fmtHour(tMax) })
+  }
+
+  const hGrids = yTicks.map((tk) => ({
+    x1: vb.plotL,
+    y1: tk.y,
+    x2: vb.plotR,
+    y2: tk.y,
+  }))
+
+  return {
+    hasPath: true,
+    vb,
+    dLine,
+    dArea,
+    lastCx: last.x,
+    lastCy: last.y,
+    yTicks,
+    xTicks,
+    hGrids,
+    strokeColor,
+  }
+}
+
 /**
  * @param {Event} e
  */
@@ -666,8 +876,10 @@ onMounted(() => {
   }
   void load()
   void loadCameras()
+  void loadVerrazzano()
   intervalId = setInterval(() => {
     void load()
+    void loadVerrazzano()
   }, POLL_MS)
 })
 
@@ -776,6 +988,7 @@ onUnmounted(() => {
                     :image-url="getCameraForRow(row)?.imageUrl"
                     :status="getCameraForRow(row)?.status || 'Unknown'"
                     :bridge-name="displayTitle(row)"
+                    fill-column
                   />
                 </div>
                 <div class="bridge-data-col">
@@ -908,32 +1121,148 @@ onUnmounted(() => {
             </li>
           </ul>
           
-          <div v-if="hasVerrazzanoCamera" class="verrazzano-section">
-            <h2 class="verrazzano-h2">Camera Only</h2>
+          <div v-if="hasVerrazzanoCamera || verrazzanoHasLiveData" class="verrazzano-section">
+            <h2 class="verrazzano-h2">MTA Bridge</h2>
             <div
               class="bridge-tile verrazzano-tile"
-              @click="() => {}"
+              :class="{
+                'bridge-tile--d-green': verrazzanoDelayTier === 'green',
+                'bridge-tile--d-orange': verrazzanoDelayTier === 'orange',
+                'bridge-tile--d-red': verrazzanoDelayTier === 'red',
+              }"
             >
-              <div class="bridge-tile-inner has-camera">
-                <div class="bridge-camera-col bridge-camera-col--verrazzano">
+              <div class="bridge-tile-inner" :class="{ 'has-camera': hasVerrazzanoCamera }">
+                <div v-if="hasVerrazzanoCamera" class="bridge-camera-col bridge-camera-col--verrazzano">
                   <BridgeCameraPlayer
                     :video-url="verrazzanoCamera?.videoUrl"
                     :image-url="verrazzanoCamera?.imageUrl"
                     :status="verrazzanoCamera?.status || 'Unknown'"
                     bridge-name="Verrazzano-Narrows"
+                    fill-column
                   />
                 </div>
                 <div class="bridge-data-col">
                   <div class="bridge-card-head">
                     <div class="bridge-card-id">
-                      <span class="bridge-rank verrazzano-rank" aria-hidden="true">📷</span>
+                      <span class="bridge-rank verrazzano-rank" aria-hidden="true">MTA</span>
                       <h2 class="bridge-title">Verrazzano-Narrows {{ direction === 'ToNJ' ? 'to NJ' : 'to NY' }}</h2>
                     </div>
+                    <div
+                      class="bridge-trend ico"
+                      :class="[verrazzanoTrendInfo.cls, verrazzanoDelayTier ? `bridge-trend--delay-${verrazzanoDelayTier}` : '']"
+                      :title="verrazzanoTrendInfo.full"
+                    >{{ verrazzanoTrendInfo.short }}</div>
                   </div>
-                  <div class="verrazzano-info">
-                    <p class="verrazzano-note">Live camera feed only</p>
-                    <p class="verrazzano-hint">Crossing time data not available for MTA bridges</p>
+                  <div v-if="verrazzanoHasLiveData" class="bridge-card-metrics">
+                    <div class="bridge-kpi bridge-kpi--cross">
+                      <span class="bridge-kpi-lab">Crossing time</span>
+                      <div class="bridge-kpi-row">
+                        <span class="bridge-kpi-num">{{ verrazzanoLiveData?.routeTravelTime ?? '—' }}</span>
+                        <span class="bridge-kpi-unit">min</span>
+                      </div>
+                    </div>
+                    <div class="bridge-kpi-divider" aria-hidden="true" />
+                    <div class="bridge-kpi bridge-kpi--speed">
+                      <span class="bridge-kpi-lab">Estimated speed</span>
+                      <div class="bridge-kpi-row bridge-kpi-row--speed">
+                        <template v-if="verrazzanoLiveData?.routeSpeed != null">
+                          <span class="bridge-kpi-num">{{ verrazzanoLiveData.routeSpeed }}</span>
+                          <span class="bridge-kpi-unit">mph</span>
+                        </template>
+                        <template v-else>
+                          <span class="bridge-kpi-num bridge-kpi-num--muted">—</span>
+                        </template>
+                      </div>
+                    </div>
                   </div>
+                  <div v-else class="verrazzano-info">
+                    <p class="verrazzano-note">Live camera feed</p>
+                    <p class="verrazzano-hint">Traffic data requires HERE or TomTom API key in Settings</p>
+                  </div>
+                  <div v-if="verrazzanoChartModel().hasPath" class="bridge-chart-shell">
+                    <div class="bridge-chart-head">
+                      <span class="bridge-chart-title">History</span>
+                      <span class="bridge-chart-sub">Minutes · local time</span>
+                    </div>
+                    <div class="bridge-chart-panel">
+                      <svg
+                        class="bridge-chart-svg"
+                        :viewBox="`0 0 ${verrazzanoChartModel().vb.w} ${verrazzanoChartModel().vb.h}`"
+                        preserveAspectRatio="xMidYMid meet"
+                        width="100%"
+                        :style="{
+                          aspectRatio: `${verrazzanoChartModel().vb.w} / ${verrazzanoChartModel().vb.h}`,
+                        }"
+                        role="img"
+                        aria-label="Crossing time vs time for Verrazzano-Narrows"
+                      >
+                        <defs>
+                          <linearGradient
+                            id="bcg-verrazzano"
+                            x1="0"
+                            y1="0"
+                            x2="0"
+                            y2="1"
+                          >
+                            <stop offset="0%" :stop-color="verrazzanoChartModel().strokeColor" stop-opacity="0.14" />
+                            <stop offset="100%" :stop-color="verrazzanoChartModel().strokeColor" stop-opacity="0.02" />
+                          </linearGradient>
+                        </defs>
+                        <template v-if="verrazzanoChartModel().hasPath">
+                          <text
+                            v-for="(yt, yi) in verrazzanoChartModel().yTicks"
+                            :key="`vzt-${yi}`"
+                            class="bridge-chart-axis-title"
+                            x="6"
+                            :y="yt.y + 3.5"
+                            text-anchor="start"
+                          >{{ yt.lab }}</text>
+                          <line
+                            v-for="(g, gi) in verrazzanoChartModel().hGrids"
+                            :key="`vzg-${gi}`"
+                            :x1="g.x1"
+                            :y1="g.y1"
+                            :x2="g.x2"
+                            :y2="g.y2"
+                            class="bridge-chart-grid"
+                          />
+                          <path
+                            :d="verrazzanoChartModel().dArea"
+                            fill="url(#bcg-verrazzano)"
+                          />
+                          <path
+                            :d="verrazzanoChartModel().dLine"
+                            fill="none"
+                            :stroke="verrazzanoChartModel().strokeColor"
+                            stroke-width="0.95"
+                            stroke-linecap="round"
+                            stroke-linejoin="round"
+                            opacity="0.82"
+                          />
+                          <circle
+                            :cx="verrazzanoChartModel().lastCx"
+                            :cy="verrazzanoChartModel().lastCy"
+                            r="1.35"
+                            :fill="verrazzanoChartModel().strokeColor"
+                            stroke="#0f0f14"
+                            stroke-width="0.45"
+                            opacity="0.9"
+                          />
+                          <text
+                            v-for="(tk, ti) in verrazzanoChartModel().xTicks"
+                            :key="`vzx-${ti}`"
+                            class="bridge-chart-tick-x"
+                            :x="tk.x"
+                            :y="verrazzanoChartModel().vb.h - 5"
+                            text-anchor="middle"
+                          >{{ tk.lab }}</text>
+                        </template>
+                      </svg>
+                    </div>
+                  </div>
+                  <p v-if="verrazzanoPayload?.source" class="verrazzano-source">
+                    Data: {{ verrazzanoPayload.source === 'here' ? 'HERE Traffic' : 'TomTom' }}
+                  </p>
                 </div>
               </div>
             </div>
@@ -1321,6 +1650,10 @@ onUnmounted(() => {
   width: 33.333%;
   min-width: 100px;
   max-width: 180px;
+  align-self: stretch;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
 }
 
 .bridge-data-col {
@@ -1340,6 +1673,8 @@ onUnmounted(() => {
     width: 100%;
     max-width: none;
     margin-bottom: 0.25rem;
+    align-self: auto;
+    max-height: 180px;
   }
 }
 
@@ -1630,6 +1965,10 @@ onUnmounted(() => {
 
 .bridge-camera-col--verrazzano {
   max-width: 220px;
+  align-self: stretch;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
 }
 
 .verrazzano-info {
@@ -1648,6 +1987,20 @@ onUnmounted(() => {
   font-size: 0.65rem;
   color: #6e6e7e;
   line-height: 1.3;
+}
+
+.verrazzano-source {
+  margin: 0.2rem 0 0;
+  font-size: 0.5rem;
+  font-weight: 600;
+  color: #5a5a6a;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.verrazzano-rank {
+  font-size: 0.42rem;
+  letter-spacing: 0.02em;
 }
 
 @media (max-width: 520px) {

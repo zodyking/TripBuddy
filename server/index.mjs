@@ -141,6 +141,7 @@ import {
   refreshPanynjCrossingData,
   startPanynjBridgePoll,
 } from './bridge-panynj.mjs'
+import { getVerrazzanoResponsePayload } from './bridge-verrazzano-traffic.mjs'
 import { registerTrafficMonitoredRoutes } from './traffic-monitored-routes-routes.mjs'
 await fs.mkdir(UPLOADS_DIR, { recursive: true })
 
@@ -447,6 +448,13 @@ app.get('/api/status', async () => ({
 
 app.get('/api/bridges/panynj', async () => {
   return getBridgesResponsePayload()
+})
+
+app.get('/api/bridges/verrazzano', async (req) => {
+  const ak = req.credentialAccountKey
+    ? String(req.credentialAccountKey)
+    : ''
+  return getVerrazzanoResponsePayload(ak)
 })
 
 const NY511_CAMERA_CACHE_TTL_MS = 5 * 60 * 1000

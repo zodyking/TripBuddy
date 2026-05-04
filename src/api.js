@@ -158,6 +158,12 @@ export async function getBridgesPanynj() {
   return handleJson(r)
 }
 
+/** Verrazzano-Narrows Bridge traffic data (HERE/TomTom) + stored series for trend charts. */
+export async function getVerrazzanoTraffic() {
+  const r = await apiFetch('/api/bridges/verrazzano')
+  return handleJson(r)
+}
+
 /**
  * HERE Traffic API: list stored routes + live traffic flow per route.
  * @see https://developer.here.com/documentation/traffic-api/dev_guide/topics/send-request-readme.html
