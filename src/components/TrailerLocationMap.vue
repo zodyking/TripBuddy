@@ -281,89 +281,17 @@ function prefersReducedMotion() {
   return window.matchMedia('(prefers-reduced-motion: reduce)').matches
 }
 
-function mapBearingDeg() {
-  if (!map || typeof map.getBearing !== 'function') return 0
-  const b = map.getBearing()
-  return typeof b === 'number' && Number.isFinite(b) ? b : 0
-}
-
-/**
- * Compass bearing from trailer toward nearest “road” proxy: another trailer pin or user GPS.
- * @param {number} fromLat
- * @param {number} fromLng
- * @param {string} selfKey trailer order key
- * @returns {number | null} degrees clockwise from north to target, or null if no target
- */
-function bearingDegTowardNearestRoad(fromLat, fromLng, selfKey) {
-  const pins = effectiveTrailers.value
-  let best = null
-  let bestD = Infinity
-  for (const p of pins) {
-    const k = String(p.order)
-    if (k === selfKey) continue
-    const d = L.latLng(fromLat, fromLng).distanceTo(L.latLng(p.lat, p.lng))
-    if (d < bestD && d > 1) {
-      bestD = d
-      best = { lat: p.lat, lng: p.lng }
-    }
-  }
-  const u = userFix.value
-  if (u && Number.isFinite(u.lat) && Number.isFinite(u.lng)) {
-    const d = L.latLng(fromLat, fromLng).distanceTo(L.latLng(u.lat, u.lng))
-    if (d < bestD && d > 1) {
-      bestD = d
-      best = { lat: u.lat, lng: u.lng }
-    }
-  }
-  if (!best || !Number.isFinite(bestD) || bestD > 500_000) return null
-  const dy = best.lat - fromLat
-  const dx = best.lng - fromLng
-  if (!Number.isFinite(dx) || !Number.isFinite(dy)) return null
-  const rad = Math.atan2(dx, dy)
-  let deg = (rad * 180) / Math.PI
-  deg = ((deg % 360) + 360) % 360
-  return deg
-}
-
-/**
- * Top of trailer art faces nearest-road bearing + 90° (clockwise), counter-rotated for map bearing.
- * @param {L.Marker} mk
- * @param {number} fromLat
- * @param {number} fromLng
- * @param {string} selfKey
- */
-function applyTrailerMarkerFixedOrientation(mk, fromLat, fromLng, selfKey) {
+/** Trailer icons stay map-north-up (no road follow, no extra spin). */
+function resetTrailerMarkerRotation(mk) {
+  if (!mk) return
   const mkAny = /** @type {any} */ (mk)
-  const toDeg = bearingDegTowardNearestRoad(fromLat, fromLng, selfKey)
-  if (toDeg == null) {
-    if (typeof mkAny.setRotationAngle === 'function') mkAny.setRotationAngle(0)
-    else {
-      const el = mk.getElement?.()
-      if (el) {
-        el.style.transform = ''
-        el.style.transformOrigin = ''
-      }
-    }
-    return
-  }
-  const css = ((toDeg + 90 - mapBearingDeg() + 360) % 360)
   if (typeof mkAny.setRotationAngle === 'function') {
-    mkAny.setRotationAngle(css)
-  } else {
-    const el = mk.getElement?.()
-    if (el) {
-      el.style.transform = `rotate(${css}deg)`
-      el.style.transformOrigin = 'center bottom'
-    }
+    mkAny.setRotationAngle(0)
   }
-}
-
-function applyAllTrailerMarkerOrientations() {
-  for (const t of effectiveTrailers.value) {
-    const key = String(t.order)
-    const mk = trailerMarkers.get(key)
-    if (!mk) continue
-    applyTrailerMarkerFixedOrientation(mk, t.lat, t.lng, key)
+  const el = mk.getElement?.()
+  if (el) {
+    el.style.transform = ''
+    el.style.transformOrigin = ''
   }
 }
 
@@ -416,21 +344,19 @@ function makeUserTruckIcon() {
  * Update all marker icons after zoom change (for geo-scaled sizing).
  */
 function updateMarkersForZoom() {
-  if (map && useGeoScaledMarkers.value) {
-    for (const t of effectiveTrailers.value) {
-      const key = String(t.order)
-      const mk = trailerMarkers.get(key)
-      if (mk) {
-        mk.setIcon(makeTrailerIcon(t))
-        applyTrailerMarkerFixedOrientation(mk, t.lat, t.lng, key)
-      }
-    }
+  if (!map || !useGeoScaledMarkers.value) return
 
-    if (userMarker && userFix.value) {
-      userMarker.setIcon(makeUserTruckIcon())
+  for (const t of effectiveTrailers.value) {
+    const key = String(t.order)
+    const mk = trailerMarkers.get(key)
+    if (mk) {
+      mk.setIcon(makeTrailerIcon(t))
+      resetTrailerMarkerRotation(mk)
     }
-  } else {
-    applyAllTrailerMarkerOrientations()
+  }
+
+  if (userMarker && userFix.value) {
+    userMarker.setIcon(makeUserTruckIcon())
   }
 }
 
@@ -509,7 +435,6 @@ function syncUserOverlay() {
   }
 
   applyUserMarkerRotation()
-  applyAllTrailerMarkerOrientations()
 }
 
 function applyUserMarkerRotation() {
@@ -659,8 +584,6 @@ function syncTrailerMarkers() {
         icon,
         title: label,
         zIndexOffset: t.highlightHeavy ? 450 : 400,
-        rotationAngle: 0,
-        rotationOrigin: 'center bottom',
       })
         .bindPopup(label)
         .addTo(overlayLayer)
@@ -671,7 +594,7 @@ function syncTrailerMarkers() {
       mk.setPopupContent(label)
       mk.setZIndexOffset(t.highlightHeavy ? 450 : 400)
     }
-    applyTrailerMarkerFixedOrientation(mk, t.lat, t.lng, key)
+    nextTick(() => resetTrailerMarkerRotation(mk))
   }
 
   if (!didFitWithUser) {
@@ -727,7 +650,6 @@ function initMap() {
   applyUserCoordsFromProps()
 
   map.on('zoomend', updateMarkersForZoom)
-  map.on('moveend', applyAllTrailerMarkerOrientations)
 
   nextTick(() => {
     map?.invalidateSize()
@@ -740,7 +662,6 @@ function destroyMap() {
   stopWatch()
   if (map) {
     map.off('zoomend', updateMarkersForZoom)
-    map.off('moveend', applyAllTrailerMarkerOrientations)
   }
   if (fitDebounce) {
     clearTimeout(fitDebounce)
@@ -811,14 +732,12 @@ watch(smoothHeading, () => {
     applyMapCompassRotation()
     applyUserMarkerRotation()
   }
-  applyAllTrailerMarkerOrientations()
 })
 
 watch(compassModeActive, (active) => {
   if (!active && map && typeof map.setBearing === 'function') {
     map.setBearing(0)
   }
-  applyAllTrailerMarkerOrientations()
 })
 </script>
 
