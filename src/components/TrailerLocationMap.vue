@@ -152,8 +152,8 @@ let geoStopped = false
 let watchStarted = false
 let didFitWithUser = false
 
-/** Whether to use geo-scaled (real-world sized) markers. */
-const useGeoScaledMarkers = ref(true)
+/** Fixed pixel icons only — same raster sizes as Directory / Bridges “my location” truck. */
+const useGeoScaledMarkers = ref(false)
 
 function prefersReducedMotion() {
   if (typeof window === 'undefined') return false
