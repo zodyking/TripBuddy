@@ -69,7 +69,7 @@ const compassModeActive = ref(false)
 
 /** Bottom-left big number: 'trailer' | 'seal' per trailer order */
 const trailerBigNumMode = ref(/** @type {Record<string, 'trailer' | 'seal'>} */ ({}))
-const DOUBLE_TAP_MS = 340
+const DOUBLE_TAP_MS = 450
 const SINGLE_COPY_DELAY_MS = 260
 /** @type {Record<string, number>} */
 const bigNumLastTapAt = {}
@@ -119,6 +119,18 @@ function bigNumLabel(row) {
   return modeForOrder(row.orderKey) === 'seal' ? 'Seal' : `Trailer ${row.slot}`
 }
 
+function toggleSealModeForOrder(row) {
+  if (!row.seal) return
+  const key = String(row.orderKey)
+  clearBigNumSingleCopyTimer(key)
+  bigNumLastTapAt[key] = 0
+  const cur = modeForOrder(key)
+  trailerBigNumMode.value = {
+    ...trailerBigNumMode.value,
+    [key]: cur === 'seal' ? 'trailer' : 'seal',
+  }
+}
+
 /**
  * @param {{ orderKey: string, nbr: string, seal: string, slot: number }} row
  * @param {MouseEvent} [e]
@@ -126,17 +138,20 @@ function bigNumLabel(row) {
 function onBigNumClick(row, e) {
   e?.preventDefault?.()
   const key = String(row.orderKey)
+
+  /** Desktop double-click: second click has detail === 2 (timing-based detection often misses it). */
+  if (e && /** @type {MouseEvent} */ (e).detail === 2 && row.seal) {
+    toggleSealModeForOrder(row)
+    return
+  }
+
   const now = Date.now()
   const prev = bigNumLastTapAt[key] || 0
   if (now - prev > 0 && now - prev < DOUBLE_TAP_MS) {
     clearBigNumSingleCopyTimer(key)
     bigNumLastTapAt[key] = 0
     if (row.seal) {
-      const cur = modeForOrder(key)
-      trailerBigNumMode.value = {
-        ...trailerBigNumMode.value,
-        [key]: cur === 'seal' ? 'trailer' : 'seal',
-      }
+      toggleSealModeForOrder(row)
     }
     return
   }
