@@ -477,14 +477,13 @@ body {
 
 .map-marker-raster-chip {
   flex-shrink: 0;
-  margin: 0 4px;
-  padding: 3px 6px;
-  min-height: 1.35rem;
-  border-radius: 4px;
+  margin: 0 5px;
+  padding: 2px 4px;
+  border-radius: 2.5px;
   text-align: center;
   font-family: var(--font-sans, system-ui, sans-serif);
   font-weight: 800;
-  line-height: 1.15;
+  line-height: 1.1;
   color: #f8fafc;
   background: #0f172a;
   border: 0.6px solid rgba(226, 232, 240, 0.35);
