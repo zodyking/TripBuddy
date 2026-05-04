@@ -1829,6 +1829,10 @@ onUnmounted(() => {
             <TrailerLocationMap
               :trailers="trailerGpsData.trailerMapPins || []"
               :heavy-trailer-order="trailerGpsData.heavyTrailerOrder || ''"
+              :lat="trailerGpsData.lat"
+              :lng="trailerGpsData.lng"
+              :trailer-size="trailerGpsData.size || ''"
+              :trailer-number="trailerGpsData.trlrNbr || ''"
               :user-lat="trailerGpsData.userLat"
               :user-lng="trailerGpsData.userLng"
               :user-location-pending="trailerGpsData.userGpsPending"
