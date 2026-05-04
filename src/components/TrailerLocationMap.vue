@@ -68,20 +68,22 @@ const compassModeActive = ref(false)
 
 /** Bottom-left big number: 'trailer' | 'seal' per trailer order */
 const trailerBigNumMode = ref(/** @type {Record<string, 'trailer' | 'seal'>} */ ({}))
-/** Suppress tap-to-copy right after a long-press toggle (same gesture). */
-const suppressBigNumTapCopy = ref(/** @type {Record<string, boolean>} */ ({}))
+const DOUBLE_TAP_MS = 340
+const SINGLE_COPY_DELAY_MS = 260
+/** @type {Record<string, number>} */
+const bigNumLastTapAt = {}
 /** @type {Record<string, ReturnType<typeof setTimeout>>} */
-const bigNumLongPressTimers = {}
+const bigNumSingleCopyTimers = {}
 const copyToast = ref('')
 /** @type {ReturnType<typeof setTimeout> | null} */
 let copyToastTimer = null
 
-function clearBigNumLongPress(orderKey) {
+function clearBigNumSingleCopyTimer(orderKey) {
   const k = String(orderKey)
-  const t = bigNumLongPressTimers[k]
+  const t = bigNumSingleCopyTimers[k]
   if (t) {
     clearTimeout(t)
-    delete bigNumLongPressTimers[k]
+    delete bigNumSingleCopyTimers[k]
   }
 }
 
@@ -107,47 +109,34 @@ function bigNumLabel(row) {
 }
 
 /**
- * @param {{ orderKey: string, seal: string, slot: number }} row
- * @param {PointerEvent} e
+ * @param {{ orderKey: string, nbr: string, seal: string, slot: number }} row
+ * @param {MouseEvent} [e]
  */
-function onBigNumPointerDown(row, e) {
-  if (e.button != null && e.button !== 0) return
+function onBigNumClick(row, e) {
+  e?.preventDefault?.()
   const key = String(row.orderKey)
-  clearBigNumLongPress(key)
-  bigNumLongPressTimers[key] = setTimeout(() => {
-    delete bigNumLongPressTimers[key]
-    if (!row.seal) return
-    const cur = modeForOrder(key)
-    trailerBigNumMode.value = {
-      ...trailerBigNumMode.value,
-      [key]: cur === 'seal' ? 'trailer' : 'seal',
+  const now = Date.now()
+  const prev = bigNumLastTapAt[key] || 0
+  if (now - prev > 0 && now - prev < DOUBLE_TAP_MS) {
+    clearBigNumSingleCopyTimer(key)
+    bigNumLastTapAt[key] = 0
+    if (row.seal) {
+      const cur = modeForOrder(key)
+      trailerBigNumMode.value = {
+        ...trailerBigNumMode.value,
+        [key]: cur === 'seal' ? 'trailer' : 'seal',
+      }
     }
-    suppressBigNumTapCopy.value = { ...suppressBigNumTapCopy.value, [key]: true }
-  }, 520)
-}
-
-/**
- * @param {{ orderKey: string, nbr: string, seal: string }} row
- */
-function onBigNumPointerUp(row) {
-  const key = String(row.orderKey)
-  clearBigNumLongPress(key)
-  if (suppressBigNumTapCopy.value[key]) {
-    const next = { ...suppressBigNumTapCopy.value }
-    delete next[key]
-    suppressBigNumTapCopy.value = next
     return
   }
-  const v = bigNumDisplayValue(row)
-  if (!v || v === '—') return
-  void copyToClipboard(v)
-}
-
-/**
- * @param {{ orderKey: string }} row
- */
-function onBigNumPointerCancel(row) {
-  clearBigNumLongPress(String(row.orderKey))
+  bigNumLastTapAt[key] = now
+  clearBigNumSingleCopyTimer(key)
+  bigNumSingleCopyTimers[key] = setTimeout(() => {
+    delete bigNumSingleCopyTimers[key]
+    const v = bigNumDisplayValue(row)
+    if (!v || v === '—') return
+    void copyToClipboard(v)
+  }, SINGLE_COPY_DELAY_MS)
 }
 
 async function copyToClipboard(text) {
@@ -252,9 +241,11 @@ watch(
       .join('|'),
   () => {
     trailerBigNumMode.value = {}
-    suppressBigNumTapCopy.value = {}
-    for (const k of Object.keys(bigNumLongPressTimers)) {
-      clearBigNumLongPress(k)
+    for (const k of Object.keys(bigNumLastTapAt)) {
+      delete bigNumLastTapAt[k]
+    }
+    for (const k of Object.keys(bigNumSingleCopyTimers)) {
+      clearBigNumSingleCopyTimer(k)
     }
   },
 )
@@ -288,6 +279,92 @@ const useGeoScaledMarkers = ref(false)
 function prefersReducedMotion() {
   if (typeof window === 'undefined') return false
   return window.matchMedia('(prefers-reduced-motion: reduce)').matches
+}
+
+function mapBearingDeg() {
+  if (!map || typeof map.getBearing !== 'function') return 0
+  const b = map.getBearing()
+  return typeof b === 'number' && Number.isFinite(b) ? b : 0
+}
+
+/**
+ * Compass bearing from trailer toward nearest “road” proxy: another trailer pin or user GPS.
+ * @param {number} fromLat
+ * @param {number} fromLng
+ * @param {string} selfKey trailer order key
+ * @returns {number | null} degrees clockwise from north to target, or null if no target
+ */
+function bearingDegTowardNearestRoad(fromLat, fromLng, selfKey) {
+  const pins = effectiveTrailers.value
+  let best = null
+  let bestD = Infinity
+  for (const p of pins) {
+    const k = String(p.order)
+    if (k === selfKey) continue
+    const d = L.latLng(fromLat, fromLng).distanceTo(L.latLng(p.lat, p.lng))
+    if (d < bestD && d > 1) {
+      bestD = d
+      best = { lat: p.lat, lng: p.lng }
+    }
+  }
+  const u = userFix.value
+  if (u && Number.isFinite(u.lat) && Number.isFinite(u.lng)) {
+    const d = L.latLng(fromLat, fromLng).distanceTo(L.latLng(u.lat, u.lng))
+    if (d < bestD && d > 1) {
+      bestD = d
+      best = { lat: u.lat, lng: u.lng }
+    }
+  }
+  if (!best || !Number.isFinite(bestD) || bestD > 500_000) return null
+  const dy = best.lat - fromLat
+  const dx = best.lng - fromLng
+  if (!Number.isFinite(dx) || !Number.isFinite(dy)) return null
+  const rad = Math.atan2(dx, dy)
+  let deg = (rad * 180) / Math.PI
+  deg = ((deg % 360) + 360) % 360
+  return deg
+}
+
+/**
+ * Top of trailer art faces nearest-road bearing + 90° (clockwise), counter-rotated for map bearing.
+ * @param {L.Marker} mk
+ * @param {number} fromLat
+ * @param {number} fromLng
+ * @param {string} selfKey
+ */
+function applyTrailerMarkerFixedOrientation(mk, fromLat, fromLng, selfKey) {
+  const mkAny = /** @type {any} */ (mk)
+  const toDeg = bearingDegTowardNearestRoad(fromLat, fromLng, selfKey)
+  if (toDeg == null) {
+    if (typeof mkAny.setRotationAngle === 'function') mkAny.setRotationAngle(0)
+    else {
+      const el = mk.getElement?.()
+      if (el) {
+        el.style.transform = ''
+        el.style.transformOrigin = ''
+      }
+    }
+    return
+  }
+  const css = ((toDeg + 90 - mapBearingDeg() + 360) % 360)
+  if (typeof mkAny.setRotationAngle === 'function') {
+    mkAny.setRotationAngle(css)
+  } else {
+    const el = mk.getElement?.()
+    if (el) {
+      el.style.transform = `rotate(${css}deg)`
+      el.style.transformOrigin = 'center bottom'
+    }
+  }
+}
+
+function applyAllTrailerMarkerOrientations() {
+  for (const t of effectiveTrailers.value) {
+    const key = String(t.order)
+    const mk = trailerMarkers.get(key)
+    if (!mk) continue
+    applyTrailerMarkerFixedOrientation(mk, t.lat, t.lng, key)
+  }
 }
 
 /**
@@ -339,18 +416,21 @@ function makeUserTruckIcon() {
  * Update all marker icons after zoom change (for geo-scaled sizing).
  */
 function updateMarkersForZoom() {
-  if (!map || !useGeoScaledMarkers.value) return
-
-  for (const t of effectiveTrailers.value) {
-    const key = String(t.order)
-    const mk = trailerMarkers.get(key)
-    if (mk) {
-      mk.setIcon(makeTrailerIcon(t))
+  if (map && useGeoScaledMarkers.value) {
+    for (const t of effectiveTrailers.value) {
+      const key = String(t.order)
+      const mk = trailerMarkers.get(key)
+      if (mk) {
+        mk.setIcon(makeTrailerIcon(t))
+        applyTrailerMarkerFixedOrientation(mk, t.lat, t.lng, key)
+      }
     }
-  }
 
-  if (userMarker && userFix.value) {
-    userMarker.setIcon(makeUserTruckIcon())
+    if (userMarker && userFix.value) {
+      userMarker.setIcon(makeUserTruckIcon())
+    }
+  } else {
+    applyAllTrailerMarkerOrientations()
   }
 }
 
@@ -429,6 +509,7 @@ function syncUserOverlay() {
   }
 
   applyUserMarkerRotation()
+  applyAllTrailerMarkerOrientations()
 }
 
 function applyUserMarkerRotation() {
@@ -574,7 +655,13 @@ function syncTrailerMarkers() {
     const icon = makeTrailerIcon(t)
     let mk = trailerMarkers.get(key)
     if (!mk) {
-      mk = L.marker(ll, { icon, title: label, zIndexOffset: t.highlightHeavy ? 450 : 400 })
+      mk = L.marker(ll, {
+        icon,
+        title: label,
+        zIndexOffset: t.highlightHeavy ? 450 : 400,
+        rotationAngle: 0,
+        rotationOrigin: 'center bottom',
+      })
         .bindPopup(label)
         .addTo(overlayLayer)
       trailerMarkers.set(key, mk)
@@ -584,6 +671,7 @@ function syncTrailerMarkers() {
       mk.setPopupContent(label)
       mk.setZIndexOffset(t.highlightHeavy ? 450 : 400)
     }
+    applyTrailerMarkerFixedOrientation(mk, t.lat, t.lng, key)
   }
 
   if (!didFitWithUser) {
@@ -639,6 +727,7 @@ function initMap() {
   applyUserCoordsFromProps()
 
   map.on('zoomend', updateMarkersForZoom)
+  map.on('moveend', applyAllTrailerMarkerOrientations)
 
   nextTick(() => {
     map?.invalidateSize()
@@ -651,6 +740,7 @@ function destroyMap() {
   stopWatch()
   if (map) {
     map.off('zoomend', updateMarkersForZoom)
+    map.off('moveend', applyAllTrailerMarkerOrientations)
   }
   if (fitDebounce) {
     clearTimeout(fitDebounce)
@@ -681,8 +771,8 @@ onBeforeUnmount(() => {
     clearTimeout(copyToastTimer)
     copyToastTimer = null
   }
-  for (const k of Object.keys(bigNumLongPressTimers)) {
-    clearBigNumLongPress(k)
+  for (const k of Object.keys(bigNumSingleCopyTimers)) {
+    clearBigNumSingleCopyTimer(k)
   }
 })
 
@@ -721,12 +811,14 @@ watch(smoothHeading, () => {
     applyMapCompassRotation()
     applyUserMarkerRotation()
   }
+  applyAllTrailerMarkerOrientations()
 })
 
 watch(compassModeActive, (active) => {
   if (!active && map && typeof map.setBearing === 'function') {
     map.setBearing(0)
   }
+  applyAllTrailerMarkerOrientations()
 })
 </script>
 
@@ -801,13 +893,10 @@ watch(compassModeActive, (active) => {
         :class="{ 'is-heavy': row.heavy, 'is-seal': modeForOrder(row.orderKey) === 'seal' }"
         :title="
           row.seal
-            ? 'Tap to copy · hold to switch trailer / seal'
+            ? 'Tap to copy · double-tap to switch trailer / seal'
             : 'Tap to copy trailer number'
         "
-        @pointerdown="onBigNumPointerDown(row, $event)"
-        @pointerup="onBigNumPointerUp(row)"
-        @pointerleave="onBigNumPointerCancel(row)"
-        @pointercancel="onBigNumPointerCancel(row)"
+        @click="onBigNumClick(row, $event)"
       >
         <span class="trailer-loc-big-num-label">{{ bigNumLabel(row) }}</span>
         <span class="trailer-loc-big-num-val">{{ bigNumDisplayValue(row) }}</span>
