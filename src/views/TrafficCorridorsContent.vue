@@ -1,198 +1,21 @@
 <script setup>
-import { ref, onMounted, onUnmounted, computed, watch } from 'vue'
-import { RouterLink } from 'vue-router'
-import CorridorFlowMap from '../components/CorridorFlowMap.vue'
-import {
-  getTrafficMonitoredRoutes,
-  postTrafficMonitoredRouteCreate,
-  postTrafficMonitoredRoutePreview,
-  postTrafficMonitoredRouteRemove,
-  postTrafficMonitoredRoutesSync,
-  getAuthStatus,
-} from '../api.js'
-import { useMapVehicleId } from '../composables/useMapVehicleId.js'
-import { getHereKeyEffective, hydrateHereApiKeyFromServer } from '../stores/trafficTileKey.js'
-import { bestWaypointInsertionIndex } from '../utils/polylineSnap.js'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { getHighwayTraffic } from '../api.js'
+import { bridgeDelayTier } from '../utils/bridgeDelayTier.js'
 
 defineOptions({ name: 'TrafficCorridorsContent' })
 
-const POLL_MS = 60 * 1000
+const POLL_MS = 5 * 60 * 1000
 
-/** @typedef {{ lat: number, lng: number }} LatLng */
-/** @typedef {{
- *   localId: string,
- *   name: string,
- *   pathPoints: LatLng[],
- *   polyline?: string,
- *   createdAt: number,
- *   status: Record<string, unknown> | null,
- *   statusOk: boolean,
- *   statusError: string | null,
- * }} MonitoredRouteRow */
-
-const mode = ref(/** @type {'list' | 'create'} */ ('list'))
-const loading = ref(false)
+const loading = ref(true)
 const error = ref('')
-const configError = ref('')
-/** @type {import('vue').Ref<{ ok?: boolean, fetchedAt?: number, routes?: unknown[] } | null>} */
-const syncPayload = ref(null)
 
-const selectedLocalId = ref('')
+/** @type {import('vue').Ref<any | null>} */
+const payload = ref(null)
 
-/** @type {import('vue').Ref<LatLng[]>} */
-const draftWaypoints = ref([])
-const draftName = ref('')
-/** @type {import('vue').Ref<LatLng[]>} */
-const previewPolyline = ref([])
-/** Encoded polyline string from preview (for passing to create) */
-const previewPolylineEncoded = ref('')
-const previewSource = ref('')
-const previewBusy = ref(false)
-const createBusy = ref(false)
-
-/** @type {ReturnType<typeof setTimeout> | null} */
-let previewTimer = null
-
-const needsHereKey = computed(() =>
-  /here api key required/i.test(String(configError.value || '')),
-)
-
-/**
- * HERE key in client mirror, or authenticated session (server reads key from Settings / PostgreSQL).
- */
-async function hereKeyFromSettingsOrClient() {
-  await hydrateHereApiKeyFromServer()
-  if (getHereKeyEffective().trim()) return true
-  try {
-    const st = await getAuthStatus()
-    return st.authEnabled === true && st.authenticated === true
-  } catch {
-    return false
-  }
-}
-
-const routesList = computed(() => {
-  const arr = syncPayload.value?.routes
-  return Array.isArray(arr) ? arr : []
-})
-
-const selectedRoute = computed(() => {
-  const id = selectedLocalId.value
-  if (!id) return null
-  return (
-    routesList.value.find(
-      (r) => r && typeof r === 'object' && /** @type {any} */ (r).localId === id,
-    ) || null
-  )
-})
-
-watch(
-  routesList,
-  (list) => {
-    if (!list.length) {
-      selectedLocalId.value = ''
-      return
-    }
-    if (!selectedLocalId.value || !list.some((r) => r?.localId === selectedLocalId.value)) {
-      const first = list[0]
-      if (first && typeof first === 'object' && 'localId' in first) {
-        selectedLocalId.value = String(/** @type {any} */ (first).localId)
-      }
-    }
-  },
-  { immediate: true },
-)
-
-const mapPolyline = computed(() => {
-  const sel = selectedRoute.value
-  if (!sel || typeof sel !== 'object') return []
-  const o = /** @type {Record<string, unknown>} */ (sel)
-  const st = o.status && typeof o.status === 'object' ? /** @type {Record<string, unknown>} */ (o.status) : null
-  const rp = st?.routePathPoints
-  if (Array.isArray(rp) && rp.length >= 2) {
-    return rp
-      .map((p) => {
-        if (!p || typeof p !== 'object') return null
-        const q = /** @type {Record<string, unknown>} */ (p)
-        const lat = Number(q.latitude ?? q.lat)
-        const lng = Number(q.longitude ?? q.lng ?? q.lon)
-        if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null
-        return { lat, lng }
-      })
-      .filter(Boolean)
-  }
-  const pp = o.pathPoints
-  if (Array.isArray(pp) && pp.length >= 2) {
-    return pp
-      .map((p) => {
-        if (!p || typeof p !== 'object') return null
-        const q = /** @type {Record<string, unknown>} */ (p)
-        const lat = Number(q.lat)
-        const lng = Number(q.lng ?? q.lon)
-        if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null
-        return { lat, lng }
-      })
-      .filter(Boolean)
-  }
-  return []
-})
-
-async function loadRoutes() {
-  loading.value = true
-  error.value = ''
-  configError.value = ''
-  try {
-    await hydrateHereApiKeyFromServer()
-    const r = await getTrafficMonitoredRoutes()
-    if (r && typeof r === 'object' && r.ok === false) {
-      configError.value =
-        typeof r.error === 'string' ? r.error : 'Route monitoring unavailable'
-      syncPayload.value = null
-      return
-    }
-    syncPayload.value = /** @type {Record<string, unknown>} */ (r)
-  } catch (e) {
-    const msg = e instanceof Error ? e.message : 'Failed to load routes'
-    error.value = msg
-    syncPayload.value = null
-  } finally {
-    loading.value = false
-  }
-}
-
-async function pollSync() {
-  if (!(await hereKeyFromSettingsOrClient())) return
-  if (!routesList.value.length) return
-  try {
-    const r = await postTrafficMonitoredRoutesSync()
-    if (r && typeof r === 'object' && r.ok !== false) {
-      syncPayload.value = /** @type {Record<string, unknown>} */ (r)
-    }
-  } catch {
-    /* non-fatal poll */
-  }
-}
-
-/** @type {ReturnType<typeof setInterval> | null>} */
+let tick = 0
+/** @type {ReturnType<typeof setInterval> | null} */
 let intervalId = null
-
-onMounted(() => {
-  void loadRoutes()
-  intervalId = setInterval(() => void pollSync(), POLL_MS)
-})
-
-onUnmounted(() => {
-  if (intervalId) {
-    clearInterval(intervalId)
-    intervalId = null
-  }
-  if (previewTimer) {
-    clearTimeout(previewTimer)
-    previewTimer = null
-  }
-})
-
-const { vehicleId: mapVehicleId } = useMapVehicleId()
 
 function fmtTime(ts) {
   if (typeof ts !== 'number' || !Number.isFinite(ts) || ts <= 0) return '—'
@@ -206,502 +29,441 @@ function fmtTime(ts) {
   }
 }
 
-function fmtSec(s) {
-  const n = Number(s)
-  if (!Number.isFinite(n) || n < 0) return '—'
-  if (n < 60) return `${Math.round(n)}s`
-  const m = Math.floor(n / 60)
-  const sec = Math.round(n % 60)
-  return sec > 0 ? `${m}m ${sec}s` : `${m}m`
-}
-
-function fmtMeters(m) {
-  const n = Number(m)
-  if (!Number.isFinite(n) || n < 0) return '—'
-  if (n >= 1000) return `${(n / 1000).toFixed(1)} km`
-  return `${Math.round(n)} m`
+/**
+ * @param {unknown} hw
+ */
+function travelMinutes(hw) {
+  if (hw == null || typeof hw !== 'object') return Number.POSITIVE_INFINITY
+  const live = /** @type {Record<string, unknown>} */(hw).live
+  if (!live || typeof live !== 'object') return Number.POSITIVE_INFINITY
+  const m = /** @type {Record<string, unknown>} */(live).routeTravelTime
+  if (typeof m === 'number' && Number.isFinite(m)) return m
+  return Number.POSITIVE_INFINITY
 }
 
 /**
- * Get jam factor color class.
- * @param {number} jamFactor 0-10 scale
+ * @param {unknown} hw
  */
-function jamFactorClass(jamFactor) {
-  if (jamFactor < 3) return 'jam-low'
-  if (jamFactor < 6) return 'jam-medium'
-  if (jamFactor < 8) return 'jam-high'
-  return 'jam-severe'
+function finiteTravelMinutes(hw) {
+  const m = travelMinutes(hw)
+  return Number.isFinite(m) && m !== Number.POSITIVE_INFINITY ? m : null
 }
 
 /**
- * @param {unknown} row
+ * @param {unknown} hw
  */
-function routeStatusLabel(row) {
-  if (!row || typeof row !== 'object') return '—'
-  const st = /** @type {Record<string, unknown>} */ (row).status
-  if (!st || typeof st !== 'object') return '—'
-  const jam = st.avgJamFactor
-  if (typeof jam === 'number' && Number.isFinite(jam)) {
-    if (jam < 3) return 'Free flow'
-    if (jam < 6) return 'Moderate'
-    if (jam < 8) return 'Slow'
-    return 'Congested'
+function delayTierForHighway(hw) {
+  const fm = finiteTravelMinutes(hw)
+  return fm != null ? bridgeDelayTier(fm) : 'orange'
+}
+
+/**
+ * @param {unknown} hw
+ */
+function trendInfo(hw) {
+  if (hw == null || typeof hw !== 'object') {
+    return { short: '·', cls: 't--unk', full: 'Not enough data yet' }
   }
-  return '—'
-}
-
-/**
- * Format speed in mph.
- * @param {number} mps meters per second
- */
-function fmtSpeedMph(mps) {
-  const n = Number(mps)
-  if (!Number.isFinite(n) || n < 0) return '—'
-  const mph = n * 2.237
-  return `${Math.round(mph)} mph`
-}
-
-/**
- * @param {unknown} row
- */
-function routeSummaryCards(row) {
-  if (!row || typeof row !== 'object') return []
-  const st = /** @type {Record<string, unknown>} */ (row).status
-  if (!st || typeof st !== 'object') return []
-  
-  const tt = st.travelTimeSeconds
-  const delay = st.delaySeconds
-  const freeFlow = st.freeFlowTimeSeconds
-  const len = st.totalLengthMeters
-  const jam = st.avgJamFactor
-  const speed = st.avgSpeedMps
-  const freeFlowSpeed = st.avgFreeFlowMps
-  
-  const cards = [
-    {
-      key: 'tt',
-      lab: 'Travel time',
-      val: fmtSec(tt),
-      sub: 'Current (HERE Traffic)',
-    },
-    {
-      key: 'delay',
-      lab: 'Delay',
-      val: fmtSec(delay),
-      sub: 'vs free-flow traffic',
-    },
-    {
-      key: 'jam',
-      lab: 'Jam factor',
-      val: typeof jam === 'number' ? jam.toFixed(1) : '—',
-      sub: '0 = free flow, 10 = standstill',
-    },
-    {
-      key: 'speed',
-      lab: 'Current speed',
-      val: fmtSpeedMph(speed),
-      sub: 'Average along route',
-    },
-    {
-      key: 'freeFlow',
-      lab: 'Free-flow speed',
-      val: fmtSpeedMph(freeFlowSpeed),
-      sub: 'Expected without traffic',
-    },
-    {
-      key: 'len',
-      lab: 'Route length',
-      val: fmtMeters(len),
-      sub: 'Along monitored path',
-    },
-  ]
-  return cards
-}
-
-/**
- * @param {unknown} data
- * @returns {LatLng[]}
- */
-function polylineFromPreview(data) {
-  if (!data || typeof data !== 'object') return []
-  const o = /** @type {Record<string, unknown>} */ (data)
-  const candidates = [o.routedPathPoints, o.pathPoints, o.routePathPoints]
-  for (const c of candidates) {
-    if (!Array.isArray(c) || c.length < 2) continue
-    const out = []
-    for (const p of c) {
-      if (!p || typeof p !== 'object') continue
-      const q = /** @type {Record<string, unknown>} */ (p)
-      const lat = Number(q.latitude ?? q.lat)
-      const lng = Number(q.longitude ?? q.lng ?? q.lon)
-      if (!Number.isFinite(lat) || !Number.isFinite(lng)) continue
-      out.push({ lat, lng })
-    }
-    if (out.length >= 2) return out
+  const t = /** @type {Record<string, unknown>} */(hw).trend
+  if (t === 'worse') {
+    return { short: '▲', cls: 't--worse', full: 'Slower than last check' }
   }
-  return []
+  if (t === 'better') {
+    return { short: '▼', cls: 't--better', full: 'Faster than last check' }
+  }
+  if (t === 'neutral') {
+    return { short: '—', cls: 't--neutral', full: 'About the same' }
+  }
+  return { short: '·', cls: 't--unk', full: 'Not enough data yet' }
 }
 
 /**
- * @param {LatLng[]} pts
+ * @param {unknown} hw
  */
-function schedulePreview(pts) {
-  if (previewTimer) clearTimeout(previewTimer)
-  previewTimer = setTimeout(() => void runPreview(pts), 450)
+function seriesForHighway(hw) {
+  if (hw == null || typeof hw !== 'object') return []
+  const s = /** @type {Record<string, unknown>} */(hw).series
+  return Array.isArray(s) ? s : []
 }
 
-async function runPreview(pts) {
+/**
+ * @param {unknown} hw
+ */
+function chartStrokeColor(hw) {
+  const t = delayTierForHighway(hw)
+  if (t === 'green') return '#4ade80'
+  if (t === 'red') return '#f87171'
+  return '#fb923c'
+}
+
+const MAX_CHART_POINTS = 96
+
+/**
+ * @param {Array<{ t: number, m: number, s: number }>} points
+ * @param {number} maxN
+ */
+function downsampleSeries(points, maxN) {
+  if (!Array.isArray(points) || points.length === 0) return []
+  if (points.length <= maxN) return points
+  const out = []
+  const last = maxN - 1
+  for (let k = 0; k < maxN; k++) {
+    const i = Math.min(
+      points.length - 1,
+      Math.round((k * (points.length - 1)) / last),
+    )
+    out.push(points[i])
+  }
+  return out
+}
+
+/**
+ * @param {unknown} hw
+ */
+function chartModel(hw) {
+  const vb = {
+    w: 268,
+    h: 52,
+    plotL: 14,
+    plotR: 266,
+    plotT: 7,
+    plotB: 34,
+  }
+  const pw = vb.plotR - vb.plotL
+  const ph = vb.plotB - vb.plotT
+  const strokeColor = chartStrokeColor(hw)
+
+  const raw = seriesForHighway(hw)
+  let pts = downsampleSeries(raw, MAX_CHART_POINTS)
+    .slice()
+    .sort((a, b) => a.t - b.t)
+  if (pts.length === 1) {
+    const p0 = pts[0]
+    pts = [{ t: p0.t - 5 * 60 * 1000, m: p0.m, s: p0.s }, p0]
+  }
   if (pts.length < 2) {
-    previewPolyline.value = []
-    previewPolylineEncoded.value = ''
-    previewSource.value = ''
-    return
+    return { hasPath: false, strokeColor, vb }
   }
-  if (!(await hereKeyFromSettingsOrClient())) return
-  previewBusy.value = true
-  error.value = ''
-  previewSource.value = ''
-  try {
-    const r = await postTrafficMonitoredRoutePreview({ pathPoints: pts })
-    if (r && typeof r === 'object' && r.ok === true && r.preview) {
-      previewPolyline.value = polylineFromPreview(r.preview)
-      // Store encoded polyline string for passing to create endpoint
-      const prev = r.preview
-      previewPolylineEncoded.value =
-        prev && typeof prev === 'object' && typeof prev.polyline === 'string'
-          ? prev.polyline
-          : ''
-      previewSource.value =
-        typeof r.previewSource === 'string' ? r.previewSource : 'here-routing'
+
+  const tMin = pts[0].t
+  const tMax = pts[pts.length - 1].t
+  const spanT = Math.max(tMax - tMin, 60_000)
+
+  const vals = pts.map((p) => p.m).filter((v) => Number.isFinite(v))
+  if (vals.length === 0) {
+    return { hasPath: false, strokeColor, vb }
+  }
+
+  let minM = Math.min(...vals)
+  let maxM = Math.max(...vals)
+  const pad = Math.max((maxM - minM) * 0.12, 0.85)
+  minM = Math.max(0, minM - pad)
+  maxM = maxM + pad
+  if (maxM - minM < 1.25) {
+    const c = (minM + maxM) / 2
+    minM = Math.max(0, c - 1)
+    maxM = c + 1
+  }
+  const spanM = Math.max(maxM - minM, 0.75)
+
+  const xOf = /** @param {number} t */ (t) => vb.plotL + pw * ((t - tMin) / spanT)
+  const yOf = /** @param {number} m */ (m) => vb.plotT + ph * (1 - (m - minM) / spanM)
+
+  const pathPts = pts.map((pt) => ({
+    x: xOf(pt.t),
+    y: yOf(Number.isFinite(pt.m) ? pt.m : minM),
+  }))
+
+  const dLine = pathPts
+    .map((p, i) => `${i === 0 ? 'M' : 'L'}${p.x.toFixed(2)},${p.y.toFixed(2)}`)
+    .join('')
+
+  const yBase = vb.plotB
+  const dArea =
+    `M${pathPts[0].x.toFixed(2)},${yBase.toFixed(2)}` +
+    pathPts.map((p) => `L${p.x.toFixed(2)},${p.y.toFixed(2)}`).join('') +
+    `L${pathPts[pathPts.length - 1].x.toFixed(2)},${yBase.toFixed(2)}Z`
+
+  const last = pathPts[pathPts.length - 1]
+
+  const fmtCrossMin = (v) => {
+    const r = Math.round(v)
+    if (Math.abs(v - r) < 0.08) return String(r)
+    return `${v.toFixed(1)}`.replace(/\.0$/, '')
+  }
+  const yLevels = [maxM, maxM - spanM / 3, maxM - (2 * spanM) / 3, minM]
+  /** @type {{ y: number, lab: string }[]} */
+  const yTicks = []
+  const seenYLab = new Set()
+  for (const v of yLevels) {
+    let lab = fmtCrossMin(v)
+    if (seenYLab.has(lab)) lab = `${v.toFixed(1)}`.replace(/\.0$/, '')
+    seenYLab.add(lab)
+    yTicks.push({ y: yOf(v), lab })
+  }
+
+  const fmtHour = (ts) => {
+    try {
+      return new Date(ts).toLocaleTimeString(undefined, {
+        hour: 'numeric',
+        minute: '2-digit',
+      })
+    } catch {
+      return ''
+    }
+  }
+
+  const FOUR_MS = 4 * 60 * 60 * 1000
+  /** @type {number[]} */
+  let xTickTs = []
+  {
+    const d = new Date(tMin)
+    d.setMinutes(0, 0, 0)
+    d.setMilliseconds(0)
+    const h = d.getHours()
+    let nextH = Math.ceil(h / 4) * 4
+    if (nextH >= 24) {
+      d.setDate(d.getDate() + 1)
+      d.setHours(0, 0, 0, 0)
     } else {
-      previewPolyline.value = []
-      previewPolylineEncoded.value = ''
-      previewSource.value = ''
-      if (r && typeof r === 'object' && r.ok === false && typeof r.error === 'string') {
-        error.value = r.error
-      }
+      d.setHours(nextH, 0, 0, 0)
     }
-  } catch (e) {
-    previewPolyline.value = []
-    previewPolylineEncoded.value = ''
-    previewSource.value = ''
-    error.value = e instanceof Error ? e.message : 'Preview failed'
-  } finally {
-    previewBusy.value = false
+    let t = d.getTime()
+    while (t < tMin) t += FOUR_MS
+    while (t <= tMax) {
+      xTickTs.push(t)
+      t += FOUR_MS
+    }
+    if (xTickTs.length === 0) {
+      xTickTs = [tMin, tMax]
+    }
+  }
+  /** @type {{ x: number, lab: string }[]} */
+  const xTicks = xTickTs.map((ts) => ({ x: xOf(ts), lab: fmtHour(ts) }))
+  if (xTicks.length === 0) {
+    xTicks.push({ x: xOf(tMin), lab: fmtHour(tMin) })
+    if (tMax !== tMin) xTicks.push({ x: xOf(tMax), lab: fmtHour(tMax) })
+  }
+
+  /** @type {{ x1: number, y1: number, x2: number, y2: number }[]} */
+  const hGrids = yTicks.map((tk) => ({
+    x1: vb.plotL,
+    y1: tk.y,
+    x2: vb.plotR,
+    y2: tk.y,
+  }))
+
+  return {
+    hasPath: true,
+    vb,
+    dLine,
+    dArea,
+    lastCx: last.x,
+    lastCy: last.y,
+    yTicks,
+    xTicks,
+    hGrids,
+    strokeColor,
   }
 }
 
-/**
- * @param {LatLng[]} next
- */
-function onWaypointsChange(next) {
-  draftWaypoints.value = Array.isArray(next) ? next : []
-}
+const rankedHighways = computed(() => {
+  const highways = payload.value?.highways
+  if (!Array.isArray(highways)) return []
+  return [...highways].sort((a, b) => travelMinutes(a) - travelMinutes(b))
+})
 
-/**
- * @param {number} index
- */
-function onRemoveWaypoint(index) {
-  const i = Math.floor(Number(index))
-  const pts = [...draftWaypoints.value]
-  if (!Number.isFinite(i) || i < 0 || i >= pts.length) return
-  if (pts.length <= 1) {
-    draftWaypoints.value = []
-    return
-  }
-  pts.splice(i, 1)
-  draftWaypoints.value = pts
-}
-
-/**
- * @param {{ lat: number, lng: number }} p
- */
-function onAddWaypoint(p) {
-  if (!p || typeof p !== 'object') return
-  const lat = Number(p.lat)
-  const lng = Number(p.lng)
-  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return
-  const pt = { lat, lng }
-  const cur = [...draftWaypoints.value]
-  if (cur.length === 0) {
-    draftWaypoints.value = [pt]
-    return
-  }
-  if (cur.length === 1) {
-    draftWaypoints.value = [...cur, pt]
-    return
-  }
-  const k = bestWaypointInsertionIndex(cur, pt)
-  const next = [...cur.slice(0, k), pt, ...cur.slice(k)]
-  draftWaypoints.value = next
-}
-
-watch(
-  () => draftWaypoints.value,
-  (pts) => {
-    if (mode.value !== 'create') return
-    schedulePreview(pts)
-  },
-  { deep: true },
-)
-
-function startCreate() {
-  mode.value = 'create'
-  draftWaypoints.value = []
-  draftName.value = ''
-  previewPolyline.value = []
-  previewSource.value = ''
+async function load() {
   error.value = ''
-}
-
-function cancelCreate() {
-  mode.value = 'list'
-  draftWaypoints.value = []
-  previewPolyline.value = []
-  previewPolylineEncoded.value = ''
-}
-
-function clearDraftPoints() {
-  draftWaypoints.value = []
-  previewPolyline.value = []
-  previewPolylineEncoded.value = ''
-  previewSource.value = ''
-}
-
-function removeLastWaypoint() {
-  const pts = [...draftWaypoints.value]
-  if (!pts.length) return
-  pts.pop()
-  draftWaypoints.value = pts
-}
-
-async function submitCreate() {
-  const pts = draftWaypoints.value
-  if (pts.length < 2) {
-    error.value = 'Add at least two points on the map (tap to add, drag to adjust).'
-    return
-  }
-  const name = draftName.value.trim() || 'Monitored route'
-  createBusy.value = true
-  error.value = ''
+  const gen = ++tick
+  const first = !payload.value
+  if (first) loading.value = true
   try {
-    // Send the snapped preview path if available (avoids re-routing on server)
-    const payload = {
-      name,
-      pathPoints: pts,
-      // Include the routed/snapped path from preview so server doesn't re-route
-      routedPathPoints: previewPolyline.value.length >= 2 ? previewPolyline.value : undefined,
-      polyline: previewPolylineEncoded.value || undefined,
-    }
-    const r = await postTrafficMonitoredRouteCreate(payload)
-    if (r && typeof r === 'object' && r.ok === true) {
-      cancelCreate()
-      await loadRoutes()
-      const route = r.route && typeof r.route === 'object' ? /** @type {any} */ (r.route) : null
-      if (route?.localId) selectedLocalId.value = String(route.localId)
-    } else {
-      error.value =
-        r && typeof r === 'object' && typeof r.error === 'string'
-          ? r.error
-          : 'Could not create route'
-    }
+    const p = await getHighwayTraffic()
+    if (gen === tick) payload.value = p
   } catch (e) {
-    error.value = e instanceof Error ? e.message : 'Could not create route'
+    if (gen === tick) {
+      error.value = e instanceof Error ? e.message : 'Failed to load highways'
+    }
   } finally {
-    createBusy.value = false
+    if (gen === tick) loading.value = false
   }
 }
 
-async function removeSelected() {
-  const sel = selectedRoute.value
-  if (!sel || typeof sel !== 'object') return
-  const id = String(/** @type {any} */ (sel).localId || '')
-  if (!id) return
-  if (typeof window !== 'undefined' && !window.confirm('Remove this monitored route?')) {
-    return
+onMounted(() => {
+  void load()
+  intervalId = setInterval(() => void load(), POLL_MS)
+})
+
+onUnmounted(() => {
+  if (intervalId) {
+    clearInterval(intervalId)
+    intervalId = null
   }
-  try {
-    await postTrafficMonitoredRouteRemove(id)
-    selectedLocalId.value = ''
-    await loadRoutes()
-  } catch (e) {
-    error.value = e instanceof Error ? e.message : 'Remove failed'
-  }
-}
+})
 </script>
 
 <template>
-  <div class="corridor-page">
-    <div class="corridor-map-column">
-      <div class="corridor-map-shell">
-        <CorridorFlowMap
-          v-if="mode === 'list'"
-          :polyline="mapPolyline"
-          :segments="[]"
-          :vehicle-id="mapVehicleId"
-          fill-height
-        />
-        <CorridorFlowMap
-          v-else
-          edit-mode
-          :waypoints="draftWaypoints"
-          :preview-polyline="previewPolyline"
-          :vehicle-id="mapVehicleId"
-          fill-height
-          @waypoints-change="onWaypointsChange"
-          @remove-waypoint="onRemoveWaypoint"
-          @add-waypoint="onAddWaypoint"
-        />
-      </div>
-    </div>
-
-    <div class="corridor-list-column">
-      <div class="corridor-list-inner">
-        <div class="corridor-bar">
-          <h1 class="corridor-h1">Route monitoring</h1>
-          <p class="corridor-sub">
-            HERE Traffic API — create routes from waypoints, then poll live speed, jam factor, and travel time
-            (<a
-              class="corridor-doc-link"
-              href="https://developer.here.com/documentation/traffic-api/dev_guide/topics/send-request-readme.html"
-              target="_blank"
-              rel="noopener noreferrer"
-            >API docs</a>).
-          </p>
-          <p v-if="syncPayload?.fetchedAt" class="corridor-time">
-            Updated {{ fmtTime(syncPayload.fetchedAt) }}
-          </p>
-        </div>
-
-        <div class="corridor-mode-row" role="tablist" aria-label="Corridor mode">
-          <button
-            type="button"
-            class="corridor-mode-btn tap"
-            :class="{ 'is-on': mode === 'list' }"
-            @click="mode = 'list'"
-          >My routes</button>
-          <button
-            type="button"
-            class="corridor-mode-btn tap"
-            :class="{ 'is-on': mode === 'create' }"
-            @click="startCreate"
-          >New route</button>
-        </div>
-
-        <p v-if="configError" class="corridor-warn" role="status">{{ configError }}</p>
-        <p v-if="needsHereKey" class="corridor-setup-hint">
-          <RouterLink class="corridor-setup-link tap" :to="{ name: 'settings', hash: '#here' }">
-            Open Settings → HERE key
-          </RouterLink>
-          <span class="corridor-setup-sub">HERE Traffic API for route monitoring (separate from TomTom map tiles).</span>
-        </p>
-        <p v-else-if="error" class="corridor-err" role="alert">{{ error }}</p>
-
-        <template v-if="mode === 'create'">
-          <div class="corridor-create-panel">
-            <label class="corridor-lbl" for="mr-name">Route name</label>
-            <input
-              id="mr-name"
-              v-model="draftName"
-              class="corridor-inp tap"
-              type="text"
-              maxlength="120"
-              placeholder="e.g. Caton → Conduit"
-              autocomplete="off"
-            />
-            <p class="corridor-hint">
-              Click waypoints on the map. The route auto-snaps to roads via HERE Routing.
-              <span v-if="previewPolyline.length" class="corridor-inline-status">✓ Route snapped</span>
-              <span v-if="previewBusy" class="corridor-inline-status">Routing…</span>
+  <div class="highways-page">
+    <div class="highways-list-column">
+      <div class="highways-list-inner">
+        <div class="highways-bar">
+          <div class="highways-bar-top">
+            <h1 class="highways-h1">Highways</h1>
+            <p v-if="payload?.error" class="highways-warn" role="status">
+              {{ payload.error }}
             </p>
-            <div class="corridor-create-actions">
-              <button type="button" class="corridor-btn tap" :disabled="createBusy" @click="clearDraftPoints">
-                Clear points
-              </button>
-              <button
-                type="button"
-                class="corridor-btn tap"
-                :disabled="createBusy || !draftWaypoints.length"
-                @click="removeLastWaypoint"
-              >
-                Undo last
-              </button>
-              <button type="button" class="corridor-btn tap" :disabled="createBusy" @click="cancelCreate">
-                Cancel
-              </button>
-              <button
-                type="button"
-                class="corridor-btn corridor-btn--primary tap"
-                :disabled="createBusy || draftWaypoints.length < 2"
-                @click="submitCreate"
-              >
-                {{ createBusy ? 'Creating…' : 'Create monitored route' }}
-              </button>
-            </div>
+            <p v-else class="highways-pill">
+              <span>Travel time · fastest first</span>
+              <span v-if="payload?.fetchedAt" class="highways-time"
+              >· {{ fmtTime(payload.fetchedAt) }}</span>
+            </p>
           </div>
-        </template>
+        </div>
 
-        <template v-else>
-          <p v-if="loading && !syncPayload" class="corridor-skel" aria-busy="true">Loading…</p>
-          <template v-else-if="!routesList.length">
-            <p class="corridor-empty">No monitored routes yet. Use <strong>New route</strong> to draw one.</p>
-          </template>
-          <template v-else>
-            <h2 class="corridor-h2">Your routes</h2>
-            <ul class="corridor-route-pick" aria-label="Select route">
-              <li v-for="r in routesList" :key="String(r?.localId)">
-                <button
-                  v-if="r && typeof r === 'object'"
-                  type="button"
-                  class="corridor-route-pill tap"
-                  :class="{ 'is-sel': r.localId === selectedLocalId }"
-                  @click="selectedLocalId = String(r.localId)"
-                >
-                  <span class="corridor-route-pill-name">{{ r.name || 'Route' }}</span>
-                  <span class="corridor-route-pill-meta">{{ routeStatusLabel(r) }}</span>
-                </button>
-              </li>
-            </ul>
+        <p v-if="error" class="highways-err">{{ error }}</p>
+        <div v-if="loading && !payload" class="highways-skel" aria-busy="true">Loading…</div>
 
-            <div v-if="selectedRoute && typeof selectedRoute === 'object'" class="corridor-detail">
-              <div class="corridor-detail-head">
-                <h2 class="corridor-h2">{{ selectedRoute.name || 'Route' }}</h2>
-                <button type="button" class="corridor-btn corridor-btn--danger tap" @click="removeSelected">
-                  Remove
-                </button>
+        <div v-else class="highways-content-panel" aria-label="Highway traffic list">
+          <h2 v-if="rankedHighways.length" class="highways-trips-h2">Major Highways</h2>
+          <ul v-if="rankedHighways.length" class="highway-grid" aria-label="Highways, fastest first">
+            <li
+              v-for="(hw, idx) in rankedHighways"
+              :key="hw.id"
+              class="highway-tile"
+              :class="{
+                'highway-tile--d-green': delayTierForHighway(hw) === 'green',
+                'highway-tile--d-orange': delayTierForHighway(hw) === 'orange',
+                'highway-tile--d-red': delayTierForHighway(hw) === 'red',
+              }"
+            >
+              <div class="highway-tile-inner">
+                <div class="highway-data-col">
+                  <div class="highway-card-head">
+                    <div class="highway-card-id">
+                      <span class="highway-rank" aria-hidden="true">{{ idx + 1 }}</span>
+                      <div class="highway-title-wrap">
+                        <h2 class="highway-title">{{ hw.name }}</h2>
+                        <span class="highway-route">{{ hw.route }}</span>
+                      </div>
+                    </div>
+                    <div
+                      class="highway-trend ico"
+                      :class="[trendInfo(hw).cls, `highway-trend--delay-${delayTierForHighway(hw)}`]"
+                      :title="trendInfo(hw).full"
+                    >{{ trendInfo(hw).short }}</div>
+                  </div>
+                  <div class="highway-card-metrics">
+                    <div class="highway-kpi highway-kpi--cross">
+                      <span class="highway-kpi-lab">Travel time</span>
+                      <div class="highway-kpi-row">
+                        <span class="highway-kpi-num">
+                          <template v-if="hw.live?.routeTravelTime != null">{{ hw.live.routeTravelTime }}</template>
+                          <template v-else>—</template>
+                        </span>
+                        <span class="highway-kpi-unit">min</span>
+                      </div>
+                    </div>
+                    <div class="highway-kpi-divider" aria-hidden="true" />
+                    <div class="highway-kpi highway-kpi--speed">
+                      <span class="highway-kpi-lab">Avg speed</span>
+                      <div class="highway-kpi-row highway-kpi-row--speed">
+                        <template v-if="hw.live?.routeSpeed != null">
+                          <span class="highway-kpi-num">{{ hw.live.routeSpeed }}</span>
+                          <span class="highway-kpi-unit">mph</span>
+                        </template>
+                        <template v-else>
+                          <span class="highway-kpi-num highway-kpi-num--muted">—</span>
+                        </template>
+                      </div>
+                    </div>
+                  </div>
+                  <div v-if="chartModel(hw).hasPath" class="highway-chart-shell">
+                    <div class="highway-chart-head">
+                      <span class="highway-chart-title">History</span>
+                      <span class="highway-chart-sub">Minutes · local time</span>
+                    </div>
+                    <div class="highway-chart-panel">
+                      <svg
+                        class="highway-chart-svg"
+                        :viewBox="`0 0 ${chartModel(hw).vb.w} ${chartModel(hw).vb.h}`"
+                        preserveAspectRatio="xMidYMid meet"
+                        width="100%"
+                        :style="{ aspectRatio: `${chartModel(hw).vb.w} / ${chartModel(hw).vb.h}` }"
+                        role="img"
+                        :aria-label="`Travel time history for ${hw.name}`"
+                      >
+                        <defs>
+                          <linearGradient :id="`hcg-${hw.id}`" x1="0" y1="0" x2="0" y2="1">
+                            <stop offset="0%" :stop-color="chartModel(hw).strokeColor" stop-opacity="0.14" />
+                            <stop offset="100%" :stop-color="chartModel(hw).strokeColor" stop-opacity="0.02" />
+                          </linearGradient>
+                        </defs>
+                        <template v-if="chartModel(hw).hasPath">
+                          <text
+                            v-for="(yt, yi) in chartModel(hw).yTicks"
+                            :key="`yt-${yi}`"
+                            class="highway-chart-axis-title"
+                            x="6"
+                            :y="yt.y + 3.5"
+                            text-anchor="start"
+                          >{{ yt.lab }}</text>
+                          <line
+                            v-for="(g, gi) in chartModel(hw).hGrids"
+                            :key="`hg-${gi}`"
+                            :x1="g.x1"
+                            :y1="g.y1"
+                            :x2="g.x2"
+                            :y2="g.y2"
+                            class="highway-chart-grid"
+                          />
+                          <path :d="chartModel(hw).dArea" :fill="`url(#hcg-${hw.id})`" />
+                          <path
+                            :d="chartModel(hw).dLine"
+                            fill="none"
+                            :stroke="chartModel(hw).strokeColor"
+                            stroke-width="0.95"
+                            stroke-linecap="round"
+                            stroke-linejoin="round"
+                            opacity="0.82"
+                          />
+                          <circle
+                            :cx="chartModel(hw).lastCx"
+                            :cy="chartModel(hw).lastCy"
+                            r="1.35"
+                            :fill="chartModel(hw).strokeColor"
+                            stroke="#0f0f14"
+                            stroke-width="0.45"
+                            opacity="0.9"
+                          />
+                          <text
+                            v-for="(tk, ti) in chartModel(hw).xTicks"
+                            :key="`xt-${ti}`"
+                            class="highway-chart-tick-x"
+                            :x="tk.x"
+                            :y="chartModel(hw).vb.h - 5"
+                            text-anchor="middle"
+                          >{{ tk.lab }}</text>
+                        </template>
+                      </svg>
+                    </div>
+                  </div>
+                  <div v-else class="highway-chart-empty" role="status">Collecting history…</div>
+                </div>
               </div>
-              <p v-if="selectedRoute.statusError" class="corridor-status-err" role="status">
-                {{ selectedRoute.statusError }}
-              </p>
-              <p v-else-if="selectedRoute.statusOk === false" class="corridor-status-err" role="status">
-                No live status yet (route may be NEW or processing).
-              </p>
-
-              <ul
-                v-if="routeSummaryCards(selectedRoute).length"
-                class="corridor-summary-grid"
-                aria-label="Route summary"
-              >
-                <li
-                  v-for="c in routeSummaryCards(selectedRoute)"
-                  :key="c.key"
-                  class="corridor-card corridor-card--summary"
-                >
-                  <span class="corridor-card-lab">{{ c.lab }}</span>
-                  <span class="corridor-card-val">{{ c.val }}</span>
-                  <span class="corridor-card-sub">{{ c.sub }}</span>
-                </li>
-              </ul>
-            </div>
-          </template>
-        </template>
+            </li>
+          </ul>
+          <p v-else-if="!loading" class="highways-no-data">
+            No highway traffic data. Configure a HERE or TomTom API key in Settings.
+          </p>
+        </div>
       </div>
     </div>
   </div>
 </template>
 
 <style scoped>
-.corridor-page {
+.highways-page {
   width: 100%;
   display: flex;
   flex-direction: column;
@@ -713,357 +475,447 @@ async function removeSelected() {
   padding-bottom: calc(var(--nav-height, 4rem) + env(safe-area-inset-bottom, 0));
 }
 
-.corridor-map-column {
-  flex-shrink: 0;
-  min-height: min(38vh, 17rem);
-}
-
-.corridor-map-shell {
-  min-height: min(38vh, 17rem);
-  height: min(38vh, 17rem);
-  display: flex;
-  flex-direction: column;
-}
-
-.corridor-list-column {
-  flex: 1 1 auto;
+.highways-list-column {
+  flex: 1 1 0;
+  min-width: 0;
   min-height: 0;
   display: flex;
   flex-direction: column;
+  overflow: hidden;
 }
 
-.corridor-list-inner {
-  padding: 0.55rem var(--space-2, 0.5rem) 1rem;
-  flex: 1 1 auto;
+.highways-list-inner {
+  padding: 0.65rem min(1.25rem, 3.5vw) 0.85rem;
+  flex: 1 1 0;
+  min-height: 0;
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
 }
 
-.corridor-bar {
-  margin-bottom: 0.65rem;
-}
-
-.corridor-h1 {
-  margin: 0;
-  font-size: var(--text-sm, 0.875rem);
-  font-weight: 650;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  color: #c4b5fd;
-}
-
-.corridor-sub {
-  margin: 0.25rem 0 0;
-  font-size: 0.68rem;
-  color: var(--color-text-tertiary, #8b8b9c);
-  line-height: 1.35;
-}
-
-.corridor-doc-link {
-  color: #a78bfa;
-}
-
-.corridor-time {
-  margin: 0.35rem 0 0;
-  font-size: 0.62rem;
-  color: #6e6e80;
-  font-variant-numeric: tabular-nums;
-}
-
-.corridor-mode-row {
-  display: flex;
-  gap: 0.35rem;
-  margin-bottom: 0.65rem;
-}
-
-.corridor-mode-btn {
-  flex: 1;
-  padding: 0.45rem 0.5rem;
-  border-radius: 8px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  background: rgba(0, 0, 0, 0.35);
-  color: #9a9ab0;
-  font-size: 0.65rem;
-  font-weight: 750;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  cursor: pointer;
-}
-
-.corridor-mode-btn.is-on {
-  color: #f4f4f8;
-  border-color: rgba(167, 139, 250, 0.45);
-  background: rgba(123, 77, 181, 0.28);
-}
-
-.corridor-warn {
-  margin: 0 0 0.5rem;
-  padding: 0.4rem 0.5rem;
-  border-radius: 8px;
-  background: rgba(251, 191, 36, 0.1);
-  border: 1px solid rgba(251, 191, 36, 0.35);
-  color: #fcd34d;
-  font-size: 0.75rem;
-}
-
-.corridor-setup-hint {
-  margin: 0 0 0.65rem;
-  font-size: 0.72rem;
-  line-height: 1.45;
-  color: var(--color-text-secondary, #c4c4d4);
-}
-
-.corridor-setup-link {
-  display: inline-block;
-  margin-right: 0.35rem;
-  font-weight: 650;
-  color: var(--color-accent-purple, #a78bfa);
-  text-decoration: none;
-}
-
-.corridor-setup-link:hover {
-  text-decoration: underline;
-}
-
-.corridor-setup-sub {
-  display: block;
-  margin-top: 0.25rem;
-  color: var(--color-text-tertiary, #8b8b9c);
-}
-
-.corridor-err {
-  margin: 0 0 0.5rem;
-  color: #fca5a5;
-  font-size: 0.8rem;
-}
-
-.corridor-skel {
-  margin: 0 0 0.5rem;
-  color: #9ca3af;
-  font-size: 0.85rem;
-}
-
-.corridor-empty {
-  margin: 0.25rem 0 0.75rem;
-  font-size: 0.78rem;
-  color: #8b8b9c;
-  line-height: 1.4;
-}
-
-.corridor-create-panel {
+.highways-bar {
   display: flex;
   flex-direction: column;
-  gap: 0.45rem;
+  gap: 0.5rem;
+  margin-bottom: 0.6rem;
 }
 
-.corridor-lbl {
-  font-size: 0.55rem;
-  font-weight: 750;
-  letter-spacing: 0.06em;
+.highways-bar-top {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+
+.highways-h1 {
+  margin: 0;
+  font-size: var(--text-xl, 1.25rem);
+  font-weight: 600;
+  color: var(--color-text-primary, #f4f4f8);
+}
+
+.highways-warn {
+  font-size: 0.68rem;
+  color: #fbbf24;
+  margin: 0;
+  line-height: 1.3;
+  font-weight: 600;
+}
+
+.highways-pill {
+  margin: 0;
+  font-size: 0.7rem;
   text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: #7a7a8c;
+  font-weight: 700;
+}
+
+.highways-time {
+  color: #5a5a6a;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+
+.highways-err {
+  color: #f87171;
+  font-size: 0.8rem;
+  margin: 0 0 0.5rem;
+  font-weight: 600;
+}
+
+.highways-skel {
+  padding: 1.2rem 0;
+  color: #9a9ab0;
+  font-size: 0.9rem;
+}
+
+.highways-content-panel {
+  display: block;
+  width: 100%;
+  max-width: none;
+  border-radius: 14px;
+  border: 1px solid rgba(199, 168, 255, 0.12);
+  background: linear-gradient(165deg, #101018 0%, #0a0a0e 100%);
+  padding: 0.45rem 0.48rem 0.55rem;
+  box-sizing: border-box;
+  margin-top: 0.2rem;
+  box-shadow: 0 6px 22px rgba(0, 0, 0, 0.34);
+}
+
+.highways-trips-h2 {
+  margin: 0 0 0.4rem 0.15rem;
+  font-size: 0.65rem;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: #6e6e7e;
+}
+
+.highways-no-data {
+  margin: 0.5rem 0.25rem 0.35rem;
+  font-size: 0.8rem;
   color: #7a7a8c;
 }
 
-.corridor-inp {
-  width: 100%;
-  box-sizing: border-box;
-  padding: 0.5rem 0.55rem;
-  border-radius: 8px;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  background: rgba(0, 0, 0, 0.35);
-  color: #f4f4f8;
-  font-size: 0.85rem;
-}
-
-.corridor-hint {
-  margin: 0;
-  font-size: 0.58rem;
-  color: #5c5c6a;
-  line-height: 1.45;
-}
-
-.corridor-inline-status {
-  margin-left: 0.35rem;
-  color: #a78bfa;
-  font-weight: 650;
-}
-
-.corridor-create-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.4rem;
-  margin-top: 0.25rem;
-}
-
-.corridor-btn {
-  padding: 0.42rem 0.65rem;
-  border-radius: 8px;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  background: rgba(255, 255, 255, 0.06);
-  color: #e4e4f0;
-  font-size: 0.72rem;
-  font-weight: 650;
-  cursor: pointer;
-}
-
-.corridor-btn:disabled {
-  opacity: 0.45;
-  cursor: not-allowed;
-}
-
-.corridor-btn--primary {
-  border-color: rgba(167, 139, 250, 0.5);
-  background: rgba(123, 77, 181, 0.35);
-}
-
-.corridor-btn--danger {
-  border-color: rgba(248, 113, 113, 0.35);
-  color: #fecaca;
-  background: rgba(127, 29, 29, 0.25);
-}
-
-.corridor-h2 {
-  margin: 0.5rem 0 0.35rem;
-  font-size: 0.72rem;
-  font-weight: 750;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: #a8a8b8;
-}
-
-.corridor-route-pick {
+.highway-grid {
   list-style: none;
-  margin: 0 0 0.65rem;
+  margin: 0;
   padding: 0;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.35rem;
-}
-
-.corridor-route-pill {
   display: flex;
   flex-direction: column;
-  align-items: flex-start;
-  gap: 0.08rem;
-  padding: 0.4rem 0.55rem;
-  border-radius: 9px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  background: rgba(18, 18, 26, 0.9);
-  color: #e8e8f0;
-  cursor: pointer;
-  text-align: left;
-  max-width: 100%;
+  gap: 0.28rem;
+  width: 100%;
+  max-width: none;
 }
 
-.corridor-route-pill.is-sel {
-  border-color: rgba(167, 139, 250, 0.55);
-  box-shadow: 0 0 0 1px rgba(167, 139, 250, 0.2);
+.highway-tile {
+  min-width: 0;
+  width: 100%;
+  border-radius: 14px;
+  position: relative;
+  background: linear-gradient(155deg, rgba(26, 26, 34, 0.98) 0%, rgba(12, 12, 18, 0.99) 48%, rgba(10, 10, 14, 1) 100%);
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.05) inset, 0 4px 18px rgba(0, 0, 0, 0.38);
+  overflow: hidden;
 }
 
-.corridor-route-pill-name {
-  font-size: 0.75rem;
-  font-weight: 650;
+.highway-tile::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 3px;
+  border-radius: 14px 0 0 14px;
+  background: transparent;
+  opacity: 0.95;
+  pointer-events: none;
 }
 
-.corridor-route-pill-meta {
-  font-size: 0.55rem;
-  color: #8b8b9c;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
+.highway-tile--d-green::before {
+  background: linear-gradient(180deg, #4ade80, #22c55e);
+  box-shadow: 0 0 14px rgba(74, 222, 128, 0.35);
 }
 
-.corridor-detail-head {
+.highway-tile--d-orange::before {
+  background: linear-gradient(180deg, #fb923c, #ea580c);
+  box-shadow: 0 0 14px rgba(251, 146, 60, 0.28);
+}
+
+.highway-tile--d-red::before {
+  background: linear-gradient(180deg, #f87171, #dc2626);
+  box-shadow: 0 0 14px rgba(248, 113, 113, 0.28);
+}
+
+.highway-tile-inner {
+  padding: 0.38rem 0.48rem 0.38rem 0.54rem;
+  min-height: 0;
   display: flex;
-  align-items: center;
+  flex-direction: column;
+  gap: 0.26rem;
+}
+
+.highway-data-col {
+  flex: 1 1 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.26rem;
+}
+
+.highway-card-head {
+  display: flex;
+  align-items: flex-start;
   justify-content: space-between;
-  gap: 0.5rem;
-  flex-wrap: wrap;
-}
-
-.corridor-detail-head .corridor-h2 {
-  margin: 0;
-}
-
-.corridor-status-err {
-  margin: 0 0 0.5rem;
-  font-size: 0.72rem;
-  color: #fca5a5;
-}
-
-.corridor-summary-grid {
-  list-style: none;
-  margin: 0 0 0.75rem;
-  padding: 0;
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(7.5rem, 1fr));
   gap: 0.45rem;
 }
 
-.corridor-card {
-  border-radius: 10px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  background: rgba(18, 18, 26, 0.92);
-  padding: 0.5rem 0.55rem;
-  box-sizing: border-box;
+.highway-card-id {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.42rem;
+  min-width: 0;
+  flex: 1;
 }
 
-.corridor-card--summary {
+.highway-rank {
+  flex-shrink: 0;
+  font-size: 0.52rem;
+  font-weight: 900;
+  line-height: 1;
+  color: #8b8b9a;
+  width: 1.15rem;
+  height: 1.15rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.45);
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  margin-top: 0.12rem;
+}
+
+.highway-title-wrap {
   display: flex;
   flex-direction: column;
-  gap: 0.12rem;
+  gap: 0.08rem;
+  min-width: 0;
 }
 
-.corridor-card-lab {
-  font-size: 0.5rem;
+.highway-title {
+  margin: 0;
+  font-size: var(--text-xs, 0.6875rem);
+  font-weight: 600;
+  line-height: 1.25;
+  color: var(--color-text-primary, #f4f4f8);
+  letter-spacing: -0.01em;
+  word-break: break-word;
+}
+
+.highway-route {
+  font-size: 0.55rem;
+  font-weight: 650;
+  color: #8b8b9a;
+  letter-spacing: 0.02em;
+}
+
+.highway-trend {
+  flex-shrink: 0;
+  width: 1.28rem;
+  height: 1.28rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.68rem;
+  line-height: 1;
   font-weight: 750;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: #8b8b9c;
+  border-radius: 9px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: #a1a1b0;
+  background: rgba(0, 0, 0, 0.35);
 }
 
-.corridor-card-val {
-  font-size: clamp(1rem, 4vw, 1.25rem);
+.highway-trend.highway-trend--delay-green {
+  color: #ecfdf5;
+  background: rgba(22, 101, 52, 0.55);
+  border-color: rgba(74, 222, 128, 0.45);
+}
+
+.highway-trend.highway-trend--delay-orange {
+  color: #fff7ed;
+  background: rgba(154, 52, 18, 0.52);
+  border-color: rgba(251, 146, 60, 0.48);
+}
+
+.highway-trend.highway-trend--delay-red {
+  color: #fef2f2;
+  background: rgba(127, 29, 29, 0.55);
+  border-color: rgba(248, 113, 113, 0.48);
+}
+
+.t--worse {
+  color: #fecdd3;
+  background: rgba(127, 29, 29, 0.45);
+  border-color: rgba(248, 113, 113, 0.4);
+}
+
+.t--better {
+  color: #a7f3d0;
+  background: rgba(6, 78, 59, 0.4);
+  border-color: rgba(52, 211, 153, 0.45);
+}
+
+.t--neutral {
+  color: #fde68a;
+  background: rgba(100, 80, 0, 0.35);
+  border-color: rgba(250, 204, 21, 0.3);
+}
+
+.t--unk {
+  color: #6a6a78;
+}
+
+.highway-card-metrics {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: stretch;
+  gap: 0;
+  padding: 0.28rem 0.34rem;
+  border-radius: 9px;
+  background: rgba(0, 0, 0, 0.32);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.highway-kpi {
+  display: flex;
+  flex-direction: column;
+  gap: 0.18rem;
+  min-width: 0;
+}
+
+.highway-kpi--cross {
+  padding-right: 0.35rem;
+}
+
+.highway-kpi--speed {
+  padding-left: 0.35rem;
+  align-items: flex-end;
+  text-align: right;
+}
+
+.highway-kpi-divider {
+  width: 1px;
+  align-self: stretch;
+  margin: 0.12rem 0;
+  background: linear-gradient(180deg, transparent, rgba(255, 255, 255, 0.08) 15%, rgba(255, 255, 255, 0.08) 85%, transparent);
+}
+
+.highway-kpi-lab {
+  font-size: 0.47rem;
+  font-weight: 750;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: #6b6b78;
+  line-height: 1.15;
+}
+
+.highway-kpi-row {
+  display: flex;
+  align-items: baseline;
+  gap: 0.14rem;
+  flex-wrap: nowrap;
+}
+
+.highway-kpi-row--speed {
+  justify-content: flex-end;
+}
+
+.highway-kpi-num {
+  font-size: clamp(1.05rem, 4.2vw, 1.38rem);
   font-weight: 700;
+  line-height: 1;
+  letter-spacing: -0.02em;
   color: #ebe8f7;
   font-variant-numeric: tabular-nums;
 }
 
-.corridor-card-sub {
-  font-size: 0.55rem;
-  color: #6b6b78;
+.highway-kpi-num--muted {
+  font-size: 1rem;
+  font-weight: 650;
+  color: #5c5c6c;
+}
+
+.highway-kpi-unit {
+  font-size: 0.56rem;
+  font-weight: 650;
+  color: #8b8b9c;
+  letter-spacing: 0.02em;
+}
+
+.highway-chart-shell {
+  display: flex;
+  flex-direction: column;
+  gap: 0.14rem;
+}
+
+.highway-chart-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.35rem;
+  padding: 0 0.04rem;
+}
+
+.highway-chart-title {
+  font-size: 0.48rem;
+  font-weight: 800;
+  letter-spacing: 0.11em;
+  text-transform: uppercase;
+  color: #6e6e7e;
+}
+
+.highway-chart-sub {
+  font-size: 0.48rem;
+  font-weight: 650;
+  color: #5a5a68;
+  letter-spacing: 0.04em;
+}
+
+.highway-chart-panel {
+  border-radius: 8px;
+  padding: 0.06rem 0 0;
+  background: rgba(0, 0, 0, 0.38);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  width: 100%;
+  min-width: 0;
+}
+
+.highway-chart-empty {
+  min-height: 52px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.5rem 0.35rem;
+  font-size: 0.62rem;
+  font-weight: 600;
+  color: #5c5c6e;
+  letter-spacing: 0.04em;
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.38);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.highway-chart-svg {
+  display: block;
+  width: 100%;
+  max-width: 100%;
+  height: auto;
+  vertical-align: middle;
+}
+
+.highway-chart-grid {
+  stroke: rgba(255, 255, 255, 0.045);
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+}
+
+.highway-chart-axis-title {
+  fill: #8b8b9a;
+  font-size: 4.35px;
+  font-weight: 650;
+  font-family: var(--font-sans, system-ui, sans-serif);
+}
+
+.highway-chart-tick-x {
+  fill: #8b8b9a;
+  font-size: 4.25px;
+  font-weight: 600;
+  font-family: var(--font-sans, system-ui, sans-serif);
 }
 
 @media (orientation: landscape) and (min-width: 700px) {
-  .corridor-page {
-    flex-direction: row;
-    align-items: stretch;
-    padding-left: 0;
-    padding-right: 0;
-    padding-top: 0;
-  }
-
-  .corridor-map-column {
-    flex: 1.15 1 0;
-    min-height: 0;
-    border-right: 1px solid var(--color-border, rgba(255, 255, 255, 0.08));
-  }
-
-  .corridor-map-shell {
-    height: 100%;
-    min-height: 0;
-    flex: 1;
-  }
-
-  .corridor-list-column {
-    flex: 1 1 0;
-    min-width: 0;
-    min-height: 0;
-  }
-
-  .corridor-list-inner {
-    overflow-y: auto;
-    padding-top: 0.55rem;
+  .highways-list-inner {
+    padding-top: 0.65rem;
     padding-left: var(--space-3, 0.75rem);
     padding-right: max(env(safe-area-inset-right, 0px), var(--space-3, 0.75rem));
   }

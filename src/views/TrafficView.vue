@@ -32,7 +32,7 @@ const tab = ref('crossings')
           :aria-selected="tab === 'corridors'"
           @click="tab = 'corridors'"
         >
-          Corridors
+          Highways
         </button>
       </div>
     </nav>

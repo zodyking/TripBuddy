@@ -164,6 +164,12 @@ export async function getVerrazzanoTraffic() {
   return handleJson(r)
 }
 
+/** Highway traffic data (HERE/TomTom) + stored series for trend charts. */
+export async function getHighwayTraffic() {
+  const r = await apiFetch('/api/traffic/highways')
+  return handleJson(r)
+}
+
 /**
  * HERE Traffic API: list stored routes + live traffic flow per route.
  * @see https://developer.here.com/documentation/traffic-api/dev_guide/topics/send-request-readme.html

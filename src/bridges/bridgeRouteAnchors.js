@@ -63,6 +63,14 @@ const BRIDGE_ANCHORS_BYDIR = Object.freeze(
       ToNY: [40.5253, -74.2458],
       ToNJ: [40.5243, -74.2473],
     },
+    /**
+     * Verrazzano-Narrows Bridge — Wikipedia: 40.6066°N, 74.0447°W (center main span).
+     * MTA bridge, not PANYNJ. Synthetic 'verrazzano' routeId.
+     */
+    verrazzano: {
+      ToNY: [40.6070, -74.0440],
+      ToNJ: [40.6062, -74.0454],
+    },
   }),
 )
 

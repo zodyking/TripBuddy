@@ -350,6 +350,8 @@ export function bridgeShortLabelForRouteId(routeId) {
     // Outerbridge — short label fits marker without ellipsis
     260: 'Outer',
     2520: 'Outer',
+    // Verrazzano-Narrows (MTA, synthetic routeId)
+    verrazzano: 'Verrazzano',
   })
   if (k && map[k]) return map[k]
   return ''

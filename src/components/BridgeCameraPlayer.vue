@@ -44,6 +44,8 @@ const youtubeEmbedSrc = computed(() => {
     playsinline: '1',
     rel: '0',
     modestbranding: '1',
+    controls: '0',
+    showinfo: '0',
   })
   return `https://www.youtube.com/embed/${encodeURIComponent(id)}?${q}`
 })
@@ -318,7 +320,7 @@ onUnmounted(() => {
   width: 100%;
   height: 100%;
   border: 0;
-  transform: scale(1.08);
+  transform: scale(1.15);
   transform-origin: center center;
 }
 

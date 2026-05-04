@@ -149,14 +149,42 @@ function gwbMatchRouteForToggle(row, d) {
 
 const rankedRows = computed(() => {
   const live = payload.value?.live
-  if (!Array.isArray(live)) return []
   const d = direction.value
-  const out = live.filter((r) => {
-    if (isTunnelRow(r)) return false
-    if (!matchDir(r, d)) return false
-    if (isGwbRow(r) && !gwbMatchRouteForToggle(r, d)) return false
-    return true
-  })
+  /** @type {any[]} */
+  const out = []
+  
+  if (Array.isArray(live)) {
+    for (const r of live) {
+      if (isTunnelRow(r)) continue
+      if (!matchDir(r, d)) continue
+      if (isGwbRow(r) && !gwbMatchRouteForToggle(r, d)) continue
+      out.push(r)
+    }
+  }
+  
+  const vzLive = verrazzanoLiveData.value
+  if (vzLive && vzLive.routeTravelTime != null) {
+    out.push({
+      routeId: 'verrazzano',
+      crossingDisplayName: 'Verrazzano-Narrows Bridge',
+      routeTravelTime: vzLive.routeTravelTime,
+      routeSpeed: vzLive.routeSpeed,
+      travelDirection: d,
+      isCrossingClosed: false,
+      _isVerrazzano: true,
+    })
+  } else if (hasVerrazzanoCamera.value) {
+    out.push({
+      routeId: 'verrazzano',
+      crossingDisplayName: 'Verrazzano-Narrows Bridge',
+      routeTravelTime: null,
+      routeSpeed: null,
+      travelDirection: d,
+      isCrossingClosed: false,
+      _isVerrazzano: true,
+    })
+  }
+  
   return out.sort((a, b) => {
     const ac = isClosedRow(a) ? 1 : 0
     const bc = isClosedRow(b) ? 1 : 0
@@ -195,9 +223,20 @@ function displayTitle(row) {
 }
 
 /**
+ * Check if row is the Verrazzano synthetic row.
+ * @param {unknown} row
+ */
+function isVerrazzanoRow(row) {
+  return row != null && typeof row === 'object' && /** @type {any} */(row)._isVerrazzano === true
+}
+
+/**
  * @param {unknown} row
  */
 function trendInfo(row) {
+  if (isVerrazzanoRow(row)) {
+    return verrazzanoTrendInfo.value
+  }
   const id = rowRouteId(row)
   if (!id || !payload.value?.byRoute) {
     return { short: '·', cls: 't--unk', full: 'Not enough data yet' }
@@ -223,6 +262,9 @@ function trendInfo(row) {
  * @param {unknown} row
  */
 function seriesForRow(row) {
+  if (isVerrazzanoRow(row)) {
+    return verrazzanoSeries.value
+  }
   const id = rowRouteId(row)
   if (!id || !payload.value?.byRoute?.[id]) return []
   const s = payload.value.byRoute[id].series
@@ -316,9 +358,13 @@ function bridgeChartModel(row) {
   }
 
   const raw = seriesForRow(row)
-  const pts = downsampleSeries(raw, MAX_CHART_POINTS)
+  let pts = downsampleSeries(raw, MAX_CHART_POINTS)
     .slice()
     .sort((a, b) => a.t - b.t)
+  if (pts.length === 1) {
+    const p0 = pts[0]
+    pts = [{ t: p0.t - 5 * 60 * 1000, m: p0.m, s: p0.s }, p0]
+  }
   if (pts.length < 2) {
     return { hasPath: false, strokeColor, vb }
   }
@@ -646,22 +692,15 @@ async function loadVerrazzano() {
  * @param {unknown} row
  */
 function getBridgeCameraFeed(row) {
+  if (isVerrazzanoRow(row)) {
+    const cam = findVerrazzanoCamera(direction.value, cameras.value)
+    return cam ? { videoUrl: cam.videoUrl, imageUrl: cam.imageUrl, status: cam.status } : null
+  }
   return resolveBridgeCameraFeed(row, direction.value, cameras.value)
 }
 
-/**
- * Get Verrazzano camera for the current direction.
- */
-function getVerrazzanoCameraForDirection() {
-  return findVerrazzanoCamera(direction.value, cameras.value)
-}
-
-const verrazzanoCamera = computed(() => {
-  return getVerrazzanoCameraForDirection()
-})
-
 const hasVerrazzanoCamera = computed(() => {
-  return verrazzanoCamera.value !== null
+  return findVerrazzanoCamera(direction.value, cameras.value) !== null
 })
 
 const verrazzanoLiveData = computed(() => {
@@ -702,165 +741,7 @@ const verrazzanoSeries = computed(() => {
   return bd[dir].series
 })
 
-const verrazzanoDelayTier = computed(() => {
-  const live = verrazzanoLiveData.value
-  if (!live || live.routeTravelTime == null) return 'orange'
-  const m = live.routeTravelTime
-  return bridgeDelayTier(m)
-})
 
-const verrazzanoChartStrokeColor = computed(() => {
-  const t = verrazzanoDelayTier.value
-  if (t === 'green') return '#4ade80'
-  if (t === 'red') return '#f87171'
-  return '#fb923c'
-})
-
-function verrazzanoChartModel() {
-  const vb = {
-    w: 268,
-    h: 52,
-    plotL: 14,
-    plotR: 266,
-    plotT: 7,
-    plotB: 34,
-  }
-  const pw = vb.plotR - vb.plotL
-  const ph = vb.plotB - vb.plotT
-  const strokeColor = verrazzanoChartStrokeColor.value
-
-  const raw = verrazzanoSeries.value
-  let pts = raw.slice(-96).sort((a, b) => a.t - b.t)
-  if (pts.length === 1) {
-    const p0 = pts[0]
-    pts = [{ t: p0.t - 5 * 60 * 1000, m: p0.m, s: p0.s }, p0]
-  }
-  if (pts.length < 2) {
-    return { hasPath: false, strokeColor, vb }
-  }
-
-  const tMin = pts[0].t
-  const tMax = pts[pts.length - 1].t
-  const spanT = Math.max(tMax - tMin, 60_000)
-
-  const vals = pts.map((p) => p.m).filter((v) => Number.isFinite(v))
-  if (vals.length === 0) {
-    return { hasPath: false, strokeColor, vb }
-  }
-
-  let minM = Math.min(...vals)
-  let maxM = Math.max(...vals)
-  const pad = Math.max((maxM - minM) * 0.12, 0.85)
-  minM = Math.max(0, minM - pad)
-  maxM = maxM + pad
-  if (maxM - minM < 1.25) {
-    const c = (minM + maxM) / 2
-    minM = Math.max(0, c - 1)
-    maxM = c + 1
-  }
-  const spanM = Math.max(maxM - minM, 0.75)
-
-  const xOf = (t) => vb.plotL + pw * ((t - tMin) / spanT)
-  const yOf = (m) => vb.plotT + ph * (1 - (m - minM) / spanM)
-
-  const pathPts = pts.map((pt) => ({
-    x: xOf(pt.t),
-    y: yOf(Number.isFinite(pt.m) ? pt.m : minM),
-  }))
-
-  const dLine = pathPts
-    .map((p, i) => `${i === 0 ? 'M' : 'L'}${p.x.toFixed(2)},${p.y.toFixed(2)}`)
-    .join('')
-
-  const yBase = vb.plotB
-  const dArea =
-    `M${pathPts[0].x.toFixed(2)},${yBase.toFixed(2)}` +
-    pathPts.map((p) => `L${p.x.toFixed(2)},${p.y.toFixed(2)}`).join('') +
-    `L${pathPts[pathPts.length - 1].x.toFixed(2)},${yBase.toFixed(2)}Z`
-
-  const last = pathPts[pathPts.length - 1]
-
-  const fmtCrossMin = (v) => {
-    const r = Math.round(v)
-    if (Math.abs(v - r) < 0.08) return String(r)
-    return `${v.toFixed(1)}`.replace(/\.0$/, '')
-  }
-  const yLevels = [
-    maxM,
-    maxM - spanM / 3,
-    maxM - (2 * spanM) / 3,
-    minM,
-  ]
-  const yTicks = []
-  const seenYLab = new Set()
-  for (const v of yLevels) {
-    let lab = fmtCrossMin(v)
-    if (seenYLab.has(lab)) lab = `${v.toFixed(1)}`.replace(/\.0$/, '')
-    seenYLab.add(lab)
-    yTicks.push({ y: yOf(v), lab })
-  }
-
-  const fmtHour = (ts) => {
-    try {
-      return new Date(ts).toLocaleTimeString(undefined, {
-        hour: 'numeric',
-        minute: '2-digit',
-      })
-    } catch {
-      return ''
-    }
-  }
-
-  const FOUR_MS = 4 * 60 * 60 * 1000
-  let xTickTs = []
-  {
-    const d = new Date(tMin)
-    d.setMinutes(0, 0, 0)
-    d.setMilliseconds(0)
-    const h = d.getHours()
-    let nextH = Math.ceil(h / 4) * 4
-    if (nextH >= 24) {
-      d.setDate(d.getDate() + 1)
-      d.setHours(0, 0, 0, 0)
-    } else {
-      d.setHours(nextH, 0, 0, 0)
-    }
-    let t = d.getTime()
-    while (t < tMin) t += FOUR_MS
-    while (t <= tMax) {
-      xTickTs.push(t)
-      t += FOUR_MS
-    }
-    if (xTickTs.length === 0) {
-      xTickTs = [tMin, tMax]
-    }
-  }
-  const xTicks = xTickTs.map((ts) => ({ x: xOf(ts), lab: fmtHour(ts) }))
-  if (xTicks.length === 0) {
-    xTicks.push({ x: xOf(tMin), lab: fmtHour(tMin) })
-    if (tMax !== tMin) xTicks.push({ x: xOf(tMax), lab: fmtHour(tMax) })
-  }
-
-  const hGrids = yTicks.map((tk) => ({
-    x1: vb.plotL,
-    y1: tk.y,
-    x2: vb.plotR,
-    y2: tk.y,
-  }))
-
-  return {
-    hasPath: true,
-    vb,
-    dLine,
-    dArea,
-    lastCx: last.x,
-    lastCy: last.y,
-    yTicks,
-    xTicks,
-    hGrids,
-    strokeColor,
-  }
-}
 
 /**
  * @param {Event} e
@@ -1125,157 +1006,6 @@ onUnmounted(() => {
               </div>
             </li>
           </ul>
-          
-          <div v-if="hasVerrazzanoCamera || verrazzanoHasLiveData" class="verrazzano-section">
-            <h2 class="bridges-trips-h2">MTA Bridge</h2>
-            <div
-              class="bridge-tile verrazzano-tile"
-              :class="{
-                'bridge-tile--d-green': verrazzanoDelayTier === 'green',
-                'bridge-tile--d-orange': verrazzanoDelayTier === 'orange',
-                'bridge-tile--d-red': verrazzanoDelayTier === 'red',
-              }"
-            >
-              <div class="bridge-tile-inner" :class="{ 'has-camera': hasVerrazzanoCamera }">
-                <div v-if="hasVerrazzanoCamera" class="bridge-camera-col bridge-camera-col--verrazzano">
-                  <BridgeCameraPlayer
-                    :video-url="verrazzanoCamera?.videoUrl"
-                    :image-url="verrazzanoCamera?.imageUrl"
-                    :status="verrazzanoCamera?.status || 'Unknown'"
-                    bridge-name="Verrazzano-Narrows"
-                    fill-column
-                  />
-                </div>
-                <div class="bridge-data-col">
-                  <div class="bridge-card-head">
-                    <div class="bridge-card-id">
-                      <span class="bridge-rank verrazzano-rank" aria-hidden="true">MTA</span>
-                      <h2 class="bridge-title">Verrazzano-Narrows {{ direction === 'ToNJ' ? 'to NJ' : 'to NY' }}</h2>
-                    </div>
-                    <div
-                      class="bridge-trend ico"
-                      :class="[verrazzanoTrendInfo.cls, verrazzanoDelayTier ? `bridge-trend--delay-${verrazzanoDelayTier}` : '']"
-                      :title="verrazzanoTrendInfo.full"
-                    >{{ verrazzanoTrendInfo.short }}</div>
-                  </div>
-                  <div v-if="verrazzanoHasLiveData" class="bridge-card-metrics">
-                    <div class="bridge-kpi bridge-kpi--cross">
-                      <span class="bridge-kpi-lab">Crossing time</span>
-                      <div class="bridge-kpi-row">
-                        <span class="bridge-kpi-num">{{ verrazzanoLiveData?.routeTravelTime ?? '—' }}</span>
-                        <span class="bridge-kpi-unit">min</span>
-                      </div>
-                    </div>
-                    <div class="bridge-kpi-divider" aria-hidden="true" />
-                    <div class="bridge-kpi bridge-kpi--speed">
-                      <span class="bridge-kpi-lab">Observed speed</span>
-                      <div class="bridge-kpi-row bridge-kpi-row--speed">
-                        <template v-if="verrazzanoLiveData?.routeSpeed != null">
-                          <span class="bridge-kpi-num">{{ verrazzanoLiveData.routeSpeed }}</span>
-                          <span class="bridge-kpi-unit">mph</span>
-                        </template>
-                        <template v-else>
-                          <span class="bridge-kpi-num bridge-kpi-num--muted">—</span>
-                        </template>
-                      </div>
-                    </div>
-                  </div>
-                  <div v-else class="verrazzano-info">
-                    <p class="verrazzano-note">Live camera feed</p>
-                    <p class="verrazzano-hint">Traffic data requires HERE or TomTom API key in Settings</p>
-                  </div>
-                  <div v-if="verrazzanoHasLiveData" class="bridge-chart-shell">
-                    <div class="bridge-chart-head">
-                      <span class="bridge-chart-title">History</span>
-                      <span class="bridge-chart-sub">Minutes · local time</span>
-                    </div>
-                    <div class="bridge-chart-panel">
-                      <svg
-                        v-if="verrazzanoChartModel().hasPath"
-                        class="bridge-chart-svg"
-                        :viewBox="`0 0 ${verrazzanoChartModel().vb.w} ${verrazzanoChartModel().vb.h}`"
-                        preserveAspectRatio="xMidYMid meet"
-                        width="100%"
-                        :style="{
-                          aspectRatio: `${verrazzanoChartModel().vb.w} / ${verrazzanoChartModel().vb.h}`,
-                        }"
-                        role="img"
-                        aria-label="Crossing time vs time for Verrazzano-Narrows"
-                      >
-                        <defs>
-                          <linearGradient
-                            id="bcg-verrazzano"
-                            x1="0"
-                            y1="0"
-                            x2="0"
-                            y2="1"
-                          >
-                            <stop offset="0%" :stop-color="verrazzanoChartModel().strokeColor" stop-opacity="0.14" />
-                            <stop offset="100%" :stop-color="verrazzanoChartModel().strokeColor" stop-opacity="0.02" />
-                          </linearGradient>
-                        </defs>
-                        <text
-                          v-for="(yt, yi) in verrazzanoChartModel().yTicks"
-                          :key="`vzt-${yi}`"
-                          class="bridge-chart-axis-title"
-                          x="6"
-                          :y="yt.y + 3.5"
-                          text-anchor="start"
-                        >{{ yt.lab }}</text>
-                        <line
-                          v-for="(g, gi) in verrazzanoChartModel().hGrids"
-                          :key="`vzg-${gi}`"
-                          :x1="g.x1"
-                          :y1="g.y1"
-                          :x2="g.x2"
-                          :y2="g.y2"
-                          class="bridge-chart-grid"
-                        />
-                        <path
-                          :d="verrazzanoChartModel().dArea"
-                          fill="url(#bcg-verrazzano)"
-                        />
-                        <path
-                          :d="verrazzanoChartModel().dLine"
-                          fill="none"
-                          :stroke="verrazzanoChartModel().strokeColor"
-                          stroke-width="0.95"
-                          stroke-linecap="round"
-                          stroke-linejoin="round"
-                          opacity="0.82"
-                        />
-                        <circle
-                          :cx="verrazzanoChartModel().lastCx"
-                          :cy="verrazzanoChartModel().lastCy"
-                          r="1.35"
-                          :fill="verrazzanoChartModel().strokeColor"
-                          stroke="#0f0f14"
-                          stroke-width="0.45"
-                          opacity="0.9"
-                        />
-                        <text
-                          v-for="(tk, ti) in verrazzanoChartModel().xTicks"
-                          :key="`vzx-${ti}`"
-                          class="bridge-chart-tick-x"
-                          :x="tk.x"
-                          :y="verrazzanoChartModel().vb.h - 5"
-                          text-anchor="middle"
-                        >{{ tk.lab }}</text>
-                      </svg>
-                      <div
-                        v-else
-                        class="bridge-chart-empty"
-                        role="status"
-                      >Collecting history…</div>
-                    </div>
-                  </div>
-                  <p v-if="verrazzanoPayload?.source" class="verrazzano-source">
-                    Data: {{ verrazzanoPayload.source === 'here' ? 'HERE Traffic' : 'TomTom' }}
-                  </p>
-                </div>
-              </div>
-            </div>
-          </div>
           
           <p v-else-if="!rankedRows.length" class="bridges-no-crossings">No bridge data for this direction</p>
         </div>
@@ -1956,64 +1686,4 @@ onUnmounted(() => {
   font-family: var(--font-sans, system-ui, sans-serif);
 }
 
-.verrazzano-section {
-  margin-top: 0.75rem;
-  padding-top: 0.5rem;
-  border-top: 1px solid rgba(255, 255, 255, 0.06);
-}
-
-.verrazzano-tile {
-  cursor: default;
-}
-
-.verrazzano-tile::before {
-  background: linear-gradient(180deg, #8b5cf6, #6366f1);
-  box-shadow: 0 0 14px rgba(139, 92, 246, 0.28);
-}
-
-.verrazzano-rank {
-  font-size: 0.42rem;
-  letter-spacing: 0.02em;
-}
-
-.bridge-camera-col--verrazzano {
-  max-width: 220px;
-  align-self: stretch;
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-}
-
-.verrazzano-info {
-  padding: 0.35rem 0.25rem;
-}
-
-.verrazzano-note {
-  margin: 0;
-  font-size: 0.75rem;
-  font-weight: 600;
-  color: #a78bfa;
-}
-
-.verrazzano-hint {
-  margin: 0.25rem 0 0;
-  font-size: 0.65rem;
-  color: #6e6e7e;
-  line-height: 1.3;
-}
-
-.verrazzano-source {
-  margin: 0.2rem 0 0;
-  font-size: 0.5rem;
-  font-weight: 600;
-  color: #5a5a6a;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-}
-
-@media (max-width: 520px) {
-  .bridge-camera-col--verrazzano {
-    max-width: none;
-  }
-}
 </style>
