@@ -11,6 +11,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "hls.js": "^1.6.16",
     "leaflet": "^1.9.4",
     "leaflet-rotate": "^0.2.8",
     "leaflet.markercluster": "^1.5.3",

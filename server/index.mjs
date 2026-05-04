@@ -15,6 +15,8 @@ import {
   setTomtomApiKeyForAccount,
   getHereApiKeyForAccount,
   setHereApiKeyForAccount,
+  getNy511ApiKeyForAccount,
+  setNy511ApiKeyForAccount,
 } from './user-profile-pg.mjs'
 import { sanitizeTomtomApiKey } from './tomtom-key.mjs'
 import { sanitizeHereApiKey } from './here-traffic-api.mjs'
@@ -447,6 +449,102 @@ app.get('/api/bridges/panynj', async () => {
   return getBridgesResponsePayload()
 })
 
+const NY511_CAMERA_CACHE_TTL_MS = 5 * 60 * 1000
+let ny511CamerasCache = { data: null, fetchedAt: 0 }
+
+const NY511_BRIDGE_CAMERAS = [
+  { bridge: 'Bayonne', location: 'NY440 at Walker Street', locationAlt: 'Bayonne Br' },
+  { bridge: 'Goethals', location: 'I-278 at Forest Avenue' },
+  { bridge: 'Outerbridge', location: '909C at Tyrellan Avenue', locationAlt: 'Tyrellan' },
+  { bridge: 'Verrazzano-ToNJ', location: 'I-278 at 92nd Street' },
+  { bridge: 'Verrazzano-ToNY', location: 'I-278 at Fingerboard Road' },
+]
+
+function matchCameraLocation(cameraLocation, targetLocation, targetAlt) {
+  if (!cameraLocation || typeof cameraLocation !== 'string') return false
+  const loc = cameraLocation.toLowerCase()
+  const tgt = targetLocation.toLowerCase()
+  if (loc.includes(tgt) || tgt.includes(loc)) return true
+  if (targetAlt) {
+    const alt = targetAlt.toLowerCase()
+    if (loc.includes(alt) || alt.includes(loc)) return true
+  }
+  return false
+}
+
+app.get('/api/511ny/cameras', async (req, reply) => {
+  try {
+    const ak = req.credentialAccountKey
+    let apiKey = ''
+    if (typeof ak === 'string' && ak.trim()) {
+      apiKey = await getNy511ApiKeyForAccount(ak)
+    }
+    if (!apiKey) {
+      const qk = typeof req.query?.key === 'string' ? req.query.key.trim() : ''
+      if (qk) apiKey = qk.replace(/[^a-zA-Z0-9_-]/g, '')
+    }
+    if (!apiKey) {
+      return reply.code(400).send({
+        error: 'No 511NY API key configured. Add your key in Settings.',
+        code: 'NO_API_KEY',
+      })
+    }
+
+    const now = Date.now()
+    if (
+      ny511CamerasCache.data &&
+      now - ny511CamerasCache.fetchedAt < NY511_CAMERA_CACHE_TTL_MS
+    ) {
+      return { ok: true, cameras: ny511CamerasCache.data, cached: true }
+    }
+
+    const url = `https://511ny.org/api/v2/get/cameras?key=${encodeURIComponent(apiKey)}&format=json`
+    const res = await fetch(url, {
+      headers: { Accept: 'application/json' },
+      signal: AbortSignal.timeout(15000),
+    })
+    if (!res.ok) {
+      const text = await res.text().catch(() => '')
+      return reply.code(res.status).send({
+        error: `511NY API error: ${res.status} ${res.statusText}`,
+        detail: text.slice(0, 500),
+      })
+    }
+    const allCameras = await res.json()
+    if (!Array.isArray(allCameras)) {
+      return reply.code(502).send({ error: '511NY returned invalid data' })
+    }
+
+    const bridgeCameras = []
+    for (const mapping of NY511_BRIDGE_CAMERAS) {
+      const cam = allCameras.find((c) =>
+        matchCameraLocation(c.Location, mapping.location, mapping.locationAlt),
+      )
+      if (cam) {
+        const view = Array.isArray(cam.Views) && cam.Views.length > 0 ? cam.Views[0] : null
+        bridgeCameras.push({
+          bridge: mapping.bridge,
+          cameraId: cam.Id,
+          location: cam.Location,
+          roadway: cam.Roadway,
+          direction: cam.Direction,
+          lat: cam.Latitude,
+          lng: cam.Longitude,
+          imageUrl: view?.Url || null,
+          videoUrl: view?.VideoUrl || null,
+          status: view?.Status || 'Unknown',
+        })
+      }
+    }
+
+    ny511CamerasCache = { data: bridgeCameras, fetchedAt: now }
+    return { ok: true, cameras: bridgeCameras, cached: false }
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e)
+    return reply.code(500).send({ error: msg })
+  }
+})
+
 registerTrafficMonitoredRoutes(app)
 
 app.get('/api/events', async (req, reply) => {
@@ -601,20 +699,26 @@ app.get('/api/settings/credentials', async (req) => {
   }
   const includeTomtom = req.query?.includeTomtomApiKey === '1'
   const includeHere = req.query?.includeHereApiKey === '1'
+  const includeNy511 = req.query?.includeNy511ApiKey === '1'
   const ak = req.credentialAccountKey
   let tomtomApiKey = undefined
   let hereApiKey = undefined
+  let ny511ApiKey = undefined
   if (includeTomtom && typeof ak === 'string' && ak.trim()) {
     tomtomApiKey = (await getTomtomApiKeyForAccount(ak)) || ''
   }
   if (includeHere && typeof ak === 'string' && ak.trim()) {
     hereApiKey = (await getHereApiKeyForAccount(ak)) || ''
   }
+  if (includeNy511 && typeof ak === 'string' && ak.trim()) {
+    ny511ApiKey = (await getNy511ApiKeyForAccount(ak)) || ''
+  }
   return {
     ...meta,
     ...(includeBearer ? { fedexLinehaulBearer } : {}),
     ...(includeTomtom ? { tomtomApiKey } : {}),
     ...(includeHere ? { hereApiKey } : {}),
+    ...(includeNy511 ? { ny511ApiKey } : {}),
     secretHint: process.env.FEDEX_TOOL_SECRET ? null : TOOL_SECRET_HINT,
   }
 })
@@ -673,6 +777,31 @@ app.put('/api/settings/here-api-key', async (req, reply) => {
     }
     await setHereApiKeyForAccount(ak, sanitized)
     return { ok: true, hasHereApiKey: Boolean(sanitized) }
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e)
+    return reply.code(400).send({ error: msg })
+  }
+})
+
+app.put('/api/settings/ny511-api-key', async (req, reply) => {
+  try {
+    const ak = req.credentialAccountKey
+    if (typeof ak !== 'string' || !ak.trim()) {
+      return reply.code(400).send({ error: 'No account in session.' })
+    }
+    const body = req.body ?? {}
+    const raw =
+      typeof body.ny511ApiKey === 'string'
+        ? body.ny511ApiKey
+        : typeof body.key === 'string'
+          ? body.key
+          : ''
+    const sanitized = raw.trim().replace(/[^a-zA-Z0-9_-]/g, '')
+    if (raw.trim() && !sanitized) {
+      return reply.code(400).send({ error: 'Invalid 511NY API key format.' })
+    }
+    await setNy511ApiKeyForAccount(ak, sanitized)
+    return { ok: true, hasNy511ApiKey: Boolean(sanitized) }
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e)
     return reply.code(400).send({ error: msg })

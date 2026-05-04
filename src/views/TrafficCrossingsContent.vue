@@ -1,8 +1,10 @@
 <script setup>
 import { ref, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
-import { getBridgesPanynj } from '../api.js'
+import { getBridgesPanynj, getNy511Cameras } from '../api.js'
 import { getBridgeAnchorForRouteId } from '../bridges/bridgeRouteAnchors.js'
+import { findCameraForBridgeRow, findVerrazzanoCamera } from '../bridges/bridgeCameraMapping.js'
 import BridgesMap from '../components/BridgesMap.vue'
+import BridgeCameraPlayer from '../components/BridgeCameraPlayer.vue'
 import {
   bridgeShortLabelForRouteId,
   bridgeShortLabelFromDisplayName,
@@ -23,6 +25,11 @@ const error = ref('')
 
 /** @type {import('vue').Ref<any | null>} */
 const payload = ref(null)
+
+/** @type {import('vue').Ref<Array<{ bridge: string, videoUrl: string | null, imageUrl: string | null, status: string }>>} */
+const cameras = ref([])
+const camerasLoading = ref(false)
+const camerasError = ref('')
 
 let tick = 0
 /** @type {ReturnType<typeof setInterval> | null} */
@@ -603,6 +610,44 @@ async function load() {
   }
 }
 
+async function loadCameras() {
+  camerasError.value = ''
+  camerasLoading.value = true
+  try {
+    const res = await getNy511Cameras()
+    if (res.ok && Array.isArray(res.cameras)) {
+      cameras.value = res.cameras
+    }
+  } catch (e) {
+    camerasError.value = e instanceof Error ? e.message : 'Failed to load cameras'
+  } finally {
+    camerasLoading.value = false
+  }
+}
+
+/**
+ * Get camera data for a bridge row.
+ * @param {unknown} row
+ */
+function getCameraForRow(row) {
+  return findCameraForBridgeRow(row, cameras.value)
+}
+
+/**
+ * Get Verrazzano camera for the current direction.
+ */
+function getVerrazzanoCameraForDirection() {
+  return findVerrazzanoCamera(direction.value, cameras.value)
+}
+
+const verrazzanoCamera = computed(() => {
+  return getVerrazzanoCameraForDirection()
+})
+
+const hasVerrazzanoCamera = computed(() => {
+  return verrazzanoCamera.value !== null
+})
+
 /**
  * @param {Event} e
  */
@@ -620,6 +665,7 @@ onMounted(() => {
     splitMql.addEventListener('change', onSplitMqlChange)
   }
   void load()
+  void loadCameras()
   intervalId = setInterval(() => {
     void load()
   }, POLL_MS)
@@ -723,19 +769,28 @@ onUnmounted(() => {
               }"
               @click="onListTileClick(row)"
             >
-              <div class="bridge-tile-inner">
-                <div class="bridge-card-head">
-                  <div class="bridge-card-id">
-                    <span class="bridge-rank" aria-hidden="true">{{ idx + 1 }}</span>
-                    <h2 class="bridge-title">{{ displayTitle(row) }}</h2>
-                  </div>
-                  <div
-                    class="bridge-trend ico"
-                    :class="[trendInfo(row).cls, delayTierClass(row)]"
-                    :title="trendInfo(row).full"
-                  >{{ trendInfo(row).short }}</div>
+              <div class="bridge-tile-inner" :class="{ 'has-camera': getCameraForRow(row) }">
+                <div v-if="getCameraForRow(row)" class="bridge-camera-col">
+                  <BridgeCameraPlayer
+                    :video-url="getCameraForRow(row)?.videoUrl"
+                    :image-url="getCameraForRow(row)?.imageUrl"
+                    :status="getCameraForRow(row)?.status || 'Unknown'"
+                    :bridge-name="displayTitle(row)"
+                  />
                 </div>
-                <div class="bridge-card-metrics">
+                <div class="bridge-data-col">
+                  <div class="bridge-card-head">
+                    <div class="bridge-card-id">
+                      <span class="bridge-rank" aria-hidden="true">{{ idx + 1 }}</span>
+                      <h2 class="bridge-title">{{ displayTitle(row) }}</h2>
+                    </div>
+                    <div
+                      class="bridge-trend ico"
+                      :class="[trendInfo(row).cls, delayTierClass(row)]"
+                      :title="trendInfo(row).full"
+                    >{{ trendInfo(row).short }}</div>
+                  </div>
+                  <div class="bridge-card-metrics">
                   <div class="bridge-kpi bridge-kpi--cross">
                     <span class="bridge-kpi-lab">Crossing time</span>
                     <div class="bridge-kpi-row">
@@ -848,10 +903,43 @@ onUnmounted(() => {
                     </svg>
                   </div>
                 </div>
+                </div>
               </div>
             </li>
           </ul>
-          <p v-else class="bridges-no-crossings">No bridge data for this direction</p>
+          
+          <div v-if="hasVerrazzanoCamera" class="verrazzano-section">
+            <h2 class="verrazzano-h2">Camera Only</h2>
+            <div
+              class="bridge-tile verrazzano-tile"
+              @click="() => {}"
+            >
+              <div class="bridge-tile-inner has-camera">
+                <div class="bridge-camera-col bridge-camera-col--verrazzano">
+                  <BridgeCameraPlayer
+                    :video-url="verrazzanoCamera?.videoUrl"
+                    :image-url="verrazzanoCamera?.imageUrl"
+                    :status="verrazzanoCamera?.status || 'Unknown'"
+                    bridge-name="Verrazzano-Narrows"
+                  />
+                </div>
+                <div class="bridge-data-col">
+                  <div class="bridge-card-head">
+                    <div class="bridge-card-id">
+                      <span class="bridge-rank verrazzano-rank" aria-hidden="true">📷</span>
+                      <h2 class="bridge-title">Verrazzano-Narrows {{ direction === 'ToNJ' ? 'to NJ' : 'to NY' }}</h2>
+                    </div>
+                  </div>
+                  <div class="verrazzano-info">
+                    <p class="verrazzano-note">Live camera feed only</p>
+                    <p class="verrazzano-hint">Crossing time data not available for MTA bridges</p>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+          
+          <p v-else-if="!rankedRows.length" class="bridges-no-crossings">No bridge data for this direction</p>
         </div>
       </div>
     </div>
@@ -1223,6 +1311,38 @@ onUnmounted(() => {
   gap: 0.26rem;
 }
 
+.bridge-tile-inner.has-camera {
+  flex-direction: row;
+  gap: 0.5rem;
+}
+
+.bridge-camera-col {
+  flex: 0 0 auto;
+  width: 33.333%;
+  min-width: 100px;
+  max-width: 180px;
+}
+
+.bridge-data-col {
+  flex: 1 1 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.26rem;
+}
+
+@media (max-width: 520px) {
+  .bridge-tile-inner.has-camera {
+    flex-direction: column;
+  }
+  
+  .bridge-camera-col {
+    width: 100%;
+    max-width: none;
+    margin-bottom: 0.25rem;
+  }
+}
+
 .bridge-card-head {
   display: flex;
   align-items: flex-start;
@@ -1478,5 +1598,61 @@ onUnmounted(() => {
   font-size: 4.25px;
   font-weight: 600;
   font-family: var(--font-sans, system-ui, sans-serif);
+}
+
+.verrazzano-section {
+  margin-top: 0.75rem;
+  padding-top: 0.5rem;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.verrazzano-h2 {
+  margin: 0 0 0.4rem 0.15rem;
+  font-size: 0.65rem;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: #6e6e7e;
+}
+
+.verrazzano-tile {
+  cursor: default;
+}
+
+.verrazzano-tile::before {
+  background: linear-gradient(180deg, #8b5cf6, #6366f1);
+  box-shadow: 0 0 14px rgba(139, 92, 246, 0.28);
+}
+
+.verrazzano-rank {
+  font-size: 0.65rem;
+}
+
+.bridge-camera-col--verrazzano {
+  max-width: 220px;
+}
+
+.verrazzano-info {
+  padding: 0.35rem 0.25rem;
+}
+
+.verrazzano-note {
+  margin: 0;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: #a78bfa;
+}
+
+.verrazzano-hint {
+  margin: 0.25rem 0 0;
+  font-size: 0.65rem;
+  color: #6e6e7e;
+  line-height: 1.3;
+}
+
+@media (max-width: 520px) {
+  .bridge-camera-col--verrazzano {
+    max-width: none;
+  }
 }
 </style>

@@ -7,6 +7,7 @@ import {
   putCredentials,
   putTomtomApiKey,
   putHereApiKey,
+  putNy511ApiKey,
   deleteCredentials,
   putAssignment,
   getHealth,
@@ -41,6 +42,8 @@ import {
   setTomtomTrafficKey,
   hereApiKeyOverride,
   setHereApiKey,
+  ny511ApiKeyOverride,
+  setNy511ApiKey,
 } from '../stores/trafficTileKey.js'
 import AutomationList from '../components/automation/AutomationList.vue'
 import AutomationEditor from '../components/automation/AutomationEditor.vue'
@@ -374,6 +377,26 @@ async function saveHereApiKey() {
   }
 }
 
+/** 511NY API key (Bridge cameras). Free developer account: 511ny.org/developers */
+const ny511ApiDraft = ref('')
+const ny511ApiMsg = ref('')
+const ny511ApiBusy = ref(false)
+
+async function saveNy511ApiKey() {
+  if (!(await requireApi())) return
+  ny511ApiBusy.value = true
+  ny511ApiMsg.value = ''
+  try {
+    await putNy511ApiKey({ ny511ApiKey: ny511ApiDraft.value })
+    setNy511ApiKey(ny511ApiDraft.value)
+    ny511ApiMsg.value = '511NY key saved to your account (encrypted on the server).'
+  } catch (e) {
+    ny511ApiMsg.value = e instanceof Error ? e.message : String(e)
+  } finally {
+    ny511ApiBusy.value = false
+  }
+}
+
 const screenshotModal = ref(null)
 
 function openScreenshotModal(line) {
@@ -433,6 +456,7 @@ async function loadCredentials() {
       includeLinehaulBearer: true,
       includeTomtomApiKey: true,
       includeHereApiKey: true,
+      includeNy511ApiKey: true,
     })
     credUser.value = credMeta.value.username || ''
     credTractor.value = String(credMeta.value.tractorNumber ?? '')
@@ -484,6 +508,10 @@ async function loadCredentials() {
       typeof credMeta.value.hereApiKey === 'string' ? credMeta.value.hereApiKey.trim() : ''
     if (hk) setHereApiKey(hk)
     hereApiDraft.value = hereApiKeyOverride.value
+    const nk =
+      typeof credMeta.value.ny511ApiKey === 'string' ? credMeta.value.ny511ApiKey.trim() : ''
+    if (nk) setNy511ApiKey(nk)
+    ny511ApiDraft.value = ny511ApiKeyOverride.value
   } catch (e) {
     pushLiveLog({
       type: 'error',
@@ -555,6 +583,8 @@ async function clearCredentials() {
     tomtomTrafficDraft.value = ''
     setHereApiKey('')
     hereApiDraft.value = ''
+    setNy511ApiKey('')
+    ny511ApiDraft.value = ''
     await loadCredentials()
     pushLiveLog({ type: 'info', message: 'Credentials cleared', ts: Date.now() })
   } catch (e) {
@@ -789,6 +819,7 @@ onMounted(() => {
   loadAssignmentState()
   tomtomTrafficDraft.value = trafficTomtomKeyOverride.value
   hereApiDraft.value = hereApiKeyOverride.value
+  ny511ApiDraft.value = ny511ApiKeyOverride.value
   applySettingsRouteFragment()
 })
 
@@ -1136,6 +1167,50 @@ onUnmounted(() => {
             @click="saveHereApiKey"
           >
             {{ hereApiBusy ? 'Saving…' : 'Save HERE key' }}
+          </button>
+        </div>
+      </SettingsSection>
+
+      <SettingsSection title="511NY Camera API (Bridge Crossings)" section-id="settings-ny511" :open="true">
+        <p class="cred-hint">
+          <strong>Traffic → Crossings</strong> shows live camera feeds from
+          <a
+            href="https://511ny.org/developers/"
+            target="_blank"
+            rel="noopener noreferrer"
+            class="ext-link"
+          >511NY</a>
+          for bridges including Bayonne, Goethals, Outerbridge, and Verrazzano-Narrows.
+        </p>
+        <p class="cred-hint">
+          To get your free key: Go to <a href="https://511ny.org/my511/register" target="_blank" rel="noopener noreferrer" class="ext-link">511ny.org/my511/register</a>
+          → create an account → go to <strong>Manage Account</strong> → check "Would you like to sign up for the Developer API?" → wait for approval email with your key.
+        </p>
+        <p class="cred-hint">
+          <strong>Rate limit:</strong> 10 calls per 60 seconds. Camera data is cached server-side for 5 minutes.
+        </p>
+        <label class="lbl" for="ny511-api-key">511NY API key (for Bridge Cameras)</label>
+        <input
+          id="ny511-api-key"
+          v-model="ny511ApiDraft"
+          class="inp tap"
+          type="password"
+          autocomplete="off"
+          placeholder="Paste 511NY API key"
+          :aria-describedby="'ny511-hint'"
+        />
+        <p id="ny511-hint" class="cred-hint">
+          Active key: {{ ny511ApiKeyOverride ? 'saved (server + this browser)' : 'empty' }}
+        </p>
+        <p v-if="ny511ApiMsg" class="cred-msg">{{ ny511ApiMsg }}</p>
+        <div class="btn-row">
+          <button
+            type="button"
+            class="btn primary tap"
+            :disabled="ny511ApiBusy"
+            @click="saveNy511ApiKey"
+          >
+            {{ ny511ApiBusy ? 'Saving…' : 'Save 511NY key' }}
           </button>
         </div>
       </SettingsSection>

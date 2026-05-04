@@ -342,16 +342,18 @@ export async function getPublicGeoFenceCheck() {
 }
 
 /**
- * @param {{ includeLinehaulBearer?: boolean, includeTomtomApiKey?: boolean, includeHereApiKey?: boolean }} [opts]
+ * @param {{ includeLinehaulBearer?: boolean, includeTomtomApiKey?: boolean, includeHereApiKey?: boolean, includeNy511ApiKey?: boolean }} [opts]
  * When includeLinehaulBearer, response includes decrypted Linehaul JWT for Settings only.
  * When includeTomtomApiKey, response includes decrypted TomTom key for Settings only.
  * When includeHereApiKey, response includes decrypted HERE key for Settings only.
+ * When includeNy511ApiKey, response includes decrypted 511NY key for Settings only.
  */
 export async function getCredentials(opts = {}) {
   const q = new URLSearchParams()
   if (opts.includeLinehaulBearer) q.set('includeLinehaulBearer', '1')
   if (opts.includeTomtomApiKey) q.set('includeTomtomApiKey', '1')
   if (opts.includeHereApiKey) q.set('includeHereApiKey', '1')
+  if (opts.includeNy511ApiKey) q.set('includeNy511ApiKey', '1')
   const qs = q.toString()
   const r = await apiFetch(`/api/settings/credentials${qs ? `?${qs}` : ''}`)
   return handleJson(r)
@@ -380,6 +382,32 @@ export async function putHereApiKey(body) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body ?? {}),
   })
+  return handleJson(r)
+}
+
+/**
+ * Persist 511NY API key for the signed-in user (encrypted server-side).
+ * @param {{ ny511ApiKey?: string }} body Empty string clears the stored key.
+ */
+export async function putNy511ApiKey(body) {
+  const r = await apiFetch('/api/settings/ny511-api-key', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body ?? {}),
+  })
+  return handleJson(r)
+}
+
+/**
+ * Get 511NY camera feeds for bridge crossings.
+ * Returns cameras for: Bayonne, Goethals, Outerbridge, Verrazzano (ToNJ/ToNY).
+ * @param {{ key?: string }} [opts] Optional API key override
+ */
+export async function getNy511Cameras(opts = {}) {
+  const q = new URLSearchParams()
+  if (opts.key) q.set('key', opts.key)
+  const qs = q.toString()
+  const r = await apiFetch(`/api/511ny/cameras${qs ? `?${qs}` : ''}`)
   return handleJson(r)
 }
 
