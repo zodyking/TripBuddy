@@ -29,6 +29,7 @@ import { useCompassOrientation } from '../composables/useCompassOrientation.js'
  *   trlrNbr?: string,
  *   sealNumber?: string,
  *   size?: string,
+ *   pkgWeightLbs?: number | null,
  *   highlightHeavy?: boolean
  * }} TrailerMapPin
  */
@@ -89,6 +90,16 @@ function clearBigNumSingleCopyTimer(orderKey) {
 
 function modeForOrder(orderKey) {
   return trailerBigNumMode.value[String(orderKey)] === 'seal' ? 'seal' : 'trailer'
+}
+
+/**
+ * @param {unknown} lbs
+ */
+function formatWeightLbsDisplay(lbs) {
+  const n = typeof lbs === 'number' ? lbs : Number(lbs)
+  if (!Number.isFinite(n) || n <= 0) return ''
+  const rounded = Math.round(n)
+  return `${rounded.toLocaleString(undefined)} lb`
 }
 
 /**
@@ -180,6 +191,9 @@ const effectiveTrailers = computed(() => {
         const trlrNbr = o.trlrNbr != null ? String(o.trlrNbr) : ''
         const sealRaw = o.sealNumber != null ? String(o.sealNumber).trim() : ''
         const size = o.size != null ? String(o.size) : ''
+        const pkgRaw = o.pkgWeightLbs
+        const pkgWeightLbs =
+          pkgRaw != null && Number.isFinite(Number(pkgRaw)) ? Number(pkgRaw) : null
         const highlightHeavy =
           Boolean(o.highlightHeavy) ||
           (heavy !== '' && order === heavy)
@@ -190,6 +204,7 @@ const effectiveTrailers = computed(() => {
           trlrNbr,
           sealNumber: sealRaw,
           size,
+          pkgWeightLbs,
           highlightHeavy,
         })
       })
@@ -206,6 +221,7 @@ const effectiveTrailers = computed(() => {
         trlrNbr: String(props.trailerNumber ?? '').trim(),
         sealNumber: '',
         size: String(props.trailerSize ?? '').trim(),
+        pkgWeightLbs: null,
         highlightHeavy: false,
       }),
     ]
@@ -230,6 +246,9 @@ const trailerNumRows = computed(() => {
       nbr: String(t.trlrNbr ?? '').trim() || '—',
       seal: seal && seal !== '—' ? seal : '',
       heavy: Boolean(t.highlightHeavy),
+      weightDisplay: formatWeightLbsDisplay(
+        /** @type {TrailerMapPin} */ (t).pkgWeightLbs,
+      ),
     }
   })
 })
@@ -824,7 +843,11 @@ watch(compassModeActive, (active) => {
               class="trailer-loc-big-num-label-trailer"
             >&nbsp;{{ row.nbr }}</span>
           </template>
-          <template v-else>{{ bigNumLabel(row) }}</template>
+          <template v-else>
+            {{ bigNumLabel(row)
+            }}<span v-if="row.weightDisplay" class="trailer-loc-big-num-weight-inline">
+              &nbsp;{{ row.weightDisplay }}</span>
+          </template>
         </span>
         <span class="trailer-loc-big-num-val">{{ bigNumDisplayValue(row) }}</span>
       </button>
@@ -984,6 +1007,11 @@ watch(compassModeActive, (active) => {
   font-weight: 700;
   letter-spacing: 0.04em;
   text-transform: none;
+}
+
+.trailer-loc-big-num-weight-inline {
+  font-weight: 700;
+  color: #ef4444;
 }
 
 .trailer-loc-big-num-val {

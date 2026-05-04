@@ -1306,13 +1306,18 @@ function openTrailerGpsModal(card) {
   const all = tripTrailerCards.value.filter(
     (c) => c.hasGps && c.lat != null && c.lng != null,
   )
-  /** @type {{ lat: number, lng: number, order: string, trlrNbr: string, size: string, sealNumber: string }[]} */
+  /** @type {{ lat: number, lng: number, order: string, trlrNbr: string, size: string, sealNumber: string, pkgWeightLbs?: number | null }[]} */
   const trailerMapPins = all.map((c) => {
     const sealRow = (c.summaryRows || []).find((r) => r.label === 'Seal')
     const sealRaw =
       sealRow && typeof sealRow.value === 'string' ? sealRow.value.trim() : ''
     const sealNumber =
       sealRaw && sealRaw !== '—' && sealRaw.toLowerCase() !== 'none' ? sealRaw : ''
+    const w = c.pkgWeightLbs
+    const pkgWeightLbs =
+      w != null && Number.isFinite(/** @type {number} */ (w))
+        ? /** @type {number} */ (w)
+        : null
     return {
       lat: /** @type {number} */ (c.lat),
       lng: /** @type {number} */ (c.lng),
@@ -1320,6 +1325,7 @@ function openTrailerGpsModal(card) {
       trlrNbr: String(c.trlrNbr ?? '').trim(),
       size: String(c.size ?? '').trim(),
       sealNumber,
+      pkgWeightLbs,
     }
   })
 
@@ -1840,7 +1846,7 @@ onUnmounted(() => {
     <Teleport to="body">
       <div
         v-if="trailerGpsModalOpen && trailerGpsData"
-        class="portal-modal-backdrop"
+        class="portal-modal-backdrop trailer-gps-modal-backdrop"
         :style="{ zIndex: PORTAL_Z_LOCATION_MODAL }"
         role="presentation"
         @click.self="closeTrailerGpsModal"
@@ -4333,13 +4339,35 @@ button.trailer-nbr.copyable-inline {
    TRAILER GPS MODAL
    ═══════════════════════════════════════════════════════════════════════════ */
 
+.portal-modal-backdrop.trailer-gps-modal-backdrop {
+  padding: 0;
+  align-items: stretch;
+}
+
 .trailer-gps-modal {
-  width: min(92vw, 58rem);
-  height: min(90vh, 54rem);
+  width: 100%;
   max-width: none;
+  height: 100vh;
+  height: 100dvh;
+  max-height: none;
+  margin: 0 auto;
+  border-radius: 0;
   display: flex;
   flex-direction: column;
   gap: 0.55rem;
+}
+
+@media (min-width: 720px) {
+  .portal-modal-backdrop.trailer-gps-modal-backdrop {
+    padding: 0 0.75rem;
+    align-items: center;
+  }
+  .trailer-gps-modal {
+    width: min(92vw, 58rem);
+    height: min(100vh, 100dvh);
+    border-radius: 12px;
+    margin: 0 auto;
+  }
 }
 .trailer-gps-header {
   display: flex;
