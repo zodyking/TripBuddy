@@ -33,6 +33,7 @@ let phoneCopiedTimer = 0
 /** Manual add location modal state */
 const addLocationOpen = ref(false)
 const addLocationId = ref('')
+const addLocationName = ref('')
 const addLocationPhone = ref('')
 const addLocationSaving = ref(false)
 const addLocationError = ref('')
@@ -126,28 +127,22 @@ function onMapSelect(locationId) {
   })
 }
 
-/** Base64 body for `public/fedex-logo-vcard.png` (RFC2426 PHOTO; many clients reject SVG). */
-const vcardFedexLogoB64 = ref('')
+/**
+ * Embedded FedEx logo PNG (48x48 purple/orange) for vCard PHOTO.
+ * Many contact apps reject SVG or WebP; a small PNG ensures compatibility.
+ */
+const VCARD_FEDEX_LOGO_PNG_B64 =
+  'iVBORw0KGgoAAAANSUhEUgAAADAAAAAwCAYAAABXAvmHAAABhklEQVR4nO2ZsU7DMBCGv0IMSNC' +
+  'FhYWJgZU34AVg5w14JCZGxMrOyMgTwMaKQKhCqhDiLI6bNHXi2L5zbPj/KYqT6Pz5fOfzOQgCC' +
+  'CCIlGWZWf1XnSUGSFvgCfiKfL3vwDXwkPoGmsBT4FWe6w3wiHpNqJnABZABm0CZsD4BvAKvQLu' +
+  'Oag0wCOwDc0Aa6bprwB1wD7yUWdYEegALwE7k670BToF74KXMsiZwFPl6j4E+4EaCtT3hGOgG7' +
+  'kmD1gROgFtJVgW6Am+lgGPg0HH9YeAS2HRcfxfoAbYkWNvjD4FNx/UHgCVg23H9LuDQcf0WsO2' +
+  '4fhvw5Li+AKyUWaYJnEmysuMcf5XYBvIl11EFOHZcnwFLJddRAXh2XJ8Cq47rM2DZcX0KHHPHR' +
+  'uAi8O64PgWWHdfHwCn3bHQlHNenQNpx/RJI6yywwB1LxDpQ1xMOsC3B2h5/jHonyaoAl9yxEbj' +
+  'ouD4FEu7ZCFxwXJ8Ay9yz0ZVw57g+AZa4Z6Mr4dpx/QJIuy+AAggICHj//AB0qHKFsRd4pwAAA' +
+  'ABJRU5ErkJggg=='
 
-async function ensureVcardFedexLogo() {
-  if (vcardFedexLogoB64.value || typeof fetch === 'undefined') return
-  try {
-    const r = await fetch(`${import.meta.env.BASE_URL}fedex-logo-vcard.png`, {
-      cache: 'force-cache',
-    })
-    if (!r.ok) return
-    const buf = await r.arrayBuffer()
-    let bin = ''
-    const bytes = new Uint8Array(buf)
-    const chunk = 0x8000
-    for (let i = 0; i < bytes.length; i += chunk) {
-      bin += String.fromCharCode.apply(null, bytes.subarray(i, i + chunk))
-    }
-    vcardFedexLogoB64.value = btoa(bin)
-  } catch {
-    /* optional */
-  }
-}
+const vcardFedexLogoB64 = ref(VCARD_FEDEX_LOGO_PNG_B64)
 
 /**
  * Fold one long vCard line to 75-octet chunks (continuation lines start with space).
@@ -236,6 +231,7 @@ function digitsOnlyPhone(phone) {
 
 function openAddLocationModal() {
   addLocationId.value = ''
+  addLocationName.value = ''
   addLocationPhone.value = ''
   addLocationError.value = ''
   addLocationOpen.value = true
@@ -244,12 +240,14 @@ function openAddLocationModal() {
 function closeAddLocationModal() {
   addLocationOpen.value = false
   addLocationId.value = ''
+  addLocationName.value = ''
   addLocationPhone.value = ''
   addLocationError.value = ''
 }
 
 async function submitAddLocation() {
   const rawId = addLocationId.value.trim()
+  const rawName = addLocationName.value.trim()
   if (!rawId) {
     addLocationError.value = 'Location ID is required'
     return
@@ -263,7 +261,7 @@ async function submitAddLocation() {
   try {
     await saveLocationToDirectory({
       locationId: rawId,
-      locationName: '',
+      locationName: rawName,
       abbreviation: '',
       address: '',
       phone: addLocationPhone.value.trim(),
@@ -275,7 +273,7 @@ async function submitAddLocation() {
       ...locations.value,
       {
         locationId: rawId,
-        locationName: '',
+        locationName: rawName,
         abbreviation: '',
         address: '',
         phone: addLocationPhone.value.trim(),
@@ -456,19 +454,16 @@ const hasVcardPhones = computed(() => {
 
 function downloadDirectoryVcard() {
   if (typeof window === 'undefined') return
-  void (async () => {
-    await ensureVcardFedexLogo()
-    const body = buildDirectoryVcardString()
-    if (!body.includes('item1.TEL')) return
-    const blob = new Blob([body], { type: 'text/vcard;charset=utf-8' })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = 'FedEx-directory-contacts.vcf'
-    a.rel = 'noopener'
-    a.click()
-    URL.revokeObjectURL(url)
-  })()
+  const body = buildDirectoryVcardString()
+  if (!body.includes('item1.TEL')) return
+  const blob = new Blob([body], { type: 'text/vcard;charset=utf-8' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = 'FedEx-directory-contacts.vcf'
+  a.rel = 'noopener'
+  a.click()
+  URL.revokeObjectURL(url)
 }
 
 /**
@@ -495,7 +490,6 @@ const DIRECTORY_POLL_MS = 60_000
 
 onMounted(() => {
   updateLandscapeSplit()
-  void ensureVcardFedexLogo()
   if (typeof window !== 'undefined' && window.matchMedia) {
     splitMql = window.matchMedia(
       '(orientation: landscape) and (min-width: 700px)',
@@ -846,8 +840,8 @@ onUnmounted(() => {
         <div class="add-location-modal">
           <h2 id="add-location-title" class="add-location-heading">Add Location</h2>
           <p class="add-location-desc">
-            Enter a location ID and optional phone. Details will fill in automatically when
-            you route to this location.
+            Enter a location ID, name, and optional phone. Other details will fill in
+            automatically when you route to this location.
           </p>
           <form class="add-location-form" @submit.prevent="submitAddLocation">
             <div class="add-location-field">
@@ -859,6 +853,16 @@ onUnmounted(() => {
                 placeholder="e.g. 89"
                 autocomplete="off"
                 required
+              />
+            </div>
+            <div class="add-location-field">
+              <label for="add-loc-name">Location Name</label>
+              <input
+                id="add-loc-name"
+                v-model="addLocationName"
+                type="text"
+                placeholder="e.g. Woodbridge"
+                autocomplete="off"
               />
             </div>
             <div class="add-location-field">
