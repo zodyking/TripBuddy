@@ -1268,14 +1268,22 @@ function openTrailerGpsModal(card) {
   const all = tripTrailerCards.value.filter(
     (c) => c.hasGps && c.lat != null && c.lng != null,
   )
-  /** @type {{ lat: number, lng: number, order: string, trlrNbr: string, size: string }[]} */
-  const trailerMapPins = all.map((c) => ({
-    lat: /** @type {number} */ (c.lat),
-    lng: /** @type {number} */ (c.lng),
-    order: String(c.order),
-    trlrNbr: String(c.trlrNbr ?? '').trim(),
-    size: String(c.size ?? '').trim(),
-  }))
+  /** @type {{ lat: number, lng: number, order: string, trlrNbr: string, size: string, sealNumber: string }[]} */
+  const trailerMapPins = all.map((c) => {
+    const sealRow = (c.summaryRows || []).find((r) => r.label === 'Seal')
+    const sealRaw =
+      sealRow && typeof sealRow.value === 'string' ? sealRow.value.trim() : ''
+    const sealNumber =
+      sealRaw && sealRaw !== '—' && sealRaw.toLowerCase() !== 'none' ? sealRaw : ''
+    return {
+      lat: /** @type {number} */ (c.lat),
+      lng: /** @type {number} */ (c.lng),
+      order: String(c.order),
+      trlrNbr: String(c.trlrNbr ?? '').trim(),
+      size: String(c.size ?? '').trim(),
+      sealNumber,
+    }
+  })
 
   const withWeight = all.filter(
     (c) =>

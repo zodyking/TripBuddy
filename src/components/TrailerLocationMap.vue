@@ -22,7 +22,15 @@ import {
 import { useCompassOrientation } from '../composables/useCompassOrientation.js'
 
 /**
- * @typedef {{ lat: number, lng: number, order?: string, trlrNbr?: string, size?: string, highlightHeavy?: boolean }} TrailerMapPin
+ * @typedef {{
+ *   lat: number,
+ *   lng: number,
+ *   order?: string,
+ *   trlrNbr?: string,
+ *   sealNumber?: string,
+ *   size?: string,
+ *   highlightHeavy?: boolean
+ * }} TrailerMapPin
  */
 
 const props = defineProps({
@@ -58,6 +66,106 @@ const {
 
 const compassModeActive = ref(false)
 
+/** Bottom-left big number: 'trailer' | 'seal' per trailer order */
+const trailerBigNumMode = ref(/** @type {Record<string, 'trailer' | 'seal'>} */ ({}))
+/** Suppress tap-to-copy right after a long-press toggle (same gesture). */
+const suppressBigNumTapCopy = ref(/** @type {Record<string, boolean>} */ ({}))
+/** @type {Record<string, ReturnType<typeof setTimeout>>} */
+const bigNumLongPressTimers = {}
+const copyToast = ref('')
+/** @type {ReturnType<typeof setTimeout> | null} */
+let copyToastTimer = null
+
+function clearBigNumLongPress(orderKey) {
+  const k = String(orderKey)
+  const t = bigNumLongPressTimers[k]
+  if (t) {
+    clearTimeout(t)
+    delete bigNumLongPressTimers[k]
+  }
+}
+
+function modeForOrder(orderKey) {
+  return trailerBigNumMode.value[String(orderKey)] === 'seal' ? 'seal' : 'trailer'
+}
+
+/**
+ * @param {{ orderKey: string, nbr: string, seal: string, slot: number }} row
+ */
+function bigNumDisplayValue(row) {
+  if (modeForOrder(row.orderKey) === 'seal') {
+    return row.seal || '—'
+  }
+  return row.nbr
+}
+
+/**
+ * @param {{ orderKey: string, seal: string, slot: number }} row
+ */
+function bigNumLabel(row) {
+  return modeForOrder(row.orderKey) === 'seal' ? 'Seal' : `Trailer ${row.slot}`
+}
+
+/**
+ * @param {{ orderKey: string, seal: string, slot: number }} row
+ * @param {PointerEvent} e
+ */
+function onBigNumPointerDown(row, e) {
+  if (e.button != null && e.button !== 0) return
+  const key = String(row.orderKey)
+  clearBigNumLongPress(key)
+  bigNumLongPressTimers[key] = setTimeout(() => {
+    delete bigNumLongPressTimers[key]
+    if (!row.seal) return
+    const cur = modeForOrder(key)
+    trailerBigNumMode.value = {
+      ...trailerBigNumMode.value,
+      [key]: cur === 'seal' ? 'trailer' : 'seal',
+    }
+    suppressBigNumTapCopy.value = { ...suppressBigNumTapCopy.value, [key]: true }
+  }, 520)
+}
+
+/**
+ * @param {{ orderKey: string, nbr: string, seal: string }} row
+ */
+function onBigNumPointerUp(row) {
+  const key = String(row.orderKey)
+  clearBigNumLongPress(key)
+  if (suppressBigNumTapCopy.value[key]) {
+    const next = { ...suppressBigNumTapCopy.value }
+    delete next[key]
+    suppressBigNumTapCopy.value = next
+    return
+  }
+  const v = bigNumDisplayValue(row)
+  if (!v || v === '—') return
+  void copyToClipboard(v)
+}
+
+/**
+ * @param {{ orderKey: string }} row
+ */
+function onBigNumPointerCancel(row) {
+  clearBigNumLongPress(String(row.orderKey))
+}
+
+async function copyToClipboard(text) {
+  const t = String(text ?? '').trim()
+  if (!t) return
+  try {
+    await navigator.clipboard.writeText(t)
+    if (copyToastTimer) clearTimeout(copyToastTimer)
+    copyToast.value = 'Copied'
+    copyToastTimer = setTimeout(() => {
+      copyToast.value = ''
+      copyToastTimer = null
+    }, 1200)
+  } catch {
+    /* clipboard may be denied */
+  }
+}
+
 const userFix = ref(
   /** @type {{ lat: number, lng: number, accuracyM: number } | null} */ (null),
 )
@@ -81,6 +189,7 @@ const effectiveTrailers = computed(() => {
         if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null
         const order = o.order != null ? String(o.order) : String(i + 1)
         const trlrNbr = o.trlrNbr != null ? String(o.trlrNbr) : ''
+        const sealRaw = o.sealNumber != null ? String(o.sealNumber).trim() : ''
         const size = o.size != null ? String(o.size) : ''
         const highlightHeavy =
           Boolean(o.highlightHeavy) ||
@@ -90,6 +199,7 @@ const effectiveTrailers = computed(() => {
           lng,
           order,
           trlrNbr,
+          sealNumber: sealRaw,
           size,
           highlightHeavy,
         })
@@ -105,6 +215,7 @@ const effectiveTrailers = computed(() => {
         lng: ln,
         order: '1',
         trlrNbr: String(props.trailerNumber ?? '').trim(),
+        sealNumber: '',
         size: String(props.trailerSize ?? '').trim(),
         highlightHeavy: false,
       }),
@@ -121,13 +232,32 @@ const trailerNumRows = computed(() => {
     if (Number.isFinite(na) && Number.isFinite(nb) && na !== nb) return na - nb
     return String(a.order).localeCompare(String(b.order), undefined, { numeric: true })
   })
-  return list.map((t, i) => ({
-    key: `${t.order}-${i}`,
-    slot: i + 1,
-    nbr: String(t.trlrNbr ?? '').trim() || '—',
-    heavy: Boolean(t.highlightHeavy),
-  }))
+  return list.map((t, i) => {
+    const seal = String(t.sealNumber ?? '').trim()
+    return {
+      key: `${t.order}-${i}`,
+      slot: i + 1,
+      orderKey: String(t.order),
+      nbr: String(t.trlrNbr ?? '').trim() || '—',
+      seal: seal && seal !== '—' ? seal : '',
+      heavy: Boolean(t.highlightHeavy),
+    }
+  })
 })
+
+watch(
+  () =>
+    effectiveTrailers.value
+      .map((x) => `${x.order}:${x.trlrNbr}:${x.sealNumber ?? ''}`)
+      .join('|'),
+  () => {
+    trailerBigNumMode.value = {}
+    suppressBigNumTapCopy.value = {}
+    for (const k of Object.keys(bigNumLongPressTimers)) {
+      clearBigNumLongPress(k)
+    }
+  },
+)
 
 /** @type {L.Map | null} */
 let map = null
@@ -547,6 +677,13 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   destroyMap()
+  if (copyToastTimer) {
+    clearTimeout(copyToastTimer)
+    copyToastTimer = null
+  }
+  for (const k of Object.keys(bigNumLongPressTimers)) {
+    clearBigNumLongPress(k)
+  }
 })
 
 watch(
@@ -654,18 +791,36 @@ watch(compassModeActive, (active) => {
     <div
       v-if="trailerNumRows.length"
       class="trailer-loc-big-nums"
-      aria-label="Trailer numbers"
+      aria-label="Trailer numbers and seals"
     >
-      <div
+      <button
         v-for="row in trailerNumRows"
         :key="row.key"
-        class="trailer-loc-big-num-row"
-        :class="{ 'is-heavy': row.heavy }"
+        type="button"
+        class="trailer-loc-big-num-row tap"
+        :class="{ 'is-heavy': row.heavy, 'is-seal': modeForOrder(row.orderKey) === 'seal' }"
+        :title="
+          row.seal
+            ? 'Tap to copy · hold to switch trailer / seal'
+            : 'Tap to copy trailer number'
+        "
+        @pointerdown="onBigNumPointerDown(row, $event)"
+        @pointerup="onBigNumPointerUp(row)"
+        @pointerleave="onBigNumPointerCancel(row)"
+        @pointercancel="onBigNumPointerCancel(row)"
       >
-        <span class="trailer-loc-big-num-label">Trailer {{ row.slot }}</span>
-        <span class="trailer-loc-big-num-val">{{ row.nbr }}</span>
-      </div>
+        <span class="trailer-loc-big-num-label">{{ bigNumLabel(row) }}</span>
+        <span class="trailer-loc-big-num-val">{{ bigNumDisplayValue(row) }}</span>
+      </button>
     </div>
+    <p
+      v-if="copyToast"
+      class="trailer-loc-copy-toast"
+      role="status"
+      aria-live="polite"
+    >
+      {{ copyToast }}
+    </p>
     <p
       v-if="userLocationPending && !hasUserFix"
       class="trailer-loc-hint"
@@ -767,15 +922,28 @@ watch(compassModeActive, (active) => {
   flex-direction: column;
   gap: 0.45rem;
   max-width: min(16rem, calc(100% - 1rem));
-  pointer-events: none;
 }
 
 .trailer-loc-big-num-row {
+  display: block;
+  width: 100%;
+  margin: 0;
   padding: 0.4rem 0.65rem 0.5rem;
   border-radius: 10px;
   background: rgba(15, 23, 42, 0.88);
   border: 1px solid rgba(255, 255, 255, 0.12);
   box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
+  text-align: left;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+}
+
+.trailer-loc-big-num-row:active {
+  transform: scale(0.99);
+  opacity: 0.95;
 }
 
 .trailer-loc-big-num-row.is-heavy {
@@ -807,6 +975,28 @@ watch(compassModeActive, (active) => {
 
 .trailer-loc-big-num-row.is-heavy .trailer-loc-big-num-val {
   color: #fecaca;
+}
+
+.trailer-loc-big-num-row.is-seal .trailer-loc-big-num-val {
+  color: #fde68a;
+}
+
+.trailer-loc-copy-toast {
+  position: absolute;
+  z-index: 1002;
+  left: 50%;
+  bottom: 5.5rem;
+  transform: translateX(-50%);
+  margin: 0;
+  padding: 0.35rem 0.65rem;
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: #0f172a;
+  background: rgba(254, 240, 138, 0.95);
+  border-radius: 8px;
+  border: 1px solid rgba(0, 0, 0, 0.1);
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.2);
+  pointer-events: none;
 }
 
 .trailer-loc-hint {
