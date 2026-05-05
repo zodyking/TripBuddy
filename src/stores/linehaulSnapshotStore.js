@@ -1077,10 +1077,55 @@ async function refreshLinehaulApisImpl(attempt) {
   if (tripsAprvd.ok && tripsAprvd.body != null && typeof tripsAprvd.body === 'object') {
     seqFromAprvd = tripBodyDailySeq(tripsAprvd.body)
   }
-  if (seqFromAprvd) {
+
+  /** Pre-plan seq at start of poll — APRVD list row often matches this while ENRT on prior leg. */
+  const prePlanSeqAtPollStart = tripBodyDailySeq(prePlanTripSnapshot.value)
+
+  const driverStatPoll =
+    dr.ok && dr.body && typeof dr.body === 'object'
+      ? String(dr.body.driverAvlStat ?? '').toUpperCase()
+      : ''
+  const tractorStatPoll =
+    tr.ok && tr.body && typeof tr.body === 'object'
+      ? String(tr.body.detlCodeAvailStat ?? '').toUpperCase()
+      : ''
+  const aprvdListStatus =
+    tripsAprvd.ok && tripsAprvd.body != null && typeof tripsAprvd.body === 'object'
+      ? String(/** @type {Record<string, unknown>} */ (tripsAprvd.body).tripStatus ?? '')
+          .trim()
+          .toUpperCase()
+      : ''
+
+  const treatAsDispatchedPoll =
+    driverStatPoll === 'ENRT' ||
+    tractorStatPoll === 'ENRT' ||
+    aprvdListStatus === 'DSPCH'
+
+  const activeLegGuess =
+    stableTripState.value.dailyTripLegSequence ||
+    tripBodyDailySeq(cachedTripSnapshot.value) ||
+    tripBodyDailySeq(linehaulTripsBody.value)
+
+  const aprvdListIsPrePlanLeg =
+    Boolean(
+      seqFromAprvd &&
+        prePlanSeqAtPollStart &&
+        seqFromAprvd === prePlanSeqAtPollStart,
+    )
+
+  /** Fetch DSPCH/detail for the active trip, not the APRVD list row, when list is the next leg only. */
+  const fetchActiveLegInsteadOfAprvdList =
+    aprvdListIsPrePlanLeg &&
+    treatAsDispatchedPoll &&
+    Boolean(activeLegGuess && activeLegGuess !== seqFromAprvd)
+
+  if (seqFromAprvd && !fetchActiveLegInsteadOfAprvdList) {
     lastDailyTripLegSequence.value = seqFromAprvd
   }
-  const seqForLeg = seqFromAprvd ?? lastDailyTripLegSequence.value
+
+  const seqForLeg = fetchActiveLegInsteadOfAprvdList
+    ? activeLegGuess
+    : seqFromAprvd ?? lastDailyTripLegSequence.value
 
   /** @type {{ ok: boolean, status: number, body?: unknown, error?: string, noActiveTrip?: boolean } | null} */
   let tripsByLeg = null
@@ -1153,7 +1198,14 @@ async function refreshLinehaulApisImpl(attempt) {
   if (aprvdBody && Array.isArray(aprvdBody.trailers) && aprvdBody.trailers.length > 0) {
     // Only update cached if same sequence or no cached trip yet
     if (!cachedSeq || cachedSeq === incomingSeq) {
-      cachedTripSnapshot.value = { ...aprvdBody }
+      const cacheWouldPolluteActiveWithPrePlanAprvd =
+        fetchActiveLegInsteadOfAprvdList &&
+        incomingSeq != null &&
+        prePlanSeqAtPollStart != null &&
+        incomingSeq === prePlanSeqAtPollStart
+      if (!cacheWouldPolluteActiveWithPrePlanAprvd) {
+        cachedTripSnapshot.value = { ...aprvdBody }
+      }
     }
   }
 
