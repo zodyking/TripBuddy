@@ -6,6 +6,8 @@ import {
   linehaulTripsBody,
   tripBodyDailySeq,
   stableTripState,
+  linehaulDriverBody,
+  linehaulTractorBody,
 } from '../stores/linehaulSnapshotStore.js'
 import {
   monthGridForCalendarMonth,
@@ -106,6 +108,11 @@ const deleteUsernameInput = ref('')
 const deleteError = ref('')
 const deleteBusy = ref(false)
 const storedUsername = ref('')
+
+/** Credential snapshot for PDF header (no secrets beyond what's already in Settings). */
+const pdfCredMeta = ref(
+  /** @type {{ employeeNumber?: string, driverName?: string }} */ ({}),
+)
 
 /** Which work-week key is generating a PDF (disables that week's button). */
 const pdfWeekBusyKey = ref('')
@@ -451,6 +458,11 @@ async function load() {
       shiftEndMins: sem,
     }
     storedUsername.value = typeof c.username === 'string' ? c.username.trim() : ''
+    pdfCredMeta.value = {
+      employeeNumber:
+        typeof c.employeeNumber === 'string' ? c.employeeNumber.trim() : '',
+      driverName: typeof c.driverName === 'string' ? c.driverName.trim() : '',
+    }
   } catch {
     /* use defaults */
   }
@@ -932,44 +944,110 @@ function dayPayEstimateFor(weekKey, shiftDayKey) {
   }
 }
 
+const pdfDriverInfoBlock = computed(() => {
+  const lines = []
+  const id =
+    storedUsername.value.trim() ||
+    String(pdfCredMeta.value.employeeNumber ?? '').trim()
+  const name = String(pdfCredMeta.value.driverName ?? '').trim()
+  if (id) lines.push(`Login / ID: ${id}`)
+  if (name) lines.push(`Name: ${name}`)
+  const d = linehaulDriverBody.value
+  if (d && typeof d === 'object') {
+    const loc =
+      d.driverLocation != null ? String(d.driverLocation).trim() : ''
+    const da =
+      d.driverActvStat != null ? String(d.driverActvStat).trim() : ''
+    const ds =
+      d.driverAvlStat != null ? String(d.driverAvlStat).trim() : ''
+    if (loc) lines.push(`Location: ${loc}`)
+    if (da) lines.push(`Active: ${da}`)
+    if (ds) lines.push(`Avail. status: ${ds}`)
+  }
+  return lines.length
+    ? lines.join('\n')
+    : 'Driver details not loaded - open Home after sign-in to refresh Linehaul.'
+})
+
+const pdfTruckInfoBlock = computed(() => {
+  const lines = []
+  const t = linehaulTractorBody.value
+  if (t && typeof t === 'object') {
+    const tn = t.tractorNbr != null ? String(t.tractorNbr).trim() : ''
+    const lid = t.locationId != null ? String(t.locationId).trim() : ''
+    const dom =
+      t.tractorDomicileAbbrv != null
+        ? String(t.tractorDomicileAbbrv).trim()
+        : ''
+    const act =
+      t.detlCodeActvStat != null ? String(t.detlCodeActvStat).trim() : ''
+    const avl =
+      t.detlCodeAvailStat != null ? String(t.detlCodeAvailStat).trim() : ''
+    if (tn) lines.push(`Tractor: ${tn}`)
+    if (lid) lines.push(`Location ID: ${lid}`)
+    if (dom) lines.push(`Domicile: ${dom}`)
+    if (act) lines.push(`Active: ${act}`)
+    if (avl) lines.push(`Avail. status: ${avl}`)
+  }
+  return lines.length
+    ? lines.join('\n')
+    : 'Tractor details not loaded - open Home after sign-in to refresh Linehaul.'
+})
+
 /**
- * @param {{
+ * @typedef {{
  *   key: string,
  *   groupLabel: string,
- *   items: LedgerEntry[],
- * }} wg
+ *   days: { dayLabel: string, shiftDayKey: string, items: LedgerEntry[] }[],
+ * }} HistoryWeekGroupLite
+ */
+
+/**
+ * @param {HistoryWeekGroupLite} wg
  */
 function onDownloadWeekTotalsPdf(wg) {
   const key = String(wg.key)
   if (pdfWeekBusyKey.value === key) return
   pdfWeekBusyKey.value = key
   try {
-    const est =
-      weekPayEstimateByKey.value[key] || ({
-        rows: [],
-        sumBillable: 0,
+    /** @type {{ dayLabel: string, sumBillable: number, rows: { od: string, when: string, billableMi: number, rounded: boolean }[] }[]} */
+    const days = []
+    for (const dg of wg.days) {
+      const dk = dg.shiftDayKey ? String(dg.shiftDayKey) : 'unk'
+      const est = dayPayEstimateFor(key, dk)
+      days.push({
+        dayLabel: dg.dayLabel,
+        sumBillable: est.sumBillable,
+        rows: est.rows.map((r) => ({
+          od: r.od,
+          when: r.when,
+          billableMi: r.billableMi,
+          rounded: r.rounded,
+        })),
       })
+    }
     const groupingModeLabel =
       historyWeekViewMode.value === 'paySchedule'
-        ? 'FedEx pay schedule (Sun–Sat)'
+        ? 'FedEx pay schedule (Sun-Sat)'
         : 'Configured work week'
     const cal = viewMonthInfo.value.groupLabel || 'Calendar view'
+    const estWeek =
+      weekPayEstimateByKey.value[key] || ({
+        sumBillable: 0,
+        rows: [],
+      })
     downloadHistoryWeekTotalsPdf({
+      driverBlock: pdfDriverInfoBlock.value,
+      truckBlock: pdfTruckInfoBlock.value,
       weekRangeLabel: wg.groupLabel,
       calendarContext: cal,
       groupingModeLabel,
-      preparedFor: storedUsername.value.trim() || undefined,
-      preparedAtMs: Date.now(),
+      generatedAtMs: Date.now(),
       roundingBandMin: PAY_ROUND_BAND_MIN,
       roundingBandMax: PAY_ROUND_BAND_MAX,
       roundingToMi: PAY_ROUND_TO_MI,
-      rows: est.rows.map((r) => ({
-        od: r.od,
-        when: r.when,
-        billableMi: r.billableMi,
-        rounded: r.rounded,
-      })),
-      sumBillable: est.sumBillable,
+      days,
+      sumBillable: estWeek.sumBillable,
     })
   } catch (e) {
     console.error('[weekTotalsPdf]', e)
@@ -1508,6 +1586,15 @@ onUnmounted(() => {
               <div class="history-ww-head-row">
                 <h3 class="history-ww-title">{{ wg.groupLabel }}</h3>
                 <div class="history-head-metrics">
+                  <button
+                    type="button"
+                    class="history-week-download-btn tap"
+                    :disabled="pdfWeekBusyKey === wg.key"
+                    title="Download one-page PDF summary for this work week"
+                    @click.stop="onDownloadWeekTotalsPdf(wg)"
+                  >
+                    {{ pdfWeekBusyKey === wg.key ? 'Working…' : 'Download' }}
+                  </button>
                   <span class="history-mile-pill">{{
                     mileageHeaderLine(wg.mileageSum, wg.tripsWithMileage)
                   }}</span>
@@ -1738,19 +1825,8 @@ onUnmounted(() => {
             </div>
 
             <details class="history-pay-fold history-fold history-pay-card" open>
-              <summary
-                class="history-pay-fold__summary history-fold__summary history-pay-fold__summary--week-totals"
-              >
+              <summary class="history-pay-fold__summary history-fold__summary">
                 <span class="history-pay-fold__title">Week totals</span>
-                <button
-                  type="button"
-                  class="history-week-pdf-btn tap"
-                  :disabled="pdfWeekBusyKey === wg.key"
-                  title="Download one-page PDF summary"
-                  @click.stop="onDownloadWeekTotalsPdf(wg)"
-                >
-                  {{ pdfWeekBusyKey === wg.key ? '…' : 'PDF' }}
-                </button>
               </summary>
               <div class="history-pay-body">
                 <p class="history-pay-rules">
@@ -2412,35 +2488,30 @@ onUnmounted(() => {
   justify-content: space-between !important;
 }
 
-.history-pay-fold__summary--week-totals {
-  justify-content: space-between !important;
-}
-
-.history-week-pdf-btn {
+.history-week-download-btn {
   flex-shrink: 0;
   font-size: 0.62rem;
-  font-weight: 800;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  padding: 0.28rem 0.55rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  padding: 0.32rem 0.65rem;
   border-radius: 8px;
   border: 1px solid rgba(124, 92, 255, 0.55);
-  background: rgba(124, 92, 255, 0.14);
+  background: rgba(124, 92, 255, 0.16);
   color: #ece8ff;
   cursor: pointer;
 }
 
-.history-week-pdf-btn:hover:not(:disabled) {
-  background: rgba(124, 92, 255, 0.22);
+.history-week-download-btn:hover:not(:disabled) {
+  background: rgba(124, 92, 255, 0.26);
   border-color: rgba(167, 139, 250, 0.75);
 }
 
-.history-week-pdf-btn:focus-visible {
+.history-week-download-btn:focus-visible {
   outline: 2px solid rgba(167, 139, 250, 0.85);
   outline-offset: 2px;
 }
 
-.history-week-pdf-btn:disabled {
+.history-week-download-btn:disabled {
   opacity: 0.55;
   cursor: wait;
 }
