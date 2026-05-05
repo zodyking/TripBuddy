@@ -12,6 +12,8 @@
   },
   "dependencies": {
     "hls.js": "^1.6.16",
+    "jspdf": "^4.2.1",
+    "jspdf-autotable": "^5.0.7",
     "leaflet": "^1.9.4",
     "leaflet-rotate": "^0.2.8",
     "leaflet.markercluster": "^1.5.3",

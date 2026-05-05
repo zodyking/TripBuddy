@@ -14,6 +14,7 @@ import {
 } from '../utils/workWeekGroup.js'
 import { shiftDateKeyForEventMs } from '../utils/shiftCalendar.js'
 import { resolveHistoryTrailerLoadBadge } from '../utils/tripDetailsDisplay.js'
+import { downloadHistoryWeekTotalsPdf } from '../utils/historyWeekTotalsPdf.js'
 
 /**
  * @typedef {object} LedgerEntry
@@ -105,6 +106,9 @@ const deleteUsernameInput = ref('')
 const deleteError = ref('')
 const deleteBusy = ref(false)
 const storedUsername = ref('')
+
+/** Which work-week key is generating a PDF (disables that week's button). */
+const pdfWeekBusyKey = ref('')
 
 /** Leg # FedEx reports as active on Home (same as History row). */
 const activeTripLegSeqForHistory = computed(() => {
@@ -928,6 +932,55 @@ function dayPayEstimateFor(weekKey, shiftDayKey) {
   }
 }
 
+/**
+ * @param {{
+ *   key: string,
+ *   groupLabel: string,
+ *   items: LedgerEntry[],
+ * }} wg
+ */
+function onDownloadWeekTotalsPdf(wg) {
+  const key = String(wg.key)
+  if (pdfWeekBusyKey.value === key) return
+  pdfWeekBusyKey.value = key
+  try {
+    const est =
+      weekPayEstimateByKey.value[key] || ({
+        rows: [],
+        sumBillable: 0,
+      })
+    const groupingModeLabel =
+      historyWeekViewMode.value === 'paySchedule'
+        ? 'FedEx pay schedule (Sun–Sat)'
+        : 'Configured work week'
+    const cal = viewMonthInfo.value.groupLabel || 'Calendar view'
+    downloadHistoryWeekTotalsPdf({
+      weekRangeLabel: wg.groupLabel,
+      calendarContext: cal,
+      groupingModeLabel,
+      preparedFor: storedUsername.value.trim() || undefined,
+      preparedAtMs: Date.now(),
+      roundingBandMin: PAY_ROUND_BAND_MIN,
+      roundingBandMax: PAY_ROUND_BAND_MAX,
+      roundingToMi: PAY_ROUND_TO_MI,
+      rows: est.rows.map((r) => ({
+        od: r.od,
+        when: r.when,
+        billableMi: r.billableMi,
+        rounded: r.rounded,
+      })),
+      sumBillable: est.sumBillable,
+    })
+  } catch (e) {
+    console.error('[weekTotalsPdf]', e)
+    window.alert(
+      e instanceof Error ? e.message : 'Could not generate PDF. Try again.',
+    )
+  } finally {
+    pdfWeekBusyKey.value = ''
+  }
+}
+
 /** Expand week/day `<details>` when user picks a calendar shift day. */
 const wwDetailsElByKey = /** @type {Record<string, HTMLDetailsElement | undefined>} */ ({})
 const dayDetailsElByKey = /** @type {Record<string, HTMLDetailsElement | undefined>} */ ({})
@@ -1685,8 +1738,19 @@ onUnmounted(() => {
             </div>
 
             <details class="history-pay-fold history-fold history-pay-card" open>
-              <summary class="history-pay-fold__summary history-fold__summary">
+              <summary
+                class="history-pay-fold__summary history-fold__summary history-pay-fold__summary--week-totals"
+              >
                 <span class="history-pay-fold__title">Week totals</span>
+                <button
+                  type="button"
+                  class="history-week-pdf-btn tap"
+                  :disabled="pdfWeekBusyKey === wg.key"
+                  title="Download one-page PDF summary"
+                  @click.stop="onDownloadWeekTotalsPdf(wg)"
+                >
+                  {{ pdfWeekBusyKey === wg.key ? '…' : 'PDF' }}
+                </button>
               </summary>
               <div class="history-pay-body">
                 <p class="history-pay-rules">
@@ -2346,6 +2410,39 @@ onUnmounted(() => {
 
 .history-pay-fold__summary--pay {
   justify-content: space-between !important;
+}
+
+.history-pay-fold__summary--week-totals {
+  justify-content: space-between !important;
+}
+
+.history-week-pdf-btn {
+  flex-shrink: 0;
+  font-size: 0.62rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 0.28rem 0.55rem;
+  border-radius: 8px;
+  border: 1px solid rgba(124, 92, 255, 0.55);
+  background: rgba(124, 92, 255, 0.14);
+  color: #ece8ff;
+  cursor: pointer;
+}
+
+.history-week-pdf-btn:hover:not(:disabled) {
+  background: rgba(124, 92, 255, 0.22);
+  border-color: rgba(167, 139, 250, 0.75);
+}
+
+.history-week-pdf-btn:focus-visible {
+  outline: 2px solid rgba(167, 139, 250, 0.85);
+  outline-offset: 2px;
+}
+
+.history-week-pdf-btn:disabled {
+  opacity: 0.55;
+  cursor: wait;
 }
 
 .history-pay-fold__pill {
