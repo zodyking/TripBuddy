@@ -1,6 +1,11 @@
 <script setup>
 import { ref, computed, watch, onMounted, onUnmounted, nextTick, Teleport } from 'vue'
 import { getAssignment, getCredentials, patchTripHistoryOutcome } from '../api.js'
+import {
+  linehaulDriverBody,
+  linehaulTractorBody,
+} from '../stores/linehaulSnapshotStore.js'
+import { downloadHistoryWeekTotalsPdf } from '../utils/historyWeekTotalsPdf.js'
 import { monthGridForCalendarMonth, workWeekGroupMeta } from '../utils/workWeekGroup.js'
 import { shiftDateKeyForEventMs } from '../utils/shiftCalendar.js'
 
@@ -27,6 +32,12 @@ const loading = ref(true)
 const error = ref('')
 /** @type {import('vue').Ref<LedgerEntry[]>} */
 const entries = ref([])
+
+const storedUsername = ref('')
+const pdfCredMeta = ref(
+  /** @type {{ employeeNumber?: string, driverName?: string }} */ ({}),
+)
+const pdfWeekBusyKey = ref('')
 
 /** Viewed calendar month (prev/next, no year cap). */
 const viewYear = ref(/** @type {number} */(new Date().getFullYear()))
@@ -262,6 +273,12 @@ async function load() {
       workWeekEndDay: Math.min(6, Math.max(0, Math.floor(we))),
       shiftStartMins: ssm,
       shiftEndMins: sem,
+    }
+    storedUsername.value = typeof c.username === 'string' ? c.username.trim() : ''
+    pdfCredMeta.value = {
+      employeeNumber:
+        typeof c.employeeNumber === 'string' ? c.employeeNumber.trim() : '',
+      driverName: typeof c.driverName === 'string' ? c.driverName.trim() : '',
     }
   } catch {
     /* use defaults */
@@ -632,7 +649,126 @@ const dayPayEstimateByWeekDayKey = computed(() => {
  */
 function dayPayEstimateFor(weekKey, shiftDayKey) {
   const dk = shiftDayKey ? String(shiftDayKey) : 'unk'
-  return dayPayEstimateByWeekDayKey.value[`${String(weekKey)}|${dk}`] || { estimateUsd: 0 }
+  return dayPayEstimateByWeekDayKey.value[`${String(weekKey)}|${dk}`] || {
+    estimateUsd: 0,
+    sumBillable: 0,
+    rows: [],
+  }
+}
+
+const pdfGroupingLabel = computed(() => {
+  const DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
+  const ws = workWeekFromCred.value.workWeekStartDay
+  const we = workWeekFromCred.value.workWeekEndDay
+  const a = DOW[Math.min(6, Math.max(0, ws))] ?? String(ws)
+  const b = DOW[Math.min(6, Math.max(0, we))] ?? String(we)
+  return `Work week (${a} - ${b})`
+})
+
+const pdfDriverInfoBlock = computed(() => {
+  const lines = []
+  const id =
+    storedUsername.value.trim() ||
+    String(pdfCredMeta.value.employeeNumber ?? '').trim()
+  const name = String(pdfCredMeta.value.driverName ?? '').trim()
+  if (id) lines.push(`Login / ID: ${id}`)
+  if (name) lines.push(`Name: ${name}`)
+  const d = linehaulDriverBody.value
+  if (d && typeof d === 'object') {
+    const loc =
+      d.driverLocation != null ? String(d.driverLocation).trim() : ''
+    const da =
+      d.driverActvStat != null ? String(d.driverActvStat).trim() : ''
+    const ds =
+      d.driverAvlStat != null ? String(d.driverAvlStat).trim() : ''
+    if (loc) lines.push(`Location: ${loc}`)
+    if (da) lines.push(`Active: ${da}`)
+    if (ds) lines.push(`Avail: ${ds}`)
+  }
+  return lines.length
+    ? lines.join('\n')
+    : 'Driver details unavailable - open Home to sync Linehaul.'
+})
+
+const pdfTruckInfoBlock = computed(() => {
+  const lines = []
+  const t = linehaulTractorBody.value
+  if (t && typeof t === 'object') {
+    const tn = t.tractorNbr != null ? String(t.tractorNbr).trim() : ''
+    const lid = t.locationId != null ? String(t.locationId).trim() : ''
+    const dom =
+      t.tractorDomicileAbbrv != null
+        ? String(t.tractorDomicileAbbrv).trim()
+        : ''
+    const act =
+      t.detlCodeActvStat != null ? String(t.detlCodeActvStat).trim() : ''
+    const avl =
+      t.detlCodeAvailStat != null ? String(t.detlCodeAvailStat).trim() : ''
+    if (tn) lines.push(`Tractor: ${tn}`)
+    if (lid) lines.push(`Location ID: ${lid}`)
+    if (dom) lines.push(`Domicile: ${dom}`)
+    if (act) lines.push(`Active: ${act}`)
+    if (avl) lines.push(`Avail: ${avl}`)
+  }
+  return lines.length
+    ? lines.join('\n')
+    : 'Tractor details unavailable - open Home to sync Linehaul.'
+})
+
+/**
+ * @param {{
+ *   key: string,
+ *   groupLabel: string,
+ *   days: { dayLabel: string, shiftDayKey: string, items: LedgerEntry[] }[],
+ * }} wg
+ */
+function onDownloadWeekTotalsPdf(wg) {
+  const key = String(wg.key)
+  if (pdfWeekBusyKey.value === key) return
+  pdfWeekBusyKey.value = key
+  try {
+    /** @type {{ dayLabel: string, sumBillable: number, rows: { od: string, when: string, billableMi: number, rounded: boolean }[] }[]} */
+    const days = []
+    for (const dg of wg.days) {
+      const dk = dg.shiftDayKey ? String(dg.shiftDayKey) : 'unk'
+      const est = dayPayEstimateFor(key, dk)
+      days.push({
+        dayLabel: dg.dayLabel,
+        sumBillable: est.sumBillable,
+        rows: est.rows.map((r) => ({
+          od: r.od,
+          when: r.when,
+          billableMi: r.billableMi,
+          rounded: r.rounded,
+        })),
+      })
+    }
+    const estWeek =
+      weekPayEstimateByKey.value[key] || {
+        sumBillable: 0,
+        rows: [],
+      }
+    downloadHistoryWeekTotalsPdf({
+      driverBlock: pdfDriverInfoBlock.value,
+      truckBlock: pdfTruckInfoBlock.value,
+      weekRangeLabel: wg.groupLabel,
+      calendarContext: viewMonthInfo.value.groupLabel || '',
+      groupingModeLabel: pdfGroupingLabel.value,
+      generatedAtMs: Date.now(),
+      roundingBandMin: PAY_ROUND_BAND_MIN,
+      roundingBandMax: PAY_ROUND_BAND_MAX,
+      roundingToMi: PAY_ROUND_TO_MI,
+      days,
+      sumBillable: estWeek.sumBillable,
+    })
+  } catch (e) {
+    console.error('[weekTotalsPdf]', e)
+    window.alert(
+      e instanceof Error ? e.message : 'Could not generate PDF. Try again.',
+    )
+  } finally {
+    pdfWeekBusyKey.value = ''
+  }
 }
 
 /** Expand week/day `<details>` when user picks a calendar shift day. */
@@ -1025,6 +1161,15 @@ onUnmounted(() => {
               <div class="history-ww-head-row">
                 <h3 class="history-ww-title">{{ wg.groupLabel }}</h3>
                 <div class="history-head-metrics">
+                  <button
+                    type="button"
+                    class="history-week-download-btn tap"
+                    :disabled="pdfWeekBusyKey === wg.key"
+                    title="Download PDF summary for this work week"
+                    @click.stop="onDownloadWeekTotalsPdf(wg)"
+                  >
+                    {{ pdfWeekBusyKey === wg.key ? 'Working…' : 'Download' }}
+                  </button>
                   <span class="history-mile-pill">{{
                     mileageHeaderLine(wg.mileageSum, wg.tripsWithMileage, wg.tripCount)
                   }}</span>
@@ -1599,6 +1744,33 @@ onUnmounted(() => {
   flex-wrap: wrap;
   gap: 0.35rem;
   flex-shrink: 0;
+}
+
+.history-week-download-btn {
+  flex-shrink: 0;
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  padding: 0.32rem 0.65rem;
+  border-radius: 8px;
+  border: 1px solid rgba(124, 92, 255, 0.55);
+  background: rgba(124, 92, 255, 0.16);
+  color: #ece8ff;
+  cursor: pointer;
+}
+
+.history-week-download-btn:hover:not(:disabled) {
+  background: rgba(124, 92, 255, 0.26);
+}
+
+.history-week-download-btn:focus-visible {
+  outline: 2px solid rgba(167, 139, 250, 0.85);
+  outline-offset: 2px;
+}
+
+.history-week-download-btn:disabled {
+  opacity: 0.55;
+  cursor: wait;
 }
 
 .history-mile-pill {
