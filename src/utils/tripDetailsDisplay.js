@@ -435,3 +435,145 @@ export function buildDollySection(body) {
   const hasData = rows.some((r) => r.value !== '—')
   return { show: hasData, rows, hasData }
 }
+
+/** Same substitutions as week-totals PDF (WinAnsi-safe). */
+function pdfEquipmentAscii(s) {
+  return String(s ?? '')
+    .replace(/\u2192/g, '->')
+    .replace(/\u2013|\u2014/g, '-')
+    .replace(/\u00b7/g, '|')
+    .replace(/\u2022/g, '*')
+    .replace(/[\u201c\u201d]/g, '"')
+    .replace(/[\u2018\u2019]/g, "'")
+}
+
+/**
+ * @param {unknown} body
+ * @returns {string}
+ */
+function pdfDollyEquipmentLine(body) {
+  const o =
+    body && typeof body === 'object' && !Array.isArray(body)
+      ? /** @type {Record<string, unknown>} */ (body)
+      : {}
+  const nested = o.dolly
+  /** @type {string[]} */
+  let parts = []
+  if (nested && typeof nested === 'object' && Array.isArray(nested.rows)) {
+    for (const row of nested.rows) {
+      if (!row || typeof row !== 'object') continue
+      const label = String(/** @type {{ label?: unknown }} */ (row).label ?? '').trim()
+      const value = String(/** @type {{ value?: unknown }} */ (row).value ?? '').trim()
+      if (!value || value === '—' || value === '-' || value === '–') continue
+      parts.push(`${label}: ${value}`)
+    }
+  }
+  if (!parts.length) {
+    const flat = buildDollySection(body)
+    parts = flat.rows
+      .filter((r) => r.value !== '—')
+      .map((r) => `${r.label}: ${r.value}`)
+  }
+  if (!parts.length) return ''
+  return `Dolly\t${parts.join('\t')}`
+}
+
+/**
+ * Trailers for PDF: supports raw Linehaul trip bodies and persisted history cards (`summaryRows`).
+ * @param {unknown} body
+ * @returns {string[]}
+ */
+function pdfTrailerEquipmentLines(body) {
+  const o =
+    body && typeof body === 'object' && !Array.isArray(body)
+      ? /** @type {Record<string, unknown>} */ (body)
+      : {}
+  const arr = o.trailers
+  if (!Array.isArray(arr) || arr.length === 0) return []
+
+  const first = arr[0]
+  const isPersistedCard =
+    first &&
+    typeof first === 'object' &&
+    Array.isArray(/** @type {{ summaryRows?: unknown }} */ (first).summaryRows)
+
+  if (isPersistedCard) {
+    return arr.map((raw, i) => {
+      const c = /** @type {Record<string, unknown>} */ (raw)
+      const order = c.order != null ? String(c.order) : String(i + 1)
+      const nbr = String(c.trlrNbr ?? '').trim()
+      const size = String(c.size ?? '').trim()
+      const load = String(c.loadType ?? '').trim()
+      const stat = String(c.statusLabel ?? '').trim()
+      const rows = Array.isArray(c.summaryRows) ? c.summaryRows : []
+      /** @param {string} lab */
+      const valFor = (lab) => {
+        const row = rows.find(
+          (r) =>
+            r &&
+            typeof r === 'object' &&
+            String(/** @type {{ label?: unknown }} */ (r).label ?? '').trim() === lab,
+        )
+        return row
+          ? String(/** @type {{ value?: unknown }} */ (row).value ?? '').trim()
+          : ''
+      }
+      const seal = valFor('Seal')
+      const weight = valFor('Weight')
+      const dest = valFor('Destination')
+      /** @type {string[]} */
+      const bits = [
+        `Trailer ${order}`,
+        nbr ? `#${nbr}` : '',
+        seal && seal !== '—' ? `Seal ${seal}` : '',
+        size,
+        load && load !== '—' ? load : '',
+        stat && stat !== '—' ? stat : '',
+        weight && weight !== '—' ? weight : '',
+        dest && dest !== '—' ? dest : '',
+      ].filter(Boolean)
+      return bits.join('\t')
+    })
+  }
+
+  const cards = buildEnhancedTrailerCards(body)
+  return cards.map((c) => {
+    const sealRow = c.summaryRows.find((r) => r.label === 'Seal')
+    const seal =
+      sealRow && sealRow.value !== '—' ? String(sealRow.value).trim() : ''
+    const weightRow = c.summaryRows.find((r) => r.label === 'Weight')
+    const weight =
+      weightRow && weightRow.value !== '—' ? String(weightRow.value).trim() : ''
+    const destRow = c.summaryRows.find((r) => r.label === 'Destination')
+    const dest =
+      destRow && destRow.value !== '—' ? String(destRow.value).trim() : ''
+    /** @type {string[]} */
+    const bits = [
+      `Trailer ${c.order}`,
+      c.trlrNbr ? `#${c.trlrNbr}` : '',
+      seal ? `Seal ${seal}` : '',
+      c.size,
+      c.loadType && c.loadType !== '—' ? c.loadType : '',
+      c.statusLabel && c.statusLabel !== '—' ? c.statusLabel : '',
+      weight,
+      dest,
+    ].filter(Boolean)
+    return bits.join('\t')
+  })
+}
+
+/**
+ * Multi-line block for History week PDF: dolly fields plus each trailer (numbers, seals, load/size/status).
+ * Works with raw trip payloads and with `buildHistoryTripDetailsFromBody` snapshots.
+ * @param {unknown} body `tripDetails` or Linehaul trip body
+ * @returns {string} WinAnsi-safe text; empty when no equipment rows
+ */
+export function formatTripEquipmentPdfBlock(body) {
+  /** @type {string[]} */
+  const lines = []
+  const dolly = pdfDollyEquipmentLine(body)
+  if (dolly) lines.push(dolly)
+  lines.push(...pdfTrailerEquipmentLines(body))
+  if (!lines.length) return ''
+  return lines.map((ln) => pdfEquipmentAscii(`  ${ln}`)).join('\n')
+}

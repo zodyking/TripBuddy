@@ -50,6 +50,7 @@ function formatMi(n) {
  *     dispatchDate: string,
  *     dispatchTime: string,
  *     legLabel: string,
+ *     equipmentBlock?: string,
  *   }[],
  * }} WeekTotalsPdfDaySection
  */
@@ -301,6 +302,17 @@ export function downloadHistoryWeekTotalsPdf(opts) {
         mi,
         rounding,
       ])
+
+      const equip = typeof r.equipmentBlock === 'string' ? r.equipmentBlock.trim() : ''
+      if (equip) {
+        tableBody.push([
+          {
+            content: asciiPdfText(equip),
+            colSpan: COL_COUNT,
+            __pdfEquipment: true,
+          },
+        ])
+      }
     })
   }
 
@@ -441,6 +453,26 @@ export function downloadHistoryWeekTotalsPdf(opts) {
 
     didParseCell(data) {
       const raw = data.cell.raw
+      if (
+        raw &&
+        typeof raw === 'object' &&
+        '__pdfEquipment' in raw &&
+        /** @type {{ __pdfEquipment?: boolean }} */ (raw).__pdfEquipment
+      ) {
+        data.cell.styles.fillColor = colors.soft
+        data.cell.styles.font = 'courier'
+        data.cell.styles.fontSize = 4.85
+        data.cell.styles.textColor = colors.muted
+        data.cell.styles.valign = 'top'
+        data.cell.styles.cellPadding = {
+          top: 0.4,
+          bottom: 0.55,
+          left: 2.8,
+          right: 1.35,
+        }
+        data.cell.styles.lineColor = colors.softLine
+        return
+      }
       if (
         raw &&
         typeof raw === 'object' &&

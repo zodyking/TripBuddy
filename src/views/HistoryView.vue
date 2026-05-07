@@ -21,7 +21,10 @@ import {
   workWeekInclusiveDayCount,
 } from '../utils/workWeekGroup.js'
 import { shiftDateKeyForEventMs } from '../utils/shiftCalendar.js'
-import { resolveHistoryTrailerLoadBadge } from '../utils/tripDetailsDisplay.js'
+import {
+  formatTripEquipmentPdfBlock,
+  resolveHistoryTrailerLoadBadge,
+} from '../utils/tripDetailsDisplay.js'
 
 /**
  * @typedef {object} LedgerEntry
@@ -409,6 +412,7 @@ function computeWeekPayEstimate(items) {
    *   paidMi: number | null,
    *   billableMi: number,
    *   rounded: boolean,
+   *   equipmentPdfBlock: string,
    * }[]} */
   const rows = []
   for (const e of sorted) {
@@ -430,6 +434,7 @@ function computeWeekPayEstimate(items) {
       paidMi,
       billableMi,
       rounded: base >= PAY_ROUND_BAND_MIN && base <= PAY_ROUND_BAND_MAX,
+      equipmentPdfBlock: formatTripEquipmentPdfBlock(e.tripDetails),
     })
   }
   return {
@@ -1060,6 +1065,7 @@ const pdfTruckInfoBlock = computed(() => {
     if (tn) lines.push(`Tractor: ${tn}`)
     if (lid) lines.push(`Location ID: ${lid}`)
     if (dom) lines.push(`Domicile: ${dom}`)
+    if (act) lines.push(`Active: ${act}`)
     if (avl) lines.push(`Avail. status: ${avl}`)
   }
   return lines.length
@@ -1098,6 +1104,7 @@ function onDownloadWeekTotalsPdf(wg) {
           dispatchDate: r.dispatchDate,
           dispatchTime: r.dispatchTime,
           legLabel: r.legLabel,
+          equipmentBlock: r.equipmentPdfBlock,
         })),
       })
     }
