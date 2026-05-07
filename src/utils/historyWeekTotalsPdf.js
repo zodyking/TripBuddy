@@ -50,6 +50,7 @@ function formatMi(n) {
  *     dispatchDate: string,
  *     dispatchTime: string,
  *     legLabel: string,
+ *     tractorNumber: string,
  *     equipmentBlock?: string,
  *   }[],
  * }} WeekTotalsPdfDaySection
@@ -95,7 +96,7 @@ export function downloadHistoryWeekTotalsPdf(opts) {
   const pageW = doc.internal.pageSize.getWidth()
   const pageH = doc.internal.pageSize.getHeight()
 
-  const marginX = 9
+  const marginX = 7
   const marginTop = 8
   const marginBottom = 10
   const innerW = pageW - marginX * 2
@@ -280,16 +281,13 @@ export function downloadHistoryWeekTotalsPdf(opts) {
           ? `${formatMi(r.billableMi)}`
           : '-'
 
-      const rounding = r.rounded
-        ? `${opts.roundingBandMin}-${opts.roundingBandMax} -> ${opts.roundingToMi}`
-        : ''
-
       const o = asciiPdfText(r.originId ?? '-')
       const dest = asciiPdfText(r.destId ?? '-')
       const wd = asciiPdfText(r.weekday ?? '-')
       const dt = asciiPdfText(r.dispatchDate ?? '-')
       const tm = asciiPdfText(r.dispatchTime ?? '-')
       const leg = asciiPdfText(r.legLabel ?? '-')
+      const tractor = asciiPdfText(r.tractorNumber ?? '-')
 
       tableBody.push([
         String(index + 1),
@@ -299,8 +297,8 @@ export function downloadHistoryWeekTotalsPdf(opts) {
         dt,
         tm,
         leg,
+        tractor,
         mi,
-        rounding,
       ])
 
       const equip = typeof r.equipmentBlock === 'string' ? r.equipmentBlock.trim() : ''
@@ -318,6 +316,7 @@ export function downloadHistoryWeekTotalsPdf(opts) {
 
   autoTable(doc, {
     startY: cursorY,
+    tableWidth: innerW,
     margin: {
       left: marginX,
       right: marginX,
@@ -333,8 +332,8 @@ export function downloadHistoryWeekTotalsPdf(opts) {
         'Date',
         'Time',
         'Leg #',
+        'Tractor',
         'Billable Mi',
-        'Rounding',
       ],
     ],
     body: tableBody,
@@ -343,7 +342,7 @@ export function downloadHistoryWeekTotalsPdf(opts) {
       [
         {
           content: 'WEEK TOTAL',
-          colSpan: 7,
+          colSpan: 8,
           styles: {
             fontStyle: 'bold',
             fillColor: colors.band,
@@ -353,7 +352,7 @@ export function downloadHistoryWeekTotalsPdf(opts) {
         },
         {
           content: `${formatMi(opts.sumBillable)} mi`,
-          colSpan: 2,
+          colSpan: 1,
           styles: {
             fontStyle: 'bold',
             halign: 'right',
@@ -418,36 +417,35 @@ export function downloadHistoryWeekTotalsPdf(opts) {
         textColor: colors.faint,
       },
       1: {
-        cellWidth: 16,
+        cellWidth: 26,
         halign: 'center',
       },
       2: {
-        cellWidth: 16,
+        cellWidth: 26,
         halign: 'center',
       },
       3: {
-        cellWidth: 18,
-      },
-      4: {
         cellWidth: 22,
       },
+      4: {
+        cellWidth: 28,
+      },
       5: {
-        cellWidth: 15,
+        cellWidth: 18,
         halign: 'center',
       },
       6: {
-        cellWidth: 24,
+        cellWidth: 30,
         halign: 'center',
         fontSize: 5,
       },
       7: {
-        cellWidth: 16,
-        halign: 'right',
+        cellWidth: 24,
+        halign: 'center',
       },
       8: {
         cellWidth: 22,
-        halign: 'center',
-        textColor: colors.muted,
+        halign: 'right',
       },
     },
 
@@ -460,14 +458,14 @@ export function downloadHistoryWeekTotalsPdf(opts) {
         /** @type {{ __pdfEquipment?: boolean }} */ (raw).__pdfEquipment
       ) {
         data.cell.styles.fillColor = colors.soft
-        data.cell.styles.font = 'courier'
-        data.cell.styles.fontSize = 4.85
+        data.cell.styles.font = 'helvetica'
+        data.cell.styles.fontSize = 5.1
         data.cell.styles.textColor = colors.muted
         data.cell.styles.valign = 'top'
         data.cell.styles.cellPadding = {
-          top: 0.4,
-          bottom: 0.55,
-          left: 2.8,
+          top: 0.35,
+          bottom: 0.45,
+          left: 1.35,
           right: 1.35,
         }
         data.cell.styles.lineColor = colors.softLine

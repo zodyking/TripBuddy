@@ -475,7 +475,7 @@ function pdfDollyEquipmentLine(body) {
       .map((r) => `${r.label}: ${r.value}`)
   }
   if (!parts.length) return ''
-  return `Dolly\t${parts.join('\t')}`
+  return `Dolly | ${parts.join(' | ')}`
 }
 
 /**
@@ -503,8 +503,6 @@ function pdfTrailerEquipmentLines(body) {
       const order = c.order != null ? String(c.order) : String(i + 1)
       const nbr = String(c.trlrNbr ?? '').trim()
       const size = String(c.size ?? '').trim()
-      const load = String(c.loadType ?? '').trim()
-      const stat = String(c.statusLabel ?? '').trim()
       const rows = Array.isArray(c.summaryRows) ? c.summaryRows : []
       /** @param {string} lab */
       const valFor = (lab) => {
@@ -520,19 +518,15 @@ function pdfTrailerEquipmentLines(body) {
       }
       const seal = valFor('Seal')
       const weight = valFor('Weight')
-      const dest = valFor('Destination')
       /** @type {string[]} */
       const bits = [
         `Trailer ${order}`,
         nbr ? `#${nbr}` : '',
-        seal && seal !== '—' ? `Seal ${seal}` : '',
         size,
-        load && load !== '—' ? load : '',
-        stat && stat !== '—' ? stat : '',
+        seal && seal !== '—' ? `Seal ${seal}` : '',
         weight && weight !== '—' ? weight : '',
-        dest && dest !== '—' ? dest : '',
       ].filter(Boolean)
-      return bits.join('\t')
+      return bits.join(' | ')
     })
   }
 
@@ -544,26 +538,21 @@ function pdfTrailerEquipmentLines(body) {
     const weightRow = c.summaryRows.find((r) => r.label === 'Weight')
     const weight =
       weightRow && weightRow.value !== '—' ? String(weightRow.value).trim() : ''
-    const destRow = c.summaryRows.find((r) => r.label === 'Destination')
-    const dest =
-      destRow && destRow.value !== '—' ? String(destRow.value).trim() : ''
     /** @type {string[]} */
     const bits = [
       `Trailer ${c.order}`,
       c.trlrNbr ? `#${c.trlrNbr}` : '',
-      seal ? `Seal ${seal}` : '',
       c.size,
-      c.loadType && c.loadType !== '—' ? c.loadType : '',
-      c.statusLabel && c.statusLabel !== '—' ? c.statusLabel : '',
+      seal ? `Seal ${seal}` : '',
       weight,
-      dest,
     ].filter(Boolean)
-    return bits.join('\t')
+    return bits.join(' | ')
   })
 }
 
 /**
- * Multi-line block for History week PDF: dolly fields plus each trailer (numbers, seals, load/size/status).
+ * Multi-line block for History week PDF: dolly fields plus each trailer
+ * (number, size, seal, weight only — no load/status/destination).
  * Works with raw trip payloads and with `buildHistoryTripDetailsFromBody` snapshots.
  * @param {unknown} body `tripDetails` or Linehaul trip body
  * @returns {string} WinAnsi-safe text; empty when no equipment rows
@@ -575,5 +564,5 @@ export function formatTripEquipmentPdfBlock(body) {
   if (dolly) lines.push(dolly)
   lines.push(...pdfTrailerEquipmentLines(body))
   if (!lines.length) return ''
-  return lines.map((ln) => pdfEquipmentAscii(`  ${ln}`)).join('\n')
+  return lines.map((ln) => pdfEquipmentAscii(ln)).join('\n')
 }

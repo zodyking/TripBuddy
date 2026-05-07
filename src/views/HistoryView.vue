@@ -394,6 +394,20 @@ function tripPdfDispatchColumns(e) {
 }
 
 /**
+ * Tractor saved on ledger `tripDetails` (from Linehaul trip snapshot).
+ * @param {LedgerEntry} e
+ */
+function tripPdfTractor(e) {
+  const td =
+    e.tripDetails && typeof e.tripDetails === 'object'
+      ? /** @type {Record<string, unknown>} */ (e.tripDetails)
+      : {}
+  const t = td.tractorNumber
+  const s = t != null ? String(t).trim() : ''
+  return s || '-'
+}
+
+/**
  * @param {LedgerEntry[]} items
  */
 function computeWeekPayEstimate(items) {
@@ -409,6 +423,7 @@ function computeWeekPayEstimate(items) {
    *   dispatchDate: string,
    *   dispatchTime: string,
    *   legLabel: string,
+   *   tractorNumber: string,
    *   paidMi: number | null,
    *   billableMi: number,
    *   rounded: boolean,
@@ -431,6 +446,7 @@ function computeWeekPayEstimate(items) {
       dispatchDate: dispatchCols.dispatchDate,
       dispatchTime: dispatchCols.dispatchTime,
       legLabel: dispatchCols.legLabel,
+      tractorNumber: tripPdfTractor(e),
       paidMi,
       billableMi,
       rounded: base >= PAY_ROUND_BAND_MIN && base <= PAY_ROUND_BAND_MAX,
@@ -1104,6 +1120,7 @@ function onDownloadWeekTotalsPdf(wg) {
           dispatchDate: r.dispatchDate,
           dispatchTime: r.dispatchTime,
           legLabel: r.legLabel,
+          tractorNumber: r.tractorNumber,
           equipmentBlock: r.equipmentPdfBlock,
         })),
       })
