@@ -351,22 +351,82 @@ function tripPayWhenWithLeg(e) {
 }
 
 /**
+ * Split dispatch timestamp + leg for PDF columns (WinAnsi-safe strings).
+ * @param {LedgerEntry} e
+ */
+function tripPdfDispatchColumns(e) {
+  const ts = e.displayDate
+  const seq = String(e.dailyTripLegSequence || '').trim()
+  const legLabel = /^\d+$/.test(seq) ? seq : '-'
+  if (typeof ts !== 'number' || !Number.isFinite(ts) || ts <= 0) {
+    return {
+      weekday: '-',
+      dispatchDate: '-',
+      dispatchTime: '-',
+      legLabel,
+    }
+  }
+  const d = new Date(ts)
+  if (isNaN(d.getTime())) {
+    return {
+      weekday: '-',
+      dispatchDate: '-',
+      dispatchTime: '-',
+      legLabel,
+    }
+  }
+  return {
+    weekday: d.toLocaleDateString(undefined, { weekday: 'long' }),
+    dispatchDate: d.toLocaleDateString(undefined, {
+      month: 'numeric',
+      day: 'numeric',
+      year: 'numeric',
+    }),
+    dispatchTime: d.toLocaleTimeString(undefined, {
+      hour: 'numeric',
+      minute: '2-digit',
+    }),
+    legLabel,
+  }
+}
+
+/**
  * @param {LedgerEntry[]} items
  */
 function computeWeekPayEstimate(items) {
   const sorted = [...items].sort((a, b) => b.displayDate - a.displayDate)
   let sumBillable = 0
-  /** @type {{ id: string, od: string, when: string, paidMi: number | null, billableMi: number, rounded: boolean }[]} */
+  /** @type {{
+   *   id: string,
+   *   od: string,
+   *   when: string,
+   *   originId: string,
+   *   destId: string,
+   *   weekday: string,
+   *   dispatchDate: string,
+   *   dispatchTime: string,
+   *   legLabel: string,
+   *   paidMi: number | null,
+   *   billableMi: number,
+   *   rounded: boolean,
+   * }[]} */
   const rows = []
   for (const e of sorted) {
     const paidMi = tripPaidMiles(e)
     const base = paidMi ?? 0
     const billableMi = billableMilesForPayEstimate(base)
     sumBillable += billableMi
+    const dispatchCols = tripPdfDispatchColumns(e)
     rows.push({
       id: e.id,
       od: tripOdIdsOnly(e),
       when: tripPayWhenWithLeg(e),
+      originId: leadingLocationId(e.dispatchHeader?.origin) || '-',
+      destId: leadingLocationId(e.dispatchHeader?.destination) || '-',
+      weekday: dispatchCols.weekday,
+      dispatchDate: dispatchCols.dispatchDate,
+      dispatchTime: dispatchCols.dispatchTime,
+      legLabel: dispatchCols.legLabel,
       paidMi,
       billableMi,
       rounded: base >= PAY_ROUND_BAND_MIN && base <= PAY_ROUND_BAND_MAX,
@@ -975,6 +1035,7 @@ const pdfDriverInfoBlock = computed(() => {
     const ds =
       d.driverAvlStat != null ? String(d.driverAvlStat).trim() : ''
     if (loc) lines.push(`Location: ${loc}`)
+    if (da) lines.push(`Active: ${da}`)
     if (ds) lines.push(`Avail. status: ${ds}`)
   }
   return lines.length
@@ -1031,6 +1092,12 @@ function onDownloadWeekTotalsPdf(wg) {
           when: r.when,
           billableMi: r.billableMi,
           rounded: r.rounded,
+          originId: r.originId,
+          destId: r.destId,
+          weekday: r.weekday,
+          dispatchDate: r.dispatchDate,
+          dispatchTime: r.dispatchTime,
+          legLabel: r.legLabel,
         })),
       })
     }

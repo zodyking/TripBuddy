@@ -39,7 +39,18 @@ function formatMi(n) {
  * @typedef {{
  *   dayLabel: string,
  *   sumBillable: number,
- *   rows: { od: string, when: string, billableMi: number, rounded: boolean }[],
+ *   rows: {
+ *     od: string,
+ *     when: string,
+ *     billableMi: number,
+ *     rounded: boolean,
+ *     originId: string,
+ *     destId: string,
+ *     weekday: string,
+ *     dispatchDate: string,
+ *     dispatchTime: string,
+ *     legLabel: string,
+ *   }[],
  * }} WeekTotalsPdfDaySection
  */
 
@@ -228,11 +239,13 @@ export function downloadHistoryWeekTotalsPdf(opts) {
   /** @type {unknown[][]} */
   const tableBody = []
 
+  const COL_COUNT = 9
+
   if (!opts.days.length) {
     tableBody.push([
       {
         content: 'No shift-day groups for this report.',
-        colSpan: 5,
+        colSpan: COL_COUNT,
         styles: {
           fontStyle: 'italic',
           textColor: colors.faint,
@@ -249,7 +262,7 @@ export function downloadHistoryWeekTotalsPdf(opts) {
     tableBody.push([
       {
         content: `${dayLabel.toUpperCase()}   |   DAY TOTAL: ${formatMi(day.sumBillable)} mi`,
-        colSpan: 5,
+        colSpan: COL_COUNT,
         styles: {
           fillColor: colors.dayBand,
           textColor: colors.header,
@@ -270,10 +283,21 @@ export function downloadHistoryWeekTotalsPdf(opts) {
         ? `${opts.roundingBandMin}-${opts.roundingBandMax} -> ${opts.roundingToMi}`
         : ''
 
+      const o = asciiPdfText(r.originId ?? '-')
+      const dest = asciiPdfText(r.destId ?? '-')
+      const wd = asciiPdfText(r.weekday ?? '-')
+      const dt = asciiPdfText(r.dispatchDate ?? '-')
+      const tm = asciiPdfText(r.dispatchTime ?? '-')
+      const leg = asciiPdfText(r.legLabel ?? '-')
+
       tableBody.push([
         String(index + 1),
-        asciiPdfText(r.od || '-'),
-        asciiPdfText(r.when || '-'),
+        o,
+        dest,
+        wd,
+        dt,
+        tm,
+        leg,
         mi,
         rounding,
       ])
@@ -288,14 +312,26 @@ export function downloadHistoryWeekTotalsPdf(opts) {
       bottom: marginBottom,
     },
 
-    head: [['#', 'Origin / Destination', 'Dispatch / Leg', 'Billable Mi', 'Rounding']],
+    head: [
+      [
+        '#',
+        'Origin',
+        'Destination',
+        'Day',
+        'Date',
+        'Time',
+        'Leg #',
+        'Billable Mi',
+        'Rounding',
+      ],
+    ],
     body: tableBody,
 
     foot: [
       [
         {
           content: 'WEEK TOTAL',
-          colSpan: 3,
+          colSpan: 7,
           styles: {
             fontStyle: 'bold',
             fillColor: colors.band,
@@ -321,8 +357,8 @@ export function downloadHistoryWeekTotalsPdf(opts) {
 
     styles: {
       font: 'helvetica',
-      fontSize: 5.55,
-      minCellHeight: 3.65,
+      fontSize: 5.2,
+      minCellHeight: 3.5,
       cellPadding: {
         top: 0.85,
         bottom: 0.85,
@@ -340,7 +376,7 @@ export function downloadHistoryWeekTotalsPdf(opts) {
       fillColor: colors.header,
       textColor: colors.white,
       fontStyle: 'bold',
-      fontSize: 5.7,
+      fontSize: 5.45,
       cellPadding: {
         top: 1.25,
         bottom: 1.25,
@@ -365,22 +401,39 @@ export function downloadHistoryWeekTotalsPdf(opts) {
 
     columnStyles: {
       0: {
-        cellWidth: 8,
+        cellWidth: 6,
         halign: 'center',
         textColor: colors.faint,
       },
       1: {
-        cellWidth: 58,
+        cellWidth: 16,
+        halign: 'center',
       },
       2: {
-        cellWidth: 'auto',
+        cellWidth: 16,
+        halign: 'center',
       },
       3: {
-        cellWidth: 20,
-        halign: 'right',
+        cellWidth: 18,
       },
       4: {
-        cellWidth: 28,
+        cellWidth: 22,
+      },
+      5: {
+        cellWidth: 15,
+        halign: 'center',
+      },
+      6: {
+        cellWidth: 24,
+        halign: 'center',
+        fontSize: 5,
+      },
+      7: {
+        cellWidth: 16,
+        halign: 'right',
+      },
+      8: {
+        cellWidth: 22,
         halign: 'center',
         textColor: colors.muted,
       },
