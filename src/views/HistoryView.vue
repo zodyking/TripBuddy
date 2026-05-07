@@ -1,6 +1,11 @@
 <script setup>
 import { ref, computed, watch, onMounted, onUnmounted, nextTick, Teleport } from 'vue'
-import { getAssignment, getCredentials, patchTripHistoryOutcome, deleteTripHistoryEntry } from '../api.js'
+import {
+  getAssignment,
+  getCredentials,
+  patchTripHistoryOutcome,
+  deleteTripHistoryEntry,
+} from '../api.js'
 import {
   tripPhase,
   linehaulTripsBody,
@@ -9,6 +14,7 @@ import {
   linehaulDriverBody,
   linehaulTractorBody,
 } from '../stores/linehaulSnapshotStore.js'
+import { downloadHistoryWeekTotalsPdf } from '../utils/historyWeekTotalsPdf.js'
 import {
   monthGridForCalendarMonth,
   workWeekGroupMeta,
@@ -16,7 +22,6 @@ import {
 } from '../utils/workWeekGroup.js'
 import { shiftDateKeyForEventMs } from '../utils/shiftCalendar.js'
 import { resolveHistoryTrailerLoadBadge } from '../utils/tripDetailsDisplay.js'
-import { downloadHistoryWeekTotalsPdf } from '../utils/historyWeekTotalsPdf.js'
 
 /**
  * @typedef {object} LedgerEntry
@@ -69,6 +74,12 @@ const error = ref('')
 /** @type {import('vue').Ref<LedgerEntry[]>} */
 const entries = ref([])
 
+const storedUsername = ref('')
+const pdfCredMeta = ref(
+  /** @type {{ employeeNumber?: string, driverName?: string }} */ ({}),
+)
+const pdfWeekBusyKey = ref('')
+
 /** Viewed calendar month (prev/next, no year cap). */
 const viewYear = ref(/** @type {number} */(new Date().getFullYear()))
 const viewMonth0 = ref(/** @type {number} */(new Date().getMonth()))
@@ -107,15 +118,6 @@ const deleteTarget = ref(/** @type {LedgerEntry | null} */ (null))
 const deleteUsernameInput = ref('')
 const deleteError = ref('')
 const deleteBusy = ref(false)
-const storedUsername = ref('')
-
-/** Credential snapshot for PDF header (no secrets beyond what's already in Settings). */
-const pdfCredMeta = ref(
-  /** @type {{ employeeNumber?: string, driverName?: string }} */ ({}),
-)
-
-/** Which work-week key is generating a PDF (disables that week's button). */
-const pdfWeekBusyKey = ref('')
 
 /** Leg # FedEx reports as active on Home (same as History row). */
 const activeTripLegSeqForHistory = computed(() => {
@@ -944,6 +946,18 @@ function dayPayEstimateFor(weekKey, shiftDayKey) {
   }
 }
 
+const pdfGroupingLabel = computed(() => {
+  if (historyWeekViewMode.value === 'paySchedule') {
+    return 'FedEx pay schedule (Sun-Sat)'
+  }
+  const DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
+  const ws = workWeekFromCred.value.workWeekStartDay
+  const we = workWeekFromCred.value.workWeekEndDay
+  const a = DOW[Math.min(6, Math.max(0, ws))] ?? String(ws)
+  const b = DOW[Math.min(6, Math.max(0, we))] ?? String(we)
+  return `Configured work week (${a} - ${b})`
+})
+
 const pdfDriverInfoBlock = computed(() => {
   const lines = []
   const id =
@@ -961,7 +975,6 @@ const pdfDriverInfoBlock = computed(() => {
     const ds =
       d.driverAvlStat != null ? String(d.driverAvlStat).trim() : ''
     if (loc) lines.push(`Location: ${loc}`)
-    if (da) lines.push(`Active: ${da}`)
     if (ds) lines.push(`Avail. status: ${ds}`)
   }
   return lines.length
@@ -986,7 +999,6 @@ const pdfTruckInfoBlock = computed(() => {
     if (tn) lines.push(`Tractor: ${tn}`)
     if (lid) lines.push(`Location ID: ${lid}`)
     if (dom) lines.push(`Domicile: ${dom}`)
-    if (act) lines.push(`Active: ${act}`)
     if (avl) lines.push(`Avail. status: ${avl}`)
   }
   return lines.length
@@ -995,15 +1007,11 @@ const pdfTruckInfoBlock = computed(() => {
 })
 
 /**
- * @typedef {{
+ * @param {{
  *   key: string,
  *   groupLabel: string,
  *   days: { dayLabel: string, shiftDayKey: string, items: LedgerEntry[] }[],
- * }} HistoryWeekGroupLite
- */
-
-/**
- * @param {HistoryWeekGroupLite} wg
+ * }} wg
  */
 function onDownloadWeekTotalsPdf(wg) {
   const key = String(wg.key)
@@ -1026,22 +1034,18 @@ function onDownloadWeekTotalsPdf(wg) {
         })),
       })
     }
-    const groupingModeLabel =
-      historyWeekViewMode.value === 'paySchedule'
-        ? 'FedEx pay schedule (Sun-Sat)'
-        : 'Configured work week'
     const cal = viewMonthInfo.value.groupLabel || 'Calendar view'
     const estWeek =
-      weekPayEstimateByKey.value[key] || ({
+      weekPayEstimateByKey.value[key] || {
         sumBillable: 0,
         rows: [],
-      })
+      }
     downloadHistoryWeekTotalsPdf({
       driverBlock: pdfDriverInfoBlock.value,
       truckBlock: pdfTruckInfoBlock.value,
       weekRangeLabel: wg.groupLabel,
       calendarContext: cal,
-      groupingModeLabel,
+      groupingModeLabel: pdfGroupingLabel.value,
       generatedAtMs: Date.now(),
       roundingBandMin: PAY_ROUND_BAND_MIN,
       roundingBandMax: PAY_ROUND_BAND_MAX,
@@ -1590,7 +1594,7 @@ onUnmounted(() => {
                     type="button"
                     class="history-week-download-btn tap"
                     :disabled="pdfWeekBusyKey === wg.key"
-                    title="Download one-page PDF summary for this work week"
+                    title="Download PDF summary for this work week"
                     @click.stop="onDownloadWeekTotalsPdf(wg)"
                   >
                     {{ pdfWeekBusyKey === wg.key ? 'Working…' : 'Download' }}
@@ -2403,6 +2407,33 @@ onUnmounted(() => {
   flex-wrap: wrap;
   gap: 0.35rem;
   flex-shrink: 0;
+}
+
+.history-week-download-btn {
+  flex-shrink: 0;
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  padding: 0.32rem 0.65rem;
+  border-radius: 8px;
+  border: 1px solid rgba(124, 92, 255, 0.55);
+  background: rgba(124, 92, 255, 0.16);
+  color: #ece8ff;
+  cursor: pointer;
+}
+
+.history-week-download-btn:hover:not(:disabled) {
+  background: rgba(124, 92, 255, 0.26);
+}
+
+.history-week-download-btn:focus-visible {
+  outline: 2px solid rgba(167, 139, 250, 0.85);
+  outline-offset: 2px;
+}
+
+.history-week-download-btn:disabled {
+  opacity: 0.55;
+  cursor: wait;
 }
 
 .history-mile-pill {
