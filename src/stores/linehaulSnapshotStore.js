@@ -436,11 +436,11 @@ function resetStableTripState() {
 /**
  * HISTORY GATE - Determines if trip should be stored in history
  * @param {typeof stableTripState.value} tripState
- * @param {{ prePlanSnapshot: unknown, tripPhase: string, hiddenSequences: string[] }} context
+ * @param {{ prePlanSnapshot: unknown, tripPhase: string }} context
  * @returns {{ allow: boolean, reason: string }}
  */
 function shouldUpsertToHistory(tripState, context) {
-  const { prePlanSnapshot, tripPhase, hiddenSequences } = context
+  const { prePlanSnapshot, tripPhase } = context
 
   if (tripPhase === 'none') {
     return { allow: false, reason: 'trip_phase_none' }
@@ -454,10 +454,6 @@ function shouldUpsertToHistory(tripState, context) {
   const prePlanSeq = _tripBodyDailySeq(prePlanSnapshot)
   if (prePlanSeq && seq === prePlanSeq) {
     return { allow: false, reason: 'is_preplan' }
-  }
-
-  if (hiddenSequences.includes(seq)) {
-    return { allow: false, reason: 'user_hidden' }
   }
 
   if (!tripState.trailers?.length && !tripState.destination?.number) {
@@ -673,15 +669,101 @@ function applyHiddenTripFilter() {
 }
 
 /**
- * User completed trip — persist hidden seq, optional history ledger entry, and clear matching UI state.
+ * Resolve trip payload for history when completing or backfilling a leg.
+ * @param {string} seq
+ * @returns {Record<string, unknown> | null}
+ */
+function snapBodyForHistoryLeg(seq) {
+  const want = String(seq).trim()
+  if (!/^\d+$/.test(want)) return null
+  const candidates = [
+    linehaulTripsBody.value,
+    cachedTripSnapshot.value,
+    prePlanTripSnapshot.value,
+  ]
+  for (const b of candidates) {
+    if (b && typeof b === 'object' && !Array.isArray(b)) {
+      if (tripBodyDailySeq(b) === want) {
+        return { .../** @type {Record<string, unknown>} */ (b) }
+      }
+    }
+  }
+  const st = stableTripState.value
+  if (String(st.dailyTripLegSequence ?? '').trim() === want) {
+    return {
+      dailyTripLegSequence: want,
+      tripStatus: st.tripStatus,
+      trailers: st.trailers,
+      dollyNumber1: st.dolly?.number1,
+      dollyNumber2: st.dolly?.number2,
+      dollyEquipmentSequence1: st.dolly?.seq1,
+      dollyEquipmentSequence2: st.dolly?.seq2,
+      currentLocationNumber: st.origin?.number,
+      currentLocationName: st.origin?.name,
+      tripDestNumber: st.destination?.number,
+      tripDest: st.destination?.name,
+      tractorNumber: st.tractorNumber,
+    }
+  }
+  return null
+}
+
+/**
+ * User completed trip — persist hidden seq, ledger row marked delivered, and clear matching UI state.
  * @param {string} dailyTripLegSequence
- * @param {{ dispatchHeader?: Record<string, unknown>, tripDetails?: Record<string, unknown> } | null} [history]
  */
 export async function markTripLegSequenceCompleted(dailyTripLegSequence) {
   const seq = String(dailyTripLegSequence ?? '').trim()
   if (!/^\d+$/.test(seq)) return
-  /** Trip is already in history from the Linehaul poller; this only hides the leg on Home. */
-  const body = { appendHiddenDailyTripLegSequence: seq }
+  const now = Date.now()
+  const snapBody = snapBodyForHistoryLeg(seq)
+  const instr =
+    typeof stableTripState.value.instructions === 'string'
+      ? stableTripState.value.instructions.trim()
+      : ''
+
+  /** @type {Record<string, unknown>} */
+  const upsertTripHistoryEntry = snapBody
+    ? {
+        id: `h-${seq}`,
+        source: 'linehaul',
+        dailyTripLegSequence: seq,
+        recordedAt: now,
+        completedAt: now,
+        dispatchHeader: {
+          ...buildHistoryDispatchHeaderFromBody(snapBody, {
+            source: 'linehaul',
+            instructions: instr,
+            instructionsFinal: true,
+          }),
+          historyOutcome: 'delivered',
+          historyOutcomeAt: now,
+        },
+        tripDetails: buildHistoryTripDetailsFromBody(snapBody),
+      }
+    : {
+        id: `h-${seq}`,
+        source: 'linehaul',
+        dailyTripLegSequence: seq,
+        recordedAt: now,
+        completedAt: now,
+        dispatchHeader: {
+          source: 'linehaul',
+          tripStatusText: '—',
+          tripStatusKind: 'linehaul',
+          origin: '—',
+          destination: '—',
+          instructions: '',
+          historyOutcome: 'delivered',
+          historyOutcomeAt: now,
+        },
+        tripDetails: {},
+      }
+
+  const body = {
+    appendHiddenDailyTripLegSequence: seq,
+    upsertTripHistoryEntry,
+  }
   const a = await putAssignment(body)
   hiddenDailyTripLegSequences.value = Array.isArray(a.hiddenDailyTripLegSequences)
     ? a.hiddenDailyTripLegSequences.map(String)
@@ -1302,7 +1384,6 @@ async function refreshLinehaulApisImpl(attempt) {
     const historyGate = shouldUpsertToHistory(stableTripState.value, {
       prePlanSnapshot: prePlanTripSnapshot.value,
       tripPhase: tripPhase.value,
-      hiddenSequences: hiddenDailyTripLegSequences.value,
     })
 
     if (historyGate.allow) {

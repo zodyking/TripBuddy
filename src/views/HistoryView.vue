@@ -13,6 +13,7 @@ import {
   stableTripState,
   linehaulDriverBody,
   linehaulTractorBody,
+  hiddenDailyTripLegSequences,
 } from '../stores/linehaulSnapshotStore.js'
 import { downloadHistoryWeekTotalsPdf } from '../utils/historyWeekTotalsPdf.js'
 import {
@@ -137,6 +138,8 @@ function isHistoryRowActiveOngoingTrip(e) {
   const leg = String(e?.dailyTripLegSequence ?? '').trim()
   if (!leg || !activeTripLegSeqForHistory.value) return false
   if (leg !== activeTripLegSeqForHistory.value) return false
+  const hidden = hiddenDailyTripLegSequences.value.map((s) => String(s).trim())
+  if (hidden.includes(leg)) return false
   return tripPhase.value === 'assigned' || tripPhase.value === 'dispatched'
 }
 

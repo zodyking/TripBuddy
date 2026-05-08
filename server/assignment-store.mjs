@@ -48,8 +48,8 @@ export const PRESETS = {
   },
 }
 
-/** Max ledger entries per user (newest first). */
-const MAX_TRIP_HISTORY = 150
+/** Max ledger entries per user (newest first). Soft cap — raised so routine trips are not trimmed. */
+const MAX_TRIP_HISTORY = 2000
 
 const TRIP_OUTCOMES = new Set(['delivered', 'rejected', 'removed', 'none'])
 
@@ -711,12 +711,31 @@ export async function writeAssignment(body) {
       const newTd = e.tripDetails && typeof e.tripDetails === 'object' ? e.tripDetails : {}
       const oldTd = prior && prior.tripDetails && typeof prior.tripDetails === 'object' ? prior.tripDetails : {}
       const mergedTripDetails = { ...oldTd, ...newTd }
+      const incomingCompletedAt =
+        typeof e.completedAt === 'number' &&
+        Number.isFinite(e.completedAt) &&
+        e.completedAt > 0
+          ? e.completedAt
+          : null
+      const priorCompletedAt =
+        prior &&
+        typeof prior.completedAt === 'number' &&
+        Number.isFinite(prior.completedAt) &&
+        prior.completedAt > 0
+          ? prior.completedAt
+          : 0
+      const completedAt =
+        incomingCompletedAt != null
+          ? Math.max(priorCompletedAt, incomingCompletedAt)
+          : priorCompletedAt > 0
+            ? priorCompletedAt
+            : at
       const nextEntry = {
         id,
         source: typeof e.source === 'string' && e.source.trim() ? e.source.trim() : 'linehaul',
         /** API snapshots: first poll only; later polls must not change this. */
         recordedAt: at,
-        completedAt: at,
+        completedAt,
         dailyTripLegSequence: seq,
         dispatchHeader: mergedDispatchHeader,
         tripDetails: mergedTripDetails,
