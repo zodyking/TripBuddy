@@ -3,6 +3,12 @@
  * IDs are path parameters; Authorization is the user's browser session JWT (short-lived).
  */
 
+import {
+  assertApiAllowed,
+  recordApiCompletedCall,
+  getQuotaAccountKey,
+} from './api-quota.mjs'
+
 export const LINEHAUL_TRIP_BASE =
   'https://fxg-prod-prod.apigee.net/linehaul/trip/v1'
 
@@ -24,12 +30,22 @@ export function isLinehaulApigeeUrl(url) {
   }
 }
 
+/** @param {() => Promise<{ ok: boolean, status: number }>} fn */
+async function withFedexLinehaulQuota(fn) {
+  const ak = getQuotaAccountKey()
+  if (ak) await assertApiAllowed(ak, 'fedex_linehaul')
+  const out = await fn()
+  if (ak) await recordApiCompletedCall(ak, 'fedex_linehaul').catch(() => {})
+  return out
+}
+
 /**
  * @param {'tractor' | 'driver'} resource
  * @param {string} id digits only
  * @param {string} bearerToken raw JWT (no "Bearer " prefix)
  */
 export async function linehaulGet(resource, id, bearerToken) {
+  return withFedexLinehaulQuota(async () => {
   const path =
     resource === 'tractor'
       ? `${LINEHAUL_TRIP_BASE}/tractor/${encodeURIComponent(id)}`
@@ -56,6 +72,7 @@ export async function linehaulGet(resource, id, bearerToken) {
     headers: Object.fromEntries(res.headers.entries()),
     body,
   }
+  })
 }
 
 /**
@@ -64,6 +81,7 @@ export async function linehaulGet(resource, id, bearerToken) {
  * @param {string} bearerToken raw JWT (no "Bearer " prefix)
  */
 export async function linehaulTripStatusByReferenceId(referenceId, bearerToken) {
+  return withFedexLinehaulQuota(async () => {
   const path = `${LINEHAUL_TRIP_BASE}/trip-preparation/trip/tripStatus/referenceId/${encodeURIComponent(referenceId)}`
   const res = await fetch(path, {
     method: 'GET',
@@ -87,6 +105,7 @@ export async function linehaulTripStatusByReferenceId(referenceId, bearerToken) 
     headers: Object.fromEntries(res.headers.entries()),
     body,
   }
+  })
 }
 
 /**
@@ -96,6 +115,7 @@ export async function linehaulTripStatusByReferenceId(referenceId, bearerToken) 
  * @param {{ originId?: string }} [opts] optional originId header (matches browser tab)
  */
 export async function linehaulTripsGet(queryString, bearerToken, opts = {}) {
+  return withFedexLinehaulQuota(async () => {
   const qs = queryString.replace(/^\?/, '')
   const path = `${LINEHAUL_TRIP_BASE}/trips${qs ? `?${qs}` : ''}`
   /** @type {Record<string, string>} */
@@ -122,6 +142,7 @@ export async function linehaulTripsGet(queryString, bearerToken, opts = {}) {
     headers: Object.fromEntries(res.headers.entries()),
     body,
   }
+  })
 }
 
 /**
@@ -135,6 +156,7 @@ export async function linehaulTransportationNetworkLocationGet(
   bearerToken,
   opts = {},
 ) {
+  return withFedexLinehaulQuota(async () => {
   const path = `${LINEHAUL_TRIP_V2_BASE}/transportation-network/locations/${encodeURIComponent(locationId)}`
   /** @type {Record<string, string>} */
   const headers = {
@@ -160,6 +182,7 @@ export async function linehaulTransportationNetworkLocationGet(
     headers: Object.fromEntries(res.headers.entries()),
     body,
   }
+  })
 }
 
 /**
@@ -180,6 +203,7 @@ export async function linehaulViewTripInfoDetailsGet(
   bearerToken,
   opts = {},
 ) {
+  return withFedexLinehaulQuota(async () => {
   const oo = String(orgIdOrigin ?? '').trim()
   const od = String(orgIdDest ?? '').trim()
   const path = `${LINEHAUL_TRIP_BASE}/viewTripInfoDetails?${new URLSearchParams({
@@ -222,4 +246,5 @@ export async function linehaulViewTripInfoDetailsGet(
     headers: Object.fromEntries(res.headers.entries()),
     body,
   }
+  })
 }

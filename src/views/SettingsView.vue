@@ -20,6 +20,9 @@ import {
   getSettingsGeoFence,
   putSettingsGeoFence,
   postSettingsGeoFencePreview,
+  getApiQuotaSettings,
+  putApiQuotaLimits,
+  postApiQuotaReset,
 } from '../api.js'
 import {
   refreshLinehaulApis,
@@ -397,6 +400,81 @@ async function saveNy511ApiKey() {
   }
 }
 
+/** Server-tracked outbound API usage (per UTC day). */
+const apiQuotaRows = ref(
+  /** @type {Array<{ id: string, label: string, countToday: number, limitDay: number, defaultLimitDay: number, perMinuteLimit: number, callsLastMinute: number }>} */ ([]),
+)
+const apiQuotaDayKey = ref('')
+const apiQuotaMsg = ref('')
+const apiQuotaBusy = ref(false)
+/** Editable daily caps keyed by bucket id */
+const apiQuotaDraftLimits = ref(/** @type {Record<string, string>} */ ({}))
+
+async function refreshApiQuota() {
+  apiQuotaMsg.value = ''
+  try {
+    const r = await getApiQuotaSettings()
+    if (!r.ok || !Array.isArray(r.buckets)) {
+      apiQuotaRows.value = []
+      return
+    }
+    apiQuotaDayKey.value = typeof r.dayKey === 'string' ? r.dayKey : ''
+    apiQuotaRows.value = r.buckets
+    const d = { ...apiQuotaDraftLimits.value }
+    for (const b of r.buckets) {
+      d[b.id] = String(b.limitDay)
+    }
+    apiQuotaDraftLimits.value = d
+  } catch (e) {
+    apiQuotaRows.value = []
+    apiQuotaMsg.value = e instanceof Error ? e.message : String(e)
+  }
+}
+
+async function saveApiQuotaLimitsFromUi() {
+  if (!(await requireApi())) return
+  apiQuotaBusy.value = true
+  apiQuotaMsg.value = ''
+  try {
+    /** @type {Record<string, number>} */
+    const limits = {}
+    for (const row of apiQuotaRows.value) {
+      const raw = apiQuotaDraftLimits.value[row.id]
+      const n = Math.floor(Number(raw))
+      if (!Number.isFinite(n) || n < 1) continue
+      limits[row.id] = n
+    }
+    const r = await putApiQuotaLimits({ limits })
+    if (r.ok && Array.isArray(r.buckets)) {
+      apiQuotaRows.value = r.buckets
+      apiQuotaDayKey.value = typeof r.dayKey === 'string' ? r.dayKey : ''
+      apiQuotaMsg.value = 'Daily limits saved.'
+    }
+  } catch (e) {
+    apiQuotaMsg.value = e instanceof Error ? e.message : String(e)
+  } finally {
+    apiQuotaBusy.value = false
+  }
+}
+
+async function resetApiQuotaToday() {
+  if (!(await requireApi())) return
+  apiQuotaBusy.value = true
+  apiQuotaMsg.value = ''
+  try {
+    const r = await postApiQuotaReset()
+    if (r.ok && Array.isArray(r.buckets)) {
+      apiQuotaRows.value = r.buckets
+      apiQuotaDayKey.value = typeof r.dayKey === 'string' ? r.dayKey : ''
+      apiQuotaMsg.value = "Today's counts reset (UTC)."
+    }
+  } catch (e) {
+    apiQuotaMsg.value = e instanceof Error ? e.message : String(e)
+  } finally {
+    apiQuotaBusy.value = false
+  }
+}
+
 const screenshotModal = ref(null)
 
 function openScreenshotModal(line) {
@@ -512,6 +590,7 @@ async function loadCredentials() {
       typeof credMeta.value.ny511ApiKey === 'string' ? credMeta.value.ny511ApiKey.trim() : ''
     if (nk) setNy511ApiKey(nk)
     ny511ApiDraft.value = ny511ApiKeyOverride.value
+    await refreshApiQuota()
   } catch (e) {
     pushLiveLog({
       type: 'error',
@@ -802,10 +881,15 @@ async function runLinehaulTest() {
 
 function applySettingsRouteFragment() {
   const raw = typeof route.hash === 'string' ? route.hash.replace(/^#/, '').trim() : ''
-  if (raw !== 'tomtom' && raw !== 'here') return
+  if (raw !== 'tomtom' && raw !== 'here' && raw !== 'api-quota') return
   settingsTab.value = 'general'
   nextTick(() => {
-    const elId = raw === 'here' ? 'settings-here' : 'settings-tomtom'
+    const elId =
+      raw === 'here'
+        ? 'settings-here'
+        : raw === 'api-quota'
+          ? 'settings-api-quota'
+          : 'settings-tomtom'
     const el = document.getElementById(elId)
     if (el instanceof HTMLDetailsElement) el.open = true
     el?.scrollIntoView({ behavior: 'smooth', block: 'start' })
@@ -1167,6 +1251,66 @@ onUnmounted(() => {
             @click="saveHereApiKey"
           >
             {{ hereApiBusy ? 'Saving…' : 'Save HERE key' }}
+          </button>
+        </div>
+      </SettingsSection>
+
+      <SettingsSection title="API usage & limits" section-id="settings-api-quota" :open="false">
+        <p class="cred-hint">
+          Outbound API calls are counted per account and saved in the database. Caps apply per
+          <strong>UTC calendar day</strong> and per rolling minute (burst protection). When a cap is hit,
+          requests are blocked until tomorrow or you raise the limit.
+        </p>
+        <p v-if="apiQuotaDayKey" class="cred-hint">
+          Current UTC day: <strong>{{ apiQuotaDayKey }}</strong>
+        </p>
+        <div v-if="apiQuotaRows.length" class="api-quota-table-wrap">
+          <table class="api-quota-table">
+            <thead>
+              <tr>
+                <th scope="col">API</th>
+                <th scope="col">Calls today</th>
+                <th scope="col">Daily limit</th>
+                <th scope="col">Calls last min</th>
+                <th scope="col">Max / min</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="row in apiQuotaRows" :key="row.id">
+                <td>{{ row.label }}</td>
+                <td>{{ row.countToday }}</td>
+                <td>
+                  <input
+                    v-model="apiQuotaDraftLimits[row.id]"
+                    class="inp inp-compact tap"
+                    type="number"
+                    min="1"
+                    step="1"
+                    :aria-label="`Daily limit for ${row.label}`"
+                  />
+                </td>
+                <td>{{ row.callsLastMinute }}</td>
+                <td>{{ row.perMinuteLimit }}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <p v-else-if="!apiQuotaMsg" class="cred-hint">Loading usage…</p>
+        <p v-if="apiQuotaMsg" class="cred-msg">{{ apiQuotaMsg }}</p>
+        <div class="btn-row">
+          <button type="button" class="btn tap" :disabled="apiQuotaBusy" @click="refreshApiQuota">
+            Refresh
+          </button>
+          <button
+            type="button"
+            class="btn primary tap"
+            :disabled="apiQuotaBusy"
+            @click="saveApiQuotaLimitsFromUi"
+          >
+            Save limits
+          </button>
+          <button type="button" class="btn tap" :disabled="apiQuotaBusy" @click="resetApiQuotaToday">
+            Reset today's counts
           </button>
         </div>
       </SettingsSection>
@@ -2139,6 +2283,30 @@ onUnmounted(() => {
   min-width: 8rem;
   max-width: 100%;
   margin-bottom: 0;
+}
+.api-quota-table-wrap {
+  overflow-x: auto;
+  margin: 0.75rem 0;
+}
+.api-quota-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.75rem;
+}
+.api-quota-table th,
+.api-quota-table td {
+  border: 1px solid var(--border, #2e2e38);
+  padding: 0.35rem 0.45rem;
+  text-align: left;
+  vertical-align: middle;
+}
+.api-quota-table thead th {
+  background: #12121a;
+  font-weight: 600;
+}
+.inp-compact {
+  max-width: 7rem;
+  min-height: 2.25rem;
 }
 .btn {
   cursor: pointer;

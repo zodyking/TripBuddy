@@ -2,6 +2,11 @@ import { readKeyJson, writeKeyJson } from './kv-store.mjs'
 import { G } from './scope-kv.mjs'
 import { maybeNotifyBridgeCrossingDigest } from './notification-publish.mjs'
 import { maybeNotifyBridgeTierChanges } from './bridge-tier-notifications.mjs'
+import {
+  getQuotaAccountKey,
+  assertApiAllowed,
+  recordApiCompletedCall,
+} from './api-quota.mjs'
 
 const KEY = G('bridge:panynj:series')
 const PA_URL =
@@ -97,6 +102,8 @@ export async function appendPanynjSnapshotFromLive(live) {
  * One Port Authority pull + store.
  */
 export async function refreshPanynjCrossingData() {
+  const ak = getQuotaAccountKey()
+  if (ak) await assertApiAllowed(ak, 'panynj')
   const j = await fetchPanynjCrossingJson()
   const live = Array.isArray(j) ? j : []
   if (live.length === 0) {
@@ -108,6 +115,7 @@ export async function refreshPanynjCrossingData() {
   const st = await appendPanynjSnapshotFromLive(live)
   maybeNotifyBridgeCrossingDigest(live)
   await maybeNotifyBridgeTierChanges(live)
+  if (ak) await recordApiCompletedCall(ak, 'panynj').catch(() => {})
   return st
 }
 

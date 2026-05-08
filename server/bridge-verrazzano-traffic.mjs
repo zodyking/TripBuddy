@@ -13,6 +13,11 @@ import {
 } from './here-traffic-api.mjs'
 import { getHereApiKeyForAccount, getTomtomApiKeyForAccount } from './user-profile-pg.mjs'
 import { getCalculateRoutePolyline } from './tomtom-routing-calculate.mjs'
+import {
+  assertApiAllowed,
+  recordApiCompletedCall,
+  ApiQuotaError,
+} from './api-quota.mjs'
 
 const KEY = G('bridge:verrazzano:series')
 const MAX_POINTS_PER_DIRECTION = 500
@@ -98,7 +103,21 @@ async function appendDataPoint(dir, minutes, speedMph) {
  * @param {'ToNY' | 'ToNJ'} dir
  * @returns {Promise<{ ok: boolean, travelMinutes: number | null, speedMph: number | null, error?: string }>}
  */
-async function fetchHereTraffic(hereApiKey, dir) {
+async function fetchHereTraffic(accountKey, hereApiKey, dir) {
+  const ak = String(accountKey || '').trim()
+  try {
+    if (ak) await assertApiAllowed(ak, 'here')
+  } catch (e) {
+    if (e instanceof ApiQuotaError) {
+      return {
+        ok: false,
+        travelMinutes: null,
+        speedMph: null,
+        error: e.message,
+      }
+    }
+    throw e
+  }
   const waypoints = POLYLINES[dir]
   const polyline = encodeFlexiblePolyline(waypoints, 5)
   if (!polyline) {
@@ -120,16 +139,33 @@ async function fetchHereTraffic(hereApiKey, dir) {
   const travelMinutes = parsed.travelTimeSeconds / 60
   const speedMph = parsed.avgSpeedMps * MPS_TO_MPH
 
+  if (ak) await recordApiCompletedCall(ak, 'here').catch(() => {})
+
   return { ok: true, travelMinutes, speedMph }
 }
 
 /**
  * Get traffic data from TomTom Routing API (fallback).
+ * @param {string} accountKey
  * @param {string} tomtomApiKey
  * @param {'ToNY' | 'ToNJ'} dir
  * @returns {Promise<{ ok: boolean, travelMinutes: number | null, speedMph: number | null, error?: string }>}
  */
-async function fetchTomtomTraffic(tomtomApiKey, dir) {
+async function fetchTomtomTraffic(accountKey, tomtomApiKey, dir) {
+  const ak = String(accountKey || '').trim()
+  try {
+    if (ak) await assertApiAllowed(ak, 'tomtom')
+  } catch (e) {
+    if (e instanceof ApiQuotaError) {
+      return {
+        ok: false,
+        travelMinutes: null,
+        speedMph: null,
+        error: e.message,
+      }
+    }
+    throw e
+  }
   const waypoints = POLYLINES[dir]
   const pathPoints = waypoints.map(p => ({ latitude: p.lat, longitude: p.lng }))
   
@@ -167,6 +203,8 @@ async function fetchTomtomTraffic(tomtomApiKey, dir) {
   const speedMph = lengthMeters > 0 && travelTimeSeconds > 0
     ? (lengthMeters / travelTimeSeconds) * MPS_TO_MPH
     : null
+
+  if (ak) await recordApiCompletedCall(ak, 'tomtom').catch(() => {})
 
   return { ok: true, travelMinutes, speedMph }
 }
@@ -226,14 +264,14 @@ export async function fetchVerrazzanoTraffic(accountKey) {
     let result = { ok: false, travelMinutes: null, speedMph: null, error: 'No API key' }
 
     if (hereKey) {
-      result = await fetchHereTraffic(hereKey, dir)
+      result = await fetchHereTraffic(ak, hereKey, dir)
       if (result.ok) {
         usedSource = 'here'
       }
     }
 
     if (!result.ok && tomtomKey) {
-      result = await fetchTomtomTraffic(tomtomKey, dir)
+      result = await fetchTomtomTraffic(ak, tomtomKey, dir)
       if (result.ok) {
         usedSource = 'tomtom'
       }

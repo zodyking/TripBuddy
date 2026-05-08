@@ -410,6 +410,29 @@ export async function putNy511ApiKey(body) {
   return handleJson(r)
 }
 
+/** Per-account API usage counters and limits (server / PostgreSQL). */
+export async function getApiQuotaSettings() {
+  const r = await apiFetch('/api/settings/api-quota')
+  return handleJson(r)
+}
+
+/** @param {{ limits?: Record<string, number | string> }} body */
+export async function putApiQuotaLimits(body) {
+  const r = await apiFetch('/api/settings/api-quota-limits', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body ?? {}),
+  })
+  return handleJson(r)
+}
+
+export async function postApiQuotaReset() {
+  const r = await apiFetch('/api/settings/api-quota-reset', {
+    method: 'POST',
+  })
+  return handleJson(r)
+}
+
 /**
  * Get 511NY camera feeds for bridge crossings.
  * Returns cameras for: Bayonne, Goethals, Outerbridge, Verrazzano (ToNJ/ToNY).

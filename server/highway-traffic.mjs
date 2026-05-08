@@ -13,6 +13,11 @@ import {
 } from './here-traffic-api.mjs'
 import { getHereApiKeyForAccount, getTomtomApiKeyForAccount } from './user-profile-pg.mjs'
 import { getCalculateRoutePolyline } from './tomtom-routing-calculate.mjs'
+import {
+  assertApiAllowed,
+  recordApiCompletedCall,
+  ApiQuotaError,
+} from './api-quota.mjs'
 
 const KEY = G('traffic:highways:series')
 const SNAPPED_KEY = G('traffic:highways:snapped')
@@ -207,14 +212,23 @@ async function writeSnappedState(st) {
 
 /**
  * Fetch snapped waypoints for a highway using TomTom Routing API.
+ * @param {string} accountKey
  * @param {string} tomtomApiKey
  * @param {string} highwayId
  * @returns {Promise<Array<{ lat: number, lng: number }> | null>}
  */
-async function fetchSnappedWaypoints(tomtomApiKey, highwayId) {
+async function fetchSnappedWaypoints(accountKey, tomtomApiKey, highwayId) {
   const hw = HIGHWAYS[highwayId]
   if (!hw || !Array.isArray(hw.waypoints) || hw.waypoints.length < 2) {
     return null
+  }
+
+  const ak = String(accountKey || '').trim()
+  try {
+    if (ak) await assertApiAllowed(ak, 'tomtom')
+  } catch (e) {
+    if (e instanceof ApiQuotaError) return null
+    throw e
   }
 
   const pathPoints = hw.waypoints.map((w) => ({
@@ -226,6 +240,8 @@ async function fetchSnappedWaypoints(tomtomApiKey, highwayId) {
   if (!res.ok || !res.points || res.points.length < 2) {
     return null
   }
+
+  if (ak) await recordApiCompletedCall(ak, 'tomtom').catch(() => {})
 
   return res.points.map((p) => ({
     lat: p.latitude,
@@ -264,7 +280,7 @@ async function getSnappedWaypoints(accountKey) {
     if (newSnapped[highwayId] && newSnapped[highwayId].length > 0) {
       continue
     }
-    const snapped = await fetchSnappedWaypoints(tomtomKey, highwayId)
+    const snapped = await fetchSnappedWaypoints(ak, tomtomKey, highwayId)
     if (snapped && snapped.length > 0) {
       newSnapped[highwayId] = snapped
     }
@@ -314,16 +330,32 @@ async function appendDataPoint(highwayId, minutes, speedMph) {
 
 /**
  * Get traffic data from HERE Traffic Flow API.
+ * @param {string} accountKey
  * @param {string} hereApiKey
  * @param {string} highwayId
  * @returns {Promise<{ ok: boolean, travelMinutes: number | null, speedMph: number | null, error?: string }>}
  */
-async function fetchHereTraffic(hereApiKey, highwayId) {
+async function fetchHereTraffic(accountKey, hereApiKey, highwayId) {
   const hw = HIGHWAYS[highwayId]
   if (!hw) {
     return { ok: false, travelMinutes: null, speedMph: null, error: 'Unknown highway' }
   }
-  
+
+  const ak = String(accountKey || '').trim()
+  try {
+    if (ak) await assertApiAllowed(ak, 'here')
+  } catch (e) {
+    if (e instanceof ApiQuotaError) {
+      return {
+        ok: false,
+        travelMinutes: null,
+        speedMph: null,
+        error: e.message,
+      }
+    }
+    throw e
+  }
+
   const polyline = encodeFlexiblePolyline(hw.waypoints, 5)
   if (!polyline) {
     return { ok: false, travelMinutes: null, speedMph: null, error: 'Failed to encode polyline' }
@@ -341,6 +373,8 @@ async function fetchHereTraffic(hereApiKey, highwayId) {
     return { ok: false, travelMinutes: null, speedMph: null, error: 'No flow data returned' }
   }
 
+  if (ak) await recordApiCompletedCall(ak, 'here').catch(() => {})
+
   const travelMinutes = parsed.travelTimeSeconds / 60
   const speedMph = parsed.avgSpeedMps * MPS_TO_MPH
 
@@ -349,18 +383,34 @@ async function fetchHereTraffic(hereApiKey, highwayId) {
 
 /**
  * Get traffic data from TomTom Routing API (fallback).
+ * @param {string} accountKey
  * @param {string} tomtomApiKey
  * @param {string} highwayId
  * @returns {Promise<{ ok: boolean, travelMinutes: number | null, speedMph: number | null, error?: string }>}
  */
-async function fetchTomtomTraffic(tomtomApiKey, highwayId) {
+async function fetchTomtomTraffic(accountKey, tomtomApiKey, highwayId) {
   const hw = HIGHWAYS[highwayId]
   if (!hw) {
     return { ok: false, travelMinutes: null, speedMph: null, error: 'Unknown highway' }
   }
-  
-  const pathPoints = hw.waypoints.map(p => ({ latitude: p.lat, longitude: p.lng }))
-  
+
+  const ak = String(accountKey || '').trim()
+  try {
+    if (ak) await assertApiAllowed(ak, 'tomtom')
+  } catch (e) {
+    if (e instanceof ApiQuotaError) {
+      return {
+        ok: false,
+        travelMinutes: null,
+        speedMph: null,
+        error: e.message,
+      }
+    }
+    throw e
+  }
+
+  const pathPoints = hw.waypoints.map((p) => ({ latitude: p.lat, longitude: p.lng }))
+
   const res = await getCalculateRoutePolyline(tomtomApiKey, pathPoints)
   if (!res.ok) {
     const d = res.data && typeof res.data === 'object' ? res.data : {}
@@ -391,10 +441,13 @@ async function fetchTomtomTraffic(tomtomApiKey, highwayId) {
     return { ok: false, travelMinutes: null, speedMph: null, error: 'No travel time in response' }
   }
 
+  if (ak) await recordApiCompletedCall(ak, 'tomtom').catch(() => {})
+
   const travelMinutes = travelTimeSeconds / 60
-  const speedMph = lengthMeters > 0 && travelTimeSeconds > 0
-    ? (lengthMeters / travelTimeSeconds) * MPS_TO_MPH
-    : null
+  const speedMph =
+    lengthMeters > 0 && travelTimeSeconds > 0
+      ? (lengthMeters / travelTimeSeconds) * MPS_TO_MPH
+      : null
 
   return { ok: true, travelMinutes, speedMph }
 }
@@ -468,14 +521,14 @@ export async function fetchAllHighwayTraffic(accountKey) {
     let result = { ok: false, travelMinutes: null, speedMph: null, error: 'No API key' }
 
     if (hereKey) {
-      result = await fetchHereTraffic(hereKey, highwayId)
+      result = await fetchHereTraffic(ak, hereKey, highwayId)
       if (result.ok) {
         usedSource = 'here'
       }
     }
 
     if (!result.ok && tomtomKey) {
-      result = await fetchTomtomTraffic(tomtomKey, highwayId)
+      result = await fetchTomtomTraffic(ak, tomtomKey, highwayId)
       if (result.ok) {
         usedSource = 'tomtom'
       }

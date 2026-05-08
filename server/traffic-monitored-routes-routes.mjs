@@ -13,6 +13,20 @@ import {
   sanitizeHereApiKey,
 } from './here-traffic-api.mjs'
 import { getHereApiKeyForAccount } from './user-profile-pg.mjs'
+import {
+  assertApiAllowed,
+  recordApiCompletedCall,
+  ApiQuotaError,
+} from './api-quota.mjs'
+
+/**
+ * @param {import('fastify').FastifyRequest} req
+ */
+function monitoredTrafficAccountKey(req) {
+  return req && typeof req.credentialAccountKey === 'string'
+    ? req.credentialAccountKey.trim()
+    : ''
+}
 
 /**
  * @param {unknown} body
@@ -126,6 +140,21 @@ export function registerTrafficMonitoredRoutes(app) {
           'HERE API key required. Add it in Settings → Map: HERE traffic overlay.',
       })
     }
+    const ak = monitoredTrafficAccountKey(req)
+    try {
+      if (ak) await assertApiAllowed(ak, 'here')
+    } catch (e) {
+      if (e instanceof ApiQuotaError) {
+        return reply.code(429).send({
+          ok: false,
+          error: e.message,
+          code: e.code,
+          bucket: e.bucket,
+          quotaKind: e.kind,
+        })
+      }
+      throw e
+    }
     const pathPoints = pathPointsFromBody(req.body)
     if (pathPoints.length < 2) {
       return reply
@@ -145,6 +174,8 @@ export function registerTrafficMonitoredRoutes(app) {
           here: routeResult.data,
         })
     }
+
+    if (ak) await recordApiCompletedCall(ak, 'here').catch(() => {})
 
     return {
       ok: true,
@@ -169,7 +200,8 @@ export function registerTrafficMonitoredRoutes(app) {
       })
     }
     const name = routeNameFromBody(req.body) || 'Monitored route'
-    
+    const ak = monitoredTrafficAccountKey(req)
+
     // Check if client sent the already-snapped path from preview
     const clientPolyline = polylineFromBody(req.body)
     const routedPathPoints = pathPointsFromBody(req.body, 'routedPathPoints')
@@ -189,11 +221,27 @@ export function registerTrafficMonitoredRoutes(app) {
           .code(400)
           .send({ ok: false, error: 'At least two path points are required.' })
       }
-      
+
+      try {
+        if (ak) await assertApiAllowed(ak, 'here')
+      } catch (e) {
+        if (e instanceof ApiQuotaError) {
+          return reply.code(429).send({
+            ok: false,
+            error: e.message,
+            code: e.code,
+            bucket: e.bucket,
+            quotaKind: e.kind,
+          })
+        }
+        throw e
+      }
+
       const routeResult = await getRoutedPolyline(key, waypoints)
       if (routeResult.ok && routeResult.points && routeResult.points.length >= 2) {
         finalPolyline = routeResult.polyline || encodeFlexiblePolyline(routeResult.points)
         finalPathPoints = routeResult.points
+        if (ak) await recordApiCompletedCall(ak, 'here').catch(() => {})
       } else {
         // Last resort: use raw waypoints
         finalPolyline = encodeFlexiblePolyline(waypoints)
@@ -244,13 +292,34 @@ export function registerTrafficMonitoredRoutes(app) {
         })
       }
 
+      const ak = monitoredTrafficAccountKey(req)
+
       const results = await Promise.all(
         stored.map(async (r) => {
+          try {
+            if (ak) await assertApiAllowed(ak, 'here')
+          } catch (e) {
+            if (e instanceof ApiQuotaError) {
+              const polyline = r.polyline || encodeFlexiblePolyline(r.pathPoints)
+              return {
+                localId: r.localId,
+                name: r.name,
+                pathPoints: r.pathPoints,
+                polyline,
+                createdAt: r.createdAt,
+                status: null,
+                statusOk: false,
+                statusError: e.message,
+              }
+            }
+            throw e
+          }
           // Encode polyline if not stored
           const polyline = r.polyline || encodeFlexiblePolyline(r.pathPoints)
 
           // Get live traffic flow along the corridor
           const flowResult = await getTrafficFlowCorridor(key, polyline, 150)
+          if (flowResult.ok && ak) await recordApiCompletedCall(ak, 'here').catch(() => {})
           const parsed = flowResult.ok ? parseTrafficFlowResponse(flowResult.data) : null
 
           return {
@@ -296,11 +365,31 @@ export function registerTrafficMonitoredRoutes(app) {
     }
     try {
       const stored = await readMonitoredRoutesForUser()
+      const ak = monitoredTrafficAccountKey(req)
       const results = await Promise.all(
         stored.map(async (r) => {
+          try {
+            if (ak) await assertApiAllowed(ak, 'here')
+          } catch (e) {
+            if (e instanceof ApiQuotaError) {
+              const polyline = r.polyline || encodeFlexiblePolyline(r.pathPoints)
+              return {
+                localId: r.localId,
+                name: r.name,
+                pathPoints: r.pathPoints,
+                polyline,
+                createdAt: r.createdAt,
+                status: null,
+                statusOk: false,
+                statusError: e.message,
+              }
+            }
+            throw e
+          }
           const polyline = r.polyline || encodeFlexiblePolyline(r.pathPoints)
 
           const flowResult = await getTrafficFlowCorridor(key, polyline, 150)
+          if (flowResult.ok && ak) await recordApiCompletedCall(ak, 'here').catch(() => {})
           const parsed = flowResult.ok ? parseTrafficFlowResponse(flowResult.data) : null
 
           return {

@@ -65,6 +65,9 @@ export async function ensureUserProfileTable() {
     await client.query(`
       ALTER TABLE ${TABLE} ADD COLUMN IF NOT EXISTS ny511_api_key_enc JSONB
     `)
+    await client.query(`
+      ALTER TABLE ${TABLE} ADD COLUMN IF NOT EXISTS api_quota_state JSONB
+    `)
   } finally {
     client.release()
   }

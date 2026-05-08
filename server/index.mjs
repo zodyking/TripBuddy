@@ -141,6 +141,14 @@ import {
 import { getVerrazzanoResponsePayload } from './bridge-verrazzano-traffic.mjs'
 import { getHighwayTrafficPayload } from './highway-traffic.mjs'
 import { registerTrafficMonitoredRoutes } from './traffic-monitored-routes-routes.mjs'
+import {
+  getApiQuotaSnapshot,
+  setApiQuotaLimitOverrides,
+  resetApiQuotaDayCounts,
+  assertApiAllowed,
+  recordApiCompletedCall,
+  ApiQuotaError,
+} from './api-quota.mjs'
 await fs.mkdir(UPLOADS_DIR, { recursive: true })
 
 const app = Fastify({ logger: false })
@@ -449,6 +457,21 @@ app.get('/api/511ny/cameras', async (req, reply) => {
       return { ok: true, cameras: ny511CamerasCache.data, cached: true }
     }
 
+    if (typeof ak === 'string' && ak.trim()) {
+      try {
+        await assertApiAllowed(ak.trim(), 'ny511')
+      } catch (e) {
+        if (e instanceof ApiQuotaError) {
+          return reply.code(429).send({
+            error: e.message,
+            code: e.code,
+            bucket: e.bucket,
+          })
+        }
+        throw e
+      }
+    }
+
     const url = `https://511ny.org/api/v2/get/cameras?key=${encodeURIComponent(apiKey)}&format=json`
     const res = await fetch(url, {
       headers: { Accept: 'application/json' },
@@ -489,6 +512,9 @@ app.get('/api/511ny/cameras', async (req, reply) => {
     }
 
     ny511CamerasCache = { data: bridgeCameras, fetchedAt: now }
+    if (typeof ak === 'string' && ak.trim()) {
+      await recordApiCompletedCall(ak.trim(), 'ny511').catch(() => {})
+    }
     return { ok: true, cameras: bridgeCameras, cached: false }
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e)
@@ -753,6 +779,45 @@ app.put('/api/settings/ny511-api-key', async (req, reply) => {
     }
     await setNy511ApiKeyForAccount(ak, sanitized)
     return { ok: true, hasNy511ApiKey: Boolean(sanitized) }
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e)
+    return reply.code(400).send({ error: msg })
+  }
+})
+
+app.get('/api/settings/api-quota', async (req, reply) => {
+  const ak = req.credentialAccountKey
+  if (typeof ak !== 'string' || !ak.trim()) {
+    return reply.code(401).send({ error: 'Unauthorized' })
+  }
+  return getApiQuotaSnapshot(ak.trim())
+})
+
+app.put('/api/settings/api-quota-limits', async (req, reply) => {
+  try {
+    const ak = req.credentialAccountKey
+    if (typeof ak !== 'string' || !ak.trim()) {
+      return reply.code(401).send({ error: 'Unauthorized' })
+    }
+    const body = req.body ?? {}
+    const limits =
+      body.limits && typeof body.limits === 'object' && !Array.isArray(body.limits)
+        ? body.limits
+        : {}
+    return await setApiQuotaLimitOverrides(ak.trim(), limits)
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e)
+    return reply.code(400).send({ error: msg })
+  }
+})
+
+app.post('/api/settings/api-quota-reset', async (req, reply) => {
+  try {
+    const ak = req.credentialAccountKey
+    if (typeof ak !== 'string' || !ak.trim()) {
+      return reply.code(401).send({ error: 'Unauthorized' })
+    }
+    return await resetApiQuotaDayCounts(ak.trim())
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e)
     return reply.code(400).send({ error: msg })
