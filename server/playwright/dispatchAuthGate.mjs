@@ -192,14 +192,7 @@ async function handleOktaThenWaitDispatch(
   if (!tryOktaLogin) {
     log('info', 'PurpleID detected — running saved sign-in')
   }
-  const oktaOk = await tryOktaAutoLogin(page, u, p, (type, msg) =>
-    log(type, msg),
-  )
-  if (!oktaOk) {
-    throw new Error(
-      'PurpleID automatic sign-in did not complete (username/password fields or Verify step). Check credentials or try again.',
-    )
-  }
+  await tryOktaAutoLogin(page, u, p, (type, msg) => log(type, msg))
   log(
     'info',
     'Waiting for FedEx Ground dispatch home (fdxtools) after PurpleID sign-in…',
