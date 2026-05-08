@@ -276,65 +276,69 @@ app.post('/api/auth/login', async (req, reply) => {
 
   const alreadyVerified = await isAppLoginVerifiedForAccountKey(accountKey)
   if (alreadyVerified) {
-    const pwdOk = await verifyPasswordForAccountKey(accountKey, password)
     const fileUser = (await getUsernameForAccountKey(accountKey)).trim()
-    const userMatch = fileUser && fileUser.toLowerCase() === username.toLowerCase()
-    if (!pwdOk || !userMatch) {
+    const userMatch =
+      fileUser && fileUser.toLowerCase() === username.toLowerCase()
+    if (!userMatch) {
       return reply.code(401).send({
         ok: false,
         error: 'Wrong username or password.',
       })
     }
-    const tokenOk = await runWithCredentialAccountKey(accountKey, async () => {
-      const bearer = await getDecryptedLinehaulBearer()
-      if (!bearer) return false
-      const driverId = await getLinehaulDriverId()
-      if (driverId && /^\d+$/.test(driverId)) {
-        const r = await linehaulGet('driver', driverId, bearer)
-        if (r.status === 200 && r.ok) return true
-      }
-      const tractor = await getTractorNumber()
-      if (tractor && /^\d+$/.test(tractor)) {
-        const r = await linehaulGet('tractor', tractor, bearer)
-        if (r.status === 200 && r.ok) return true
-      }
-      return false
-    })
-    if (tokenOk) {
-      await writeUserMeta(accountKey, { appLoginVerified: true })
-      setLastActiveAccountKey(accountKey)
-      try {
-        await runWithCredentialAccountKey(accountKey, () =>
-          saveCredentials({ linehaulPollMinutes: 1 }),
-        )
-      } catch {
-        /* non-fatal */
-      }
-      try {
-        await mergePreLoginAccessToUser(username, accountKey)
-      } catch {
-        /* non-fatal */
-      }
-      const id = createSession(accountKey)
-      reply.setCookie(COOKIE_NAME, id, {
-        path: '/',
-        httpOnly: true,
-        secure: process.env.NODE_ENV === 'production',
-        sameSite: 'lax',
-        maxAge: 7 * 24 * 60 * 60,
+    const pwdOk = await verifyPasswordForAccountKey(accountKey, password)
+    if (pwdOk) {
+      const tokenOk = await runWithCredentialAccountKey(accountKey, async () => {
+        const bearer = await getDecryptedLinehaulBearer()
+        if (!bearer) return false
+        const driverId = await getLinehaulDriverId()
+        if (driverId && /^\d+$/.test(driverId)) {
+          const r = await linehaulGet('driver', driverId, bearer)
+          if (r.status === 200 && r.ok) return true
+        }
+        const tractor = await getTractorNumber()
+        if (tractor && /^\d+$/.test(tractor)) {
+          const r = await linehaulGet('tractor', tractor, bearer)
+          if (r.status === 200 && r.ok) return true
+        }
+        return false
       })
-      try {
-        await publishInAppForAccount(accountKey, {
-          type: 'info',
-          message: 'Signed in — alerts for dispatch changes and crossing-time refreshes appear here.',
-          source: 'session',
+      if (tokenOk) {
+        await writeUserMeta(accountKey, { appLoginVerified: true })
+        setLastActiveAccountKey(accountKey)
+        try {
+          await runWithCredentialAccountKey(accountKey, () =>
+            saveCredentials({ linehaulPollMinutes: 1 }),
+          )
+        } catch {
+          /* non-fatal */
+        }
+        try {
+          await mergePreLoginAccessToUser(username, accountKey)
+        } catch {
+          /* non-fatal */
+        }
+        const id = createSession(accountKey)
+        reply.setCookie(COOKIE_NAME, id, {
+          path: '/',
+          httpOnly: true,
+          secure: process.env.NODE_ENV === 'production',
+          sameSite: 'lax',
+          maxAge: 7 * 24 * 60 * 60,
         })
-      } catch {
-        /* non-fatal: inbox / SSE must not block login */
+        try {
+          await publishInAppForAccount(accountKey, {
+            type: 'info',
+            message:
+              'Signed in — alerts for dispatch changes and crossing-time refreshes appear here.',
+            source: 'session',
+          })
+        } catch {
+          /* non-fatal: inbox / SSE must not block login */
+        }
+        return { ok: true, fastLogin: true }
       }
-      return { ok: true, fastLogin: true }
     }
-    /* Verified user but token expired — refresh via background sign-in below. */
+    /* Fall through: bearer expired/missing, or stored password stale after FedEx reset — re-verify via Playwright. */
   }
 
   const result = await runWithCredentialAccountKey(accountKey, () =>
