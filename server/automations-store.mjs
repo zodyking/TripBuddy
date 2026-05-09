@@ -661,6 +661,7 @@ export async function listAutomations() {
     name: a.name,
     description: a.description,
     enabled: a.enabled,
+    protected: a.protected || false,
     triggerCount: a.triggers?.length || 0,
     actionCount: a.actions?.length || 0,
     updatedAt: a.updatedAt,
@@ -690,6 +691,9 @@ export async function updateAutomation(id, data) {
   const idx = store.automations.findIndex((a) => a.id === id)
   if (idx === -1) throw new Error(`Automation not found: ${id}`)
   const existing = store.automations[idx]
+  if (existing.protected) {
+    throw new Error(`Cannot modify protected automation: ${existing.name}`)
+  }
   const updated = {
     ...existing,
     ...data,
@@ -708,6 +712,10 @@ export async function deleteAutomation(id) {
   const store = await readAutomations()
   const idx = store.automations.findIndex((a) => a.id === id)
   if (idx === -1) throw new Error(`Automation not found: ${id}`)
+  const auto = store.automations[idx]
+  if (auto.protected) {
+    throw new Error(`Cannot delete protected automation: ${auto.name}`)
+  }
   store.automations.splice(idx, 1)
   await writeStore(store)
   return { ok: true }
@@ -717,11 +725,15 @@ export async function duplicateAutomation(id) {
   const store = await readAutomations()
   const source = store.automations.find((a) => a.id === id)
   if (!source) throw new Error(`Automation not found: ${id}`)
+  if (source.protected) {
+    throw new Error(`Cannot duplicate protected automation: ${source.name}`)
+  }
   const copy = JSON.parse(JSON.stringify(source))
   copy.id = generateId()
   copy.name = `${source.name} (copy)`
   copy.createdAt = Date.now()
   copy.updatedAt = Date.now()
+  copy.protected = false
   store.automations.push(copy)
   await writeStore(store)
   return copy

@@ -58,7 +58,8 @@ export const PRESETS = {
   inspect_checkout: {
     name: 'Inspect & Checkout',
     description:
-      'Dispatch home, sign-in, home gate, then warning/begin inspection, dolly/seals/trailer steps (assignment field values + prompts when missing).',
+      'Dispatch home, sign-in, home gate, then warning/begin inspection, dolly/seals/trailer steps with smart field detection, seal fallback, and full dispatch flow.',
+    protected: true,
     triggers: [
       { id: genId(), type: 'manual', buttonLabel: 'Inspect/Checkout' },
     ],
@@ -124,6 +125,7 @@ export function getPreset(id) {
   copy.createdAt = Date.now()
   copy.updatedAt = Date.now()
   copy.enabled = true
+  copy.protected = preset.protected || false
   return copy
 }
 

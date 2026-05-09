@@ -271,13 +271,69 @@ export async function patchTripHistoryOutcome(p) {
 }
 
 /**
- * Delete a trip from the history ledger by its dailyTripLegSequence.
- * @param {{ dailyTripLegSequence: string }} p
+ * Manual audit: which calendar work-day bucket this row appears under (does not change FedEx timestamps).
+ * @param {{ id?: string, dailyTripLegSequence?: string, historyAuditBucketMs: number | null }} p
+ */
+export async function patchTripHistoryAuditBucket(p) {
+  return putAssignment({
+    patchTripHistoryAuditBucket: {
+      id: p.id != null ? String(p.id) : '',
+      dailyTripLegSequence:
+        p.dailyTripLegSequence != null ? String(p.dailyTripLegSequence) : '',
+      historyAuditBucketMs: p.historyAuditBucketMs,
+    },
+  })
+}
+
+/**
+ * Append a user-entered history row (no FedEx leg required).
+ * @param {{
+ *   id?: string,
+ *   completedAt?: number,
+ *   dailyTripLegSequence?: string,
+ *   dispatchHeader?: Record<string, unknown>,
+ *   tripDetails?: Record<string, unknown>,
+ *   historyAuditBucketMs?: number,
+ * }} p
+ */
+export async function appendTripHistoryManual(p) {
+  return putAssignment({
+    appendTripHistoryEntry: {
+      id:
+        p.id ||
+        `manual-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`,
+      source: 'manual_audit',
+      completedAt:
+        typeof p.completedAt === 'number' && Number.isFinite(p.completedAt)
+          ? p.completedAt
+          : Date.now(),
+      dailyTripLegSequence: p.dailyTripLegSequence
+        ? String(p.dailyTripLegSequence)
+        : '',
+      dispatchHeader:
+        p.dispatchHeader && typeof p.dispatchHeader === 'object'
+          ? p.dispatchHeader
+          : {},
+      tripDetails:
+        p.tripDetails && typeof p.tripDetails === 'object' ? p.tripDetails : {},
+      ...(typeof p.historyAuditBucketMs === 'number' &&
+      Number.isFinite(p.historyAuditBucketMs) &&
+      p.historyAuditBucketMs > 0
+        ? { historyAuditBucketMs: p.historyAuditBucketMs }
+        : {}),
+    },
+  })
+}
+
+/**
+ * Delete a trip from the history ledger by dailyTripLegSequence or by id (manual rows).
+ * @param {{ dailyTripLegSequence?: string, id?: string }} p
  */
 export async function deleteTripHistoryEntry(p) {
   return putAssignment({
     deleteTripHistoryEntry: {
-      dailyTripLegSequence: String(p.dailyTripLegSequence),
+      dailyTripLegSequence: String(p.dailyTripLegSequence ?? ''),
+      ...(p.id ? { id: String(p.id) } : {}),
     },
   })
 }

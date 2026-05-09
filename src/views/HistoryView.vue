@@ -4,6 +4,8 @@ import {
   getAssignment,
   getCredentials,
   patchTripHistoryOutcome,
+  patchTripHistoryAuditBucket,
+  appendTripHistoryManual,
   deleteTripHistoryEntry,
 } from '../api.js'
 import {
@@ -31,7 +33,9 @@ import {
  * @typedef {object} LedgerEntry
  * @property {string} id
  * @property {string} [source]
- * @property {number} displayDate (Linehaul: first-saved/dispatch time from recordedAt; complete: completedAt)
+ * @property {number} displayDate (grouping/sorting; audit bucket overrides FedEx times when set)
+ * @property {number} ledgerEventMs FedEx/story time anchor for same-leg dedup (not overridden by audit bucket)
+ * @property {number} [historyAuditBucketMs]
  * @property {number} completedAt
  * @property {string} dailyTripLegSequence
  * @property {string} [outcome]
@@ -122,6 +126,22 @@ const deleteTarget = ref(/** @type {LedgerEntry | null} */ (null))
 const deleteUsernameInput = ref('')
 const deleteError = ref('')
 const deleteBusy = ref(false)
+
+const manualTripModalOpen = ref(false)
+const manualTripOrigin = ref('')
+const manualTripDestination = ref('')
+const manualTripNotes = ref('')
+/** YYYY-MM-DD — bucket day for grouping (local noon UTC ms sent to server). */
+const manualTripAuditDate = ref('')
+const manualTripBusy = ref(false)
+const manualTripError = ref('')
+
+const auditDayModalOpen = ref(false)
+/** @type {import('vue').Ref<LedgerEntry | null>} */
+const auditDayTarget = ref(null)
+const auditDayDateStr = ref('')
+const auditDayBusy = ref(false)
+const auditDayError = ref('')
 
 /** Leg # FedEx reports as active on Home (same as History row). */
 const activeTripLegSeqForHistory = computed(() => {
@@ -522,6 +542,27 @@ function formatUsdWhole(n) {
   return `$${r.toLocaleString(undefined)}`
 }
 
+/**
+ * @param {number} ms
+ */
+function isoDateFromMs(ms) {
+  const d = new Date(ms)
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+
+/**
+ * Local calendar day → ms at noon (audit bucket; avoids DST midnight edges).
+ * @param {string} iso YYYY-MM-DD
+ */
+function localNoonMsFromIsoDate(iso) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(iso).trim())
+  if (!m) return Date.now()
+  const y = Number(m[1])
+  const mo = Number(m[2]) - 1
+  const da = Number(m[3])
+  return new Date(y, mo, da, 12, 0, 0, 0).getTime()
+}
+
 async function load() {
   loading.value = true
   error.value = ''
@@ -572,7 +613,7 @@ async function load() {
             ? x.recordedAt
             : 0
         const sourceStr = sourceStr0
-        const displayDate =
+        const ledgerEventMs =
           sourceStr === 'linehaul' && rec > 0
             ? rec
             : comp > 0
@@ -580,9 +621,17 @@ async function load() {
               : rec > 0
                 ? rec
                 : 0
+        const oRaw = /** @type {any} */ (x)
+        const auditMsRaw = oRaw.historyAuditBucketMs
+        const auditMs =
+          typeof auditMsRaw === 'number' &&
+          Number.isFinite(auditMsRaw) &&
+          auditMsRaw > 0
+            ? auditMsRaw
+            : 0
+        const displayDate = auditMs > 0 ? auditMs : ledgerEventMs
         const seq = String(x.dailyTripLegSequence ?? '').trim()
         const legKey = /^\d+$/.test(seq) ? seq : ''
-        const oRaw = /** @type {any} */ (x)
         const rawO =
           typeof oRaw.outcome === 'string' && oRaw.outcome
             ? normalizeOutcome(oRaw.outcome)
@@ -590,9 +639,11 @@ async function load() {
               ? normalizeOutcome(/** @type {any} */ (oRaw.dispatchHeader).historyOutcome)
               : ''
         const o = rawO || 'delivered'
+        /** @type {LedgerEntry} */
         const e = {
           id: String(x.id ?? ''),
           source: sourceStr,
+          ledgerEventMs,
           displayDate,
           completedAt: comp,
           dailyTripLegSequence: seq,
@@ -606,6 +657,9 @@ async function load() {
               ? /** @type {Record<string, unknown>} */ (x.tripDetails)
               : {},
         }
+        if (auditMs > 0) {
+          e.historyAuditBucketMs = auditMs
+        }
         if (!e.id) continue
         if (!legKey) {
           byLeg.set(e.id, e)
@@ -615,8 +669,8 @@ async function load() {
         if (!cur) {
           byLeg.set(legKey, e)
         } else {
-          const tNew = e.displayDate
-          const tCur = cur.displayDate
+          const tNew = e.ledgerEventMs
+          const tCur = cur.ledgerEventMs
           const tN = typeof tNew === 'number' && tNew > 0 ? tNew : Infinity
           const tC = typeof tCur === 'number' && tCur > 0 ? tCur : Infinity
           if (tN < tC) byLeg.set(legKey, e)
@@ -1486,6 +1540,115 @@ function closeDeleteModal() {
   deleteBusy.value = false
 }
 
+function openManualTripModal() {
+  manualTripModalOpen.value = true
+  manualTripOrigin.value = ''
+  manualTripDestination.value = ''
+  manualTripNotes.value = ''
+  manualTripAuditDate.value = isoDateFromMs(Date.now())
+  manualTripBusy.value = false
+  manualTripError.value = ''
+}
+
+function closeManualTripModal() {
+  manualTripModalOpen.value = false
+  manualTripError.value = ''
+}
+
+async function submitManualTrip() {
+  const o = manualTripOrigin.value.trim()
+  const d = manualTripDestination.value.trim()
+  if (!o || !d) {
+    manualTripError.value = 'Enter origin and destination.'
+    return
+  }
+  manualTripBusy.value = true
+  manualTripError.value = ''
+  try {
+    const bucketMs = localNoonMsFromIsoDate(
+      manualTripAuditDate.value.trim() || isoDateFromMs(Date.now()),
+    )
+    await appendTripHistoryManual({
+      dispatchHeader: {
+        origin: o,
+        destination: d,
+      },
+      tripDetails: manualTripNotes.value.trim()
+        ? { notes: manualTripNotes.value.trim() }
+        : {},
+      historyAuditBucketMs: bucketMs,
+    })
+    closeManualTripModal()
+    await load()
+  } catch (err) {
+    manualTripError.value = err instanceof Error ? err.message : 'Failed to add trip'
+  } finally {
+    manualTripBusy.value = false
+  }
+}
+
+/**
+ * @param {LedgerEntry} row
+ */
+function openAuditDayModal(row) {
+  auditDayTarget.value = row
+  auditDayDateStr.value = isoDateFromMs(row.displayDate)
+  auditDayBusy.value = false
+  auditDayError.value = ''
+  auditDayModalOpen.value = true
+}
+
+function closeAuditDayModal() {
+  auditDayModalOpen.value = false
+  auditDayTarget.value = null
+  auditDayError.value = ''
+}
+
+async function submitAuditDayMove() {
+  const row = auditDayTarget.value
+  if (!row) return
+  auditDayBusy.value = true
+  auditDayError.value = ''
+  try {
+    const ms = localNoonMsFromIsoDate(
+      auditDayDateStr.value.trim() || isoDateFromMs(row.displayDate),
+    )
+    await patchTripHistoryAuditBucket({
+      id: row.id,
+      dailyTripLegSequence: row.dailyTripLegSequence,
+      historyAuditBucketMs: ms,
+    })
+    closeAuditDayModal()
+    await load()
+  } catch (err) {
+    auditDayError.value =
+      err instanceof Error ? err.message : 'Could not update audit day'
+  } finally {
+    auditDayBusy.value = false
+  }
+}
+
+async function clearAuditDayBucket() {
+  const row = auditDayTarget.value
+  if (!row) return
+  auditDayBusy.value = true
+  auditDayError.value = ''
+  try {
+    await patchTripHistoryAuditBucket({
+      id: row.id,
+      dailyTripLegSequence: row.dailyTripLegSequence,
+      historyAuditBucketMs: null,
+    })
+    closeAuditDayModal()
+    await load()
+  } catch (err) {
+    auditDayError.value =
+      err instanceof Error ? err.message : 'Could not clear audit day'
+  } finally {
+    auditDayBusy.value = false
+  }
+}
+
 async function confirmDeleteTrip() {
   if (!deleteTarget.value) return
   const inputVal = deleteUsernameInput.value.trim().toLowerCase()
@@ -1501,12 +1664,17 @@ async function confirmDeleteTrip() {
   deleteBusy.value = true
   deleteError.value = ''
   try {
-    await deleteTripHistoryEntry({
-      dailyTripLegSequence: deleteTarget.value.dailyTripLegSequence,
+    const del = deleteTarget.value
+    const seq = String(del.dailyTripLegSequence ?? '').trim()
+    if (/^\d+$/.test(seq)) {
+      await deleteTripHistoryEntry({ dailyTripLegSequence: seq })
+    } else {
+      await deleteTripHistoryEntry({ dailyTripLegSequence: '', id: del.id })
+    }
+    entries.value = entries.value.filter((x) => {
+      if (/^\d+$/.test(seq)) return x.dailyTripLegSequence !== seq
+      return x.id !== del.id
     })
-    entries.value = entries.value.filter(
-      (x) => x.dailyTripLegSequence !== deleteTarget.value?.dailyTripLegSequence,
-    )
     closeDeleteModal()
   } catch (err) {
     deleteError.value = err instanceof Error ? err.message : 'Failed to delete trip'
@@ -1607,6 +1775,15 @@ onUnmounted(() => {
           class="history-week-mode__lab"
           :class="{ 'history-week-mode__lab--on': historyWeekViewMode === 'paySchedule' }"
         >Pay schedule</span>
+      </div>
+      <div class="history-manual-toolbar">
+        <button
+          type="button"
+          class="history-link tap"
+          @click="openManualTripModal"
+        >
+          + Add manual trip
+        </button>
       </div>
       <div
         v-if="viewMonthGrid.cells.length"
@@ -1809,6 +1986,14 @@ onUnmounted(() => {
                               :datetime="new Date(e.displayDate).toISOString()"
                               >{{ formatWhen(e.displayDate) }}</time
                             >
+                            <span class="history-trip-meta-strip__sep" aria-hidden="true">·</span>
+                            <button
+                              type="button"
+                              class="history-link tap history-audit-day-btn"
+                              @click.stop="openAuditDayModal(e)"
+                            >
+                              Audit day…
+                            </button>
                             <template v-if="e.dailyTripLegSequence">
                               <span class="history-trip-meta-strip__sep" aria-hidden="true">·</span>
                               <span class="history-trip-meta-strip__leg">Leg #{{ e.dailyTripLegSequence }}</span>
@@ -2054,6 +2239,135 @@ onUnmounted(() => {
           </button>
         </li>
       </ul>
+    </Teleport>
+
+    <Teleport to="body">
+      <div
+        v-if="manualTripModalOpen"
+        class="delete-modal-overlay"
+        @click.self="closeManualTripModal"
+      >
+        <div
+          class="delete-modal"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="manual-trip-modal-title"
+        >
+          <h2 id="manual-trip-modal-title" class="delete-modal-title">Add manual trip</h2>
+          <p class="delete-modal-desc">
+            For notes or trips not from FedEx dispatch. FedEx timestamps on other entries are unchanged.
+          </p>
+          <label class="history-modal-field">
+            <span class="history-modal-label">Origin</span>
+            <input
+              v-model="manualTripOrigin"
+              type="text"
+              class="delete-modal-input"
+              autocomplete="off"
+            />
+          </label>
+          <label class="history-modal-field">
+            <span class="history-modal-label">Destination</span>
+            <input
+              v-model="manualTripDestination"
+              type="text"
+              class="delete-modal-input"
+              autocomplete="off"
+            />
+          </label>
+          <label class="history-modal-field">
+            <span class="history-modal-label">Notes (optional)</span>
+            <textarea
+              v-model="manualTripNotes"
+              class="delete-modal-input history-modal-textarea"
+              rows="2"
+            />
+          </label>
+          <label class="history-modal-field">
+            <span class="history-modal-label">Show under work day</span>
+            <input v-model="manualTripAuditDate" type="date" class="delete-modal-input" />
+          </label>
+          <p v-if="manualTripError" class="delete-modal-error">{{ manualTripError }}</p>
+          <div class="delete-modal-actions">
+            <button
+              type="button"
+              class="delete-modal-btn delete-modal-btn--cancel"
+              :disabled="manualTripBusy"
+              @click="closeManualTripModal"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              class="delete-modal-btn delete-modal-btn--confirm"
+              :disabled="
+                manualTripBusy ||
+                !manualTripOrigin.trim() ||
+                !manualTripDestination.trim()
+              "
+              @click="submitManualTrip"
+            >
+              {{ manualTripBusy ? 'Saving…' : 'Add trip' }}
+            </button>
+          </div>
+        </div>
+      </div>
+    </Teleport>
+
+    <Teleport to="body">
+      <div
+        v-if="auditDayModalOpen && auditDayTarget"
+        class="delete-modal-overlay"
+        @click.self="closeAuditDayModal"
+      >
+        <div
+          class="delete-modal"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="audit-day-modal-title"
+        >
+          <h2 id="audit-day-modal-title" class="delete-modal-title">Audit work day</h2>
+          <p class="delete-modal-desc">
+            Move this row between calendar days for your records only. FedEx dispatch and completion times stay the same.
+          </p>
+          <p class="delete-modal-trip">
+            <strong>{{ str(auditDayTarget.dispatchHeader?.origin) || '—' }}</strong>
+            →
+            <strong>{{ str(auditDayTarget.dispatchHeader?.destination) || '—' }}</strong>
+          </p>
+          <label class="history-modal-field">
+            <span class="history-modal-label">Work day (grouping)</span>
+            <input v-model="auditDayDateStr" type="date" class="delete-modal-input" />
+          </label>
+          <p v-if="auditDayError" class="delete-modal-error">{{ auditDayError }}</p>
+          <div class="delete-modal-actions delete-modal-actions--wrap">
+            <button
+              type="button"
+              class="delete-modal-btn delete-modal-btn--cancel"
+              :disabled="auditDayBusy"
+              @click="closeAuditDayModal"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              class="delete-modal-btn delete-modal-btn--confirm"
+              :disabled="auditDayBusy || !auditDayTarget?.historyAuditBucketMs"
+              @click="clearAuditDayBucket"
+            >
+              Use FedEx dates
+            </button>
+            <button
+              type="button"
+              class="delete-modal-btn delete-modal-btn--confirm"
+              :disabled="auditDayBusy"
+              @click="submitAuditDayMove"
+            >
+              {{ auditDayBusy ? 'Saving…' : 'Apply' }}
+            </button>
+          </div>
+        </div>
+      </div>
     </Teleport>
 
     <Teleport to="body">
@@ -3720,5 +4034,39 @@ onUnmounted(() => {
 
 .delete-modal-btn--confirm:hover:not(:disabled) {
   background: rgba(239, 68, 68, 0.3);
+}
+
+.history-manual-toolbar {
+  margin-top: var(--space-3, 0.75rem);
+  margin-bottom: var(--space-2, 0.5rem);
+}
+
+.history-modal-field {
+  display: block;
+  margin-bottom: var(--space-3, 0.75rem);
+}
+
+.history-modal-label {
+  display: block;
+  font-size: 0.78rem;
+  margin-bottom: var(--space-1, 0.25rem);
+  color: var(--color-text-secondary, #a8a8b8);
+}
+
+.history-modal-textarea {
+  min-height: 3.25rem;
+  resize: vertical;
+}
+
+.delete-modal-actions--wrap {
+  flex-wrap: wrap;
+  justify-content: flex-start;
+}
+
+.history-audit-day-btn {
+  padding: 0;
+  border: none;
+  background: transparent;
+  font: inherit;
 }
 </style>

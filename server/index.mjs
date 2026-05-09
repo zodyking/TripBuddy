@@ -1562,9 +1562,9 @@ app.post('/api/automations/:id/run', async (req, reply) => {
   }
   const auto = await getAutomation(req.params.id)
   if (!auto) return reply.code(404).send({ error: 'Automation not found' })
-  const { headless = true, slowMo = 0 } = req.body ?? {}
+  const { headless = true, slowMo = 0, tripData = {} } = req.body ?? {}
   try {
-    const result = await runAutomation(auto, { headless, slowMo })
+    const result = await runAutomation(auto, { headless, slowMo, tripData })
     return result
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e)

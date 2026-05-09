@@ -691,6 +691,7 @@ async function executeAction(action, page, ctx) {
         signal,
         runId: ctx.runId,
         assignment: ctx.assignment,
+        tripData: ctx.tripData || {},
         waitForInspectField,
       })
       ctx.variables._inspectCheckoutContinue = outcome
@@ -953,7 +954,7 @@ export async function runAutomation(automation, opts = {}) {
   runAbort = new AbortController()
   const signal = runAbort.signal
 
-  const { headless = true, slowMo = 0 } = opts
+  const { headless = true, slowMo = 0, tripData = {} } = opts
 
   runnerBusy = true
   setBlockAutomationBusy(true)
@@ -967,6 +968,7 @@ export async function runAutomation(automation, opts = {}) {
     credentials: {},
     assignment: {},
     screenshots: [],
+    tripData,
   }
 
   try {

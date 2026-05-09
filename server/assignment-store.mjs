@@ -655,6 +655,13 @@ export async function writeAssignment(body) {
       tripDetails:
         e.tripDetails && typeof e.tripDetails === 'object' ? e.tripDetails : {},
     }
+    const auditMs =
+      typeof e.historyAuditBucketMs === 'number' && Number.isFinite(e.historyAuditBucketMs)
+        ? e.historyAuditBucketMs
+        : null
+    if (auditMs != null && auditMs > 0) {
+      entry.historyAuditBucketMs = auditMs
+    }
     if (source === 'linehaul' || source === 'complete') {
       if (/^\d+$/.test(seq)) {
         tripHistoryLedger = tripHistoryLedger.filter(
@@ -730,6 +737,19 @@ export async function writeAssignment(body) {
           : priorCompletedAt > 0
             ? priorCompletedAt
             : at
+      const priorAudit =
+        prior &&
+        typeof prior.historyAuditBucketMs === 'number' &&
+        Number.isFinite(prior.historyAuditBucketMs) &&
+        prior.historyAuditBucketMs > 0
+          ? prior.historyAuditBucketMs
+          : null
+      const incomingAudit =
+        typeof e.historyAuditBucketMs === 'number' &&
+        Number.isFinite(e.historyAuditBucketMs) &&
+        e.historyAuditBucketMs > 0
+          ? e.historyAuditBucketMs
+          : null
       const nextEntry = {
         id,
         source: typeof e.source === 'string' && e.source.trim() ? e.source.trim() : 'linehaul',
@@ -739,6 +759,11 @@ export async function writeAssignment(body) {
         dailyTripLegSequence: seq,
         dispatchHeader: mergedDispatchHeader,
         tripDetails: mergedTripDetails,
+        ...(incomingAudit != null
+          ? { historyAuditBucketMs: incomingAudit }
+          : priorAudit != null
+            ? { historyAuditBucketMs: priorAudit }
+            : {}),
       }
       const rest = tripHistoryLedger.filter(
         (x) => x && String(x.dailyTripLegSequence) !== seq && x.id !== id,
@@ -783,13 +808,47 @@ export async function writeAssignment(body) {
         })
         .slice(0, MAX_TRIP_HISTORY)
     }
+  } else if (body.patchTripHistoryAuditBucket && typeof body.patchTripHistoryAuditBucket === 'object') {
+    const p = body.patchTripHistoryAuditBucket
+    const seq = String(p.dailyTripLegSequence ?? '').trim()
+    const id = typeof p.id === 'string' ? p.id.trim() : ''
+    const hasBucketKey = 'historyAuditBucketMs' in p
+    let bucketVal = null
+    if (hasBucketKey) {
+      if (p.historyAuditBucketMs === null || p.historyAuditBucketMs === undefined) {
+        bucketVal = null
+      } else if (
+        typeof p.historyAuditBucketMs === 'number' &&
+        Number.isFinite(p.historyAuditBucketMs) &&
+        p.historyAuditBucketMs > 0
+      ) {
+        bucketVal = p.historyAuditBucketMs
+      } else {
+        throw new Error('Invalid historyAuditBucketMs')
+      }
+    }
+    tripHistoryLedger = tripHistoryLedger.map((x) => {
+      if (!x) return x
+      const matchSeq = /^\d+$/.test(seq) && String(x.dailyTripLegSequence ?? '').trim() === seq
+      const matchId = Boolean(id) && String(x.id ?? '') === id
+      if (!matchSeq && !matchId) return x
+      const nextRow = { ...x }
+      if (hasBucketKey) {
+        if (bucketVal === null) delete nextRow.historyAuditBucketMs
+        else nextRow.historyAuditBucketMs = bucketVal
+      }
+      return nextRow
+    })
   } else if (body.deleteTripHistoryEntry && typeof body.deleteTripHistoryEntry === 'object') {
     const p = body.deleteTripHistoryEntry
     const seq = String(p.dailyTripLegSequence ?? '').trim()
+    const id = typeof p.id === 'string' ? p.id.trim() : ''
     if (/^\d+$/.test(seq)) {
       tripHistoryLedger = tripHistoryLedger.filter(
         (x) => !x || String(x.dailyTripLegSequence) !== seq,
       )
+    } else if (id) {
+      tripHistoryLedger = tripHistoryLedger.filter((x) => !x || String(x.id) !== id)
     }
   }
 

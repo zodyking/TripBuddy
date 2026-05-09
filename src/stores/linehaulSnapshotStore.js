@@ -329,6 +329,16 @@ function processApiResponse(mergedApiBody, assignmentInstructions, context) {
     return { changed: false, reason: 'no_api_body' }
   }
 
+  const incSeq = _tripBodyDailySeq(mergedApiBody)
+  const hidden = new Set(
+    (Array.isArray(context.hiddenSequences) ? context.hiddenSequences : [])
+      .map((s) => String(s).trim())
+      .filter((s) => /^\d+$/.test(s)),
+  )
+  if (incSeq && hidden.has(incSeq)) {
+    return { changed: false, reason: 'seq_hidden_from_home' }
+  }
+
   const incomingFp = computeTripFingerprint(mergedApiBody)
   if (incomingFp === _lastProcessedFingerprint && incomingFp !== 'empty') {
     return { changed: false, reason: 'identical_fingerprint' }
@@ -338,7 +348,6 @@ function processApiResponse(mergedApiBody, assignmentInstructions, context) {
   const next = { ...prev }
   const updates = []
 
-  const incSeq = _tripBodyDailySeq(mergedApiBody)
   const prePlanSeq = _tripBodyDailySeq(context.prePlanSnapshot)
 
   if (prePlanSeq && incSeq === prePlanSeq) {
@@ -639,6 +648,11 @@ function applyHiddenTripFilter() {
   )
   if (!hidden.size) return
   let needPersist = false
+  const stSeq = String(stableTripState.value.dailyTripLegSequence ?? '').trim()
+  if (stSeq && /^\d+$/.test(stSeq) && hidden.has(stSeq)) {
+    resetStableTripState()
+    needPersist = true
+  }
   const cur = linehaulTripsBody.value
   const seqCur = tripBodyDailySeq(cur)
   if (seqCur && hidden.has(seqCur)) {
@@ -773,10 +787,39 @@ export async function markTripLegSequenceCompleted(dailyTripLegSequence) {
 }
 
 /**
- * FedEx still reports this leg — remove it from the hidden list so Home shows the assignment again.
- * @param {string[]} dailyTripLegSequences
+ * Ledger rows marked delivered — keep hidden-from-home even when FedEx still lists the leg.
+ * @param {unknown[]} ledger
+ * @returns {Set<string>}
  */
-export async function unhideTripLegSequencesIfHidden(dailyTripLegSequences) {
+function deliveredSeqSetFromLedger(ledger) {
+  const set = new Set()
+  if (!Array.isArray(ledger)) return set
+  for (const x of ledger) {
+    if (!x || typeof x !== 'object') continue
+    const seq = String(x.dailyTripLegSequence ?? '').trim()
+    if (!/^\d+$/.test(seq)) continue
+    const raw = /** @type {Record<string, unknown>} */ (x)
+    const fromOutcome =
+      typeof raw.outcome === 'string' ? raw.outcome.trim().toLowerCase() : ''
+    const dh = raw.dispatchHeader
+    const fromDh =
+      dh && typeof dh === 'object'
+        ? String(/** @type {Record<string, unknown>} */ (dh).historyOutcome ?? '')
+            .trim()
+            .toLowerCase()
+        : ''
+    if (fromOutcome === 'delivered' || fromDh === 'delivered') set.add(seq)
+  }
+  return set
+}
+
+/**
+ * FedEx still reports this leg — remove it from the hidden list so Home shows the assignment again.
+ * Does not unhide legs the user marked delivered (manual trip complete).
+ * @param {string[]} dailyTripLegSequences
+ * @param {unknown[]} [tripHistoryLedger]
+ */
+export async function unhideTripLegSequencesIfHidden(dailyTripLegSequences, tripHistoryLedger = []) {
   const raw = Array.isArray(dailyTripLegSequences) ? dailyTripLegSequences : []
   const want = new Set(
     raw.map((x) => String(x).trim()).filter((s) => /^\d+$/.test(s)),
@@ -785,7 +828,8 @@ export async function unhideTripLegSequencesIfHidden(dailyTripLegSequences) {
   const hidden = new Set(
     hiddenDailyTripLegSequences.value.map((s) => String(s).trim()).filter(Boolean),
   )
-  const toRemove = [...want].filter((s) => hidden.has(s))
+  const delivered = deliveredSeqSetFromLedger(tripHistoryLedger)
+  const toRemove = [...want].filter((s) => hidden.has(s) && !delivered.has(s))
   if (!toRemove.length) return
   try {
     const a = await putAssignment({
@@ -1075,10 +1119,15 @@ export async function refreshLinehaulApis() {
  */
 async function refreshLinehaulApisImpl(attempt) {
   let assignmentInstructions = ''
+  /** @type {unknown[]} */
+  let tripHistoryLedgerSnapshot = []
   try {
     const assign = await getAssignment()
     assignmentInstructions =
       typeof assign.instructions === 'string' ? assign.instructions : ''
+    tripHistoryLedgerSnapshot = Array.isArray(assign.tripHistoryLedger)
+      ? assign.tripHistoryLedger
+      : []
     hiddenDailyTripLegSequences.value = Array.isArray(assign.hiddenDailyTripLegSequences)
       ? assign.hiddenDailyTripLegSequences.map(String)
       : []
@@ -1448,7 +1497,7 @@ async function refreshLinehaulApisImpl(attempt) {
     const s = tripBodyDailySeq(b)
     if (s) legsFromApi.add(s)
   }
-  await unhideTripLegSequencesIfHidden([...legsFromApi])
+  await unhideTripLegSequencesIfHidden([...legsFromApi], tripHistoryLedgerSnapshot)
 
   applyHiddenTripFilter()
   schedulePersistLinehaulTripSnapshots()

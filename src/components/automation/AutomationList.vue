@@ -214,7 +214,8 @@ onMounted(load)
               {{ auto.actionCount }} action{{ auto.actionCount !== 1 ? 's' : '' }}
             </span>
           </div>
-          <span v-if="!auto.enabled" class="disabled-badge">Disabled</span>
+          <span v-if="auto.protected" class="protected-badge">Protected</span>
+          <span v-else-if="!auto.enabled" class="disabled-badge">Disabled</span>
         </div>
 
         <div v-if="auto.description" class="card-desc">{{ auto.description }}</div>
@@ -228,9 +229,9 @@ onMounted(load)
           >
             {{ runningId === auto.id ? 'Running…' : '▶ Run' }}
           </button>
-          <button type="button" class="btn tap" @click="$emit('edit', auto.id)">Edit</button>
-          <button type="button" class="btn tap" @click="duplicate(auto.id)">Duplicate</button>
-          <button type="button" class="btn tap danger" @click="remove(auto.id, auto.name)">Delete</button>
+          <button v-if="!auto.protected" type="button" class="btn tap" @click="$emit('edit', auto.id)">Edit</button>
+          <button v-if="!auto.protected" type="button" class="btn tap" @click="duplicate(auto.id)">Duplicate</button>
+          <button v-if="!auto.protected" type="button" class="btn tap danger" @click="remove(auto.id, auto.name)">Delete</button>
         </div>
       </div>
     </div>
@@ -397,6 +398,16 @@ onMounted(load)
   border-radius: 4px;
   background: #2a2a34;
   color: var(--muted, #9898a8);
+}
+
+.protected-badge {
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 0.2rem 0.5rem;
+  border-radius: 4px;
+  background: #2d4a3e;
+  color: #7dd3a8;
 }
 
 .card-desc {

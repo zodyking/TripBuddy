@@ -813,7 +813,13 @@ async function runQuickAction(auto) {
       )
       return
     }
-    const result = await runAutomation(auto.id, { headless: true })
+    // Build tripData from stableTripState for inspect/checkout automation
+    const tripData = {
+      dolly: stableTripState.value.dolly || {},
+      trailers: stableTripState.value.trailers || [],
+      tractorNumber: stableTripState.value.tractorNumber || '',
+    }
+    const result = await runAutomation(auto.id, { headless: true, tripData })
     if (result.ok) {
       if (result.variables?._inspectCheckoutCancelled === true) {
         runMsg.value = 'No trip to inspect'
@@ -940,10 +946,28 @@ async function saveLocationAndRetry() {
   }
 }
 
+function formatInspectFieldLabel(field) {
+  if (!field) return 'Value'
+  const f = String(field).toLowerCase()
+  if (f === 'dolly') return 'Dolly Number'
+  if (f.includes('seal')) {
+    const match = f.match(/trailer(\d+)/)
+    if (match) return `Trailer ${match[1]} Seal Number`
+    return 'Seal Number'
+  }
+  if (f.includes('number') || f.includes('trailer')) {
+    const match = f.match(/trailer(\d+)/)
+    if (match) return `Trailer ${match[1]} Number`
+    return 'Trailer Number'
+  }
+  if (f === 'tractor' || f.includes('tractor')) return 'Tractor Number'
+  return 'Value'
+}
+
 async function openInspectFieldModal(message, runId, fieldLabel = '') {
   inspectFieldMessage.value = message
   inspectFieldInput.value = ''
-  inspectFieldKeyLabel.value = fieldLabel ? String(fieldLabel) : 'Value'
+  inspectFieldKeyLabel.value = formatInspectFieldLabel(fieldLabel)
   if (runId) inspectFieldRunId.value = runId
   await nextTick()
   inspectFieldOpen.value = true
