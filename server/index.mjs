@@ -28,7 +28,7 @@ import {
   getSessionAccountKey,
 } from './auth-session.mjs'
 import { registerSseConnection } from './session-sse.mjs'
-import { verifyAppLoginWithBearerCapture } from './auth-probe.mjs'
+import { verifyAppLoginWithBearerCapture, tryFedexBearerReuseLogin } from './auth-probe.mjs'
 import {
   requestAsyncLocalStorage,
   runWithCredentialAccountKey,
@@ -279,10 +279,12 @@ app.post('/api/auth/login', async (req, reply) => {
     return reply.code(400).send({ ok: false, error: 'Invalid username.' })
   }
 
-  /** Always verify via headless FedEx/PurpleID — never skip Playwright using cached password/token. */
-  const result = await runWithCredentialAccountKey(accountKey, () =>
-    verifyAppLoginWithBearerCapture({ username, password }),
-  )
+  /** Prefer instant re-login when stored password matches and Linehaul JWT still works. */
+  const result = await runWithCredentialAccountKey(accountKey, async () => {
+    const reused = await tryFedexBearerReuseLogin(accountKey, username, password)
+    if (reused) return { ok: true }
+    return verifyAppLoginWithBearerCapture({ username, password })
+  })
   if (!result.ok) {
     return reply
       .code(401)

@@ -123,9 +123,11 @@ function sleep(ms, signal) {
  *   bypassValidityProbe?: boolean
  *   credentialOverride?: { username: string, password: string } | null
  *   fastDispatchGate?: boolean
+ *   navigationTimeoutMs?: number
  * }} [opts]
  * credentialOverride — use these for automated sign-in instead of saved credentials (e.g. app login form).
  * fastDispatchGate — short waits for app login (pair with tight outer timeout).
+ * navigationTimeoutMs — Playwright page.goto timeout (login should cap this; default 120s or lower when fast).
  */
 export async function captureAndSaveLinehaulBearer(opts = {}) {
   if (captureBusy) {
@@ -143,7 +145,15 @@ export async function captureAndSaveLinehaulBearer(opts = {}) {
     bypassValidityProbe = false,
     credentialOverride = null,
     fastDispatchGate = false,
+    navigationTimeoutMs: navigationTimeoutMsOpt,
   } = opts
+
+  const navigationTimeoutMs =
+    typeof navigationTimeoutMsOpt === 'number' && navigationTimeoutMsOpt > 0
+      ? navigationTimeoutMsOpt
+      : fastDispatchGate
+        ? 85_000
+        : 120_000
 
   const log = (/** @type {string} */ type, /** @type {string} */ message) => {
     emitLog(type, message)
@@ -262,7 +272,7 @@ export async function captureAndSaveLinehaulBearer(opts = {}) {
       log('info', `[Linehaul capture] Loading dispatch URL: ${DISPATCH_ENTRY_URL}`)
       await page.goto(DISPATCH_ENTRY_URL, {
         waitUntil: 'domcontentloaded',
-        timeout: 120_000,
+        timeout: navigationTimeoutMs,
       })
       const title = (await page.title().catch(() => '')).trim()
       log(

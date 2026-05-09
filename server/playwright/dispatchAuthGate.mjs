@@ -123,10 +123,10 @@ export async function ensureDispatchAppReady(
   page,
   { tryOktaLogin, log, signal, credentialOverride = null, fast = false },
 ) {
-  const settleMs = fast ? 4_000 : 15_000
-  const secondPhaseMs = fast ? 3_000 : 12_000
-  const thirdPhaseMs = fast ? 3_000 : 15_000
-  const dispatchWaitMs = fast ? 12_000 : 120_000
+  const settleMs = fast ? 8_000 : 15_000
+  const secondPhaseMs = fast ? 12_000 : 12_000
+  const thirdPhaseMs = fast ? 15_000 : 15_000
+  const dispatchWaitMs = fast ? 38_000 : 120_000
   const step = fast ? 250 : 400
 
   const opts = {

@@ -1,11 +1,77 @@
+import {
+  verifyPasswordForAccountKey,
+  getUsernameForAccountKey,
+  getDecryptedLinehaulBearer,
+  getLinehaulDriverId,
+  getTractorNumber,
+} from './credentials-store.mjs'
+import { linehaulGet } from './fedex-linehaul-api.mjs'
 import { captureAndSaveLinehaulBearer } from './playwright/linehaulBearerCapture.mjs'
 
-/** Hard cap for app login (sign-in + token scrape). */
-const LOGIN_TOTAL_MS = 15_000
+/** Hard cap for headless FedEx/PurpleID login (navigation + gate + JWT capture). */
+const LOGIN_TOTAL_MS = Number(process.env.FEDEX_LOGIN_TOTAL_MS) || 180_000
+
+/** Playwright navigation timeout for login (must be less than total budget). */
+const LOGIN_NAV_MS = Number(process.env.FEDEX_LOGIN_NAV_MS) || 85_000
+
+/** Time after dispatch gate to wait for first Linehaul Apigee JWT in network. */
+const LOGIN_JWT_WAIT_MS = Number(process.env.FEDEX_LOGIN_JWT_WAIT_MS) || 95_000
+
+/**
+ * When the typed password matches what we have on file and the stored Linehaul JWT
+ * still works against FedEx Apigee, skip Playwright entirely (fast re-login).
+ *
+ * Always falls through to headless login when the password changed, token expired,
+ * or we cannot probe driver/tractor.
+ *
+ * @param {string} accountKey
+ * @param {string} username
+ * @param {string} password
+ * @returns {Promise<boolean>}
+ */
+export async function tryFedexBearerReuseLogin(accountKey, username, password) {
+  const ak = String(accountKey || '').trim()
+  const u = String(username || '').trim()
+  const p = typeof password === 'string' ? password : ''
+  if (!ak || !u || !p) return false
+
+  const storedUser = await getUsernameForAccountKey(ak)
+  if (storedUser && storedUser.toLowerCase() !== u.toLowerCase()) return false
+
+  const hashOk = await verifyPasswordForAccountKey(ak, p)
+  if (!hashOk) return false
+
+  const bearer = await getDecryptedLinehaulBearer()
+  if (!bearer) return false
+
+  const driverId = await getLinehaulDriverId()
+  if (driverId && /^\d+$/.test(driverId)) {
+    try {
+      const r = await linehaulGet('driver', driverId, bearer)
+      if (r.ok && r.status === 200) return true
+      if (r.status === 401 || r.status === 403) return false
+    } catch {
+      return false
+    }
+  }
+
+  const tractor = await getTractorNumber()
+  if (tractor && /^\d+$/.test(tractor)) {
+    try {
+      const r = await linehaulGet('tractor', tractor, bearer)
+      if (r.ok && r.status === 200) return true
+      if (r.status === 401 || r.status === 403) return false
+    } catch {
+      return false
+    }
+  }
+
+  return false
+}
 
 /**
  * App login: capture path with inline credentials — success when API token is saved.
- * Aborts at LOGIN_TOTAL_MS; uses fast dispatch gate + short JWT wait.
+ * Aborts at LOGIN_TOTAL_MS; uses fast dispatch gate + JWT wait tuned for real FedEx loads.
  *
  * @param {{ username: string, password: string }} creds
  * @returns {Promise<{ ok: boolean, error?: string }>}
@@ -27,7 +93,8 @@ export async function verifyAppLoginWithBearerCapture(creds) {
       clearSession: true,
       bypassValidityProbe: true,
       signal: ac.signal,
-      waitMs: 12_000,
+      waitMs: LOGIN_JWT_WAIT_MS,
+      navigationTimeoutMs: LOGIN_NAV_MS,
       credentialOverride: { username, password },
       fastDispatchGate: true,
     })
