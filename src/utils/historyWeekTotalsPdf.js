@@ -35,12 +35,14 @@ function fmtMi(n) {
  *     rounded: boolean,
  *     originId: string,
  *     destId: string,
+ *     routeOd?: string,
  *     weekday: string,
  *     dispatchDate: string,
  *     dispatchTime: string,
  *     legLabel: string,
  *     tractorNumber: string,
  *     equipmentBlock?: string,
+ *     dailyTripLegSequence?: string,
  *     proofScreenshots?: { label: string, jpeg: string, ts: number }[],
  *   }[],
  * }} WeekTotalsPdfDaySection
@@ -63,22 +65,24 @@ function fmtMi(n) {
  * }} WeekTotalsPdfOpts
  */
 
-const BLACK   = [0, 0, 0]
-const DARK    = [24, 24, 24]
-const DGRAY   = [55, 55, 55]
-const MGRAY   = [100, 100, 100]
-const GRAY    = [140, 140, 140]
-const LGRAY   = [200, 200, 200]
-const RULE    = [220, 220, 220]
-const BG      = [245, 245, 245]
-const BGALT   = [250, 250, 250]
-const WHITE   = [255, 255, 255]
+const BLACK = [0, 0, 0]
+const DARK = [24, 24, 24]
+const DGRAY = [55, 55, 55]
+const MGRAY = [100, 100, 100]
+const GRAY = [140, 140, 140]
+const LGRAY = [200, 200, 200]
+const RULE = [220, 220, 220]
+const BG = [245, 245, 245]
+const BGALT = [250, 250, 250]
+const WHITE = [255, 255, 255]
 
 /** @param {WeekTotalsPdfOpts} opts */
 export function downloadHistoryWeekTotalsPdf(opts) {
   const title = ascii(opts.documentTitle?.trim() || 'Weekly Mileage Report')
-  const genAt = typeof opts.generatedAtMs === 'number' && Number.isFinite(opts.generatedAtMs)
-    ? new Date(opts.generatedAtMs) : new Date()
+  const genAt =
+    typeof opts.generatedAtMs === 'number' && Number.isFinite(opts.generatedAtMs)
+      ? new Date(opts.generatedAtMs)
+      : new Date()
   const genLabel = genAt.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })
 
   const doc = new jsPDF({ unit: 'mm', format: 'letter', orientation: 'portrait', compress: true })
@@ -120,10 +124,10 @@ export function downloadHistoryWeekTotalsPdf(opts) {
   doc.setTextColor(...LGRAY)
   doc.text(ascii(opts.weekRangeLabel), MX, y)
 
-  const metaParts = [
-    opts.calendarContext?.trim(),
-    `Grouping: ${opts.groupingModeLabel}`,
-  ].filter(Boolean).map(ascii).join('   ·   ')
+  const metaParts = [opts.calendarContext?.trim(), `Grouping: ${opts.groupingModeLabel}`]
+    .filter(Boolean)
+    .map(ascii)
+    .join('   ·   ')
   if (metaParts) {
     doc.setFontSize(6.5)
     doc.setTextColor(...GRAY)
@@ -133,14 +137,24 @@ export function downloadHistoryWeekTotalsPdf(opts) {
   y = 36
 
   /* ══════════════════════════════════════════════
-     DRIVER / TRUCK INFO — side by side
+     DRIVER / TRUCK INFO — side by side (shared height from tallest wrap)
      ══════════════════════════════════════════════ */
   const boxGap = 5
   const boxW = (IW - boxGap) / 2
-  const boxH = 24
 
-  /** @param {number} bx @param {number} by @param {string} label @param {string} body */
-  function infoBlock(bx, by, label, body) {
+  doc.setFont('helvetica', 'normal')
+  doc.setFontSize(7.5)
+  const driverBody = opts.driverBlock?.trim() || '-'
+  const truckBody = opts.truckBlock?.trim() || '-'
+  const linesDriver = doc.splitTextToSize(ascii(driverBody), boxW - 8)
+  const linesTruck = doc.splitTextToSize(ascii(truckBody), boxW - 8)
+  const maxBodyLines = Math.max(linesDriver.length, linesTruck.length, 1)
+  const lineStepMm = 7.5 * 0.352778 * 1.4
+  /** Title strip + first baseline + remaining lines + bottom padding */
+  const boxH = Math.max(26, 10.5 + maxBodyLines * lineStepMm + 3)
+
+  /** @param {number} bx @param {number} by @param {string} label @param {string[]} lines */
+  function infoBlock(bx, by, label, lines) {
     doc.setDrawColor(...RULE)
     doc.setLineWidth(0.2)
     doc.setFillColor(...BG)
@@ -158,12 +172,11 @@ export function downloadHistoryWeekTotalsPdf(opts) {
     doc.setFont('helvetica', 'normal')
     doc.setFontSize(7.5)
     doc.setTextColor(...DGRAY)
-    const lines = doc.splitTextToSize(ascii(body), boxW - 8)
-    doc.text(lines.slice(0, 5), bx + 4, by + 10.5, { lineHeightFactor: 1.4 })
+    doc.text(lines, bx + 4, by + 10.5, { lineHeightFactor: 1.4 })
   }
 
-  infoBlock(MX, y, 'Driver', opts.driverBlock?.trim() || '-')
-  infoBlock(MX + boxW + boxGap, y, 'Truck', opts.truckBlock?.trim() || '-')
+  infoBlock(MX, y, 'Driver', linesDriver)
+  infoBlock(MX + boxW + boxGap, y, 'Truck', linesTruck)
   y += boxH + 4
 
   /* ══════════════════════════════════════════════
@@ -183,7 +196,12 @@ export function downloadHistoryWeekTotalsPdf(opts) {
   doc.setFont('helvetica', 'normal')
   doc.setFontSize(7)
   doc.setTextColor(...LGRAY)
-  doc.text(`Rounding: ${opts.roundingBandMin}-${opts.roundingBandMax} mi = ${opts.roundingToMi} mi`, W - MX - 5, y + 5.8, { align: 'right' })
+  doc.text(
+    `Rounding: ${opts.roundingBandMin}-${opts.roundingBandMax} mi = ${opts.roundingToMi} mi`,
+    W - MX - 5,
+    y + 5.8,
+    { align: 'right' },
+  )
 
   y += 12
 
@@ -192,7 +210,8 @@ export function downloadHistoryWeekTotalsPdf(opts) {
   doc.setTextColor(...MGRAY)
   doc.text(
     'Billable miles match on-screen History totals. Missing paid mileage counts as 0. Unofficial estimate only.',
-    MX, y,
+    MX,
+    y,
     { maxWidth: IW },
   )
   y += 5
@@ -200,47 +219,63 @@ export function downloadHistoryWeekTotalsPdf(opts) {
   /* ══════════════════════════════════════════════
      TABLE BODY
      ══════════════════════════════════════════════ */
-  const COLS = 7
+  const COLS = 8
   /** @type {unknown[][]} */
   const body = []
 
   if (!opts.days.length) {
-    body.push([{
-      content: 'No trips for this period.',
-      colSpan: COLS,
-      styles: { fontStyle: 'italic', textColor: MGRAY, halign: 'center' },
-    }])
+    body.push([
+      {
+        content: 'No trips for this period.',
+        colSpan: COLS,
+        styles: { fontStyle: 'italic', textColor: MGRAY, halign: 'center' },
+      },
+    ])
   }
 
   /** @type {{ originId: string, destId: string, dispatchDate: string, legLabel: string, screenshots: { label: string, jpeg: string }[] }[]} */
   const proofAppendix = []
 
   for (const day of opts.days) {
-    body.push([{
-      content: ascii(day.dayLabel || 'Day').toUpperCase(),
-      colSpan: COLS - 1,
-      styles: {
-        fillColor: BLACK, textColor: WHITE, fontStyle: 'bold', fontSize: 7.5,
-        cellPadding: { top: 2, bottom: 2, left: 3, right: 2 },
+    const legLabels = [
+      ...new Set(
+        day.rows
+          .map((r) => ascii(String(r.legLabel ?? '').trim()))
+          .filter((s) => s && s !== '-'),
+      ),
+    ]
+    const legSeg = legLabels.length ? `  ·  LEGS: ${legLabels.join(', ')}` : ''
+
+    body.push([
+      {
+        content: `${ascii(day.dayLabel || 'Day').toUpperCase()}${legSeg}  ·  DAY TOTAL: ${fmtMi(day.sumBillable)} mi`,
+        colSpan: COLS,
+        styles: {
+          fillColor: BLACK,
+          textColor: WHITE,
+          fontStyle: 'bold',
+          fontSize: 7.5,
+          cellPadding: { top: 2, bottom: 2, left: 3, right: 3 },
+        },
       },
-    }, {
-      content: `${fmtMi(day.sumBillable)} mi`,
-      styles: {
-        fillColor: BLACK, textColor: WHITE, fontStyle: 'bold', fontSize: 7.5,
-        halign: 'right',
-        cellPadding: { top: 2, bottom: 2, left: 2, right: 3 },
-      },
-    }])
+    ])
 
     day.rows.forEach((r, i) => {
       const hasProof = Array.isArray(r.proofScreenshots) && r.proofScreenshots.length > 0
+      const o = String(r.originId ?? '-').trim()
+      const dest = String(r.destId ?? '-').trim()
+      const routeRaw =
+        typeof r.routeOd === 'string' && r.routeOd.trim()
+          ? r.routeOd.trim()
+          : `${o} \u2192 ${dest}`
 
       body.push([
         { content: String(i + 1), styles: { halign: 'center', textColor: MGRAY } },
-        { content: ascii(r.originId || '-'), styles: { fontStyle: 'bold' } },
-        { content: ascii(r.destId || '-'), styles: { fontStyle: 'bold' } },
+        { content: ascii(routeRaw), styles: { fontStyle: 'bold' } },
+        ascii(r.weekday || '-'),
         ascii(r.dispatchDate || '-'),
         ascii(r.dispatchTime || '-'),
+        { content: ascii(r.legLabel || '-'), styles: { halign: 'center', fontStyle: 'bold' } },
         { content: ascii(r.tractorNumber || '-'), styles: { halign: 'center' } },
         { content: fmtMi(r.billableMi), styles: { fontStyle: 'bold', halign: 'right' } },
       ])
@@ -250,11 +285,13 @@ export function downloadHistoryWeekTotalsPdf(opts) {
       const proofLine = hasProof ? `Proof of Dispatch: see appendix` : ''
       const subContent = [eqLine, proofLine].filter(Boolean).join('\n')
       if (subContent) {
-        body.push([{
-          content: subContent,
-          colSpan: COLS,
-          _equip: true,
-        }])
+        body.push([
+          {
+            content: subContent,
+            colSpan: COLS,
+            _equip: true,
+          },
+        ])
       }
 
       if (hasProof) {
@@ -277,12 +314,32 @@ export function downloadHistoryWeekTotalsPdf(opts) {
     tableWidth: IW,
     margin: { left: MX, right: MX, bottom: MB },
 
-    head: [['#', 'Origin', 'Dest', 'Date', 'Time', 'Tractor', 'Miles']],
+    head: [['#', 'O -> D', 'Day', 'Date', 'Time', 'Leg #', 'Tractor', 'Miles']],
     body,
-    foot: [[
-      { content: 'WEEK TOTAL', colSpan: 6, styles: { fontStyle: 'bold', fillColor: BLACK, textColor: WHITE, fontSize: 8 } },
-      { content: `${fmtMi(opts.sumBillable)} mi`, styles: { fontStyle: 'bold', halign: 'right', fillColor: BLACK, textColor: WHITE, fontSize: 8 } },
-    ]],
+    foot: [
+      [
+        {
+          content: 'WEEK TOTAL',
+          colSpan: 7,
+          styles: {
+            fontStyle: 'bold',
+            fillColor: BLACK,
+            textColor: WHITE,
+            fontSize: 8,
+          },
+        },
+        {
+          content: `${fmtMi(opts.sumBillable)} mi`,
+          styles: {
+            fontStyle: 'bold',
+            halign: 'right',
+            fillColor: BLACK,
+            textColor: WHITE,
+            fontSize: 8,
+          },
+        },
+      ],
+    ],
 
     theme: 'grid',
 
@@ -317,13 +374,14 @@ export function downloadHistoryWeekTotalsPdf(opts) {
     alternateRowStyles: { fillColor: BGALT },
 
     columnStyles: {
-      0: { cellWidth: 8 },
-      1: { cellWidth: 28 },
-      2: { cellWidth: 28 },
-      3: { cellWidth: 28 },
-      4: { cellWidth: 22, halign: 'center' },
-      5: { cellWidth: 24, halign: 'center' },
-      6: { cellWidth: 'auto', halign: 'right' },
+      0: { cellWidth: 8, halign: 'center' },
+      1: { cellWidth: 34 },
+      2: { cellWidth: 18 },
+      3: { cellWidth: 22 },
+      4: { cellWidth: 18, halign: 'center' },
+      5: { cellWidth: 16, halign: 'center' },
+      6: { cellWidth: 22, halign: 'center' },
+      7: { cellWidth: 'auto', halign: 'right' },
     },
 
     didParseCell(data) {
@@ -358,7 +416,11 @@ export function downloadHistoryWeekTotalsPdf(opts) {
       doc.setFont('helvetica', 'normal')
       doc.setFontSize(8)
       doc.setTextColor(...LGRAY)
-      doc.text(`${ascii(trip.originId)} -> ${ascii(trip.destId)}    ${ascii(trip.dispatchDate)}    Leg ${ascii(trip.legLabel)}`, MX, 15)
+      doc.text(
+        `${ascii(trip.originId)} -> ${ascii(trip.destId)}    ${ascii(trip.dispatchDate)}    Leg ${ascii(trip.legLabel)}`,
+        MX,
+        15,
+      )
 
       doc.setFont('helvetica', 'bold')
       doc.setFontSize(7.5)
