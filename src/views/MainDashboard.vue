@@ -874,6 +874,7 @@ async function runQuickAction(auto) {
   } finally {
     runningAutomationId.value = null
     runStartTs.value = null
+    setTimeout(() => void refreshLinehaulApis(), 1500)
   }
 }
 
@@ -2191,15 +2192,15 @@ onUnmounted(() => {
 
     <section
       ref="dispatchPanelRef"
-      class="panel dispatch-instructions-panel"
+      class="panel trip-panel"
       @pointerdown="onDispatchPanelPointerDown"
       @pointermove="onDispatchPanelPointerMove"
       @pointerup="onDispatchPanelPointerUp"
       @pointercancel="onDispatchPanelPointerCancel"
       @dblclick="onDispatchPanelDblClick"
     >
-      <div class="dispatch-card-toolbar">
-        <h2 class="dispatch-instructions-title">Dispatch Instructions</h2>
+      <div class="trip-panel-header">
+        <h2 class="trip-panel-title">Trip</h2>
         <div
           class="trip-status-inline"
           role="status"
@@ -2207,7 +2208,6 @@ onUnmounted(() => {
           :title="tripStatusDetailTitle || undefined"
         >
           <span class="trip-status-dot" :class="tripStatusDotClass" aria-hidden="true" />
-          <span class="trip-status-heading">Trip Status</span>
           <button
             type="button"
             class="trip-status-state copyable-inline tap"
@@ -2218,6 +2218,7 @@ onUnmounted(() => {
           </button>
         </div>
       </div>
+
       <div
         v-if="tripVoiceUnlockHint && tripAlertOn"
         class="trip-voice-unlock-banner"
@@ -2230,15 +2231,16 @@ onUnmounted(() => {
           >Some phones and tablets need a tap before text-to-speech can play.</span
         >
       </div>
+
       <div
         v-if="(linehaulTripsBody || prePlanTripSnapshot) && !linehaulTripsError"
-        class="dispatch-slides-wrap"
+        class="trip-route-section"
       >
         <div v-if="hasPrePlanTrip" class="dispatch-slide-dots" aria-hidden="true">
           <span class="dispatch-dot" :class="{ active: dispatchSlideIndex === 0 }" title="Current" />
           <span class="dispatch-dot" :class="{ active: dispatchSlideIndex === 1 }" title="Pre-plan" />
         </div>
-        <p v-if="hasPrePlanTrip" class="dispatch-swipe-hint">Swipe this card left or right to switch trips</p>
+        <p v-if="hasPrePlanTrip" class="dispatch-swipe-hint">Swipe to switch trips</p>
 
         <div v-if="dispatchSlideIndex === 0 && linehaulTripsBody" class="dispatch-slide">
           <div class="dispatch-od-row" aria-label="Trip origin and destination">
@@ -2278,49 +2280,47 @@ onUnmounted(() => {
           </div>
         </div>
       </div>
-      <p v-if="!mergedDispatchInstructionsForSlide.trim()" class="empty">No instructions yet.</p>
-      <button
-        v-else
-        type="button"
-        class="read dispatch-instructions-body copyable-block tap"
-        title="Tap to copy; double-tap to mark trip complete when driver and tractor are AVL"
-        @click.stop="copyTripDetailValue(mergedDispatchInstructionsForSlide, 'Instructions')"
-        @pointerup.stop="onDispatchInstructionsPointerUp"
-        @dblclick.stop.prevent="openDispatchTripCompleteDialog"
-      >
-        {{ mergedDispatchInstructionsForSlide }}
-      </button>
-    </section>
 
-    <section
-      v-if="showSealOrTripPanel"
-      ref="tripDetailsPanelRef"
-      class="panel trip-details-panel trip-details-panel--ruled"
-      @pointerdown="onTripPanelPointerDown"
-      @pointermove="onTripPanelPointerMove"
-      @pointerup="onTripPanelPointerUp"
-      @pointercancel="onTripPanelPointerCancel"
-      @dblclick="onTripPanelDblClick"
-    >
-      <h2>Trip Details</h2>
-      <p v-if="hasPrePlanTrip" class="trip-details-swipe-hint">
-        Swipe Dispatch above (or here) to switch equipment for current vs pre-plan.
-      </p>
-      <p
-        v-if="
-          tripDetailsBodyForSlide &&
-          typeof tripDetailsBodyForSlide === 'object' &&
-          tripDetailsBodyForSlide.tripStatus === 'DSPCH'
-        "
-        class="hint"
-      >
-        Dispatch snapshot (DSPCH); merged with approved trip fields when both are available.
-      </p>
+      <div v-if="mergedDispatchInstructionsForSlide.trim()" class="trip-instructions-section">
+        <h3 class="trip-section-label">Instructions</h3>
+        <button
+          type="button"
+          class="read dispatch-instructions-body copyable-block tap"
+          title="Tap to copy; double-tap to mark trip complete"
+          @click.stop="copyTripDetailValue(mergedDispatchInstructionsForSlide, 'Instructions')"
+          @pointerup.stop="onDispatchInstructionsPointerUp"
+          @dblclick.stop.prevent="openDispatchTripCompleteDialog"
+        >
+          {{ mergedDispatchInstructionsForSlide }}
+        </button>
+      </div>
 
       <div
-        v-if="(linehaulTripsBody || linehaulTripsNoActive) && !(linehaulTripsError && suppressHomeLinehaulErrors)"
-        class="trip-details-wrap"
+        v-if="showSealOrTripPanel"
+        ref="tripDetailsPanelRef"
+        class="trip-equipment-section"
+        @pointerdown.stop="onTripPanelPointerDown"
+        @pointermove.stop="onTripPanelPointerMove"
+        @pointerup.stop="onTripPanelPointerUp"
+        @pointercancel.stop="onTripPanelPointerCancel"
+        @dblclick.stop="onTripPanelDblClick"
       >
+        <h3 class="trip-section-label">Equipment</h3>
+        <p
+          v-if="
+            tripDetailsBodyForSlide &&
+            typeof tripDetailsBodyForSlide === 'object' &&
+            tripDetailsBodyForSlide.tripStatus === 'DSPCH'
+          "
+          class="hint"
+        >
+          DSPCH snapshot; merged with approved trip fields when available.
+        </p>
+
+        <div
+          v-if="(linehaulTripsBody || linehaulTripsNoActive) && !(linehaulTripsError && suppressHomeLinehaulErrors)"
+          class="trip-details-wrap"
+        >
         <div class="trailer-card trailer-card--dolly" role="group" aria-label="Dolly you are carrying">
           <div
             v-if="!tripDollySection.show"
@@ -2627,21 +2627,24 @@ onUnmounted(() => {
           </div>
         </template>
       </div>
-      <p v-else-if="linehaulTripsNoActive" class="empty trip-details-idle">No active trip</p>
-      <p
-        v-else-if="linehaulTripsError && !suppressHomeLinehaulErrors"
-        class="err trip-details-fetch-err"
-      >
-        Trip details: {{ linehaulTripsError }}
-      </p>
-      <div
-        v-else-if="linehaulTripsError && suppressHomeLinehaulErrors"
-        class="trip-details-loading"
-        aria-busy="true"
-        aria-label="Loading trip details"
-      >
-        <span class="trip-details-loading-spinner" />
+        <p v-else-if="linehaulTripsNoActive" class="empty trip-details-idle">No active trip</p>
+        <p
+          v-else-if="linehaulTripsError && !suppressHomeLinehaulErrors"
+          class="err trip-details-fetch-err"
+        >
+          Trip details: {{ linehaulTripsError }}
+        </p>
+        <div
+          v-else-if="linehaulTripsError && suppressHomeLinehaulErrors"
+          class="trip-details-loading"
+          aria-busy="true"
+          aria-label="Loading trip details"
+        >
+          <span class="trip-details-loading-spinner" />
+        </div>
       </div>
+
+      <p v-if="!mergedDispatchInstructionsForSlide.trim() && !showSealOrTripPanel" class="empty">No trip data yet.</p>
     </section>
 
     <section class="panel actions actions-panel--ruled">
@@ -3098,9 +3101,9 @@ button.trailer-nbr.copyable-inline {
 }
 .driver-status-surface {
   margin-top: 0.15rem;
-  border: 1px solid #34343e;
+  border: 1px solid rgba(255, 255, 255, 0.05);
   border-radius: 10px;
-  background: #18181f;
+  background: rgba(24, 24, 31, 0.6);
   padding: 0.5rem 0.6rem 0.6rem;
 }
 .driver-status-fetching {
@@ -3428,8 +3431,8 @@ button.trailer-nbr.copyable-inline {
   min-width: 0;
   padding: 0.45rem 0.5rem;
   border-radius: 8px;
-  border: 1px solid #34343e;
-  background: #22222c;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  background: rgba(34, 34, 44, 0.5);
 }
 .linehaul-block {
   margin-top: 0.5rem;
@@ -3441,24 +3444,50 @@ button.trailer-nbr.copyable-inline {
   color: var(--text, #e8e8ee);
   letter-spacing: 0.02em;
 }
-.dispatch-card-toolbar {
+/* ═══════════════════════════════════════════════════════════════════════════
+   UNIFIED TRIP PANEL — merged dispatch + equipment
+   ═══════════════════════════════════════════════════════════════════════════ */
+.trip-panel {
   display: flex;
-  flex-wrap: wrap;
-  align-items: flex-start;
+  flex-direction: column;
+  gap: 0;
+  touch-action: pan-y;
+}
+.trip-panel-header {
+  display: flex;
+  align-items: center;
   justify-content: space-between;
-  gap: 0.75rem 1rem;
-  margin-bottom: 0.65rem;
-  padding-bottom: 0.75rem;
-  border-bottom: 1px solid #2e2e38;
+  gap: 0.75rem;
+  margin-bottom: 0.75rem;
 }
-.dispatch-instructions-panel h2.dispatch-instructions-title {
-  margin: 0;
-  font-size: 1rem;
-  flex: 1 1 auto;
-  min-width: 0;
+.trip-panel-title {
+  margin: 0 !important;
+  font-size: 1.1rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
 }
-.dispatch-instructions-panel .dispatch-card-toolbar + .empty {
-  margin-top: 0;
+.trip-route-section {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin-bottom: 0.75rem;
+}
+.trip-instructions-section {
+  margin-bottom: 0.75rem;
+  padding-top: 0.65rem;
+  border-top: 1px solid rgba(255, 255, 255, 0.04);
+}
+.trip-equipment-section {
+  padding-top: 0.65rem;
+  border-top: 1px solid rgba(255, 255, 255, 0.04);
+}
+.trip-section-label {
+  margin: 0 0 0.5rem;
+  font-size: 0.68rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted, #9898a8);
 }
 .trip-status-inline {
   display: inline-flex;
@@ -3505,6 +3534,11 @@ button.trailer-nbr.copyable-inline {
 }
 .dispatch-instructions-body {
   margin-top: 0;
+  padding: 0.55rem 0.65rem;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid rgba(255, 255, 255, 0.04);
+  font-size: 0.88rem;
 }
 .trip-voice-unlock-banner {
   display: flex;
@@ -3542,7 +3576,6 @@ button.trailer-nbr.copyable-inline {
   display: flex;
   flex-direction: column;
   gap: 0.5rem;
-  margin-bottom: 0.85rem;
 }
 .dispatch-slide-dots {
   display: flex;
@@ -3610,12 +3643,6 @@ button.trailer-nbr.copyable-inline {
   gap: 0.5rem;
   flex-wrap: wrap;
 }
-.dispatch-instructions-panel,
-.trip-details-panel {
-  touch-action: pan-y;
-}
-
-.trip-details-panel--ruled > h2:first-of-type,
 .actions-panel--ruled > h2:first-of-type {
   margin: 0 0 0.65rem;
   padding-bottom: 0.75rem;
@@ -3647,10 +3674,10 @@ button.trailer-nbr.copyable-inline {
   align-items: flex-end;
   justify-content: space-between;
   gap: 0.5rem 0.75rem;
-  padding: 0.55rem 0.65rem;
-  border-radius: 8px;
-  background: #22222c;
-  border: 1px solid #34343e;
+  padding: 0.65rem 0.75rem;
+  border-radius: 10px;
+  background: linear-gradient(135deg, rgba(123, 77, 181, 0.06), rgba(59, 130, 246, 0.04));
+  border: 1px solid rgba(123, 77, 181, 0.15);
   font-size: 0.85rem;
   width: 100%;
   box-sizing: border-box;
@@ -3713,8 +3740,7 @@ button.trailer-nbr.copyable-inline {
 .trip-details-wrap {
   display: flex;
   flex-direction: column;
-  gap: 0.45rem;
-  margin-bottom: 0.5rem;
+  gap: 0.5rem;
 }
 .trip-details-block {
   border: 1px solid #34343e;
@@ -4080,8 +4106,8 @@ button.trailer-nbr.copyable-inline {
   object-position: top center;
 }
 .quick-actions-grid {
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 12rem), 1fr));
   gap: var(--space-3, 0.75rem);
 }
 .quick-action-btn {
@@ -4089,6 +4115,7 @@ button.trailer-nbr.copyable-inline {
   min-height: var(--touch-target, 2.75rem);
   padding: var(--space-3, 0.75rem) var(--space-4, 1rem);
   font-size: var(--text-base, 0.9375rem);
+  border-radius: 10px;
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
@@ -4149,14 +4176,15 @@ button.trailer-nbr.copyable-inline {
    ═══════════════════════════════════════════════════════════════════════════ */
 
 .trailer-card {
-  border: 1px solid #34343e;
+  border: 1px solid rgba(255, 255, 255, 0.06);
   border-radius: 10px;
-  background: #1e1e26;
+  background: rgba(30, 30, 38, 0.6);
   overflow: hidden;
-  transition: border-color 0.15s ease;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
 }
 .trailer-card:hover {
-  border-color: #48485a;
+  border-color: rgba(123, 77, 181, 0.2);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
 }
 .trailer-card-header {
   display: flex;
@@ -4166,7 +4194,7 @@ button.trailer-nbr.copyable-inline {
   padding: 0.55rem 0.65rem;
   cursor: pointer;
   user-select: none;
-  background: #22222c;
+  background: rgba(34, 34, 44, 0.5);
 }
 .trailer-card-header:focus-visible {
   outline: 2px solid var(--color-accent-purple, #7b4db5);
@@ -4320,8 +4348,8 @@ button.trailer-nbr.copyable-inline {
 }
 .trailer-card-summary {
   padding: 0.5rem 0.75rem;
-  border-top: 1px solid #2e2e38;
-  background: #1a1a22;
+  border-top: 1px solid rgba(255, 255, 255, 0.04);
+  background: rgba(26, 26, 34, 0.5);
 }
 .trailer-summary-dl {
   display: grid;
