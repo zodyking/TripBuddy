@@ -527,23 +527,25 @@ function pdfDollyEquipmentLine(body) {
   const nested = o.dolly
   /** @type {string[]} */
   let parts = []
+  const skipLabels = /sequence|seq/i
   if (nested && typeof nested === 'object' && Array.isArray(nested.rows)) {
     for (const row of nested.rows) {
       if (!row || typeof row !== 'object') continue
       const label = String(/** @type {{ label?: unknown }} */ (row).label ?? '').trim()
       const value = String(/** @type {{ value?: unknown }} */ (row).value ?? '').trim()
       if (!value || value === '—' || value === '-' || value === '–') continue
-      parts.push(`${label}: ${value}`)
+      if (skipLabels.test(label)) continue
+      parts.push(value)
     }
   }
   if (!parts.length) {
     const flat = buildDollySection(body)
     parts = flat.rows
-      .filter((r) => r.value !== '—')
-      .map((r) => `${r.label}: ${r.value}`)
+      .filter((r) => r.value !== '—' && !skipLabels.test(r.label))
+      .map((r) => r.value)
   }
   if (!parts.length) return ''
-  return `Dolly | ${parts.join(' | ')}`
+  return `Dolly  #${parts[0]}${parts.length > 1 ? `  (${parts.slice(1).join(', ')})` : ''}`
 }
 
 /**
@@ -570,7 +572,6 @@ function pdfTrailerEquipmentLines(body) {
       const c = /** @type {Record<string, unknown>} */ (raw)
       const order = c.order != null ? String(c.order) : String(i + 1)
       const nbr = String(c.trlrNbr ?? '').trim()
-      const size = String(c.size ?? '').trim()
       const rows = Array.isArray(c.summaryRows) ? c.summaryRows : []
       /** @param {string} lab */
       const valFor = (lab) => {
@@ -586,15 +587,14 @@ function pdfTrailerEquipmentLines(body) {
       }
       const seal = valFor('Seal')
       const weight = valFor('Weight')
-      /** @type {string[]} */
-      const bits = [
-        `Trailer ${order}`,
-        nbr ? `#${nbr}` : '',
-        size,
+      let line = `Trailer ${order}`
+      if (nbr) line += `  #${nbr}`
+      const details = [
         seal && seal !== '—' ? `Seal ${seal}` : '',
         weight && weight !== '—' ? weight : '',
       ].filter(Boolean)
-      return bits.join(' | ')
+      if (details.length) line += `    ${details.join('    ')}`
+      return line
     })
   }
 
@@ -606,15 +606,14 @@ function pdfTrailerEquipmentLines(body) {
     const weightRow = c.summaryRows.find((r) => r.label === 'Weight')
     const weight =
       weightRow && weightRow.value !== '—' ? String(weightRow.value).trim() : ''
-    /** @type {string[]} */
-    const bits = [
-      `Trailer ${c.order}`,
-      c.trlrNbr ? `#${c.trlrNbr}` : '',
-      c.size,
+    let line = `Trailer ${c.order}`
+    if (c.trlrNbr) line += `  #${c.trlrNbr}`
+    const details = [
       seal ? `Seal ${seal}` : '',
       weight,
     ].filter(Boolean)
-    return bits.join(' | ')
+    if (details.length) line += `    ${details.join('    ')}`
+    return line
   })
 }
 
