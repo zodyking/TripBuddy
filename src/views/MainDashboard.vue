@@ -2323,15 +2323,19 @@ onUnmounted(() => {
         >
         <div class="trailer-card trailer-card--dolly" role="group" aria-label="Dolly you are carrying">
           <div
-            v-if="!tripDollySection.show"
-            class="trailer-card-header trailer-card-header--dolly-static"
+            class="dolly-card-top"
+            :role="tripDollySection.show ? 'button' : undefined"
+            :tabindex="tripDollySection.show ? 0 : undefined"
+            :aria-expanded="tripDollySection.show ? !!expandedDollyApi : undefined"
+            @click="tripDollySection.show && onDollyHeaderClick()"
+            @keydown.enter.space.prevent="tripDollySection.show && onDollyHeaderClick()"
           >
-            <div class="trailer-card-header-inline">
+            <div class="dolly-card-id">
               <span class="dolly-label">Dolly</span>
               <button
                 v-if="dollyPrimaryDisplay"
                 type="button"
-                class="trailer-nbr copyable-inline tap"
+                class="dolly-number-display copyable-inline tap"
                 title="Tap to copy"
                 @click.stop="copyTripDetailValue(dollyPrimaryDisplay, 'Dolly number')"
               >
@@ -2347,120 +2351,6 @@ onUnmounted(() => {
                 <template v-else-if="dollyRating === 'bad'">Bad</template>
                 <template v-else>Unrated</template>
               </span>
-            </div>
-            <div class="trailer-card-actions dolly-header-actions" @click.stop>
-              <div class="dolly-rate-inline" @click.stop>
-                <span class="dolly-rate-inline__lbl">Rate</span>
-                <button
-                  v-for="opt in [
-                    { k: 'good', t: '👍' },
-                    { k: 'bad', t: '👎' },
-                    { k: 'none', t: '·' },
-                  ]"
-                  :key="opt.k"
-                  type="button"
-                  class="trip-dolly-star tap dolly-star--header"
-                  :class="{ 'trip-dolly-star--on': dollyRating === opt.k }"
-                  :title="opt.k === 'none' ? 'Clear rating' : `Mark ${opt.k}`"
-                  :disabled="!dollyPrimaryDisplay"
-                  @click="setDollyRate(opt.k)"
-                >
-                  {{ opt.t }}
-                </button>
-              </div>
-              <button
-                v-if="!dollyAddOpen"
-                type="button"
-                class="dolly-add-tile tap"
-                title="Set dolly number"
-                aria-label="Add or change dolly number"
-                @click="dollyAddOpen = true"
-              >
-                +
-              </button>
-              <button
-                v-else
-                type="button"
-                class="dolly-add-tile dolly-add-tile--active tap"
-                title="Close add dolly"
-                aria-label="Close"
-                @click="(dollyAddOpen = false), (dollyAddDigits = '')"
-              >
-                ×
-              </button>
-            </div>
-          </div>
-          <div
-            v-else
-            class="trailer-card-header"
-            role="button"
-            tabindex="0"
-            :aria-expanded="!!expandedDollyApi"
-            @click="onDollyHeaderClick"
-            @keydown.enter.space.prevent="onDollyHeaderClick"
-          >
-            <div class="trailer-card-header-inline">
-              <span class="dolly-label">Dolly</span>
-              <button
-                v-if="dollyPrimaryDisplay"
-                type="button"
-                class="trailer-nbr copyable-inline tap"
-                title="Tap to copy"
-                @click.stop="copyTripDetailValue(dollyPrimaryDisplay, 'Dolly number')"
-              >
-                #{{ dollyPrimaryDisplay }}
-              </button>
-              <span v-else class="dolly-nbr--empty" aria-hidden="true">—</span>
-              <span
-                v-if="dollyPrimaryDisplay"
-                class="dolly-rating-pill"
-                :class="`dolly-rating-pill--${dollyRating}`"
-              >
-                <template v-if="dollyRating === 'good'">Good</template>
-                <template v-else-if="dollyRating === 'bad'">Bad</template>
-                <template v-else>Unrated</template>
-              </span>
-            </div>
-            <div class="trailer-card-actions dolly-header-actions" @click.stop>
-              <div class="dolly-rate-inline" @click.stop>
-                <span class="dolly-rate-inline__lbl">Rate</span>
-                <button
-                  v-for="opt in [
-                    { k: 'good', t: '👍' },
-                    { k: 'bad', t: '👎' },
-                    { k: 'none', t: '·' },
-                  ]"
-                  :key="opt.k"
-                  type="button"
-                  class="trip-dolly-star tap dolly-star--header"
-                  :class="{ 'trip-dolly-star--on': dollyRating === opt.k }"
-                  :title="opt.k === 'none' ? 'Clear rating' : `Mark ${opt.k}`"
-                  :disabled="!dollyPrimaryDisplay"
-                  @click="setDollyRate(opt.k)"
-                >
-                  {{ opt.t }}
-                </button>
-              </div>
-              <button
-                v-if="!dollyAddOpen"
-                type="button"
-                class="dolly-add-tile tap"
-                title="Set dolly number"
-                aria-label="Add or change dolly number"
-                @click="dollyAddOpen = true"
-              >
-                +
-              </button>
-              <button
-                v-else
-                type="button"
-                class="dolly-add-tile dolly-add-tile--active tap"
-                title="Close add dolly"
-                aria-label="Close"
-                @click="(dollyAddOpen = false), (dollyAddDigits = '')"
-              >
-                ×
-              </button>
               <span
                 v-if="tripDollySection.show"
                 class="trailer-expand-icon"
@@ -2468,6 +2358,46 @@ onUnmounted(() => {
               >
                 {{ expandedDollyApi ? '−' : '+' }}
               </span>
+            </div>
+            <div class="dolly-card-actions" @click.stop>
+              <div class="dolly-rate-inline" @click.stop>
+                <button
+                  v-for="opt in [
+                    { k: 'good', t: '👍' },
+                    { k: 'bad', t: '👎' },
+                    { k: 'none', t: '·' },
+                  ]"
+                  :key="opt.k"
+                  type="button"
+                  class="trip-dolly-star tap dolly-star--header"
+                  :class="{ 'trip-dolly-star--on': dollyRating === opt.k }"
+                  :title="opt.k === 'none' ? 'Clear rating' : `Mark ${opt.k}`"
+                  :disabled="!dollyPrimaryDisplay"
+                  @click="setDollyRate(opt.k)"
+                >
+                  {{ opt.t }}
+                </button>
+              </div>
+              <button
+                v-if="!dollyAddOpen"
+                type="button"
+                class="dolly-add-tile tap"
+                title="Set dolly number"
+                aria-label="Add or change dolly number"
+                @click="dollyAddOpen = true"
+              >
+                +
+              </button>
+              <button
+                v-else
+                type="button"
+                class="dolly-add-tile dolly-add-tile--active tap"
+                title="Close add dolly"
+                aria-label="Close"
+                @click="(dollyAddOpen = false), (dollyAddDigits = '')"
+              >
+                ×
+              </button>
             </div>
           </div>
           <div
@@ -3101,9 +3031,9 @@ button.trailer-nbr.copyable-inline {
 }
 .driver-status-surface {
   margin-top: 0.15rem;
-  border: 1px solid rgba(255, 255, 255, 0.05);
+  border: 1px solid #34343e;
   border-radius: 10px;
-  background: rgba(24, 24, 31, 0.6);
+  background: #18181f;
   padding: 0.5rem 0.6rem 0.6rem;
 }
 .driver-status-fetching {
@@ -3431,8 +3361,8 @@ button.trailer-nbr.copyable-inline {
   min-width: 0;
   padding: 0.45rem 0.5rem;
   border-radius: 8px;
-  border: 1px solid rgba(255, 255, 255, 0.06);
-  background: rgba(34, 34, 44, 0.5);
+  border: 1px solid #34343e;
+  background: #22222c;
 }
 .linehaul-block {
   margin-top: 0.5rem;
@@ -3475,11 +3405,11 @@ button.trailer-nbr.copyable-inline {
 .trip-instructions-section {
   margin-bottom: 0.75rem;
   padding-top: 0.65rem;
-  border-top: 1px solid rgba(255, 255, 255, 0.04);
+  border-top: 1px solid #2e2e38;
 }
 .trip-equipment-section {
   padding-top: 0.65rem;
-  border-top: 1px solid rgba(255, 255, 255, 0.04);
+  border-top: 1px solid #2e2e38;
 }
 .trip-section-label {
   margin: 0 0 0.5rem;
@@ -3534,11 +3464,6 @@ button.trailer-nbr.copyable-inline {
 }
 .dispatch-instructions-body {
   margin-top: 0;
-  padding: 0.55rem 0.65rem;
-  border-radius: 8px;
-  background: rgba(255, 255, 255, 0.02);
-  border: 1px solid rgba(255, 255, 255, 0.04);
-  font-size: 0.88rem;
 }
 .trip-voice-unlock-banner {
   display: flex;
@@ -3676,8 +3601,8 @@ button.trailer-nbr.copyable-inline {
   gap: 0.5rem 0.75rem;
   padding: 0.65rem 0.75rem;
   border-radius: 10px;
-  background: linear-gradient(135deg, rgba(123, 77, 181, 0.06), rgba(59, 130, 246, 0.04));
-  border: 1px solid rgba(123, 77, 181, 0.15);
+  background: #22222c;
+  border: 1px solid #34343e;
   font-size: 0.85rem;
   width: 100%;
   box-sizing: border-box;
@@ -3759,12 +3684,34 @@ button.trailer-nbr.copyable-inline {
   white-space: nowrap;
   border: 0;
 }
-/* Dolly row: same card shell as trailers; first card in trip-details-wrap */
+/* ═══════════════════════════════════════════════════════════════════════════
+   DOLLY CARD — two-row layout: identity row + actions row
+   ═══════════════════════════════════════════════════════════════════════════ */
+.dolly-card-top {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  padding: 0.6rem 0.65rem;
+  background: #22222c;
+}
+.dolly-card-id {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  min-width: 0;
+}
+.dolly-card-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+}
 .trailer-card--dolly .dolly-label {
   font-weight: 700;
-  font-size: 1em;
-  line-height: 1.05;
-  color: var(--text, #e8e8ee);
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  line-height: 1;
+  color: var(--muted, #9898a8);
   flex: 0 0 auto;
   min-width: 0;
   white-space: nowrap;
@@ -3774,12 +3721,23 @@ button.trailer-nbr.copyable-inline {
   background: none;
   border: none;
 }
-.trailer-card--dolly .trailer-card-header-inline {
-  min-width: 0;
-  flex: 1;
-  justify-content: flex-start;
-  gap: clamp(0.2rem, 1.2vw, 0.35rem);
-  align-items: center;
+.dolly-number-display {
+  font-weight: 700;
+  font-size: 1rem;
+  line-height: 1.1;
+  color: var(--text, #e8e8ee);
+  font-variant-numeric: tabular-nums;
+  font-family: ui-monospace, 'Cascadia Code', 'Segoe UI Mono', monospace;
+  background: transparent;
+  border: none;
+  padding: 0;
+  margin: 0;
+  cursor: pointer;
+}
+.dolly-number-display:focus-visible {
+  outline: 2px solid var(--color-accent-purple, #7b4db5);
+  outline-offset: 2px;
+  border-radius: 4px;
 }
 .dolly-rating-pill {
   display: inline-flex;
@@ -3821,36 +3779,12 @@ button.trailer-nbr.copyable-inline {
   font-size: 1em;
   flex: 0 0 auto;
 }
-.dolly-header-actions {
-  display: flex;
-  align-items: center;
-  flex-wrap: nowrap;
-  flex-shrink: 0;
-  gap: 0.2rem;
-  min-width: 0;
-  max-width: 46%;
-}
-.dolly-header-actions .dolly-add-tile {
-  flex: 0 0 auto;
-}
-.dolly-header-actions .trailer-expand-icon {
-  flex: 0 0 auto;
-}
 .dolly-rate-inline {
   display: flex;
   align-items: center;
-  gap: 0.1rem;
+  gap: 0.25rem;
   min-width: 0;
   flex: 0 1 auto;
-}
-.dolly-rate-inline__lbl {
-  display: none;
-  font-size: 0.58rem;
-  text-transform: uppercase;
-  color: #8a8a98;
-  font-weight: 600;
-  flex-shrink: 0;
-  margin-right: 0.1rem;
 }
 .trip-dolly-star {
   min-width: 1.9rem;
@@ -3910,7 +3844,13 @@ button.trailer-nbr.copyable-inline {
 }
 .trailer-card-header--dolly-static {
   cursor: default;
-  pointer-events: auto;
+}
+.trailer-card--dolly .trailer-card-header-inline {
+  min-width: 0;
+  flex: 1;
+  justify-content: flex-start;
+  gap: clamp(0.2rem, 1.2vw, 0.35rem);
+  align-items: center;
 }
 .trailer-card--dolly .dolly-compact-btn {
   min-height: 1.9rem;
@@ -4106,8 +4046,8 @@ button.trailer-nbr.copyable-inline {
   object-position: top center;
 }
 .quick-actions-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 12rem), 1fr));
+  display: flex;
+  flex-direction: column;
   gap: var(--space-3, 0.75rem);
 }
 .quick-action-btn {
@@ -4115,7 +4055,6 @@ button.trailer-nbr.copyable-inline {
   min-height: var(--touch-target, 2.75rem);
   padding: var(--space-3, 0.75rem) var(--space-4, 1rem);
   font-size: var(--text-base, 0.9375rem);
-  border-radius: 10px;
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
@@ -4176,15 +4115,14 @@ button.trailer-nbr.copyable-inline {
    ═══════════════════════════════════════════════════════════════════════════ */
 
 .trailer-card {
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  border: 1px solid #34343e;
   border-radius: 10px;
-  background: rgba(30, 30, 38, 0.6);
+  background: #1e1e26;
   overflow: hidden;
-  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+  transition: border-color 0.15s ease;
 }
 .trailer-card:hover {
-  border-color: rgba(123, 77, 181, 0.2);
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+  border-color: #48485a;
 }
 .trailer-card-header {
   display: flex;
@@ -4194,7 +4132,7 @@ button.trailer-nbr.copyable-inline {
   padding: 0.55rem 0.65rem;
   cursor: pointer;
   user-select: none;
-  background: rgba(34, 34, 44, 0.5);
+  background: #22222c;
 }
 .trailer-card-header:focus-visible {
   outline: 2px solid var(--color-accent-purple, #7b4db5);
@@ -4348,8 +4286,8 @@ button.trailer-nbr.copyable-inline {
 }
 .trailer-card-summary {
   padding: 0.5rem 0.75rem;
-  border-top: 1px solid rgba(255, 255, 255, 0.04);
-  background: rgba(26, 26, 34, 0.5);
+  border-top: 1px solid #2e2e38;
+  background: #1a1a22;
 }
 .trailer-summary-dl {
   display: grid;
