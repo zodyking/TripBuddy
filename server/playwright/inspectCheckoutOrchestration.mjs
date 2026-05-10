@@ -46,7 +46,7 @@ const RX = {
 const WARN_MODAL_MS = 4_000
 const BEGIN_INSPECTION_MS = 20_000
 const AFTER_CLICK_MS = 2_500
-const IDLE_EXIT_MS = 18_000
+const IDLE_EXIT_MS = 24_000
 const POLL_MS = 450
 const MAX_DOLLY_ATTEMPTS = 6
 const DOLLY_SUCCESS_WAIT_MS = 18_000
@@ -385,7 +385,9 @@ async function isInspectionChecklistScreen(page) {
 }
 
 /**
- * Check if we're on the Review and Start Trip / Dispatch Summary screen (primary DISPATCH action).
+ * Check if we're on the Review and Start Trip / Dispatch Summary screen.
+ * FedEx renders the DISPATCH action as various element types (<button>, <a>, styled <div>)
+ * so we try multiple strategies.
  * @param {import('playwright').Page} page
  */
 async function isDispatchScreen(page) {
@@ -393,31 +395,53 @@ async function isDispatchScreen(page) {
   if (await dispatchRole.isVisible().catch(() => false)) return true
   const dispatchBtn = buttonLikeByVisibleText(page, RX.dispatch).first()
   if (await dispatchBtn.isVisible().catch(() => false)) return true
-  const summaryHint =
+
+  const onSummaryPage =
     (await page.getByText(RX.dispatchSummary).first().isVisible().catch(() => false)) ||
     (await page.getByText(RX.reviewStartTrip).first().isVisible().catch(() => false))
-  if (summaryHint) {
-    const loose = page.getByRole('button', { name: /dispatch/i }).first()
-    return await loose.isVisible().catch(() => false)
+
+  if (onSummaryPage) {
+    const looseRole = page.getByRole('button', { name: /dispatch/i }).first()
+    if (await looseRole.isVisible().catch(() => false)) return true
+    const looseLink = page.getByRole('link', { name: /dispatch/i }).first()
+    if (await looseLink.isVisible().catch(() => false)) return true
+    const anyClickable = page
+      .locator('a, button, [role="button"], [class*="button"], [class*="btn"]')
+      .filter({ hasText: /dispatch/i })
+      .first()
+    if (await anyClickable.isVisible().catch(() => false)) return true
+    const textOnly = page.getByText(/^dispatch$/i).first()
+    if (await textOnly.isVisible().catch(() => false)) return true
   }
   return false
 }
 
 /**
- * Check if dispatch confirmation modal is visible.
+ * Check if dispatch confirmation modal ("Do you wish to Dispatch?") is visible.
  * @param {import('playwright').Page} page
  */
 async function isDispatchConfirmModal(page) {
   const modalText = page.getByText(/do you wish to dispatch/i).first()
   const hasModal = await modalText.isVisible().catch(() => false)
-  if (!hasModal) return false
+  if (!hasModal) {
+    const altText = page.getByText(/once dispatched.*trip will begin/i).first()
+    if (!(await altText.isVisible().catch(() => false))) return false
+  }
   const yesRole = page.getByRole('button', { name: /^yes$/i }).first()
   if (await yesRole.isVisible().catch(() => false)) return true
   const yesBtn = buttonLikeByVisibleText(page, RX.dispatchConfirmYes).first()
-  return await yesBtn.isVisible().catch(() => false)
+  if (await yesBtn.isVisible().catch(() => false)) return true
+  const yesLink = page.getByRole('link', { name: /^yes$/i }).first()
+  if (await yesLink.isVisible().catch(() => false)) return true
+  const yesAny = page
+    .locator('a, button, [role="button"], [class*="button"], [class*="btn"]')
+    .filter({ hasText: /^yes$/i })
+    .first()
+  return await yesAny.isVisible().catch(() => false)
 }
 
 /**
+ * Click the DISPATCH button using multiple fallback strategies.
  * @param {import('playwright').Page} page
  */
 async function clickDispatchButton(page) {
@@ -426,10 +450,30 @@ async function clickDispatchButton(page) {
     await dispatchRole.click()
     return
   }
-  await buttonLikeByVisibleText(page, RX.dispatch).first().click()
+  const dispatchBtn = buttonLikeByVisibleText(page, RX.dispatch).first()
+  if (await dispatchBtn.isVisible().catch(() => false)) {
+    await dispatchBtn.click()
+    return
+  }
+  const dispatchLink = page.getByRole('link', { name: /dispatch/i }).first()
+  if (await dispatchLink.isVisible().catch(() => false)) {
+    await dispatchLink.click()
+    return
+  }
+  const anyClickable = page
+    .locator('a, button, [role="button"], [class*="button"], [class*="btn"]')
+    .filter({ hasText: /dispatch/i })
+    .first()
+  if (await anyClickable.isVisible().catch(() => false)) {
+    await anyClickable.click()
+    return
+  }
+  const textEl = page.getByText(/^dispatch$/i).first()
+  await textEl.click()
 }
 
 /**
+ * Click YES on the dispatch confirmation modal using multiple fallbacks.
  * @param {import('playwright').Page} page
  */
 async function clickDispatchConfirmYes(page) {
@@ -438,7 +482,25 @@ async function clickDispatchConfirmYes(page) {
     await yesRole.click()
     return
   }
-  await buttonLikeByVisibleText(page, RX.dispatchConfirmYes).first().click()
+  const yesBtn = buttonLikeByVisibleText(page, RX.dispatchConfirmYes).first()
+  if (await yesBtn.isVisible().catch(() => false)) {
+    await yesBtn.click()
+    return
+  }
+  const yesLink = page.getByRole('link', { name: /^yes$/i }).first()
+  if (await yesLink.isVisible().catch(() => false)) {
+    await yesLink.click()
+    return
+  }
+  const yesAny = page
+    .locator('a, button, [role="button"], [class*="button"], [class*="btn"]')
+    .filter({ hasText: /^yes$/i })
+    .first()
+  if (await yesAny.isVisible().catch(() => false)) {
+    await yesAny.click()
+    return
+  }
+  await page.getByText(/^yes$/i).first().click()
 }
 
 /**
@@ -494,10 +556,19 @@ export async function runInspectCheckoutAfterGate(page, opts) {
     ...(tripData && typeof tripData === 'object' ? tripData : {}),
   }
 
-  // Track used seal candidates to avoid re-trying
-  const triedSeals = new Set()
+  /** Per-trailer seal tracking — seals that failed for trailer N may still be valid for trailer M (swap). */
+  /** @type {Map<number, Set<string>>} */
+  const triedSealsByTrailer = new Map()
+  /** @param {number} idx 1-based trailer index */
+  const getTriedSeals = (idx) => {
+    if (!triedSealsByTrailer.has(idx)) triedSealsByTrailer.set(idx, new Set())
+    return /** @type {Set<string>} */ (triedSealsByTrailer.get(idx))
+  }
+  let batchSealsAttempted = false
   let lastProgress = Date.now()
   let dollyAttempts = 0
+  let dispatchClicked = false
+  let checklistDone = false
 
   const aborted = () => {
     if (signal?.aborted) throw new Error('Aborted')
@@ -545,9 +616,19 @@ export async function runInspectCheckoutAfterGate(page, opts) {
     // --- Dispatch screen (Review and Start Trip / Dispatch Summary) ---
     if (await isDispatchScreen(page)) {
       await clickDispatchButton(page)
+      dispatchClicked = true
       log('info', 'Clicked DISPATCH button')
       lastProgress = Date.now()
       await page.waitForTimeout(AFTER_CLICK_MS)
+
+      // Wait briefly for the confirmation modal to appear
+      const dWait = Date.now()
+      while (Date.now() - dWait < DISPATCH_CONFIRM_WAIT_MS) {
+        aborted()
+        if (await isDispatchConfirmModal(page)) break
+        if (await isDispatchedSuccessScreen(page)) break
+        await page.waitForTimeout(POLL_MS)
+      }
       continue
     }
 
@@ -559,9 +640,20 @@ export async function runInspectCheckoutAfterGate(page, opts) {
       const agreeBtn = buttonLikeByVisibleText(page, RX.agreeAndCheckOut).first()
       if (await agreeBtn.isVisible().catch(() => false)) {
         await agreeBtn.click()
+        checklistDone = true
         log('info', 'Clicked AGREE AND CHECK OUT')
         lastProgress = Date.now()
         await page.waitForTimeout(AFTER_CLICK_MS)
+
+        // Wait for the dispatch summary screen to load after checklist
+        const cWait = Date.now()
+        while (Date.now() - cWait < DISPATCH_CONFIRM_WAIT_MS) {
+          aborted()
+          if (await isDispatchScreen(page)) break
+          if (await isDispatchedSuccessScreen(page)) break
+          if (await isDispatchConfirmModal(page)) break
+          await page.waitForTimeout(POLL_MS)
+        }
       }
       continue
     }
@@ -591,67 +683,63 @@ export async function runInspectCheckoutAfterGate(page, opts) {
       }
     }
 
-    // --- Dolly entry ---
+    // --- Dolly entry — try every candidate from trip data before prompting ---
     if (await isDollyEntryScreen(page)) {
       dollyAttempts += 1
       if (dollyAttempts > MAX_DOLLY_ATTEMPTS) {
         throw new Error('Inspect: dolly validation failed too many times')
       }
 
-      // Get dolly candidates from trip data
       const dollyCandidates = getDollyCandidates(tripDataEffective)
-      let val = dollyCandidates[0] || ''
+      let dollyAdvanced = false
 
-      // If no dolly in trip data, prompt driver
-      if (!val) {
-        val = (
+      for (const candidate of dollyCandidates) {
+        aborted()
+        const dollyInput = await findInputByLabel(page, /dolly/i)
+        if (!dollyInput?.input) break
+
+        await dollyInput.input.fill(candidate)
+        log('info', `Trying dolly candidate: ${candidate}`)
+
+        const vd = buttonLikeByVisibleText(page, RX.validateDolly).first()
+        await vd.click()
+        lastProgress = Date.now()
+        await page.waitForTimeout(AFTER_CLICK_MS)
+
+        const t0 = Date.now()
+        while (Date.now() - t0 < DOLLY_SUCCESS_WAIT_MS) {
+          aborted()
+          if (await isDollySuccessScreen(page)) { dollyAdvanced = true; break }
+          if (!(await isDollyEntryScreen(page))) { dollyAdvanced = true; break }
+          await page.waitForTimeout(350)
+        }
+
+        if (dollyAdvanced) {
+          log('info', `Dolly validated: ${candidate}`)
+          lastProgress = Date.now()
+          break
+        }
+        log('warn', `Dolly candidate rejected: ${candidate} — trying next`)
+      }
+
+      if (!dollyAdvanced && (await isDollyEntryScreen(page))) {
+        log('info', 'All dolly candidates exhausted — prompting driver')
+        const val = (
           await waitForInspectField({
             field: 'dolly',
             message: buildPromptMessage('dolly', 0),
           })
         ).trim()
-      }
+        if (!val) throw new Error('Inspect: dolly number required')
 
-      if (!val) {
-        throw new Error('Inspect: dolly number required')
-      }
+        const dollyInput = await findInputByLabel(page, /dolly/i)
+        if (dollyInput?.input) await dollyInput.input.fill(val)
+        log('info', `Filled dolly number (driver): ${val}`)
 
-      const dollyInput = await findInputByLabel(page, /dolly/i)
-      if (dollyInput?.input) {
-        await dollyInput.input.fill(val)
-      }
-      log('info', `Filled dolly number: ${val}`)
-
-      const vd = buttonLikeByVisibleText(page, RX.validateDolly).first()
-      await vd.click()
-      lastProgress = Date.now()
-      await page.waitForTimeout(AFTER_CLICK_MS)
-
-      const t0 = Date.now()
-      let advanced = false
-      while (Date.now() - t0 < DOLLY_SUCCESS_WAIT_MS) {
-        aborted()
-        if (await isDollySuccessScreen(page)) {
-          advanced = true
-          lastProgress = Date.now()
-          break
-        }
-        if (!(await isDollyEntryScreen(page))) {
-          advanced = true
-          lastProgress = Date.now()
-          break
-        }
-        await page.waitForTimeout(350)
-      }
-
-      if (!advanced && (await isDollyEntryScreen(page))) {
-        log('warn', 'Dolly validation did not advance — prompting for re-entry')
-        val = (
-          await waitForInspectField({
-            field: 'dolly',
-            message: 'Dolly validation failed. Please re-enter dolly number.',
-          })
-        ).trim()
+        const vd = buttonLikeByVisibleText(page, RX.validateDolly).first()
+        await vd.click()
+        lastProgress = Date.now()
+        await page.waitForTimeout(AFTER_CLICK_MS)
       }
       continue
     }
@@ -663,28 +751,21 @@ export async function runInspectCheckoutAfterGate(page, opts) {
       const batchSeals =
         sealRows.length >= 2 ||
         (sealRows.length >= 1 && (await pluralSealsBtn.isVisible().catch(() => false)))
-      if (batchSeals) {
+      if (batchSeals && !batchSealsAttempted) {
+        batchSealsAttempted = true
         let filledAny = false
+        let missingCandidate = false
         for (const row of sealRows) {
           aborted()
           const trailerIndex = row.trailerIndex
           const sealCandidates = getSealCandidates(tripDataEffective, trailerIndex - 1)
-          let val = sealCandidates[0] || ''
-          if (!val) {
-            val = (
-              await waitForInspectField({
-                field: `trailer${trailerIndex}_seal`,
-                message: buildPromptMessage('seal', trailerIndex),
-              })
-            ).trim()
-          }
-          if (!val) throw new Error(`Inspect: seal required for Trailer ${trailerIndex}`)
+          const val = sealCandidates[0] || ''
+          if (!val) { missingCandidate = true; break }
           await row.input.fill(val)
-          triedSeals.add(val)
           filledAny = true
-          log('info', `Batch seal pre-fill Trailer ${trailerIndex}`)
+          log('info', `Batch seal pre-fill Trailer ${trailerIndex}: ${val}`)
         }
-        if (filledAny) {
+        if (filledAny && !missingCandidate) {
           const clickedValidate = await clickSealValidateButton(page)
           if (clickedValidate) {
             log('info', 'Clicked seal validation after batch trailer seal fill')
@@ -693,7 +774,7 @@ export async function runInspectCheckoutAfterGate(page, opts) {
             if (!(await hasInvalidSealError(page))) {
               continue
             }
-            log('warn', 'Batch seal validation failed — retrying with per-field handling')
+            log('warn', 'Batch seal validation failed — falling through to per-field swap handling')
           }
         }
       }
@@ -750,20 +831,17 @@ export async function runInspectCheckoutAfterGate(page, opts) {
 
       const detected = detectFieldType(labelText)
 
-      // --- SEAL NUMBER (loaded trailers) ---
+      // --- SEAL NUMBER (loaded trailers) — try all known seals (swap-aware) ---
       if (detected.type === 'seal') {
         const trailerIndex = detected.trailerIndex
+        const tried = getTriedSeals(trailerIndex)
         const sealCandidates = getSealCandidates(tripDataEffective, trailerIndex - 1)
+        const untried = sealCandidates.filter((s) => !tried.has(s))
 
-        // Filter out already-tried seals
-        const untried = sealCandidates.filter((s) => !triedSeals.has(s))
-
-        let val = ''
         let validationSuccess = false
 
-        // Try each seal candidate
         for (const candidate of untried) {
-          triedSeals.add(candidate)
+          tried.add(candidate)
           await input.fill(candidate)
           log('info', `Trying seal candidate: ${candidate} for Trailer ${trailerIndex}`)
 
@@ -774,25 +852,21 @@ export async function runInspectCheckoutAfterGate(page, opts) {
             await page.waitForTimeout(SEAL_VALIDATION_WAIT_MS)
           }
 
-          // Check for error
           if (await hasInvalidSealError(page)) {
-            log('warn', `Invalid seal number: ${candidate} — trying next`)
+            log('warn', `Invalid seal: ${candidate} for Trailer ${trailerIndex} — trying next`)
             await input.clear()
             await page.waitForTimeout(500)
             continue
           }
 
-          // Success - seal was accepted
-          val = candidate
           validationSuccess = true
-          log('info', `Seal validated successfully: ${candidate}`)
+          log('info', `Seal validated: ${candidate} for Trailer ${trailerIndex}`)
           break
         }
 
-        // If all candidates failed, prompt driver as last resort
         if (!validationSuccess) {
-          log('info', 'All seal candidates exhausted — prompting driver')
-          val = (
+          log('info', `All seal candidates exhausted for Trailer ${trailerIndex} — prompting driver`)
+          const val = (
             await waitForInspectField({
               field: `trailer${trailerIndex}_seal`,
               message: buildPromptMessage('seal', trailerIndex),
@@ -805,7 +879,7 @@ export async function runInspectCheckoutAfterGate(page, opts) {
           const validateBtn = buttonLikeByVisibleText(page, RX.validateSeal).first()
           if (await validateBtn.isVisible().catch(() => false)) {
             await validateBtn.click()
-            log('info', `Clicked VALIDATE SEAL with driver-provided value: ${val}`)
+            log('info', `Clicked VALIDATE SEAL with driver value: ${val}`)
             lastProgress = Date.now()
             await page.waitForTimeout(AFTER_CLICK_MS)
           }
@@ -870,18 +944,19 @@ export async function runInspectCheckoutAfterGate(page, opts) {
 
       const upper = ph.toUpperCase()
 
-      // Seal by placeholder
+      // Seal by placeholder — swap-aware: try all known seals per-trailer
       if (/SEAL/i.test(upper) && /TRAILER|TRLR|\d/.test(upper)) {
         const trailerIndex = extractTrailerIndex(ph)
+        const tried = getTriedSeals(trailerIndex)
         const sealCandidates = getSealCandidates(tripDataEffective, trailerIndex - 1)
-        const untried = sealCandidates.filter((s) => !triedSeals.has(s))
+        const untried = sealCandidates.filter((s) => !tried.has(s))
 
         let validationSuccess = false
 
         for (const candidate of untried) {
-          triedSeals.add(candidate)
+          tried.add(candidate)
           await el.fill(candidate)
-          log('info', `Trying seal (placeholder): ${candidate}`)
+          log('info', `Trying seal (placeholder): ${candidate} for Trailer ${trailerIndex}`)
 
           const btn = buttonLikeByVisibleText(page, RX.validateSeal).first()
           if (await btn.isVisible().catch(() => false)) {
@@ -891,7 +966,7 @@ export async function runInspectCheckoutAfterGate(page, opts) {
           }
 
           if (await hasInvalidSealError(page)) {
-            log('warn', `Invalid seal: ${candidate}`)
+            log('warn', `Invalid seal: ${candidate} for Trailer ${trailerIndex}`)
             await el.clear()
             await page.waitForTimeout(500)
             continue
@@ -902,6 +977,7 @@ export async function runInspectCheckoutAfterGate(page, opts) {
         }
 
         if (!validationSuccess) {
+          log('info', `All seal candidates exhausted for Trailer ${trailerIndex} — prompting driver`)
           const val = (
             await waitForInspectField({
               field: `trailer${trailerIndex}_seal`,
@@ -952,8 +1028,22 @@ export async function runInspectCheckoutAfterGate(page, opts) {
 
     if (handled) continue
 
-    // Idle exit
+    // Idle exit — report failure if dispatch was never completed
     if (Date.now() - lastProgress > IDLE_EXIT_MS) {
+      if (checklistDone && !dispatchClicked) {
+        log('warn', 'Inspect & Check Out: timed out after checklist — DISPATCH button was never clicked', {
+          inspectCheckoutPhaseDone: true,
+          dispatched: false,
+        })
+        return { ok: false, reason: 'dispatch_not_clicked' }
+      }
+      if (dispatchClicked) {
+        log('warn', 'Inspect & Check Out: timed out after clicking DISPATCH — "You are Dispatched!" never appeared', {
+          inspectCheckoutPhaseDone: true,
+          dispatched: false,
+        })
+        return { ok: false, reason: 'dispatch_not_confirmed' }
+      }
       log('info', 'Inspect & Check Out: no recognized screen for idle window — completing', {
         inspectCheckoutPhaseDone: true,
       })

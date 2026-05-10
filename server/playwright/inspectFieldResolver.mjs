@@ -56,20 +56,62 @@ function pickTrailerSealString(tr) {
 }
 
 /**
- * Seal candidates for one trailer field only. FedEx validates each seal against its trailer slot —
- * never reuse another trailer's seal here (that caused trailer‑2 seals to be wasted on trailer‑1).
+ * Seal candidates for a trailer field. Returns the preferred trailer's seal first,
+ * then seals from other trailers — because sometimes seals are physically swapped
+ * between trailers. The caller should try each candidate one-at-a-time until one
+ * is accepted, and only prompt the user when every candidate has been rejected.
  * @param {TripData} tripData
  * @param {number} preferredIndex 0-based index in `tripData.trailers` array order
  * @returns {string[]}
  */
 export function getSealCandidates(tripData, preferredIndex) {
   const trailers = tripData?.trailers || []
+  /** @type {string[]} */
+  const candidates = []
+  const seen = new Set()
+
   const preferred = trailers[preferredIndex]
-  if (!preferred || typeof preferred !== 'object') return []
-  const tr = /** @type {Record<string, unknown>} */ (preferred)
-  const raw = pickTrailerSealString(tr)
-  if (!raw) return []
-  return [raw]
+  if (preferred && typeof preferred === 'object') {
+    const raw = pickTrailerSealString(/** @type {Record<string, unknown>} */ (preferred))
+    if (raw && !seen.has(raw)) {
+      candidates.push(raw)
+      seen.add(raw)
+    }
+  }
+
+  for (let i = 0; i < trailers.length; i++) {
+    if (i === preferredIndex) continue
+    const tr = trailers[i]
+    if (!tr || typeof tr !== 'object') continue
+    const raw = pickTrailerSealString(/** @type {Record<string, unknown>} */ (tr))
+    if (raw && !seen.has(raw)) {
+      candidates.push(raw)
+      seen.add(raw)
+    }
+  }
+
+  return candidates
+}
+
+/**
+ * All unique seal numbers across every trailer in the trip data.
+ * @param {TripData} tripData
+ * @returns {string[]}
+ */
+export function getAllSealNumbers(tripData) {
+  const trailers = tripData?.trailers || []
+  /** @type {string[]} */
+  const seals = []
+  const seen = new Set()
+  for (const tr of trailers) {
+    if (!tr || typeof tr !== 'object') continue
+    const raw = pickTrailerSealString(/** @type {Record<string, unknown>} */ (tr))
+    if (raw && !seen.has(raw)) {
+      seals.push(raw)
+      seen.add(raw)
+    }
+  }
+  return seals
 }
 
 /**
