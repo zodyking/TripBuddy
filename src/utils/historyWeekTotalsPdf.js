@@ -2,10 +2,9 @@ import { jsPDF } from 'jspdf'
 import autoTable from 'jspdf-autotable'
 
 /**
- * jsPDF WinAnsi fonts cannot render common Unicode punctuation from UI strings.
  * @param {string} s
  */
-function asciiPdfText(s) {
+function ascii(s) {
   return String(s ?? '')
     .replace(/\u2192/g, '->')
     .replace(/\u2013|\u2014/g, '-')
@@ -15,21 +14,13 @@ function asciiPdfText(s) {
     .replace(/[\u2018\u2019]/g, "'")
 }
 
-/**
- * @param {string} s
- */
-function sanitizeFilenameSegment(s) {
-  return String(s || '')
-    .trim()
-    .replace(/[^\w\-]+/g, '-')
-    .replace(/^-+|-+$/g, '')
-    .slice(0, 80) || 'week'
+/** @param {string} s */
+function slug(s) {
+  return String(s || '').trim().replace(/[^\w\-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 80) || 'week'
 }
 
-/**
- * @param {number} n
- */
-function formatMi(n) {
+/** @param {number} n */
+function fmtMi(n) {
   if (!Number.isFinite(n)) return '-'
   const r = Math.round(n * 10) / 10
   return Number.isInteger(r) ? String(r) : r.toFixed(1)
@@ -73,433 +64,251 @@ function formatMi(n) {
  * }} WeekTotalsPdfOpts
  */
 
-/**
- * @param {WeekTotalsPdfOpts} opts
- */
+/* ───────── Color palette ────────── */
+const C = {
+  navy:    [17, 24, 39],
+  dark:    [31, 41, 55],
+  mid:     [75, 85, 99],
+  slate:   [107, 114, 128],
+  light:   [156, 163, 175],
+  rule:    [209, 213, 219],
+  bg:      [243, 244, 246],
+  bgAlt:   [249, 250, 251],
+  white:   [255, 255, 255],
+  accent:  [79, 70, 229],
+  accentL: [99, 102, 241],
+}
+
+/** @param {WeekTotalsPdfOpts} opts */
 export function downloadHistoryWeekTotalsPdf(opts) {
-  const docTitle = asciiPdfText(
-    opts.documentTitle?.trim() || 'Weekly Billable Mileage Report',
-  )
+  const title = ascii(opts.documentTitle?.trim() || 'Weekly Mileage Report')
+  const genAt = typeof opts.generatedAtMs === 'number' && Number.isFinite(opts.generatedAtMs)
+    ? new Date(opts.generatedAtMs) : new Date()
+  const genLabel = genAt.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })
 
-  const generatedAt =
-    typeof opts.generatedAtMs === 'number' && Number.isFinite(opts.generatedAtMs)
-      ? new Date(opts.generatedAtMs)
-      : new Date()
+  const doc = new jsPDF({ unit: 'mm', format: 'letter', orientation: 'portrait', compress: true })
+  const W = doc.internal.pageSize.getWidth()
+  const H = doc.internal.pageSize.getHeight()
+  const MX = 12
+  const MT = 12
+  const MB = 14
+  const IW = W - MX * 2
+  const totalTrips = opts.days.reduce((s, d) => s + d.rows.length, 0)
 
-  const doc = new jsPDF({
-    unit: 'mm',
-    format: 'letter',
-    orientation: 'portrait',
-    compress: true,
-  })
-
-  const pageW = doc.internal.pageSize.getWidth()
-  const pageH = doc.internal.pageSize.getHeight()
-
-  const marginX = 7
-  const marginTop = 8
-  const marginBottom = 10
-  const innerW = pageW - marginX * 2
-
-  const colors = {
-    ink: [15, 23, 42],
-    muted: [71, 85, 105],
-    faint: [100, 116, 139],
-    line: [203, 213, 225],
-    softLine: [226, 232, 240],
-    header: [30, 41, 59],
-    soft: [248, 250, 252],
-    softer: [252, 252, 254],
-    band: [241, 245, 249],
-    dayBand: [226, 232, 240],
-    white: [255, 255, 255],
-  }
-
-  const generatedLabel = generatedAt.toLocaleString(undefined, {
-    dateStyle: 'medium',
-    timeStyle: 'short',
-  })
-
-  const allTripRows = opts.days.reduce((sum, day) => sum + day.rows.length, 0)
-
-  function drawPageFrame() {
-    doc.setDrawColor(...colors.softLine)
-    doc.setLineWidth(0.15)
-    doc.line(marginX, pageH - 8, pageW - marginX, pageH - 8)
+  /* ══════════ Page frame (footer) ═══════ */
+  function pageFrame() {
+    doc.setDrawColor(...C.rule)
+    doc.setLineWidth(0.2)
+    doc.line(MX, H - MB + 2, W - MX, H - MB + 2)
 
     doc.setFont('helvetica', 'normal')
-    doc.setFontSize(5.4)
-    doc.setTextColor(...colors.faint)
-
-    doc.text(
-      'Confidential | Driver reference only | Not an official FedEx document',
-      marginX,
-      pageH - 4.5,
-    )
+    doc.setFontSize(6.5)
+    doc.setTextColor(...C.light)
+    doc.text('Confidential  |  Driver reference only  |  Not an official FedEx document', MX, H - MB + 6)
+    doc.text(`Generated ${genLabel}`, W - MX, H - MB + 6, { align: 'right' })
   }
 
-  function drawHeader() {
-    let y = marginTop
+  /* ══════════ Header ═══════ */
+  let y = MT
+
+  doc.setFillColor(...C.navy)
+  doc.rect(0, 0, W, 28, 'F')
+
+  doc.setFont('helvetica', 'bold')
+  doc.setFontSize(14)
+  doc.setTextColor(...C.white)
+  doc.text(title, MX, y + 6)
+
+  doc.setFont('helvetica', 'normal')
+  doc.setFontSize(8)
+  doc.setTextColor(180, 190, 210)
+  doc.text(ascii(opts.weekRangeLabel), MX, y + 12)
+
+  const metaRight = [
+    opts.calendarContext?.trim(),
+    `Grouping: ${opts.groupingModeLabel}`,
+  ].filter(Boolean).map(ascii).join('  |  ')
+  if (metaRight) {
+    doc.setFontSize(6.5)
+    doc.text(metaRight, W - MX, y + 12, { align: 'right' })
+  }
+
+  y = 32
+
+  /* ══════════ Driver / Truck info blocks ═══════ */
+  const boxGap = 4
+  const boxW = (IW - boxGap) / 2
+  const boxH = 22
+
+  /** @param {number} x @param {number} bY @param {string} label @param {string} body */
+  function infoBox(x, bY, label, body) {
+    doc.setFillColor(...C.bg)
+    doc.setDrawColor(...C.rule)
+    doc.setLineWidth(0.2)
+    doc.roundedRect(x, bY, boxW, boxH, 2, 2, 'FD')
 
     doc.setFont('helvetica', 'bold')
-    doc.setFontSize(11)
-    doc.setTextColor(...colors.ink)
-    doc.text(docTitle, marginX, y + 4)
+    doc.setFontSize(7)
+    doc.setTextColor(...C.accent)
+    doc.text(label.toUpperCase(), x + 4, bY + 5)
 
     doc.setFont('helvetica', 'normal')
-    doc.setFontSize(6)
-    doc.setTextColor(...colors.muted)
-
-    const subLine = [
-      opts.calendarContext?.trim(),
-      `Report Period: ${opts.weekRangeLabel}`,
-      `Grouping: ${opts.groupingModeLabel}`,
-      `Generated: ${generatedLabel}`,
-    ]
-      .filter(Boolean)
-      .map(asciiPdfText)
-      .join('   |   ')
-
-    doc.text(doc.splitTextToSize(subLine, innerW), marginX, y + 8.5)
-
-    y += 13
-
-    doc.setDrawColor(...colors.header)
-    doc.setLineWidth(0.45)
-    doc.line(marginX, y, pageW - marginX, y)
-
-    return y + 3
+    doc.setFontSize(7.5)
+    doc.setTextColor(...C.navy)
+    const lines = doc.splitTextToSize(ascii(body), boxW - 8)
+    doc.text(lines.slice(0, 5), x + 4, bY + 9.5, { lineHeightFactor: 1.35 })
   }
 
-  function drawInfoBoxes(startY) {
-    const gap = 2
-    const boxW = (innerW - gap * 2) / 3
-    const boxH = 17
+  infoBox(MX, y, 'Driver', opts.driverBlock?.trim() || '-')
+  infoBox(MX + boxW + boxGap, y, 'Truck', opts.truckBlock?.trim() || '-')
+  y += boxH + 3
 
-    const boxes = [
-      {
-        title: 'Driver',
-        value: opts.driverBlock?.trim() || '-',
-      },
-      {
-        title: 'Truck',
-        value: opts.truckBlock?.trim() || '-',
-      },
-      {
-        title: 'Summary',
-        value: [
-          `Trips: ${allTripRows}`,
-          `Billable: ${formatMi(opts.sumBillable)} mi`,
-          `Rounding: ${opts.roundingBandMin}-${opts.roundingBandMax} mi = ${opts.roundingToMi} mi`,
-        ].join('\n'),
-      },
-    ]
+  /* ══════════ Summary bar ═══════ */
+  doc.setFillColor(...C.bg)
+  doc.setDrawColor(...C.rule)
+  doc.setLineWidth(0.2)
+  doc.roundedRect(MX, y, IW, 10, 2, 2, 'FD')
 
-    boxes.forEach((box, i) => {
-      const x = marginX + i * (boxW + gap)
+  const stats = [
+    `${totalTrips} Trips`,
+    `${fmtMi(opts.sumBillable)} Billable Miles`,
+    `Rounding: ${opts.roundingBandMin}-${opts.roundingBandMax} mi = ${opts.roundingToMi} mi`,
+  ]
+  doc.setFont('helvetica', 'bold')
+  doc.setFontSize(7.5)
+  doc.setTextColor(...C.navy)
+  doc.text(stats.join('     |     '), MX + 4, y + 6.2)
+  y += 13
 
-      doc.setFillColor(...colors.soft)
-      doc.setDrawColor(...colors.line)
-      doc.setLineWidth(0.15)
-      doc.roundedRect(x, startY, boxW, boxH, 1.5, 1.5, 'FD')
+  doc.setFont('helvetica', 'normal')
+  doc.setFontSize(6)
+  doc.setTextColor(...C.slate)
+  doc.text('Billable miles match on-screen History totals. Paid miles in the rounding band count at the rounded value; missing paid mileage counts as 0. Unofficial estimate.', MX, y, { maxWidth: IW })
+  y += 6
 
-      doc.setFont('helvetica', 'bold')
-      doc.setFontSize(5.8)
-      doc.setTextColor(...colors.header)
-      doc.text(asciiPdfText(box.title).toUpperCase(), x + 2, startY + 4)
-
-      doc.setFont('helvetica', 'normal')
-      doc.setFontSize(5.7)
-      doc.setTextColor(...colors.ink)
-
-      const lines = doc.splitTextToSize(asciiPdfText(box.value), boxW - 4)
-      doc.text(lines.slice(0, 4), x + 2, startY + 7.3, {
-        lineHeightFactor: 1.05,
-      })
-    })
-
-    return startY + boxH + 3
-  }
-
-  function drawRuleNote(startY) {
-    const rule = `Billable miles match on-screen History totals. Paid miles ${opts.roundingBandMin}-${opts.roundingBandMax} count as ${opts.roundingToMi} mi; missing paid mileage counts as 0. Unofficial estimate only.`
-
-    doc.setFont('helvetica', 'normal')
-    doc.setFontSize(5.6)
-    doc.setTextColor(...colors.muted)
-
-    const lines = doc.splitTextToSize(asciiPdfText(rule), innerW)
-    doc.text(lines, marginX, startY, { lineHeightFactor: 1.05 })
-
-    return startY + lines.length * 2.4 + 2
-  }
-
-  let cursorY = drawHeader()
-  cursorY = drawInfoBoxes(cursorY)
-  cursorY = drawRuleNote(cursorY)
-
+  /* ══════════ Build table body ═══════ */
+  const COLS = 8
   /** @type {unknown[][]} */
-  const tableBody = []
-
-  const COL_COUNT = 9
+  const body = []
 
   if (!opts.days.length) {
-    tableBody.push([
-      {
-        content: 'No shift-day groups for this report.',
-        colSpan: COL_COUNT,
-        styles: {
-          fontStyle: 'italic',
-          textColor: colors.faint,
-          fontSize: 5.8,
-          halign: 'center',
-        },
-      },
-    ])
+    body.push([{ content: 'No trips for this period.', colSpan: COLS, styles: { fontStyle: 'italic', textColor: C.slate, halign: 'center' } }])
   }
 
   for (const day of opts.days) {
-    const dayLabel = asciiPdfText(day.dayLabel || 'Shift day')
+    body.push([{
+      content: `${ascii(day.dayLabel || 'Day').toUpperCase()}`,
+      colSpan: COLS - 1,
+      styles: { fillColor: C.navy, textColor: C.white, fontStyle: 'bold', fontSize: 7, cellPadding: { top: 1.8, bottom: 1.8, left: 3, right: 2 } },
+    }, {
+      content: `${fmtMi(day.sumBillable)} mi`,
+      styles: { fillColor: C.navy, textColor: C.white, fontStyle: 'bold', fontSize: 7, halign: 'right', cellPadding: { top: 1.8, bottom: 1.8, left: 2, right: 3 } },
+    }])
 
-    tableBody.push([
-      {
-        content: `${dayLabel.toUpperCase()}   |   DAY TOTAL: ${formatMi(day.sumBillable)} mi`,
-        colSpan: COL_COUNT,
-        styles: {
-          fillColor: colors.dayBand,
-          textColor: colors.header,
-          fontStyle: 'bold',
-          fontSize: 5.8,
-          cellPadding: { top: 1.25, bottom: 1.25, left: 1.6, right: 1.6 },
-        },
-      },
-    ])
-
-    day.rows.forEach((r, index) => {
-      const mi =
-        typeof r.billableMi === 'number' && Number.isFinite(r.billableMi)
-          ? `${formatMi(r.billableMi)}`
-          : '-'
-
-      const o = asciiPdfText(r.originId ?? '-')
-      const dest = asciiPdfText(r.destId ?? '-')
-      const wd = asciiPdfText(r.weekday ?? '-')
-      const dt = asciiPdfText(r.dispatchDate ?? '-')
-      const tm = asciiPdfText(r.dispatchTime ?? '-')
-      const leg = asciiPdfText(r.legLabel ?? '-')
-      const tractor = asciiPdfText(r.tractorNumber ?? '-')
-
-      tableBody.push([
-        String(index + 1),
-        o,
-        dest,
-        wd,
-        dt,
-        tm,
-        leg,
-        tractor,
-        mi,
+    day.rows.forEach((r, i) => {
+      const route = `${ascii(r.originId || '-')}  →  ${ascii(r.destId || '-')}`
+      body.push([
+        String(i + 1),
+        route,
+        ascii(r.weekday || '-'),
+        ascii(r.dispatchDate || '-'),
+        ascii(r.dispatchTime || '-'),
+        ascii(r.legLabel || '-'),
+        ascii(r.tractorNumber || '-'),
+        fmtMi(r.billableMi),
       ])
 
-      const equip = typeof r.equipmentBlock === 'string' ? r.equipmentBlock.trim() : ''
-      if (equip) {
-        tableBody.push([
-          {
-            content: asciiPdfText(equip),
-            colSpan: COL_COUNT,
-            __pdfEquipment: true,
-          },
-        ])
+      const eq = typeof r.equipmentBlock === 'string' ? r.equipmentBlock.trim() : ''
+      if (eq) {
+        body.push([{
+          content: ascii(eq),
+          colSpan: COLS,
+          _equip: true,
+        }])
       }
     })
   }
 
+  /* ══════════ Render table ═══════ */
   autoTable(doc, {
-    startY: cursorY,
-    tableWidth: innerW,
-    margin: {
-      left: marginX,
-      right: marginX,
-      bottom: marginBottom,
-    },
+    startY: y,
+    tableWidth: IW,
+    margin: { left: MX, right: MX, bottom: MB },
 
-    head: [
-      [
-        '#',
-        'Origin',
-        'Destination',
-        'Day',
-        'Date',
-        'Time',
-        'Leg #',
-        'Tractor',
-        'Billable Mi',
-      ],
-    ],
-    body: tableBody,
-
-    foot: [
-      [
-        {
-          content: 'WEEK TOTAL',
-          colSpan: 8,
-          styles: {
-            fontStyle: 'bold',
-            fillColor: colors.band,
-            textColor: colors.ink,
-            fontSize: 6,
-          },
-        },
-        {
-          content: `${formatMi(opts.sumBillable)} mi`,
-          colSpan: 1,
-          styles: {
-            fontStyle: 'bold',
-            halign: 'right',
-            fillColor: colors.band,
-            textColor: colors.ink,
-            fontSize: 6,
-          },
-        },
-      ],
-    ],
+    head: [['#', 'Route', 'Day', 'Date', 'Time', 'Leg', 'Tractor', 'Miles']],
+    body,
+    foot: [[
+      { content: 'WEEK TOTAL', colSpan: 7, styles: { fontStyle: 'bold', fillColor: C.navy, textColor: C.white, fontSize: 7.5 } },
+      { content: `${fmtMi(opts.sumBillable)} mi`, styles: { fontStyle: 'bold', halign: 'right', fillColor: C.navy, textColor: C.white, fontSize: 7.5 } },
+    ]],
 
     theme: 'grid',
 
     styles: {
       font: 'helvetica',
-      fontSize: 5.2,
-      minCellHeight: 3.5,
-      cellPadding: {
-        top: 0.85,
-        bottom: 0.85,
-        left: 1.35,
-        right: 1.35,
-      },
+      fontSize: 7,
+      minCellHeight: 5,
+      cellPadding: { top: 1.2, bottom: 1.2, left: 2, right: 2 },
       overflow: 'linebreak',
-      textColor: colors.ink,
-      lineColor: colors.softLine,
-      lineWidth: 0.08,
+      textColor: C.dark,
+      lineColor: C.rule,
+      lineWidth: 0.1,
       valign: 'middle',
     },
 
     headStyles: {
-      fillColor: colors.header,
-      textColor: colors.white,
+      fillColor: C.dark,
+      textColor: C.white,
       fontStyle: 'bold',
-      fontSize: 5.45,
-      cellPadding: {
-        top: 1.25,
-        bottom: 1.25,
-        left: 1.35,
-        right: 1.35,
-      },
-      lineColor: colors.header,
-      lineWidth: 0.08,
+      fontSize: 7,
+      cellPadding: { top: 1.8, bottom: 1.8, left: 2, right: 2 },
+      lineColor: C.dark,
     },
 
     footStyles: {
-      fillColor: colors.band,
-      textColor: colors.ink,
+      fillColor: C.navy,
+      textColor: C.white,
       fontStyle: 'bold',
-      lineColor: colors.line,
-      lineWidth: 0.12,
+      lineColor: C.navy,
     },
 
-    alternateRowStyles: {
-      fillColor: colors.softer,
-    },
+    alternateRowStyles: { fillColor: C.bgAlt },
 
     columnStyles: {
-      0: {
-        cellWidth: 6,
-        halign: 'center',
-        textColor: colors.faint,
-      },
-      1: {
-        cellWidth: 26,
-        halign: 'center',
-      },
-      2: {
-        cellWidth: 26,
-        halign: 'center',
-      },
-      3: {
-        cellWidth: 22,
-      },
-      4: {
-        cellWidth: 28,
-      },
-      5: {
-        cellWidth: 18,
-        halign: 'center',
-      },
-      6: {
-        cellWidth: 30,
-        halign: 'center',
-        fontSize: 5,
-      },
-      7: {
-        cellWidth: 24,
-        halign: 'center',
-      },
-      8: {
-        cellWidth: 22,
-        halign: 'right',
-      },
+      0: { cellWidth: 8, halign: 'center', textColor: C.slate, fontSize: 6.5 },
+      1: { cellWidth: 36 },
+      2: { cellWidth: 22 },
+      3: { cellWidth: 24 },
+      4: { cellWidth: 20, halign: 'center' },
+      5: { cellWidth: 30, fontSize: 6.5 },
+      6: { cellWidth: 22, halign: 'center' },
+      7: { cellWidth: 'auto', halign: 'right', fontStyle: 'bold' },
     },
 
     didParseCell(data) {
       const raw = data.cell.raw
-      if (
-        raw &&
-        typeof raw === 'object' &&
-        '__pdfEquipment' in raw &&
-        /** @type {{ __pdfEquipment?: boolean }} */ (raw).__pdfEquipment
-      ) {
-        data.cell.styles.fillColor = colors.soft
-        data.cell.styles.font = 'helvetica'
-        data.cell.styles.fontSize = 5.1
-        data.cell.styles.textColor = colors.muted
-        data.cell.styles.valign = 'top'
-        data.cell.styles.cellPadding = {
-          top: 0.35,
-          bottom: 0.45,
-          left: 1.35,
-          right: 1.35,
-        }
-        data.cell.styles.lineColor = colors.softLine
-        return
-      }
-      if (
-        raw &&
-        typeof raw === 'object' &&
-        'content' in raw &&
-        String(/** @type {{ content?: unknown }} */ (raw).content ?? '').includes(
-          'DAY TOTAL:',
-        )
-      ) {
-        data.cell.styles.lineWidth = 0.08
+      if (raw && typeof raw === 'object' && '_equip' in raw) {
+        data.cell.styles.fillColor = C.bg
+        data.cell.styles.fontSize = 6.5
+        data.cell.styles.textColor = C.mid
+        data.cell.styles.fontStyle = 'italic'
+        data.cell.styles.cellPadding = { top: 0.8, bottom: 0.8, left: 6, right: 2 }
+        data.cell.styles.lineColor = [229, 231, 235]
       }
     },
 
-    didDrawPage: drawPageFrame,
+    didDrawPage: pageFrame,
   })
 
-  const totalPages = doc.internal.getNumberOfPages()
-
-  for (let i = 1; i <= totalPages; i++) {
+  /* ══════════ Page numbers ═══════ */
+  const pages = doc.internal.getNumberOfPages()
+  for (let i = 1; i <= pages; i++) {
     doc.setPage(i)
-
     doc.setFont('helvetica', 'normal')
-    doc.setFontSize(5.4)
-    doc.setTextColor(...colors.faint)
-
-    doc.text(`Page ${i} of ${totalPages}`, pageW - marginX, pageH - 4.5, {
-      align: 'right',
-    })
+    doc.setFontSize(7)
+    doc.setTextColor(...C.slate)
+    doc.text(`Page ${i} of ${pages}`, W / 2, H - MB + 6, { align: 'center' })
   }
 
-  const slug = sanitizeFilenameSegment(opts.weekRangeLabel.replace(/\s+/g, '-'))
-  doc.save(`week-totals-${slug}.pdf`)
+  doc.save(`week-totals-${slug(opts.weekRangeLabel.replace(/\s+/g, '-'))}.pdf`)
 }
