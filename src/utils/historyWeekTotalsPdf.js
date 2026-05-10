@@ -41,6 +41,7 @@ function fmtMi(n) {
  *     legLabel: string,
  *     tractorNumber: string,
  *     equipmentBlock?: string,
+ *     proofScreenshots?: { label: string, jpeg: string, ts: number }[],
  *   }[],
  * }} WeekTotalsPdfDaySection
  */
@@ -211,6 +212,9 @@ export function downloadHistoryWeekTotalsPdf(opts) {
     }])
   }
 
+  /** @type {{ originId: string, destId: string, dispatchDate: string, legLabel: string, screenshots: { label: string, jpeg: string }[] }[]} */
+  const proofAppendix = []
+
   for (const day of opts.days) {
     body.push([{
       content: ascii(day.dayLabel || 'Day').toUpperCase(),
@@ -229,6 +233,8 @@ export function downloadHistoryWeekTotalsPdf(opts) {
     }])
 
     day.rows.forEach((r, i) => {
+      const hasProof = Array.isArray(r.proofScreenshots) && r.proofScreenshots.length > 0
+
       body.push([
         { content: String(i + 1), styles: { halign: 'center', textColor: MGRAY } },
         { content: ascii(r.originId || '-'), styles: { fontStyle: 'bold' } },
@@ -240,12 +246,25 @@ export function downloadHistoryWeekTotalsPdf(opts) {
       ])
 
       const eq = typeof r.equipmentBlock === 'string' ? r.equipmentBlock.trim() : ''
-      if (eq) {
+      const eqLine = eq ? ascii(eq) : ''
+      const proofLine = hasProof ? `Proof of Dispatch: see appendix` : ''
+      const subContent = [eqLine, proofLine].filter(Boolean).join('\n')
+      if (subContent) {
         body.push([{
-          content: ascii(eq),
+          content: subContent,
           colSpan: COLS,
           _equip: true,
         }])
+      }
+
+      if (hasProof) {
+        proofAppendix.push({
+          originId: r.originId || '-',
+          destId: r.destId || '-',
+          dispatchDate: r.dispatchDate || '-',
+          legLabel: r.legLabel || '-',
+          screenshots: r.proofScreenshots,
+        })
       }
     })
   }
@@ -321,6 +340,44 @@ export function downloadHistoryWeekTotalsPdf(opts) {
 
     didDrawPage: pageFooter,
   })
+
+  /* ══════════════════════════════════════════════
+     PROOF OF DISPATCH APPENDIX
+     ══════════════════════════════════════════════ */
+  for (const trip of proofAppendix) {
+    for (const shot of trip.screenshots) {
+      doc.addPage()
+      pageFooter()
+
+      doc.setFillColor(...BLACK)
+      doc.rect(0, 0, W, 20, 'F')
+      doc.setFont('helvetica', 'bold')
+      doc.setFontSize(10)
+      doc.setTextColor(...WHITE)
+      doc.text('Proof of Dispatch', MX, 9)
+      doc.setFont('helvetica', 'normal')
+      doc.setFontSize(8)
+      doc.setTextColor(...LGRAY)
+      doc.text(`${ascii(trip.originId)} -> ${ascii(trip.destId)}    ${ascii(trip.dispatchDate)}    Leg ${ascii(trip.legLabel)}`, MX, 15)
+
+      doc.setFont('helvetica', 'bold')
+      doc.setFontSize(7.5)
+      doc.setTextColor(...DARK)
+      doc.text(ascii(shot.label), MX, 26)
+
+      try {
+        const imgData = `data:image/jpeg;base64,${shot.jpeg}`
+        const imgW = IW
+        const maxImgH = H - 36 - MB
+        doc.addImage(imgData, 'JPEG', MX, 30, imgW, maxImgH, undefined, 'FAST')
+      } catch {
+        doc.setFont('helvetica', 'italic')
+        doc.setFontSize(8)
+        doc.setTextColor(...MGRAY)
+        doc.text('Screenshot could not be rendered.', MX, 36)
+      }
+    }
+  }
 
   /* ── Page numbers ── */
   const pages = doc.internal.getNumberOfPages()

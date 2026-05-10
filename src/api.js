@@ -1021,3 +1021,13 @@ export async function patchDirectoryPhone(locationId, phone) {
   })
   return handleJson(r)
 }
+
+/**
+ * Fetch dispatch proof screenshots for a trip leg sequence.
+ * @param {string} legSeq
+ * @returns {Promise<{ ok: boolean, legSeq: string, screenshots: { label: string, jpeg: string, ts: number }[] }>}
+ */
+export async function fetchDispatchProof(legSeq) {
+  const r = await apiFetch(`/api/dispatch-proof/${encodeURIComponent(legSeq)}`)
+  return handleJson(r)
+}

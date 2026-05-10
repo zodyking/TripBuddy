@@ -1639,6 +1639,20 @@ try {
   process.exit(1)
 }
 
+/* ═══════════════════ Dispatch proof screenshots ═══════════════════ */
+import { getDispatchProof } from './dispatch-proof-store.mjs'
+
+app.get('/api/dispatch-proof/:legSeq', async (req, reply) => {
+  const legSeq = String(req.params.legSeq || '').trim()
+  if (!legSeq) return reply.code(400).send({ error: 'legSeq required' })
+  try {
+    const screenshots = await getDispatchProof(legSeq)
+    return { ok: true, legSeq, screenshots }
+  } catch (e) {
+    return reply.code(500).send({ error: e instanceof Error ? e.message : String(e) })
+  }
+})
+
 await refreshPanynjCrossingData().catch((e) => {
   console.error('[bridge-panynj] initial', (e && e.message) || e)
 })

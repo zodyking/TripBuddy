@@ -7,6 +7,7 @@ import {
   patchTripHistoryAuditBucket,
   appendTripHistoryManual,
   deleteTripHistoryEntry,
+  fetchDispatchProof,
 } from '../api.js'
 import {
   tripPhase,
@@ -461,6 +462,7 @@ function computeWeekPayEstimate(items) {
     const dispatchCols = tripPdfDispatchColumns(e)
     rows.push({
       id: e.id,
+      dailyTripLegSequence: e.dailyTripLegSequence || '',
       od: tripOdIdsOnly(e),
       when: tripPayWhenWithLeg(e),
       originId: leadingLocationId(e.dispatchHeader?.origin) || '-',
@@ -1153,35 +1155,55 @@ const pdfTruckInfoBlock = computed(() => {
  *   days: { dayLabel: string, shiftDayKey: string, items: LedgerEntry[] }[],
  * }} wg
  */
-function onDownloadWeekTotalsPdf(wg) {
+async function onDownloadWeekTotalsPdf(wg) {
   const key = String(wg.key)
   if (pdfWeekBusyKey.value === key) return
   pdfWeekBusyKey.value = key
   try {
-    /** @type {{ dayLabel: string, sumBillable: number, rows: { od: string, when: string, billableMi: number, rounded: boolean }[] }[]} */
+    const allRows = []
     const days = []
     for (const dg of wg.days) {
       const dk = dg.shiftDayKey ? String(dg.shiftDayKey) : 'unk'
       const est = dayPayEstimateFor(key, dk)
-      days.push({
-        dayLabel: dg.dayLabel,
-        sumBillable: est.sumBillable,
-        rows: est.rows.map((r) => ({
-          od: r.od,
-          when: r.when,
-          billableMi: r.billableMi,
-          rounded: r.rounded,
-          originId: r.originId,
-          destId: r.destId,
-          weekday: r.weekday,
-          dispatchDate: r.dispatchDate,
-          dispatchTime: r.dispatchTime,
-          legLabel: r.legLabel,
-          tractorNumber: r.tractorNumber,
-          equipmentBlock: r.equipmentPdfBlock,
-        })),
-      })
+      const mappedRows = est.rows.map((r) => ({
+        od: r.od,
+        when: r.when,
+        billableMi: r.billableMi,
+        rounded: r.rounded,
+        originId: r.originId,
+        destId: r.destId,
+        weekday: r.weekday,
+        dispatchDate: r.dispatchDate,
+        dispatchTime: r.dispatchTime,
+        legLabel: r.legLabel,
+        tractorNumber: r.tractorNumber,
+        equipmentBlock: r.equipmentPdfBlock,
+        dailyTripLegSequence: r.dailyTripLegSequence || '',
+        proofScreenshots: /** @type {{ label: string, jpeg: string, ts: number }[] | undefined} */ (undefined),
+      }))
+      days.push({ dayLabel: dg.dayLabel, sumBillable: est.sumBillable, rows: mappedRows })
+      allRows.push(...mappedRows)
     }
+
+    const legSeqs = [...new Set(allRows.map((r) => r.dailyTripLegSequence).filter(Boolean))]
+    if (legSeqs.length) {
+      const proofResults = await Promise.allSettled(legSeqs.map((s) => fetchDispatchProof(s)))
+      /** @type {Map<string, { label: string, jpeg: string, ts: number }[]>} */
+      const proofMap = new Map()
+      proofResults.forEach((res, i) => {
+        if (res.status === 'fulfilled' && res.value?.ok && Array.isArray(res.value.screenshots) && res.value.screenshots.length) {
+          proofMap.set(legSeqs[i], res.value.screenshots)
+        }
+      })
+      if (proofMap.size) {
+        for (const r of allRows) {
+          if (r.dailyTripLegSequence && proofMap.has(r.dailyTripLegSequence)) {
+            r.proofScreenshots = proofMap.get(r.dailyTripLegSequence)
+          }
+        }
+      }
+    }
+
     const cal = viewMonthInfo.value.groupLabel || 'Calendar view'
     const estWeek =
       weekPayEstimateByKey.value[key] || {
