@@ -494,8 +494,15 @@ export async function runInspectCheckoutAfterGate(page, opts) {
     ...(tripData && typeof tripData === 'object' ? tripData : {}),
   }
 
-  // Track used seal candidates to avoid re-trying
-  const triedSeals = new Set()
+  /** Per-trailer seal tracking — seals that failed for trailer N may still be valid for trailer M (swap). */
+  /** @type {Map<number, Set<string>>} */
+  const triedSealsByTrailer = new Map()
+  /** @param {number} idx 1-based trailer index */
+  const getTriedSeals = (idx) => {
+    if (!triedSealsByTrailer.has(idx)) triedSealsByTrailer.set(idx, new Set())
+    return /** @type {Set<string>} */ (triedSealsByTrailer.get(idx))
+  }
+  let batchSealsAttempted = false
   let lastProgress = Date.now()
   let dollyAttempts = 0
 
@@ -591,67 +598,63 @@ export async function runInspectCheckoutAfterGate(page, opts) {
       }
     }
 
-    // --- Dolly entry ---
+    // --- Dolly entry — try every candidate from trip data before prompting ---
     if (await isDollyEntryScreen(page)) {
       dollyAttempts += 1
       if (dollyAttempts > MAX_DOLLY_ATTEMPTS) {
         throw new Error('Inspect: dolly validation failed too many times')
       }
 
-      // Get dolly candidates from trip data
       const dollyCandidates = getDollyCandidates(tripDataEffective)
-      let val = dollyCandidates[0] || ''
+      let dollyAdvanced = false
 
-      // If no dolly in trip data, prompt driver
-      if (!val) {
-        val = (
+      for (const candidate of dollyCandidates) {
+        aborted()
+        const dollyInput = await findInputByLabel(page, /dolly/i)
+        if (!dollyInput?.input) break
+
+        await dollyInput.input.fill(candidate)
+        log('info', `Trying dolly candidate: ${candidate}`)
+
+        const vd = buttonLikeByVisibleText(page, RX.validateDolly).first()
+        await vd.click()
+        lastProgress = Date.now()
+        await page.waitForTimeout(AFTER_CLICK_MS)
+
+        const t0 = Date.now()
+        while (Date.now() - t0 < DOLLY_SUCCESS_WAIT_MS) {
+          aborted()
+          if (await isDollySuccessScreen(page)) { dollyAdvanced = true; break }
+          if (!(await isDollyEntryScreen(page))) { dollyAdvanced = true; break }
+          await page.waitForTimeout(350)
+        }
+
+        if (dollyAdvanced) {
+          log('info', `Dolly validated: ${candidate}`)
+          lastProgress = Date.now()
+          break
+        }
+        log('warn', `Dolly candidate rejected: ${candidate} — trying next`)
+      }
+
+      if (!dollyAdvanced && (await isDollyEntryScreen(page))) {
+        log('info', 'All dolly candidates exhausted — prompting driver')
+        const val = (
           await waitForInspectField({
             field: 'dolly',
             message: buildPromptMessage('dolly', 0),
           })
         ).trim()
-      }
+        if (!val) throw new Error('Inspect: dolly number required')
 
-      if (!val) {
-        throw new Error('Inspect: dolly number required')
-      }
+        const dollyInput = await findInputByLabel(page, /dolly/i)
+        if (dollyInput?.input) await dollyInput.input.fill(val)
+        log('info', `Filled dolly number (driver): ${val}`)
 
-      const dollyInput = await findInputByLabel(page, /dolly/i)
-      if (dollyInput?.input) {
-        await dollyInput.input.fill(val)
-      }
-      log('info', `Filled dolly number: ${val}`)
-
-      const vd = buttonLikeByVisibleText(page, RX.validateDolly).first()
-      await vd.click()
-      lastProgress = Date.now()
-      await page.waitForTimeout(AFTER_CLICK_MS)
-
-      const t0 = Date.now()
-      let advanced = false
-      while (Date.now() - t0 < DOLLY_SUCCESS_WAIT_MS) {
-        aborted()
-        if (await isDollySuccessScreen(page)) {
-          advanced = true
-          lastProgress = Date.now()
-          break
-        }
-        if (!(await isDollyEntryScreen(page))) {
-          advanced = true
-          lastProgress = Date.now()
-          break
-        }
-        await page.waitForTimeout(350)
-      }
-
-      if (!advanced && (await isDollyEntryScreen(page))) {
-        log('warn', 'Dolly validation did not advance — prompting for re-entry')
-        val = (
-          await waitForInspectField({
-            field: 'dolly',
-            message: 'Dolly validation failed. Please re-enter dolly number.',
-          })
-        ).trim()
+        const vd = buttonLikeByVisibleText(page, RX.validateDolly).first()
+        await vd.click()
+        lastProgress = Date.now()
+        await page.waitForTimeout(AFTER_CLICK_MS)
       }
       continue
     }
@@ -663,28 +666,21 @@ export async function runInspectCheckoutAfterGate(page, opts) {
       const batchSeals =
         sealRows.length >= 2 ||
         (sealRows.length >= 1 && (await pluralSealsBtn.isVisible().catch(() => false)))
-      if (batchSeals) {
+      if (batchSeals && !batchSealsAttempted) {
+        batchSealsAttempted = true
         let filledAny = false
+        let missingCandidate = false
         for (const row of sealRows) {
           aborted()
           const trailerIndex = row.trailerIndex
           const sealCandidates = getSealCandidates(tripDataEffective, trailerIndex - 1)
-          let val = sealCandidates[0] || ''
-          if (!val) {
-            val = (
-              await waitForInspectField({
-                field: `trailer${trailerIndex}_seal`,
-                message: buildPromptMessage('seal', trailerIndex),
-              })
-            ).trim()
-          }
-          if (!val) throw new Error(`Inspect: seal required for Trailer ${trailerIndex}`)
+          const val = sealCandidates[0] || ''
+          if (!val) { missingCandidate = true; break }
           await row.input.fill(val)
-          triedSeals.add(val)
           filledAny = true
-          log('info', `Batch seal pre-fill Trailer ${trailerIndex}`)
+          log('info', `Batch seal pre-fill Trailer ${trailerIndex}: ${val}`)
         }
-        if (filledAny) {
+        if (filledAny && !missingCandidate) {
           const clickedValidate = await clickSealValidateButton(page)
           if (clickedValidate) {
             log('info', 'Clicked seal validation after batch trailer seal fill')
@@ -693,7 +689,7 @@ export async function runInspectCheckoutAfterGate(page, opts) {
             if (!(await hasInvalidSealError(page))) {
               continue
             }
-            log('warn', 'Batch seal validation failed — retrying with per-field handling')
+            log('warn', 'Batch seal validation failed — falling through to per-field swap handling')
           }
         }
       }
@@ -750,20 +746,17 @@ export async function runInspectCheckoutAfterGate(page, opts) {
 
       const detected = detectFieldType(labelText)
 
-      // --- SEAL NUMBER (loaded trailers) ---
+      // --- SEAL NUMBER (loaded trailers) — try all known seals (swap-aware) ---
       if (detected.type === 'seal') {
         const trailerIndex = detected.trailerIndex
+        const tried = getTriedSeals(trailerIndex)
         const sealCandidates = getSealCandidates(tripDataEffective, trailerIndex - 1)
+        const untried = sealCandidates.filter((s) => !tried.has(s))
 
-        // Filter out already-tried seals
-        const untried = sealCandidates.filter((s) => !triedSeals.has(s))
-
-        let val = ''
         let validationSuccess = false
 
-        // Try each seal candidate
         for (const candidate of untried) {
-          triedSeals.add(candidate)
+          tried.add(candidate)
           await input.fill(candidate)
           log('info', `Trying seal candidate: ${candidate} for Trailer ${trailerIndex}`)
 
@@ -774,25 +767,21 @@ export async function runInspectCheckoutAfterGate(page, opts) {
             await page.waitForTimeout(SEAL_VALIDATION_WAIT_MS)
           }
 
-          // Check for error
           if (await hasInvalidSealError(page)) {
-            log('warn', `Invalid seal number: ${candidate} — trying next`)
+            log('warn', `Invalid seal: ${candidate} for Trailer ${trailerIndex} — trying next`)
             await input.clear()
             await page.waitForTimeout(500)
             continue
           }
 
-          // Success - seal was accepted
-          val = candidate
           validationSuccess = true
-          log('info', `Seal validated successfully: ${candidate}`)
+          log('info', `Seal validated: ${candidate} for Trailer ${trailerIndex}`)
           break
         }
 
-        // If all candidates failed, prompt driver as last resort
         if (!validationSuccess) {
-          log('info', 'All seal candidates exhausted — prompting driver')
-          val = (
+          log('info', `All seal candidates exhausted for Trailer ${trailerIndex} — prompting driver`)
+          const val = (
             await waitForInspectField({
               field: `trailer${trailerIndex}_seal`,
               message: buildPromptMessage('seal', trailerIndex),
@@ -805,7 +794,7 @@ export async function runInspectCheckoutAfterGate(page, opts) {
           const validateBtn = buttonLikeByVisibleText(page, RX.validateSeal).first()
           if (await validateBtn.isVisible().catch(() => false)) {
             await validateBtn.click()
-            log('info', `Clicked VALIDATE SEAL with driver-provided value: ${val}`)
+            log('info', `Clicked VALIDATE SEAL with driver value: ${val}`)
             lastProgress = Date.now()
             await page.waitForTimeout(AFTER_CLICK_MS)
           }
@@ -870,18 +859,19 @@ export async function runInspectCheckoutAfterGate(page, opts) {
 
       const upper = ph.toUpperCase()
 
-      // Seal by placeholder
+      // Seal by placeholder — swap-aware: try all known seals per-trailer
       if (/SEAL/i.test(upper) && /TRAILER|TRLR|\d/.test(upper)) {
         const trailerIndex = extractTrailerIndex(ph)
+        const tried = getTriedSeals(trailerIndex)
         const sealCandidates = getSealCandidates(tripDataEffective, trailerIndex - 1)
-        const untried = sealCandidates.filter((s) => !triedSeals.has(s))
+        const untried = sealCandidates.filter((s) => !tried.has(s))
 
         let validationSuccess = false
 
         for (const candidate of untried) {
-          triedSeals.add(candidate)
+          tried.add(candidate)
           await el.fill(candidate)
-          log('info', `Trying seal (placeholder): ${candidate}`)
+          log('info', `Trying seal (placeholder): ${candidate} for Trailer ${trailerIndex}`)
 
           const btn = buttonLikeByVisibleText(page, RX.validateSeal).first()
           if (await btn.isVisible().catch(() => false)) {
@@ -891,7 +881,7 @@ export async function runInspectCheckoutAfterGate(page, opts) {
           }
 
           if (await hasInvalidSealError(page)) {
-            log('warn', `Invalid seal: ${candidate}`)
+            log('warn', `Invalid seal: ${candidate} for Trailer ${trailerIndex}`)
             await el.clear()
             await page.waitForTimeout(500)
             continue
@@ -902,6 +892,7 @@ export async function runInspectCheckoutAfterGate(page, opts) {
         }
 
         if (!validationSuccess) {
+          log('info', `All seal candidates exhausted for Trailer ${trailerIndex} — prompting driver`)
           const val = (
             await waitForInspectField({
               field: `trailer${trailerIndex}_seal`,
