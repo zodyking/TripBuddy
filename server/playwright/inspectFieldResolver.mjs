@@ -56,10 +56,10 @@ function pickTrailerSealString(tr) {
 }
 
 /**
- * Seal candidates for a trailer field. Returns the preferred trailer's seal first,
- * then seals from other trailers — because sometimes seals are physically swapped
- * between trailers. The caller should try each candidate one-at-a-time until one
- * is accepted, and only prompt the user when every candidate has been rejected.
+ * Seal candidates for a trailer field from the trip detail cards.
+ * Returns the matching trailer's seal first, then the other trailer's seal —
+ * because seals are sometimes physically swapped between trailers.
+ * Only prompt the user when both seals have been rejected.
  * @param {TripData} tripData
  * @param {number} preferredIndex 0-based index in `tripData.trailers` array order
  * @returns {string[]}
