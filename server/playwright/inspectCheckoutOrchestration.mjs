@@ -536,6 +536,26 @@ async function completeInspectionChecklist(page, log) {
 }
 
 /**
+ * @typedef {{ label: string, jpeg: string, ts: number }} ProofScreenshot
+ */
+
+/**
+ * Capture a compressed proof screenshot (JPEG q40).
+ * @param {import('playwright').Page} page
+ * @param {string} label
+ * @param {ProofScreenshot[]} bucket
+ * @param {(type: string, message: string, extra?: object) => void} log
+ */
+async function captureProof(page, label, bucket, log) {
+  try {
+    if (page.isClosed()) return
+    const buf = await page.screenshot({ type: 'jpeg', quality: 40, fullPage: false })
+    bucket.push({ label, jpeg: buf.toString('base64'), ts: Date.now() })
+    log('info', `Proof screenshot: ${label}`)
+  } catch { /* page closed or nav */ }
+}
+
+/**
  * Run post-gate Inspect & Check Out with smart field resolution.
  *
  * @param {import('playwright').Page} page
@@ -546,7 +566,7 @@ async function completeInspectionChecklist(page, log) {
  * @param {unknown} [opts.assignment]
  * @param {import('./inspectFieldResolver.mjs').TripData} [opts.tripData]
  * @param {(o: { field: string, message: string }) => Promise<string>} opts.waitForInspectField
- * @returns {Promise<{ ok: boolean, reason?: string }>}
+ * @returns {Promise<{ ok: boolean, reason?: string, proofScreenshots?: ProofScreenshot[] }>}
  */
 export async function runInspectCheckoutAfterGate(page, opts) {
   const { log, signal, assignment = {}, tripData = {}, waitForInspectField } = opts
@@ -555,6 +575,9 @@ export async function runInspectCheckoutAfterGate(page, opts) {
     ...buildTripDataFromAssignment(assignment),
     ...(tripData && typeof tripData === 'object' ? tripData : {}),
   }
+
+  /** @type {ProofScreenshot[]} */
+  const proofScreenshots = []
 
   /** Per-trailer seal tracking — seals that failed for trailer N may still be valid for trailer M (swap). */
   /** @type {Map<number, Set<string>>} */
@@ -583,11 +606,12 @@ export async function runInspectCheckoutAfterGate(page, opts) {
 
     // --- Check for "You are Dispatched!" success ---
     if (await isDispatchedSuccessScreen(page)) {
+      await captureProof(page, 'You Are Dispatched', proofScreenshots, log)
       log('info', 'Inspect & Check Out complete: You are Dispatched!', {
         inspectCheckoutPhaseDone: true,
         dispatched: true,
       })
-      return { ok: true, reason: 'dispatched' }
+      return { ok: true, reason: 'dispatched', proofScreenshots }
     }
 
     // --- Dispatch confirmation modal (YES/NO) ---
@@ -602,11 +626,12 @@ export async function runInspectCheckoutAfterGate(page, opts) {
       while (Date.now() - t0 < DISPATCHED_SUCCESS_WAIT_MS) {
         aborted()
         if (await isDispatchedSuccessScreen(page)) {
+          await captureProof(page, 'You Are Dispatched', proofScreenshots, log)
           log('info', 'Inspect & Check Out complete: You are Dispatched!', {
             inspectCheckoutPhaseDone: true,
             dispatched: true,
           })
-          return { ok: true, reason: 'dispatched' }
+          return { ok: true, reason: 'dispatched', proofScreenshots }
         }
         await page.waitForTimeout(POLL_MS)
       }
@@ -615,6 +640,7 @@ export async function runInspectCheckoutAfterGate(page, opts) {
 
     // --- Dispatch screen (Review and Start Trip / Dispatch Summary) ---
     if (await isDispatchScreen(page)) {
+      await captureProof(page, 'Dispatch Summary', proofScreenshots, log)
       await clickDispatchButton(page)
       dispatchClicked = true
       log('info', 'Clicked DISPATCH button')
@@ -637,6 +663,7 @@ export async function runInspectCheckoutAfterGate(page, opts) {
       await completeInspectionChecklist(page, log)
       await page.waitForTimeout(500)
 
+      await captureProof(page, 'Inspection Checklist', proofScreenshots, log)
       const agreeBtn = buttonLikeByVisibleText(page, RX.agreeAndCheckOut).first()
       if (await agreeBtn.isVisible().catch(() => false)) {
         await agreeBtn.click()
@@ -660,6 +687,7 @@ export async function runInspectCheckoutAfterGate(page, opts) {
 
     // --- Dolly validation success → VALIDATE SEALS ---
     if (await isDollySuccessScreen(page)) {
+      await captureProof(page, 'Dolly Validated', proofScreenshots, log)
       const vs = buttonLikeByVisibleText(page, RX.validateSeals).first()
       if (await vs.isVisible().catch(() => false)) {
         await vs.click()
@@ -772,6 +800,7 @@ export async function runInspectCheckoutAfterGate(page, opts) {
             lastProgress = Date.now()
             await page.waitForTimeout(Math.max(SEAL_VALIDATION_WAIT_MS, 2_000))
             if (!(await hasInvalidSealError(page))) {
+              await captureProof(page, 'Seals Validated', proofScreenshots, log)
               continue
             }
             log('warn', 'Batch seal validation failed — falling through to per-field swap handling')
@@ -1035,19 +1064,19 @@ export async function runInspectCheckoutAfterGate(page, opts) {
           inspectCheckoutPhaseDone: true,
           dispatched: false,
         })
-        return { ok: false, reason: 'dispatch_not_clicked' }
+        return { ok: false, reason: 'dispatch_not_clicked', proofScreenshots }
       }
       if (dispatchClicked) {
         log('warn', 'Inspect & Check Out: timed out after clicking DISPATCH — "You are Dispatched!" never appeared', {
           inspectCheckoutPhaseDone: true,
           dispatched: false,
         })
-        return { ok: false, reason: 'dispatch_not_confirmed' }
+        return { ok: false, reason: 'dispatch_not_confirmed', proofScreenshots }
       }
       log('info', 'Inspect & Check Out: no recognized screen for idle window — completing', {
         inspectCheckoutPhaseDone: true,
       })
-      return { ok: true, reason: 'idle' }
+      return { ok: true, reason: 'idle', proofScreenshots }
     }
   }
 }

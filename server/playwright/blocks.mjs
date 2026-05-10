@@ -699,8 +699,33 @@ async function executeAction(action, page, ctx) {
         tripData: mergedTripData,
         waitForInspectField,
       })
-      ctx.variables._inspectCheckoutContinue = outcome
-      log('info', 'Inspect & Check Out post-gate finished', { inspectCheckoutContinue: outcome })
+
+      if (outcome.proofScreenshots?.length) {
+        const legSeq = mergedTripData?.dailyTripLegSequence
+          || ctx.tripData?.dailyTripLegSequence
+          || ctx.assignment?.persistedLinehaulTripSnapshot?.dailyTripLegSequence
+          || ctx.assignment?.persistedCachedTripSnapshot?.dailyTripLegSequence
+          || ''
+        const seqStr = String(legSeq || '').trim()
+        if (seqStr) {
+          try {
+            const { saveDispatchProof } = await import('../dispatch-proof-store.mjs')
+            await saveDispatchProof(seqStr, outcome.proofScreenshots)
+            log('info', `Saved ${outcome.proofScreenshots.length} proof screenshots for leg ${seqStr}`)
+            outcome.proofLegSeq = seqStr
+          } catch (e) {
+            log('warn', `Failed to save proof screenshots: ${e instanceof Error ? e.message : e}`)
+          }
+        }
+      }
+
+      ctx.variables._inspectCheckoutContinue = {
+        ok: outcome.ok,
+        reason: outcome.reason,
+        proofLegSeq: outcome.proofLegSeq,
+        proofCount: outcome.proofScreenshots?.length || 0,
+      }
+      log('info', 'Inspect & Check Out post-gate finished', { inspectCheckoutContinue: outcome.ok })
       break
     }
 

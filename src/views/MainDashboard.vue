@@ -829,6 +829,8 @@ async function runQuickAction(auto) {
       if (!tripData.dolly) tripData.dolly = {}
       tripData.dolly.number1 = dollyFromCard
     }
+    const legSeq = currentTripLegSeq.value
+    if (legSeq) tripData.dailyTripLegSequence = String(legSeq)
     const result = await runAutomation(auto.id, { headless: true, tripData })
     if (result.ok) {
       if (result.variables?._inspectCheckoutCancelled === true) {
