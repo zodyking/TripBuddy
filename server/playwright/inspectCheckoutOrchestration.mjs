@@ -46,7 +46,7 @@ const RX = {
 const WARN_MODAL_MS = 4_000
 const BEGIN_INSPECTION_MS = 20_000
 const AFTER_CLICK_MS = 2_500
-const IDLE_EXIT_MS = 18_000
+const IDLE_EXIT_MS = 24_000
 const POLL_MS = 450
 const MAX_DOLLY_ATTEMPTS = 6
 const DOLLY_SUCCESS_WAIT_MS = 18_000
@@ -385,7 +385,9 @@ async function isInspectionChecklistScreen(page) {
 }
 
 /**
- * Check if we're on the Review and Start Trip / Dispatch Summary screen (primary DISPATCH action).
+ * Check if we're on the Review and Start Trip / Dispatch Summary screen.
+ * FedEx renders the DISPATCH action as various element types (<button>, <a>, styled <div>)
+ * so we try multiple strategies.
  * @param {import('playwright').Page} page
  */
 async function isDispatchScreen(page) {
@@ -393,31 +395,53 @@ async function isDispatchScreen(page) {
   if (await dispatchRole.isVisible().catch(() => false)) return true
   const dispatchBtn = buttonLikeByVisibleText(page, RX.dispatch).first()
   if (await dispatchBtn.isVisible().catch(() => false)) return true
-  const summaryHint =
+
+  const onSummaryPage =
     (await page.getByText(RX.dispatchSummary).first().isVisible().catch(() => false)) ||
     (await page.getByText(RX.reviewStartTrip).first().isVisible().catch(() => false))
-  if (summaryHint) {
-    const loose = page.getByRole('button', { name: /dispatch/i }).first()
-    return await loose.isVisible().catch(() => false)
+
+  if (onSummaryPage) {
+    const looseRole = page.getByRole('button', { name: /dispatch/i }).first()
+    if (await looseRole.isVisible().catch(() => false)) return true
+    const looseLink = page.getByRole('link', { name: /dispatch/i }).first()
+    if (await looseLink.isVisible().catch(() => false)) return true
+    const anyClickable = page
+      .locator('a, button, [role="button"], [class*="button"], [class*="btn"]')
+      .filter({ hasText: /dispatch/i })
+      .first()
+    if (await anyClickable.isVisible().catch(() => false)) return true
+    const textOnly = page.getByText(/^dispatch$/i).first()
+    if (await textOnly.isVisible().catch(() => false)) return true
   }
   return false
 }
 
 /**
- * Check if dispatch confirmation modal is visible.
+ * Check if dispatch confirmation modal ("Do you wish to Dispatch?") is visible.
  * @param {import('playwright').Page} page
  */
 async function isDispatchConfirmModal(page) {
   const modalText = page.getByText(/do you wish to dispatch/i).first()
   const hasModal = await modalText.isVisible().catch(() => false)
-  if (!hasModal) return false
+  if (!hasModal) {
+    const altText = page.getByText(/once dispatched.*trip will begin/i).first()
+    if (!(await altText.isVisible().catch(() => false))) return false
+  }
   const yesRole = page.getByRole('button', { name: /^yes$/i }).first()
   if (await yesRole.isVisible().catch(() => false)) return true
   const yesBtn = buttonLikeByVisibleText(page, RX.dispatchConfirmYes).first()
-  return await yesBtn.isVisible().catch(() => false)
+  if (await yesBtn.isVisible().catch(() => false)) return true
+  const yesLink = page.getByRole('link', { name: /^yes$/i }).first()
+  if (await yesLink.isVisible().catch(() => false)) return true
+  const yesAny = page
+    .locator('a, button, [role="button"], [class*="button"], [class*="btn"]')
+    .filter({ hasText: /^yes$/i })
+    .first()
+  return await yesAny.isVisible().catch(() => false)
 }
 
 /**
+ * Click the DISPATCH button using multiple fallback strategies.
  * @param {import('playwright').Page} page
  */
 async function clickDispatchButton(page) {
@@ -426,10 +450,30 @@ async function clickDispatchButton(page) {
     await dispatchRole.click()
     return
   }
-  await buttonLikeByVisibleText(page, RX.dispatch).first().click()
+  const dispatchBtn = buttonLikeByVisibleText(page, RX.dispatch).first()
+  if (await dispatchBtn.isVisible().catch(() => false)) {
+    await dispatchBtn.click()
+    return
+  }
+  const dispatchLink = page.getByRole('link', { name: /dispatch/i }).first()
+  if (await dispatchLink.isVisible().catch(() => false)) {
+    await dispatchLink.click()
+    return
+  }
+  const anyClickable = page
+    .locator('a, button, [role="button"], [class*="button"], [class*="btn"]')
+    .filter({ hasText: /dispatch/i })
+    .first()
+  if (await anyClickable.isVisible().catch(() => false)) {
+    await anyClickable.click()
+    return
+  }
+  const textEl = page.getByText(/^dispatch$/i).first()
+  await textEl.click()
 }
 
 /**
+ * Click YES on the dispatch confirmation modal using multiple fallbacks.
  * @param {import('playwright').Page} page
  */
 async function clickDispatchConfirmYes(page) {
@@ -438,7 +482,25 @@ async function clickDispatchConfirmYes(page) {
     await yesRole.click()
     return
   }
-  await buttonLikeByVisibleText(page, RX.dispatchConfirmYes).first().click()
+  const yesBtn = buttonLikeByVisibleText(page, RX.dispatchConfirmYes).first()
+  if (await yesBtn.isVisible().catch(() => false)) {
+    await yesBtn.click()
+    return
+  }
+  const yesLink = page.getByRole('link', { name: /^yes$/i }).first()
+  if (await yesLink.isVisible().catch(() => false)) {
+    await yesLink.click()
+    return
+  }
+  const yesAny = page
+    .locator('a, button, [role="button"], [class*="button"], [class*="btn"]')
+    .filter({ hasText: /^yes$/i })
+    .first()
+  if (await yesAny.isVisible().catch(() => false)) {
+    await yesAny.click()
+    return
+  }
+  await page.getByText(/^yes$/i).first().click()
 }
 
 /**
@@ -505,6 +567,8 @@ export async function runInspectCheckoutAfterGate(page, opts) {
   let batchSealsAttempted = false
   let lastProgress = Date.now()
   let dollyAttempts = 0
+  let dispatchClicked = false
+  let checklistDone = false
 
   const aborted = () => {
     if (signal?.aborted) throw new Error('Aborted')
@@ -552,9 +616,19 @@ export async function runInspectCheckoutAfterGate(page, opts) {
     // --- Dispatch screen (Review and Start Trip / Dispatch Summary) ---
     if (await isDispatchScreen(page)) {
       await clickDispatchButton(page)
+      dispatchClicked = true
       log('info', 'Clicked DISPATCH button')
       lastProgress = Date.now()
       await page.waitForTimeout(AFTER_CLICK_MS)
+
+      // Wait briefly for the confirmation modal to appear
+      const dWait = Date.now()
+      while (Date.now() - dWait < DISPATCH_CONFIRM_WAIT_MS) {
+        aborted()
+        if (await isDispatchConfirmModal(page)) break
+        if (await isDispatchedSuccessScreen(page)) break
+        await page.waitForTimeout(POLL_MS)
+      }
       continue
     }
 
@@ -566,9 +640,20 @@ export async function runInspectCheckoutAfterGate(page, opts) {
       const agreeBtn = buttonLikeByVisibleText(page, RX.agreeAndCheckOut).first()
       if (await agreeBtn.isVisible().catch(() => false)) {
         await agreeBtn.click()
+        checklistDone = true
         log('info', 'Clicked AGREE AND CHECK OUT')
         lastProgress = Date.now()
         await page.waitForTimeout(AFTER_CLICK_MS)
+
+        // Wait for the dispatch summary screen to load after checklist
+        const cWait = Date.now()
+        while (Date.now() - cWait < DISPATCH_CONFIRM_WAIT_MS) {
+          aborted()
+          if (await isDispatchScreen(page)) break
+          if (await isDispatchedSuccessScreen(page)) break
+          if (await isDispatchConfirmModal(page)) break
+          await page.waitForTimeout(POLL_MS)
+        }
       }
       continue
     }
@@ -943,8 +1028,22 @@ export async function runInspectCheckoutAfterGate(page, opts) {
 
     if (handled) continue
 
-    // Idle exit
+    // Idle exit — report failure if dispatch was never completed
     if (Date.now() - lastProgress > IDLE_EXIT_MS) {
+      if (checklistDone && !dispatchClicked) {
+        log('warn', 'Inspect & Check Out: timed out after checklist — DISPATCH button was never clicked', {
+          inspectCheckoutPhaseDone: true,
+          dispatched: false,
+        })
+        return { ok: false, reason: 'dispatch_not_clicked' }
+      }
+      if (dispatchClicked) {
+        log('warn', 'Inspect & Check Out: timed out after clicking DISPATCH — "You are Dispatched!" never appeared', {
+          inspectCheckoutPhaseDone: true,
+          dispatched: false,
+        })
+        return { ok: false, reason: 'dispatch_not_confirmed' }
+      }
       log('info', 'Inspect & Check Out: no recognized screen for idle window — completing', {
         inspectCheckoutPhaseDone: true,
       })
