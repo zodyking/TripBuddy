@@ -413,6 +413,74 @@ export function buildEnhancedTrailerCards(body) {
 }
 
 /**
+ * Best-effort seal string from FedEx trip trailer objects (keys vary by API surface).
+ * @param {Record<string, unknown>} tr
+ */
+function sealDigitsForInspectAutomation(tr) {
+  const keys = [
+    'sealNumber',
+    'sealNbr',
+    'trlrSealNumber',
+    'trailerSealNumber',
+    'sealNum',
+    'tripSealNumber',
+  ]
+  for (const k of keys) {
+    if (!(k in tr)) continue
+    const v = tr[k]
+    if (v == null || v === '') continue
+    const s = String(v).trim()
+    if (s && s !== '—' && s.toLowerCase() !== 'none') return s
+  }
+  return ''
+}
+
+/**
+ * Trip payload for Inspect/Checkout Playwright — **same trip JSON as the Trip Details card**
+ * (`tripDetailsBodyForSlide`), including pre-plan swipe and `linehaulTripsBody` fallback shapes.
+ *
+ * @param {unknown} body
+ * @returns {{ dolly: { number1?: string, number2?: string }, trailers: Record<string, unknown>[], tractorNumber: string }}
+ */
+export function buildInspectAutomationTripData(body) {
+  if (body == null || typeof body !== 'object' || Array.isArray(body)) {
+    return { dolly: {}, trailers: [], tractorNumber: '' }
+  }
+  const o = /** @type {Record<string, unknown>} */ (body)
+
+  const d1 = String(o.dollyNumber1 ?? o.primaryDollyNumber ?? '').trim()
+  const d2 = String(o.dollyNumber2 ?? o.secondaryDollyNumber ?? '').trim()
+  /** @type {{ number1?: string, number2?: string }} */
+  const dolly = {}
+  if (d1) dolly.number1 = d1
+  if (d2) dolly.number2 = d2
+
+  const arr = Array.isArray(o.trailers) ? o.trailers : []
+  const indexed = arr
+    .map((t, i) => {
+      if (!t || typeof t !== 'object' || Array.isArray(t)) return null
+      const tr = /** @type {Record<string, unknown>} */ (t)
+      const seal = sealDigitsForInspectAutomation(tr)
+      const merged =
+        seal && String(tr.sealNumber ?? '').trim() !== seal ? { ...tr, sealNumber: seal } : { ...tr }
+      return { tr: merged, i }
+    })
+    .filter((x) => x != null)
+
+  indexed.sort((a, b) => {
+    const ka = trailerCardSortKey(a.tr, a.i)
+    const kb = trailerCardSortKey(b.tr, b.i)
+    if (ka !== kb) return ka - kb
+    return a.i - b.i
+  })
+
+  const trailers = indexed.map(({ tr }) => tr)
+  const tractorNumber = String(o.tractorNumber ?? o.tractorNbr ?? '').trim()
+
+  return { dolly, trailers, tractorNumber }
+}
+
+/**
  * @param {unknown} body
  * @returns {{ show: boolean, rows: { label: string, value: string }[], hasData: boolean }}
  * `show` is true only when at least one dolly field is non-empty (omit block otherwise).

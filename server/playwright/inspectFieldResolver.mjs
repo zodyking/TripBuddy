@@ -18,12 +18,41 @@
  */
 export function getDollyCandidates(tripData) {
   const candidates = []
-  const dolly = tripData?.dolly
+  const td = /** @type {Record<string, unknown>} */ (tripData && typeof tripData === 'object' ? tripData : {})
+  const dolly = /** @type {{ number1?: string, number2?: string } | undefined} */ (td.dolly)
   if (dolly?.number1?.trim()) candidates.push(dolly.number1.trim())
   if (dolly?.number2?.trim() && dolly.number2.trim() !== dolly?.number1?.trim()) {
     candidates.push(dolly.number2.trim())
   }
+  const flat1 = String(td.dollyNumber1 ?? td.primaryDollyNumber ?? '').trim()
+  const flat2 = String(td.dollyNumber2 ?? '').trim()
+  if (flat1 && !candidates.includes(flat1)) candidates.unshift(flat1)
+  if (flat2 && flat2 !== flat1 && !candidates.includes(flat2)) candidates.push(flat2)
   return candidates
+}
+
+/**
+ * @param {Record<string, unknown>} tr
+ * @returns {string}
+ */
+function pickTrailerSealString(tr) {
+  const keys = [
+    'sealNumber',
+    'sealNbr',
+    'trlrSealNumber',
+    'trailerSealNumber',
+    'sealNum',
+    'tripSealNumber',
+  ]
+  for (const k of keys) {
+    if (!(k in tr)) continue
+    const v = tr[k]
+    if (v == null || v === '') continue
+    const s = String(v).trim()
+    if (!s || s === '—' || s.toLowerCase() === 'none') continue
+    return s
+  }
+  return ''
 }
 
 /**
@@ -36,8 +65,10 @@ export function getDollyCandidates(tripData) {
 export function getSealCandidates(tripData, preferredIndex) {
   const trailers = tripData?.trailers || []
   const preferred = trailers[preferredIndex]
-  const raw = preferred?.sealNumber != null ? String(preferred.sealNumber).trim() : ''
-  if (!raw || raw === '—' || raw.toLowerCase() === 'none') return []
+  if (!preferred || typeof preferred !== 'object') return []
+  const tr = /** @type {Record<string, unknown>} */ (preferred)
+  const raw = pickTrailerSealString(tr)
+  if (!raw) return []
   return [raw]
 }
 
@@ -59,7 +90,7 @@ export function buildTripDataFromAssignment(assignment) {
 
   /** @type {TripData} */
   const out = {}
-  const n1 = String(body.dollyNumber1 ?? '').trim()
+  const n1 = String(body.dollyNumber1 ?? body.primaryDollyNumber ?? '').trim()
   const n2 = String(body.dollyNumber2 ?? '').trim()
   if (n1 || n2) {
     out.dolly = {}
@@ -77,7 +108,11 @@ export function buildTripDataFromAssignment(assignment) {
       if (sa !== sb) return sa - sb
       return (Number(ta.trlrOrder) || 0) - (Number(tb.trlrOrder) || 0)
     })
-    out.trailers = /** @type {TripData['trailers']} */ (arr)
+    out.trailers = arr.map((t) => {
+      const tr = /** @type {Record<string, unknown>} */ (t)
+      const seal = pickTrailerSealString(tr)
+      return seal && String(tr.sealNumber ?? '').trim() !== seal ? { ...tr, sealNumber: seal } : t
+    })
   }
 
   const tn = String(body.tractorNumber ?? body.tractorNbr ?? '').trim()

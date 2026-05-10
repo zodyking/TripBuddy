@@ -70,6 +70,7 @@ import {
   hasTripOriginAndDestination,
   buildEnhancedTrailerCards,
   buildDollySection,
+  buildInspectAutomationTripData,
 } from '../utils/tripDetailsDisplay.js'
 import {
   formatLinehaulLocationForDisplay,
@@ -813,12 +814,17 @@ async function runQuickAction(auto) {
       )
       return
     }
-    // Build tripData from stableTripState for inspect/checkout automation
-    const tripData = {
-      dolly: stableTripState.value.dolly || {},
-      trailers: stableTripState.value.trailers || [],
-      tractorNumber: stableTripState.value.tractorNumber || '',
-    }
+    // Same equipment JSON as Trip Details (current vs pre-plan swipe, API fallback body)
+    const slideBody = tripDetailsBodyForSlide.value
+    const tripData =
+      slideBody && typeof slideBody === 'object' && !Array.isArray(slideBody)
+        ? buildInspectAutomationTripData(slideBody)
+        : buildInspectAutomationTripData({
+            dollyNumber1: stableTripState.value.dolly?.number1,
+            dollyNumber2: stableTripState.value.dolly?.number2,
+            trailers: stableTripState.value.trailers,
+            tractorNumber: stableTripState.value.tractorNumber,
+          })
     const result = await runAutomation(auto.id, { headless: true, tripData })
     if (result.ok) {
       if (result.variables?._inspectCheckoutCancelled === true) {
