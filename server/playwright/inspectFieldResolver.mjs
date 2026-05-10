@@ -27,37 +27,62 @@ export function getDollyCandidates(tripData) {
 }
 
 /**
- * Get seal number candidates for a specific trailer index.
- * Returns preferred trailer's seal first, then all other seals as fallbacks.
+ * Seal candidates for one trailer field only. FedEx validates each seal against its trailer slot —
+ * never reuse another trailer's seal here (that caused trailer‑2 seals to be wasted on trailer‑1).
  * @param {TripData} tripData
- * @param {number} preferredIndex 0-based trailer index
- * @returns {string[]} Array of seal numbers to try in order
+ * @param {number} preferredIndex 0-based index in `tripData.trailers` array order
+ * @returns {string[]}
  */
 export function getSealCandidates(tripData, preferredIndex) {
-  const seals = []
   const trailers = tripData?.trailers || []
-  const seen = new Set()
-
-  // Add preferred trailer's seal first
   const preferred = trailers[preferredIndex]
-  if (preferred?.sealNumber?.trim()) {
-    const seal = preferred.sealNumber.trim()
-    seals.push(seal)
-    seen.add(seal)
+  const raw = preferred?.sealNumber != null ? String(preferred.sealNumber).trim() : ''
+  if (!raw || raw === '—' || raw.toLowerCase() === 'none') return []
+  return [raw]
+}
+
+/**
+ * Trip payload shape for Inspect automation from persisted assignment (same Linehaul body as Home).
+ * @param {unknown} assignment
+ * @returns {TripData}
+ */
+export function buildTripDataFromAssignment(assignment) {
+  if (!assignment || typeof assignment !== 'object') return {}
+  const a = /** @type {Record<string, unknown>} */ (assignment)
+  const pick =
+    a.persistedLinehaulTripSnapshot ||
+    a.persistedCachedTripSnapshot ||
+    a.persistedPrePlanTripSnapshot ||
+    null
+  if (!pick || typeof pick !== 'object') return {}
+  const body = /** @type {Record<string, unknown>} */ (pick)
+
+  /** @type {TripData} */
+  const out = {}
+  const n1 = String(body.dollyNumber1 ?? '').trim()
+  const n2 = String(body.dollyNumber2 ?? '').trim()
+  if (n1 || n2) {
+    out.dolly = {}
+    if (n1) out.dolly.number1 = n1
+    if (n2) out.dolly.number2 = n2
   }
 
-  // Add all other seals as fallbacks (avoid duplicates)
-  for (let i = 0; i < trailers.length; i++) {
-    if (i !== preferredIndex && trailers[i]?.sealNumber?.trim()) {
-      const seal = trailers[i].sealNumber.trim()
-      if (!seen.has(seal)) {
-        seals.push(seal)
-        seen.add(seal)
-      }
-    }
+  if (Array.isArray(body.trailers)) {
+    const arr = [...body.trailers].filter((x) => x && typeof x === 'object')
+    arr.sort((a, b) => {
+      const ta = /** @type {Record<string, unknown>} */ (a)
+      const tb = /** @type {Record<string, unknown>} */ (b)
+      const sa = Number(ta.dailyTripLegConfigSeq ?? ta.trlrOrder ?? 9999)
+      const sb = Number(tb.dailyTripLegConfigSeq ?? tb.trlrOrder ?? 9999)
+      if (sa !== sb) return sa - sb
+      return (Number(ta.trlrOrder) || 0) - (Number(tb.trlrOrder) || 0)
+    })
+    out.trailers = /** @type {TripData['trailers']} */ (arr)
   }
 
-  return seals
+  const tn = String(body.tractorNumber ?? body.tractorNbr ?? '').trim()
+  if (tn) out.tractorNumber = tn
+  return out
 }
 
 /**
@@ -141,7 +166,7 @@ export function extractTrailerIndex(text) {
 export function buildPromptMessage(fieldType, trailerIndex) {
   switch (fieldType) {
     case 'dolly':
-      return 'Enter Dolly Number'
+      return 'Enter Dolly Number (not in trip details or saved assignment)'
     case 'seal':
       return `Enter Seal Number for Trailer ${trailerIndex} (read from trailer seal)`
     case 'trailerNumber':

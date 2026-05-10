@@ -23,6 +23,7 @@ import {
   setBlockAutomationBusy,
 } from './runner.mjs'
 import { runInspectCheckoutAfterGate } from './inspectCheckoutOrchestration.mjs'
+import { buildTripDataFromAssignment } from './inspectFieldResolver.mjs'
 
 let runAbort = null
 let runnerBusy = false
@@ -686,12 +687,16 @@ async function executeAction(action, page, ctx) {
         })
         return waitForBlockInspectField(ctx.runId, signal)
       }
+      const mergedTripData = {
+        ...buildTripDataFromAssignment(ctx.assignment),
+        ...(ctx.tripData && typeof ctx.tripData === 'object' ? ctx.tripData : {}),
+      }
       const outcome = await runInspectCheckoutAfterGate(page, {
         log,
         signal,
         runId: ctx.runId,
         assignment: ctx.assignment,
-        tripData: ctx.tripData || {},
+        tripData: mergedTripData,
         waitForInspectField,
       })
       ctx.variables._inspectCheckoutContinue = outcome

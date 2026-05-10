@@ -18,6 +18,7 @@ import {
   detectFieldType,
   extractTrailerIndex,
   buildPromptMessage,
+  buildTripDataFromAssignment,
 } from './inspectFieldResolver.mjs'
 
 /** FedEx copy patterns — tune if the app changes. */
@@ -38,12 +39,14 @@ const RX = {
   youAreDispatched: /you\s+are\s+dispatched/i,
   goToHome: /go\s+to\s+home/i,
   checkOffItems: /check\s+off\s+items/i,
+  dispatchSummary: /dispatch\s+summary/i,
+  reviewStartTrip: /review\s+and\s+start\s+trip/i,
 }
 
 const WARN_MODAL_MS = 4_000
 const BEGIN_INSPECTION_MS = 20_000
 const AFTER_CLICK_MS = 2_500
-const IDLE_EXIT_MS = 12_000
+const IDLE_EXIT_MS = 18_000
 const POLL_MS = 450
 const MAX_DOLLY_ATTEMPTS = 6
 const DOLLY_SUCCESS_WAIT_MS = 18_000
@@ -164,6 +167,117 @@ async function getAllLabeledInputs(page) {
 }
 
 /**
+ * All visible seal inputs on the current step (Trailer 1 / Trailer 2, etc.).
+ * @param {import('playwright').Page} page
+ * @returns {Promise<Array<{ input: import('playwright').Locator, trailerIndex: number, labelText: string }>>}
+ */
+async function collectVisibleSealInputs(page) {
+  const inputs = page.locator(
+    'input:visible:not([type="checkbox"]):not([type="radio"]):not([type="hidden"])',
+  )
+  const count = await inputs.count()
+  /** @type {Array<{ input: import('playwright').Locator, trailerIndex: number, labelText: string }>} */
+  const found = []
+  for (let i = 0; i < count; i++) {
+    const input = inputs.nth(i)
+    if (!(await input.isVisible().catch(() => false))) continue
+    let blob =
+      (await input
+        .locator('xpath=ancestor::mat-form-field[1]')
+        .first()
+        .innerText()
+        .catch(() => '')) || ''
+    if (!blob.trim()) {
+      blob =
+        (await input
+          .locator('xpath=./ancestor::*[position()<=8]')
+          .first()
+          .innerText()
+          .catch(() => '')) || ''
+    }
+    const compact = blob.replace(/\s+/g, ' ').trim()
+    const detected = detectFieldType(compact)
+    if (detected.type !== 'seal') continue
+    found.push({
+      input,
+      trailerIndex: detected.trailerIndex,
+      labelText: compact.slice(0, 120),
+    })
+  }
+  found.sort((a, b) => a.trailerIndex - b.trailerIndex)
+  const seen = new Set()
+  return found.filter((x) => {
+    if (seen.has(x.trailerIndex)) return false
+    seen.add(x.trailerIndex)
+    return true
+  })
+}
+
+/**
+ * Empty-trailer number inputs (no seal) on the current step.
+ * @param {import('playwright').Page} page
+ * @returns {Promise<Array<{ input: import('playwright').Locator, trailerIndex: number, labelText: string }>>}
+ */
+async function collectVisibleTrailerNumberInputs(page) {
+  const inputs = page.locator(
+    'input:visible:not([type="checkbox"]):not([type="radio"]):not([type="hidden"])',
+  )
+  const count = await inputs.count()
+  /** @type {Array<{ input: import('playwright').Locator, trailerIndex: number, labelText: string }>} */
+  const found = []
+  for (let i = 0; i < count; i++) {
+    const input = inputs.nth(i)
+    if (!(await input.isVisible().catch(() => false))) continue
+    let blob =
+      (await input
+        .locator('xpath=ancestor::mat-form-field[1]')
+        .first()
+        .innerText()
+        .catch(() => '')) || ''
+    if (!blob.trim()) {
+      blob =
+        (await input
+          .locator('xpath=./ancestor::*[position()<=8]')
+          .first()
+          .innerText()
+          .catch(() => '')) || ''
+    }
+    const compact = blob.replace(/\s+/g, ' ').trim()
+    const detected = detectFieldType(compact)
+    if (detected.type !== 'trailerNumber') continue
+    found.push({
+      input,
+      trailerIndex: detected.trailerIndex,
+      labelText: compact.slice(0, 120),
+    })
+  }
+  found.sort((a, b) => a.trailerIndex - b.trailerIndex)
+  const seen = new Set()
+  return found.filter((x) => {
+    if (seen.has(x.trailerIndex)) return false
+    seen.add(x.trailerIndex)
+    return true
+  })
+}
+
+/**
+ * @param {import('playwright').Page} page
+ */
+async function clickSealValidateButton(page) {
+  const plural = buttonLikeByVisibleText(page, RX.validateSeals).first()
+  if (await plural.isVisible().catch(() => false)) {
+    await plural.click()
+    return true
+  }
+  const singular = buttonLikeByVisibleText(page, RX.validateSeal).first()
+  if (await singular.isVisible().catch(() => false)) {
+    await singular.click()
+    return true
+  }
+  return false
+}
+
+/**
  * @param {import('playwright').Locator} loc
  * @param {number} timeout
  */
@@ -271,12 +385,22 @@ async function isInspectionChecklistScreen(page) {
 }
 
 /**
- * Check if we're on the Review and Start Trip / Dispatch screen.
+ * Check if we're on the Review and Start Trip / Dispatch Summary screen (primary DISPATCH action).
  * @param {import('playwright').Page} page
  */
 async function isDispatchScreen(page) {
+  const dispatchRole = page.getByRole('button', { name: /^dispatch$/i }).first()
+  if (await dispatchRole.isVisible().catch(() => false)) return true
   const dispatchBtn = buttonLikeByVisibleText(page, RX.dispatch).first()
-  return await dispatchBtn.isVisible().catch(() => false)
+  if (await dispatchBtn.isVisible().catch(() => false)) return true
+  const summaryHint =
+    (await page.getByText(RX.dispatchSummary).first().isVisible().catch(() => false)) ||
+    (await page.getByText(RX.reviewStartTrip).first().isVisible().catch(() => false))
+  if (summaryHint) {
+    const loose = page.getByRole('button', { name: /dispatch/i }).first()
+    return await loose.isVisible().catch(() => false)
+  }
+  return false
 }
 
 /**
@@ -284,11 +408,37 @@ async function isDispatchScreen(page) {
  * @param {import('playwright').Page} page
  */
 async function isDispatchConfirmModal(page) {
-  const yesBtn = buttonLikeByVisibleText(page, RX.dispatchConfirmYes).first()
   const modalText = page.getByText(/do you wish to dispatch/i).first()
-  const hasYes = await yesBtn.isVisible().catch(() => false)
   const hasModal = await modalText.isVisible().catch(() => false)
-  return hasYes && hasModal
+  if (!hasModal) return false
+  const yesRole = page.getByRole('button', { name: /^yes$/i }).first()
+  if (await yesRole.isVisible().catch(() => false)) return true
+  const yesBtn = buttonLikeByVisibleText(page, RX.dispatchConfirmYes).first()
+  return await yesBtn.isVisible().catch(() => false)
+}
+
+/**
+ * @param {import('playwright').Page} page
+ */
+async function clickDispatchButton(page) {
+  const dispatchRole = page.getByRole('button', { name: /^dispatch$/i }).first()
+  if (await dispatchRole.isVisible().catch(() => false)) {
+    await dispatchRole.click()
+    return
+  }
+  await buttonLikeByVisibleText(page, RX.dispatch).first().click()
+}
+
+/**
+ * @param {import('playwright').Page} page
+ */
+async function clickDispatchConfirmYes(page) {
+  const yesRole = page.getByRole('button', { name: /^yes$/i }).first()
+  if (await yesRole.isVisible().catch(() => false)) {
+    await yesRole.click()
+    return
+  }
+  await buttonLikeByVisibleText(page, RX.dispatchConfirmYes).first().click()
 }
 
 /**
@@ -339,6 +489,11 @@ async function completeInspectionChecklist(page, log) {
 export async function runInspectCheckoutAfterGate(page, opts) {
   const { log, signal, assignment = {}, tripData = {}, waitForInspectField } = opts
 
+  const tripDataEffective = {
+    ...buildTripDataFromAssignment(assignment),
+    ...(tripData && typeof tripData === 'object' ? tripData : {}),
+  }
+
   // Track used seal candidates to avoid re-trying
   const triedSeals = new Set()
   let lastProgress = Date.now()
@@ -366,8 +521,7 @@ export async function runInspectCheckoutAfterGate(page, opts) {
 
     // --- Dispatch confirmation modal (YES/NO) ---
     if (await isDispatchConfirmModal(page)) {
-      const yesBtn = buttonLikeByVisibleText(page, RX.dispatchConfirmYes).first()
-      await yesBtn.click()
+      await clickDispatchConfirmYes(page)
       log('info', 'Clicked YES on dispatch confirmation')
       lastProgress = Date.now()
       await page.waitForTimeout(AFTER_CLICK_MS)
@@ -388,10 +542,9 @@ export async function runInspectCheckoutAfterGate(page, opts) {
       continue
     }
 
-    // --- Dispatch screen (Review and Start Trip) ---
+    // --- Dispatch screen (Review and Start Trip / Dispatch Summary) ---
     if (await isDispatchScreen(page)) {
-      const dispatchBtn = buttonLikeByVisibleText(page, RX.dispatch).first()
-      await dispatchBtn.click()
+      await clickDispatchButton(page)
       log('info', 'Clicked DISPATCH button')
       lastProgress = Date.now()
       await page.waitForTimeout(AFTER_CLICK_MS)
@@ -446,7 +599,7 @@ export async function runInspectCheckoutAfterGate(page, opts) {
       }
 
       // Get dolly candidates from trip data
-      const dollyCandidates = getDollyCandidates(tripData)
+      const dollyCandidates = getDollyCandidates(tripDataEffective)
       let val = dollyCandidates[0] || ''
 
       // If no dolly in trip data, prompt driver
@@ -503,6 +656,89 @@ export async function runInspectCheckoutAfterGate(page, opts) {
       continue
     }
 
+    // --- Batch seal entry (Trailer 1 + 2 on one step, single VALIDATE SEALS) ---
+    if (!(await isDollyEntryScreen(page))) {
+      const sealRows = await collectVisibleSealInputs(page)
+      const pluralSealsBtn = buttonLikeByVisibleText(page, RX.validateSeals).first()
+      const batchSeals =
+        sealRows.length >= 2 ||
+        (sealRows.length >= 1 && (await pluralSealsBtn.isVisible().catch(() => false)))
+      if (batchSeals) {
+        let filledAny = false
+        for (const row of sealRows) {
+          aborted()
+          const trailerIndex = row.trailerIndex
+          const sealCandidates = getSealCandidates(tripDataEffective, trailerIndex - 1)
+          let val = sealCandidates[0] || ''
+          if (!val) {
+            val = (
+              await waitForInspectField({
+                field: `trailer${trailerIndex}_seal`,
+                message: buildPromptMessage('seal', trailerIndex),
+              })
+            ).trim()
+          }
+          if (!val) throw new Error(`Inspect: seal required for Trailer ${trailerIndex}`)
+          await row.input.fill(val)
+          triedSeals.add(val)
+          filledAny = true
+          log('info', `Batch seal pre-fill Trailer ${trailerIndex}`)
+        }
+        if (filledAny) {
+          const clickedValidate = await clickSealValidateButton(page)
+          if (clickedValidate) {
+            log('info', 'Clicked seal validation after batch trailer seal fill')
+            lastProgress = Date.now()
+            await page.waitForTimeout(Math.max(SEAL_VALIDATION_WAIT_MS, 2_000))
+            if (!(await hasInvalidSealError(page))) {
+              continue
+            }
+            log('warn', 'Batch seal validation failed — retrying with per-field handling')
+          }
+        }
+      }
+    }
+
+    // --- Batch empty-trailer numbers (multiple fields, one validate) ---
+    if (!(await isDollyEntryScreen(page))) {
+      const trailerRows = await collectVisibleTrailerNumberInputs(page)
+      const vmtBtn = buttonLikeByVisibleText(page, RX.validateMtTrailer).first()
+      const batchMt =
+        trailerRows.length >= 2 ||
+        (trailerRows.length >= 1 && (await vmtBtn.isVisible().catch(() => false)))
+      if (batchMt) {
+        for (const row of trailerRows) {
+          aborted()
+          const trailerIndex = row.trailerIndex
+          log('info', `Empty trailer batch — prompting for Trailer ${trailerIndex} number`)
+          const val = (
+            await waitForInspectField({
+              field: `trailer${trailerIndex}_number`,
+              message: buildPromptMessage('trailerNumber', trailerIndex),
+            })
+          ).trim()
+          if (!val) throw new Error(`Inspect: trailer number required for Trailer ${trailerIndex}`)
+          await row.input.fill(val)
+        }
+        if (await vmtBtn.isVisible().catch(() => false)) {
+          await vmtBtn.click()
+          log('info', 'Clicked VALIDATE MT TRAILER after batch trailer numbers')
+          lastProgress = Date.now()
+          await page.waitForTimeout(AFTER_CLICK_MS)
+          continue
+        }
+        const fallbackBtn = page
+          .getByRole('button', { name: /validate|submit|continue|next/i })
+          .first()
+        if (await fallbackBtn.isVisible().catch(() => false)) {
+          await fallbackBtn.click()
+          lastProgress = Date.now()
+          await page.waitForTimeout(AFTER_CLICK_MS)
+          continue
+        }
+      }
+    }
+
     // --- Detect field by label text ---
     const labeledInputs = await getAllLabeledInputs(page)
 
@@ -517,7 +753,7 @@ export async function runInspectCheckoutAfterGate(page, opts) {
       // --- SEAL NUMBER (loaded trailers) ---
       if (detected.type === 'seal') {
         const trailerIndex = detected.trailerIndex
-        const sealCandidates = getSealCandidates(tripData, trailerIndex - 1)
+        const sealCandidates = getSealCandidates(tripDataEffective, trailerIndex - 1)
 
         // Filter out already-tried seals
         const untried = sealCandidates.filter((s) => !triedSeals.has(s))
@@ -637,7 +873,7 @@ export async function runInspectCheckoutAfterGate(page, opts) {
       // Seal by placeholder
       if (/SEAL/i.test(upper) && /TRAILER|TRLR|\d/.test(upper)) {
         const trailerIndex = extractTrailerIndex(ph)
-        const sealCandidates = getSealCandidates(tripData, trailerIndex - 1)
+        const sealCandidates = getSealCandidates(tripDataEffective, trailerIndex - 1)
         const untried = sealCandidates.filter((s) => !triedSeals.has(s))
 
         let validationSuccess = false
