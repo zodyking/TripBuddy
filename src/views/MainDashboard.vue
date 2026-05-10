@@ -814,7 +814,7 @@ async function runQuickAction(auto) {
       )
       return
     }
-    // Same equipment JSON as Trip Details (current vs pre-plan swipe, API fallback body)
+    // Same equipment JSON as Trip Details cards on the home page
     const slideBody = tripDetailsBodyForSlide.value
     const tripData =
       slideBody && typeof slideBody === 'object' && !Array.isArray(slideBody)
@@ -825,6 +825,12 @@ async function runQuickAction(auto) {
             trailers: stableTripState.value.trailers,
             tractorNumber: stableTripState.value.tractorNumber,
           })
+    // Dolly card on home page uses registry as fallback — ensure the automation gets it
+    const dollyFromCard = dollyPrimaryDisplay.value
+    if (dollyFromCard && !tripData.dolly?.number1) {
+      if (!tripData.dolly) tripData.dolly = {}
+      tripData.dolly.number1 = dollyFromCard
+    }
     const result = await runAutomation(auto.id, { headless: true, tripData })
     if (result.ok) {
       if (result.variables?._inspectCheckoutCancelled === true) {
