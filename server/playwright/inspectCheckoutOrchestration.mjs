@@ -20,6 +20,7 @@ import {
   buildPromptMessage,
   buildTripDataFromAssignment,
 } from './inspectFieldResolver.mjs'
+import { getTrailerNumberCandidates } from '../trailer-number-store.mjs'
 
 /** FedEx copy patterns — tune if the app changes. */
 const RX = {
@@ -579,6 +580,20 @@ export async function runInspectCheckoutAfterGate(page, opts) {
   /** @type {ProofScreenshot[]} */
   const proofScreenshots = []
 
+  /** Pre-entered trailer numbers from the home page (for empty trailers). */
+  /** @type {Map<number, string>} */
+  const preEnteredTrailerNbrs = new Map()
+  const legSeq = String(tripDataEffective.dailyTripLegSequence || '').trim()
+  if (legSeq) {
+    try {
+      const stored = await getTrailerNumberCandidates(legSeq)
+      for (const s of stored) preEnteredTrailerNbrs.set(s.index, s.number)
+      if (preEnteredTrailerNbrs.size) {
+        log('info', `Loaded ${preEnteredTrailerNbrs.size} pre-entered trailer number(s) for leg ${legSeq}`)
+      }
+    } catch { /* store unavailable */ }
+  }
+
   /** Per-trailer seal tracking — seals that failed for trailer N may still be valid for trailer M (swap). */
   /** @type {Map<number, Set<string>>} */
   const triedSealsByTrailer = new Map()
@@ -820,13 +835,19 @@ export async function runInspectCheckoutAfterGate(page, opts) {
         for (const row of trailerRows) {
           aborted()
           const trailerIndex = row.trailerIndex
-          log('info', `Empty trailer batch — prompting for Trailer ${trailerIndex} number`)
-          const val = (
-            await waitForInspectField({
-              field: `trailer${trailerIndex}_number`,
-              message: buildPromptMessage('trailerNumber', trailerIndex),
-            })
-          ).trim()
+          const preEntered = preEnteredTrailerNbrs.get(trailerIndex) || ''
+          let val = preEntered
+          if (val) {
+            log('info', `Using pre-entered trailer number for Trailer ${trailerIndex}: ${val}`)
+          } else {
+            log('info', `No pre-entered number for Trailer ${trailerIndex} — prompting`)
+            val = (
+              await waitForInspectField({
+                field: `trailer${trailerIndex}_number`,
+                message: buildPromptMessage('trailerNumber', trailerIndex),
+              })
+            ).trim()
+          }
           if (!val) throw new Error(`Inspect: trailer number required for Trailer ${trailerIndex}`)
           await row.input.fill(val)
         }
@@ -918,17 +939,22 @@ export async function runInspectCheckoutAfterGate(page, opts) {
         break
       }
 
-      // --- TRAILER NUMBER (empty trailers - always prompt driver) ---
+      // --- TRAILER NUMBER (empty trailers — use pre-entered, then prompt) ---
       if (detected.type === 'trailerNumber') {
         const trailerIndex = detected.trailerIndex
-        log('info', `Empty trailer detected — prompting for Trailer ${trailerIndex} number`)
-
-        const val = (
-          await waitForInspectField({
-            field: `trailer${trailerIndex}_number`,
-            message: buildPromptMessage('trailerNumber', trailerIndex),
-          })
-        ).trim()
+        const preEntered = preEnteredTrailerNbrs.get(trailerIndex) || ''
+        let val = preEntered
+        if (val) {
+          log('info', `Using pre-entered trailer number for Trailer ${trailerIndex}: ${val}`)
+        } else {
+          log('info', `No pre-entered number for Trailer ${trailerIndex} — prompting`)
+          val = (
+            await waitForInspectField({
+              field: `trailer${trailerIndex}_number`,
+              message: buildPromptMessage('trailerNumber', trailerIndex),
+            })
+          ).trim()
+        }
 
         if (!val) throw new Error(`Inspect: trailer number required for Trailer ${trailerIndex}`)
 
@@ -1027,18 +1053,24 @@ export async function runInspectCheckoutAfterGate(page, opts) {
         break
       }
 
-      // Trailer number by placeholder (empties)
+      // Trailer number by placeholder (empties — use pre-entered, then prompt)
       if (
         (/TRAILER|TRLR|EMPTY/i.test(upper) && /NUMBER|NBR|NO\.?/i.test(upper) && !/SEAL/i.test(upper)) ||
         (/EMPTY/i.test(upper) && /LOAD/i.test(upper))
       ) {
         const trailerIndex = extractTrailerIndex(ph)
-        const val = (
-          await waitForInspectField({
-            field: `trailer${trailerIndex}_number`,
-            message: buildPromptMessage('trailerNumber', trailerIndex),
-          })
-        ).trim()
+        const preEntered = preEnteredTrailerNbrs.get(trailerIndex) || ''
+        let val = preEntered
+        if (val) {
+          log('info', `Using pre-entered trailer number (placeholder) for Trailer ${trailerIndex}: ${val}`)
+        } else {
+          val = (
+            await waitForInspectField({
+              field: `trailer${trailerIndex}_number`,
+              message: buildPromptMessage('trailerNumber', trailerIndex),
+            })
+          ).trim()
+        }
         if (!val) throw new Error(`Inspect: trailer number required for Trailer ${trailerIndex}`)
         await el.fill(val)
         log('info', `Filled trailer number (placeholder): ${val}`)
