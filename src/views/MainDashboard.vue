@@ -25,6 +25,8 @@ import {
   getDollyRegistry,
   putDollyNumber,
   patchDollyRating,
+  getTrailerNumbers,
+  putTrailerNumber,
 } from '../api.js'
 import {
   linehaulTractorBody,
@@ -467,6 +469,49 @@ async function setDollyRate(r) {
   } catch {
     /* */
   }
+}
+
+/* ═══════════ Pre-entered empty trailer numbers ═══════════ */
+/** @type {import('vue').Ref<Record<string, string>>} */
+const trailerNbrReg = ref({})
+const trailerNbrAddKey = ref('')
+const trailerNbrAddDigits = ref('')
+const trailerNbrPutBusy = ref(false)
+
+async function loadTrailerNumbers() {
+  const seq = currentTripLegSeq.value
+  if (!seq) { trailerNbrReg.value = {}; return }
+  try {
+    const res = await getTrailerNumbers(String(seq))
+    trailerNbrReg.value = res?.numbers && typeof res.numbers === 'object' ? res.numbers : {}
+  } catch { trailerNbrReg.value = {} }
+}
+
+function trailerNbrForOrder(order) {
+  return trailerNbrReg.value[String(order)] || ''
+}
+
+function onTrailerNbrInput(e) {
+  const t = e?.target
+  trailerNbrAddDigits.value = t && 'value' in t
+    ? String(/** @type {HTMLInputElement} */ (t).value).replace(/\D/g, '').slice(0, 8)
+    : ''
+}
+
+async function onTrailerNbrSubmit(order) {
+  const n = trailerNbrAddDigits.value.trim()
+  if (!n) return
+  const seq = currentTripLegSeq.value
+  if (!seq) return
+  trailerNbrPutBusy.value = true
+  try {
+    const res = await putTrailerNumber({ legSeq: String(seq), trailerIndex: Number(order), number: n })
+    if (res?.numbers) trailerNbrReg.value = res.numbers
+    trailerNbrAddKey.value = ''
+    trailerNbrAddDigits.value = ''
+    void copyTripDetailValue(n, `Trailer ${order} number`)
+  } catch { /* */ }
+  finally { trailerNbrPutBusy.value = false }
 }
 
 async function copyTripDetailValue(value, label) {
@@ -1143,6 +1188,7 @@ watch(
 
 watch(linehaulLastFetchAt, () => {
   void loadDollyRegistry()
+  void loadTrailerNumbers()
 })
 
 /** Debounce phase TTS so Linehaul poll flicker does not spam speech. */
@@ -1584,6 +1630,7 @@ onMounted(async () => {
   previewPollTimer = setInterval(pollAutomationPreview, 1600)
   void setupLinehaulPolling()
   void loadDollyRegistry()
+  void loadTrailerNumbers()
   syncTripVoiceUnlockHint()
 })
 
@@ -1591,6 +1638,7 @@ onActivated(() => {
   loadAssignment()
   void refreshLinehaulCredMeta()
   void loadDollyRegistry()
+  void loadTrailerNumbers()
   void loadQuickActions()
   void setupLinehaulPolling()
   syncTripVoiceUnlockHint()
@@ -2543,6 +2591,68 @@ onUnmounted(() => {
                   </dd>
                 </template>
               </dl>
+            </div>
+            <div
+              v-if="card.loadType === 'Empty'"
+              class="trailer-card-summary trailer-nbr-entry"
+              @click.stop
+            >
+              <template v-if="trailerNbrForOrder(card.order) && trailerNbrAddKey !== card.id">
+                <span class="trailer-nbr-pre-label">Pre-entered #</span>
+                <button
+                  type="button"
+                  class="trailer-nbr-pre-val copyable-inline tap"
+                  title="Tap to copy"
+                  @click.stop="copyTripDetailValue(trailerNbrForOrder(card.order), `Trailer ${card.order} number`)"
+                >
+                  {{ trailerNbrForOrder(card.order) }}
+                </button>
+                <button
+                  type="button"
+                  class="dolly-add-tile tap"
+                  title="Change trailer number"
+                  @click.stop="trailerNbrAddKey = card.id; trailerNbrAddDigits = trailerNbrForOrder(card.order)"
+                >
+                  +
+                </button>
+              </template>
+              <template v-else-if="trailerNbrAddKey === card.id">
+                <input
+                  :value="trailerNbrAddDigits"
+                  class="dolly-compact-inp"
+                  inputmode="numeric"
+                  maxlength="8"
+                  placeholder="Trailer #"
+                  @input="onTrailerNbrInput"
+                  @click.stop
+                  @keydown.enter.prevent="trailerNbrAddDigits.length >= 4 && onTrailerNbrSubmit(card.order)"
+                />
+                <button
+                  type="button"
+                  class="dolly-compact-btn btn primary"
+                  :disabled="trailerNbrPutBusy || trailerNbrAddDigits.length < 4"
+                  @click.stop="onTrailerNbrSubmit(card.order)"
+                >
+                  Save
+                </button>
+                <button
+                  type="button"
+                  class="dolly-compact-btn btn secondary"
+                  :disabled="trailerNbrPutBusy"
+                  @click.stop="trailerNbrAddKey = ''; trailerNbrAddDigits = ''"
+                >
+                  Cancel
+                </button>
+              </template>
+              <template v-else>
+                <button
+                  type="button"
+                  class="trailer-nbr-add-btn tap"
+                  @click.stop="trailerNbrAddKey = card.id; trailerNbrAddDigits = ''"
+                >
+                  Enter trailer number
+                </button>
+              </template>
             </div>
           </div>
         </template>
@@ -4307,6 +4417,47 @@ button.trailer-nbr.copyable-inline {
   font-weight: 600;
   word-break: break-word;
   min-width: 0;
+}
+.trailer-nbr-entry {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+  padding: 0.4rem 0.65rem !important;
+}
+.trailer-nbr-pre-label {
+  font-size: 0.68rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--muted, #9898a8);
+}
+.trailer-nbr-pre-val {
+  font-weight: 700;
+  font-size: 0.85rem;
+  font-variant-numeric: tabular-nums;
+  font-family: ui-monospace, 'Cascadia Code', 'Segoe UI Mono', monospace;
+  color: var(--text, #e8e8ee);
+  background: transparent;
+  border: none;
+  padding: 0;
+  margin: 0;
+  cursor: pointer;
+}
+.trailer-nbr-add-btn {
+  width: 100%;
+  padding: 0.35rem 0.5rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: #c4b5fd;
+  background: rgba(123, 77, 181, 0.08);
+  border: 1px dashed rgba(123, 77, 181, 0.3);
+  border-radius: 6px;
+  cursor: pointer;
+  text-align: center;
+}
+.trailer-nbr-add-btn:hover {
+  background: rgba(123, 77, 181, 0.15);
 }
 .trailer-card-details {
   padding: 0.5rem 0.75rem 0.65rem;

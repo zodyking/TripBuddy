@@ -1639,6 +1639,36 @@ try {
   process.exit(1)
 }
 
+/* ═══════════════════ Pre-entered trailer numbers ═══════════════════ */
+import { getTrailerNumbers, putTrailerNumber } from './trailer-number-store.mjs'
+
+app.get('/api/trailer-numbers/:legSeq', async (req, reply) => {
+  const legSeq = String(req.params.legSeq || '').trim()
+  if (!legSeq) return reply.code(400).send({ error: 'legSeq required' })
+  try {
+    const numbers = await getTrailerNumbers(legSeq)
+    return { ok: true, legSeq, numbers }
+  } catch (e) {
+    return reply.code(500).send({ error: e instanceof Error ? e.message : String(e) })
+  }
+})
+
+app.put('/api/trailer-numbers', async (req, reply) => {
+  try {
+    const b = req.body ?? {}
+    const legSeq = String(b.legSeq || '').trim()
+    const trailerIndex = Number(b.trailerIndex)
+    const number = String(b.number || '').trim()
+    if (!legSeq) return reply.code(400).send({ error: 'legSeq required' })
+    if (!trailerIndex || trailerIndex < 1) return reply.code(400).send({ error: 'trailerIndex required (1-based)' })
+    if (!number) return reply.code(400).send({ error: 'number required' })
+    const numbers = await putTrailerNumber(legSeq, trailerIndex, number)
+    return { ok: true, legSeq, numbers }
+  } catch (e) {
+    return reply.code(400).send({ error: e instanceof Error ? e.message : String(e) })
+  }
+})
+
 /* ═══════════════════ Dispatch proof screenshots ═══════════════════ */
 import { getDispatchProof } from './dispatch-proof-store.mjs'
 

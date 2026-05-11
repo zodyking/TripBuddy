@@ -1031,3 +1031,25 @@ export async function fetchDispatchProof(legSeq) {
   const r = await apiFetch(`/api/dispatch-proof/${encodeURIComponent(legSeq)}`)
   return handleJson(r)
 }
+
+/**
+ * Get pre-entered empty trailer numbers for a trip leg.
+ * @param {string} legSeq
+ */
+export async function getTrailerNumbers(legSeq) {
+  const r = await apiFetch(`/api/trailer-numbers/${encodeURIComponent(legSeq)}`)
+  return handleJson(r)
+}
+
+/**
+ * Pre-enter an empty trailer number for a trip leg.
+ * @param {{ legSeq: string, trailerIndex: number, number: string }} p
+ */
+export async function putTrailerNumber(p) {
+  const r = await apiFetch('/api/trailer-numbers', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(p),
+  })
+  return handleJson(r)
+}
