@@ -385,10 +385,10 @@ const tripDollySection = computed(() =>
 const equipmentCopyText = computed(() => {
   const lines = []
   const dolly = dollyPrimaryDisplay.value
-  if (dolly) lines.push(`; Dolly #${dolly}`)
+  if (dolly) lines.push(`Dolly: ${dolly}`)
   for (const card of tripTrailerCards.value) {
     const nbr = card.trlrNbr || trailerNbrForOrder(card.order)
-    if (nbr) lines.push(`; Trailer ${card.order} #${nbr}`)
+    if (nbr) lines.push(`Trailer ${card.order}: ${nbr}`)
   }
   return lines.join('\n')
 })
