@@ -382,6 +382,17 @@ const tripDollySection = computed(() =>
   buildDollySection(tripDetailsBodyForSlide.value),
 )
 
+const equipmentCopyText = computed(() => {
+  const lines = []
+  const dolly = dollyPrimaryDisplay.value
+  if (dolly) lines.push(`; Dolly #${dolly}`)
+  for (const card of tripTrailerCards.value) {
+    const nbr = card.trlrNbr || trailerNbrForOrder(card.order)
+    if (nbr) lines.push(`; Trailer ${card.order} #${nbr}`)
+  }
+  return lines.join('\n')
+})
+
 const copyToast = ref('')
 
 const dollyReg = ref(/** @type {null | { lastPrimaryNbr: string | null, items: Record<string, { rating?: string, nbr?: string }> }} */ (null))
@@ -2249,21 +2260,32 @@ onUnmounted(() => {
     >
       <div class="trip-panel-header">
         <h2 class="trip-panel-title">Trip</h2>
-        <div
-          class="trip-status-inline"
-          role="status"
-          :aria-label="`Trip Status: ${tripStatusUi.text}`"
-          :title="tripStatusDetailTitle || undefined"
-        >
-          <span class="trip-status-dot" :class="tripStatusDotClass" aria-hidden="true" />
+        <div class="trip-panel-header-actions">
           <button
+            v-if="equipmentCopyText"
             type="button"
-            class="trip-status-state copyable-inline tap"
-            title="Tap to copy"
-            @click.stop="copyTripDetailValue(tripStatusUi.text, 'Trip status')"
+            class="trip-copy-all-btn tap"
+            title="Copy all equipment numbers"
+            @click.stop="copyTripDetailValue(equipmentCopyText, 'Equipment numbers')"
           >
-            {{ tripStatusUi.text }}
+            Copy All
           </button>
+          <div
+            class="trip-status-inline"
+            role="status"
+            :aria-label="`Trip Status: ${tripStatusUi.text}`"
+            :title="tripStatusDetailTitle || undefined"
+          >
+            <span class="trip-status-dot" :class="tripStatusDotClass" aria-hidden="true" />
+            <button
+              type="button"
+              class="trip-status-state copyable-inline tap"
+              title="Tap to copy"
+              @click.stop="copyTripDetailValue(tripStatusUi.text, 'Trip status')"
+            >
+              {{ tripStatusUi.text }}
+            </button>
+          </div>
         </div>
       </div>
 
@@ -3495,6 +3517,30 @@ button.trailer-nbr.copyable-inline {
   font-size: 1.1rem;
   font-weight: 700;
   letter-spacing: -0.02em;
+}
+.trip-panel-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+.trip-copy-all-btn {
+  padding: 0.2rem 0.5rem;
+  font-size: 0.62rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #c4b5fd;
+  background: rgba(123, 77, 181, 0.1);
+  border: 1px solid rgba(123, 77, 181, 0.3);
+  border-radius: 4px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.trip-copy-all-btn:hover {
+  background: rgba(123, 77, 181, 0.2);
+}
+.trip-copy-all-btn:active {
+  opacity: 0.8;
 }
 .trip-route-section {
   display: flex;
