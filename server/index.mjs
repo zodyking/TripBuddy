@@ -1357,8 +1357,8 @@ app.post('/api/directory/bulk', async (req, reply) => {
 app.post('/api/directory/geocode-missing', async (req, reply) => {
   try {
     const body = req.body ?? {}
-    const max = Math.min(30, Math.max(1, Number(body.max) || 8))
-    const delayMs = Math.min(5000, Math.max(900, Number(body.delayMs) || 1100))
+    const max = Math.min(40, Math.max(1, Number(body.max) || 18))
+    const delayMs = Math.min(3000, Math.max(850, Number(body.delayMs) || 1000))
     const result = await geocodeMissingDirectoryLocations({ max, delayMs })
     return result
   } catch (e) {

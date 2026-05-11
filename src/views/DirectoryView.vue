@@ -49,6 +49,37 @@ const addLocationError = ref('')
 
 /** True while resolving addresses → coordinates for the directory map (Nominatim). */
 const geocodeBusy = ref(false)
+/** Snapshot for progress UI (reset when backfill finishes). */
+const geocodeInitialMissing = ref(0)
+const geocodeRemaining = ref(0)
+const GEOCODE_HTTP_BATCH = 20
+
+const geocodeMappedCount = computed(() => {
+  const init = geocodeInitialMissing.value
+  const rem = geocodeRemaining.value
+  if (init <= 0) return 0
+  return Math.max(0, Math.min(init, init - rem))
+})
+
+const geocodeProgressPct = computed(() => {
+  const init = geocodeInitialMissing.value
+  if (init <= 0) return 0
+  return Math.min(100, Math.round((geocodeMappedCount.value / init) * 100))
+})
+
+const geocodeEtaHint = computed(() => {
+  if (!geocodeBusy.value) return ''
+  const rem = geocodeRemaining.value
+  if (rem <= 0) return ''
+  const rounds = Math.ceil(rem / GEOCODE_HTTP_BATCH)
+  const perRoundSec = GEOCODE_HTTP_BATCH * 1.05 + 2
+  const sec = Math.ceil(rounds * perRoundSec)
+  if (sec < 120) {
+    return `Rough ETA ~${sec}s (addresses are resolved sequentially on the server).`
+  }
+  const m = Math.max(1, Math.round(sec / 60))
+  return `Rough ETA ~${m} min (OpenStreetMap Nominatim allows about one request per second; coordinates are saved so each address is only resolved once).`
+})
 
 /**
  * Sort directory entries by numeric location id when possible (312 before 3117).
@@ -125,9 +156,11 @@ const showMapGeocodeProgress = computed(
   () =>
     !loading.value &&
     geocodeBusy.value &&
-    filteredLocations.value.length > 0 &&
-    mapPins.value.length === 0,
+    needsAddressGeocode.value &&
+    filteredLocations.value.length > 0,
 )
+
+const showDirectoryGeocodeBanner = computed(() => showMapGeocodeProgress.value)
 
 function prefersReducedMotion() {
   if (typeof window === 'undefined') return false
@@ -208,12 +241,21 @@ async function runDirectoryGeocodeBackfill() {
   if (geocodeBackfillRunning || !needsAddressGeocode.value) return
   geocodeBackfillRunning = true
   geocodeBusy.value = true
+  geocodeInitialMissing.value = 0
+  geocodeRemaining.value = 0
   try {
     let rem = 1
-    for (let i = 0; i < 40 && rem > 0; i++) {
-      const r = await postDirectoryGeocodeMissing({ max: 10 })
+    for (let i = 0; i < 200 && rem > 0; i++) {
+      const r = await postDirectoryGeocodeMissing({
+        max: GEOCODE_HTTP_BATCH,
+        delayMs: 1000,
+      })
       rem = typeof r.remaining === 'number' ? r.remaining : 0
-      if (r.updated > 0) {
+      if (typeof r.missingBefore === 'number' && r.missingBefore > 0) {
+        geocodeInitialMissing.value = Math.max(geocodeInitialMissing.value, r.missingBefore)
+      }
+      geocodeRemaining.value = rem
+      if (r.updated > 0 || r.processed > 0) {
         await refreshDirectoryListOnly()
       }
       if (rem <= 0) break
@@ -224,6 +266,8 @@ async function runDirectoryGeocodeBackfill() {
   } finally {
     geocodeBusy.value = false
     geocodeBackfillRunning = false
+    geocodeInitialMissing.value = 0
+    geocodeRemaining.value = 0
   }
 }
 
@@ -682,12 +726,33 @@ onUnmounted(() => {
         v-if="showMapGeocodeProgress"
         class="map-no-coords-notice map-geocode-progress"
         role="status"
+        aria-live="polite"
       >
         <div class="spinner map-geocode-spinner" aria-hidden="true" />
-        <p>
-          Looking up addresses on the map (OpenStreetMap Nominatim). This may take a
-          minute for large directories.
-        </p>
+        <div class="map-geocode-progress-body">
+          <p class="map-geocode-progress-title">
+            <strong>Saving map coordinates on the server</strong>
+          </p>
+          <p v-if="geocodeInitialMissing > 0" class="map-geocode-progress-count">
+            {{ geocodeMappedCount }} of {{ geocodeInitialMissing }} addresses with coordinates so far
+            <span v-if="geocodeRemaining > 0" class="map-geocode-remain"
+              >({{ geocodeRemaining }} left)</span
+            >
+          </p>
+          <p v-else class="map-geocode-progress-count">Starting address lookup…</p>
+          <div
+            v-if="geocodeInitialMissing > 0"
+            class="dir-geocode-meter"
+            role="progressbar"
+            :aria-valuenow="geocodeProgressPct"
+            aria-valuemin="0"
+            aria-valuemax="100"
+            :aria-label="`Geocoding progress ${geocodeProgressPct} percent`"
+          >
+            <div class="dir-geocode-meter-fill" :style="{ width: `${geocodeProgressPct}%` }" />
+          </div>
+          <p class="map-geocode-progress-hint">{{ geocodeEtaHint }}</p>
+        </div>
       </div>
 
       <div
@@ -726,6 +791,21 @@ onUnmounted(() => {
           <div class="directory-heading-text">
             <h1 class="directory-title">Directory</h1>
             <p class="directory-subtitle">Updates automatically</p>
+            <div
+              v-if="showDirectoryGeocodeBanner"
+              class="directory-geocode-banner"
+              role="status"
+              aria-live="polite"
+            >
+              <span class="directory-geocode-banner-dot" aria-hidden="true" />
+              <span class="directory-geocode-banner-text">
+                <template v-if="geocodeInitialMissing > 0">
+                  Geocoding: {{ geocodeMappedCount }} / {{ geocodeInitialMissing }} saved —
+                  {{ geocodeRemaining }} queued
+                </template>
+                <template v-else> Geocoding addresses… </template>
+              </span>
+            </div>
           </div>
           <div class="directory-header-actions">
             <button
@@ -1414,6 +1494,51 @@ onUnmounted(() => {
   letter-spacing: var(--tracking-wide, 0.025em);
 }
 
+.directory-geocode-banner {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2, 0.5rem);
+  margin-top: var(--space-2, 0.5rem);
+  padding: var(--space-2, 0.5rem) var(--space-3, 0.75rem);
+  border-radius: var(--radius-md, 0.5rem);
+  background: rgba(123, 77, 181, 0.12);
+  border: 1px solid rgba(123, 77, 181, 0.35);
+}
+
+.directory-geocode-banner-dot {
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 50%;
+  background: var(--color-accent-purple, #7b4db5);
+  flex-shrink: 0;
+  animation: dir-geocode-pulse 1.2s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .directory-geocode-banner-dot {
+    animation: none;
+  }
+}
+
+@keyframes dir-geocode-pulse {
+  0%,
+  100% {
+    opacity: 0.45;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.15);
+  }
+}
+
+.directory-geocode-banner-text {
+  font-size: var(--text-xs, 0.6875rem);
+  font-weight: var(--weight-medium, 500);
+  color: var(--color-text-secondary, #a0a0b0);
+  line-height: var(--leading-snug, 1.375);
+}
+
 .directory-view.is-split .directory-title {
   font-size: var(--text-lg, 1.125rem);
 }
@@ -1460,6 +1585,61 @@ onUnmounted(() => {
   margin-bottom: 0;
   margin-top: 0.125rem;
   flex-shrink: 0;
+}
+
+.map-geocode-progress-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.map-geocode-progress-title {
+  margin: 0 0 var(--space-1, 0.25rem);
+  font-size: var(--text-sm, 0.875rem);
+  line-height: var(--leading-snug, 1.375);
+  color: var(--color-text-secondary, #a0a0b0);
+}
+
+.map-geocode-progress-count {
+  margin: 0 0 var(--space-2, 0.5rem);
+  font-size: var(--text-sm, 0.875rem);
+  color: var(--color-text-primary, #f4f4f8);
+}
+
+.map-geocode-remain {
+  color: var(--color-text-tertiary, #6e6e7e);
+  font-weight: var(--weight-medium, 500);
+}
+
+.dir-geocode-meter {
+  height: 0.5rem;
+  border-radius: var(--radius-full, 9999px);
+  background: rgba(255, 255, 255, 0.08);
+  overflow: hidden;
+  margin-bottom: var(--space-2, 0.5rem);
+}
+
+.dir-geocode-meter-fill {
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(
+    90deg,
+    var(--color-accent-purple, #7b4db5),
+    rgba(123, 77, 181, 0.85)
+  );
+  transition: width 0.35s ease;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dir-geocode-meter-fill {
+    transition: none;
+  }
+}
+
+.map-geocode-progress-hint {
+  margin: 0;
+  font-size: var(--text-xs, 0.6875rem);
+  line-height: var(--leading-snug, 1.375);
+  color: var(--color-text-tertiary, #6e6e7e);
 }
 
 .search-bar {

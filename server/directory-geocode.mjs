@@ -72,16 +72,25 @@ export async function geocodeDirectoryLocationById(locationId) {
   return { ok: true, updated: result.updated, entry: result.entry }
 }
 
+function envInt(name, fallback, min, max) {
+  const n = Math.floor(Number(process.env[name]))
+  if (!Number.isFinite(n)) return fallback
+  return Math.min(max, Math.max(min, n))
+}
+
 /**
  * Geocode up to `max` locations that have an address but no coordinates.
- * Waits `delayMs` between Nominatim calls (usage policy).
+ * Waits `delayMs` between Nominatim calls (usage policy: ~1 req/s per deployment).
  * @param {{ max?: number, delayMs?: number }} [opts]
  */
 export async function geocodeMissingDirectoryLocations(opts = {}) {
-  const max = Math.min(30, Math.max(1, Number(opts.max) || 8))
-  const delayMs = Math.max(900, Number(opts.delayMs) || 1100)
+  const defMax = envInt('DIRECTORY_GEOCODE_BATCH_MAX', 18, 1, 40)
+  const defDelay = envInt('DIRECTORY_GEOCODE_DELAY_MS', 1000, 850, 3000)
+  const max = Math.min(40, Math.max(1, Number(opts.max) || defMax))
+  const delayMs = Math.min(3000, Math.max(850, Number(opts.delayMs) || defDelay))
 
   let directory = await readDirectory()
+  const missingBefore = countMissingCoords(directory)
   const ids = Object.keys(directory).sort(compareLocationIdNumeric)
 
   /** @type {{ locationId: string, error: string }[]} */
@@ -135,5 +144,7 @@ export async function geocodeMissingDirectoryLocations(opts = {}) {
     processed,
     failed,
     remaining,
+    /** How many address rows still lacked coords when this HTTP request started (for UI progress). */
+    missingBefore,
   }
 }

@@ -1047,7 +1047,7 @@ export async function patchDirectoryPhone(locationId, phone) {
 /**
  * Geocode directory rows that have an address but no latitude/longitude (batched).
  * @param {{ max?: number, delayMs?: number }} [body]
- * @returns {Promise<{ ok: boolean, updated: number, processed: number, failed: Array<{ locationId: string, error: string }>, remaining: number }>}
+ * @returns {Promise<{ ok: boolean, updated: number, processed: number, failed: Array<{ locationId: string, error: string }>, remaining: number, missingBefore?: number }>}
  */
 export async function postDirectoryGeocodeMissing(body = {}) {
   const r = await apiFetch('/api/directory/geocode-missing', {
