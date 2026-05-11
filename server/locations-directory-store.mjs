@@ -96,28 +96,76 @@ export async function listLocations() {
 
 /**
  * @param {string} locationId
- * @param {string} phone
+ * @param {{
+ *   phone?: string,
+ *   locationName?: string,
+ *   abbreviation?: string,
+ *   address?: string,
+ *   locationId?: string,
+ * }} patch
  * @returns {Promise<{ updated: boolean, entry: LocationEntry }>}
  */
-export async function updateLocationPhone(locationId, phone) {
+export async function patchLocation(locationId, patch) {
   if (!locationId) {
     throw new Error('locationId is required')
+  }
+  if (!patch || typeof patch !== 'object') {
+    throw new Error('Invalid patch')
   }
   const directory = await readDirectory()
   const existing = directory[locationId]
   if (!existing) {
     throw new Error('Location not found')
   }
-  const nextPhone = String(phone ?? '').trim()
+
+  const nextId =
+    patch.locationId !== undefined && String(patch.locationId).trim()
+      ? String(patch.locationId).trim()
+      : existing.locationId
+
+  if (!nextId) {
+    throw new Error('locationId is required')
+  }
+
+  if (nextId !== locationId && directory[nextId]) {
+    throw new Error('Location ID already exists')
+  }
+
   const entry = {
     ...existing,
-    phone: nextPhone,
+    locationId: nextId,
+    locationName:
+      patch.locationName !== undefined
+        ? String(patch.locationName ?? '')
+        : existing.locationName,
+    abbreviation:
+      patch.abbreviation !== undefined
+        ? String(patch.abbreviation ?? '')
+        : existing.abbreviation,
+    address:
+      patch.address !== undefined ? String(patch.address ?? '') : existing.address,
+    phone:
+      patch.phone !== undefined ? String(patch.phone ?? '').trim() : existing.phone,
     lastUpdated: new Date().toISOString(),
   }
-  if (existing.phone === entry.phone) {
+
+  if (nextId === locationId && entriesEqual(existing, entry)) {
     return { updated: false, entry: existing }
   }
-  directory[locationId] = entry
+
+  if (nextId !== locationId) {
+    delete directory[locationId]
+  }
+  directory[nextId] = entry
   await writeDirectory(directory)
   return { updated: true, entry }
+}
+
+/**
+ * @param {string} locationId
+ * @param {string} phone
+ * @returns {Promise<{ updated: boolean, entry: LocationEntry }>}
+ */
+export async function updateLocationPhone(locationId, phone) {
+  return patchLocation(locationId, { phone })
 }

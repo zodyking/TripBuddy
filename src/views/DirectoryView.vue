@@ -1,6 +1,6 @@
 <script setup>
 import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue'
-import { fetchDirectory, patchDirectoryPhone, saveLocationToDirectory } from '../api.js'
+import { fetchDirectory, patchDirectoryEntry, saveLocationToDirectory } from '../api.js'
 import DirectoryMap from '../components/DirectoryMap.vue'
 import { useMapVehicleId } from '../composables/useMapVehicleId.js'
 
@@ -20,20 +20,27 @@ const loading = ref(false)
 const error = ref('')
 const searchQuery = ref('')
 const expandedId = ref('')
-/** @type {import('vue').Ref<Record<string, string>>} */
-const phoneDraft = ref({})
-const phoneSavingId = ref('')
-const phoneSaveError = ref('')
-/** When set, that location shows phone input + save (otherwise read-only + Edit link). */
-const phoneEditingId = ref('')
 /** Brief “Copied” feedback after copying phone (location id). */
 const phoneCopiedForId = ref('')
 let phoneCopiedTimer = 0
+
+/** Inline edit: location ID, name, address, phone */
+const editingLocationId = ref('')
+/** @type {import('vue').Ref<{ locationId: string, locationName: string, address: string, phone: string }>} */
+const editForm = ref({
+  locationId: '',
+  locationName: '',
+  address: '',
+  phone: '',
+})
+const detailsSaving = ref(false)
+const detailsSaveError = ref('')
 
 /** Manual add location modal state */
 const addLocationOpen = ref(false)
 const addLocationId = ref('')
 const addLocationName = ref('')
+const addLocationAddress = ref('')
 const addLocationPhone = ref('')
 const addLocationSaving = ref(false)
 const addLocationError = ref('')
@@ -102,21 +109,10 @@ function prefersReducedMotion() {
   return window.matchMedia('(prefers-reduced-motion: reduce)').matches
 }
 
-function ensurePhoneDraftForId(locationId) {
-  const loc = locations.value.find((l) => l.locationId === locationId)
-  if (phoneDraft.value[locationId] === undefined) {
-    phoneDraft.value = {
-      ...phoneDraft.value,
-      [locationId]: loc?.phone != null ? String(loc.phone) : '',
-    }
-  }
-}
-
 function onMapSelect(locationId) {
   expandedId.value = locationId
-  ensurePhoneDraftForId(locationId)
-  phoneSaveError.value = ''
-  phoneEditingId.value = ''
+  detailsSaveError.value = ''
+  editingLocationId.value = ''
   nextTick(() => {
     document
       .getElementById(`dir-loc-${locationId}`)
@@ -179,49 +175,65 @@ async function loadDirectory() {
 function toggleExpand(id) {
   if (expandedId.value === id) {
     expandedId.value = ''
-    phoneEditingId.value = ''
+    editingLocationId.value = ''
     return
   }
   expandedId.value = id
-  phoneEditingId.value = ''
-  ensurePhoneDraftForId(id)
-  phoneSaveError.value = ''
+  editingLocationId.value = ''
+  detailsSaveError.value = ''
 }
 
-function startPhoneEdit(loc) {
-  ensurePhoneDraftForId(loc.locationId)
-  phoneEditingId.value = loc.locationId
-  phoneSaveError.value = ''
-}
-
-function cancelPhoneEdit(loc) {
-  const id = loc.locationId
-  phoneDraft.value = {
-    ...phoneDraft.value,
-    [id]: loc.phone != null ? String(loc.phone) : '',
+function startDetailsEdit(loc) {
+  editingLocationId.value = loc.locationId
+  detailsSaveError.value = ''
+  editForm.value = {
+    locationId: String(loc.locationId ?? ''),
+    locationName: String(loc.locationName ?? ''),
+    address: String(loc.address ?? ''),
+    phone: String(loc.phone ?? ''),
   }
-  phoneSaveError.value = ''
-  phoneEditingId.value = ''
 }
 
-async function savePhoneForLocation(loc) {
-  const id = loc.locationId
-  phoneSavingId.value = id
-  phoneSaveError.value = ''
+function cancelDetailsEdit() {
+  editingLocationId.value = ''
+  detailsSaveError.value = ''
+}
+
+async function saveDetailsEdit(loc) {
+  const oldId = loc.locationId
+  const nextId = editForm.value.locationId.trim()
+  if (!nextId) {
+    detailsSaveError.value = 'Location ID is required'
+    return
+  }
+  if (nextId !== oldId && locations.value.some((l) => l.locationId === nextId)) {
+    detailsSaveError.value = 'Location ID already exists'
+    return
+  }
+  detailsSaving.value = true
+  detailsSaveError.value = ''
   try {
-    const res = await patchDirectoryPhone(id, phoneDraft.value[id] ?? '')
-    if (res.entry) {
-      const idx = locations.value.findIndex((l) => l.locationId === id)
-      if (idx >= 0) {
-        locations.value[idx] = { ...locations.value[idx], ...res.entry }
-      }
+    const res = await patchDirectoryEntry(oldId, {
+      locationId: nextId,
+      locationName: editForm.value.locationName.trim(),
+      address: editForm.value.address.trim(),
+      phone: editForm.value.phone.trim(),
+    })
+    const entry = res.entry
+    if (entry) {
+      const idx = locations.value.findIndex((l) => l.locationId === oldId)
+      const rest =
+        idx >= 0
+          ? [...locations.value.slice(0, idx), ...locations.value.slice(idx + 1)]
+          : locations.value.filter((l) => l.locationId !== oldId)
+      locations.value = [...rest, entry].sort(compareLocationIdNumeric)
+      if (expandedId.value === oldId) expandedId.value = entry.locationId
     }
-    phoneDraft.value = { ...phoneDraft.value, [id]: res.entry?.phone ?? '' }
-    phoneEditingId.value = ''
+    editingLocationId.value = ''
   } catch (e) {
-    phoneSaveError.value = e instanceof Error ? e.message : String(e)
+    detailsSaveError.value = e instanceof Error ? e.message : String(e)
   } finally {
-    phoneSavingId.value = ''
+    detailsSaving.value = false
   }
 }
 
@@ -232,6 +244,7 @@ function digitsOnlyPhone(phone) {
 function openAddLocationModal() {
   addLocationId.value = ''
   addLocationName.value = ''
+  addLocationAddress.value = ''
   addLocationPhone.value = ''
   addLocationError.value = ''
   addLocationOpen.value = true
@@ -241,6 +254,7 @@ function closeAddLocationModal() {
   addLocationOpen.value = false
   addLocationId.value = ''
   addLocationName.value = ''
+  addLocationAddress.value = ''
   addLocationPhone.value = ''
   addLocationError.value = ''
 }
@@ -263,7 +277,7 @@ async function submitAddLocation() {
       locationId: rawId,
       locationName: rawName,
       abbreviation: '',
-      address: '',
+      address: addLocationAddress.value.trim(),
       phone: addLocationPhone.value.trim(),
       latitude: null,
       longitude: null,
@@ -275,7 +289,7 @@ async function submitAddLocation() {
         locationId: rawId,
         locationName: rawName,
         abbreviation: '',
-        address: '',
+        address: addLocationAddress.value.trim(),
         phone: addLocationPhone.value.trim(),
         latitude: null,
         longitude: null,
@@ -296,7 +310,7 @@ async function submitAddLocation() {
  * @param {{ locationId: string, phone?: string }} loc
  */
 async function copyPhoneNumber(loc) {
-  const raw = phoneDraft.value[loc.locationId] ?? loc.phone ?? ''
+  const raw = loc.phone ?? ''
   const formatted = formatPhone(raw)
   const digits = digitsOnlyPhone(raw)
   const text = formatted || digits
@@ -426,10 +440,7 @@ function buildDirectoryVcardString() {
   let item = 1
   const sorted = [...locations.value].sort(compareLocationIdNumeric)
   for (const loc of sorted) {
-    const raw =
-      phoneDraft.value[loc.locationId] !== undefined
-        ? phoneDraft.value[loc.locationId]
-        : loc.phone ?? ''
+    const raw = loc.phone ?? ''
     const tel = phoneToVcardTel(raw)
     if (!tel) continue
     const label = vcardContactLabel(loc)
@@ -443,10 +454,7 @@ function buildDirectoryVcardString() {
 
 const hasVcardPhones = computed(() => {
   for (const loc of locations.value) {
-    const raw =
-      phoneDraft.value[loc.locationId] !== undefined
-        ? phoneDraft.value[loc.locationId]
-        : loc.phone ?? ''
+    const raw = loc.phone ?? ''
     if (phoneToVcardTel(raw)) return true
   }
   return false
@@ -700,79 +708,48 @@ onUnmounted(() => {
         </button>
 
         <div v-if="expandedId === loc.locationId" class="location-details">
-          <dl class="details-list">
+          <div v-if="editingLocationId !== loc.locationId" class="details-toolbar">
+            <button
+              type="button"
+              class="details-edit-all-btn tap"
+              @click.stop="startDetailsEdit(loc)"
+            >
+              Edit location
+            </button>
+          </div>
+
+          <dl v-if="editingLocationId !== loc.locationId" class="details-list">
             <div class="detail-row">
               <dt>Location ID</dt>
               <dd>{{ loc.locationId }}</dd>
             </div>
-
+            <div class="detail-row">
+              <dt>Location name</dt>
+              <dd>{{ loc.locationName?.trim() || '—' }}</dd>
+            </div>
+            <div class="detail-row">
+              <dt>Address</dt>
+              <dd>{{ loc.address?.trim() || '—' }}</dd>
+            </div>
             <div class="detail-row detail-row--phone">
               <dt>Phone</dt>
               <dd class="phone-edit-cell">
-                <template v-if="phoneEditingId !== loc.locationId">
-                  <div class="phone-display-row">
-                    <button
-                      v-if="digitsOnlyPhone(phoneDraft[loc.locationId] || loc.phone)"
-                      type="button"
-                      class="phone-display phone-copy tap"
-                      :title="'Copy phone number'"
-                      @click.stop="copyPhoneNumber(loc)"
+                <div class="phone-display-row">
+                  <button
+                    v-if="digitsOnlyPhone(loc.phone)"
+                    type="button"
+                    class="phone-display phone-copy tap"
+                    title="Copy phone number"
+                    @click.stop="copyPhoneNumber(loc)"
+                  >
+                    {{ formatPhone(loc.phone) }}
+                    <span v-if="phoneCopiedForId === loc.locationId" class="phone-copied-note"
+                      >Copied</span
                     >
-                      {{ formatPhone(phoneDraft[loc.locationId] || loc.phone) }}
-                      <span v-if="phoneCopiedForId === loc.locationId" class="phone-copied-note"
-                        >Copied</span
-                      >
-                    </button>
-                    <span v-else class="phone-display">{{
-                      formatPhone(phoneDraft[loc.locationId] || loc.phone) || '—'
-                    }}</span>
-                    <button
-                      type="button"
-                      class="phone-edit-link tap"
-                      @click.stop="startPhoneEdit(loc)"
-                    >
-                      Edit
-                    </button>
-                  </div>
-                  <p class="phone-hint">
-                    Tap number to copy. Updates the shared directory for everyone.
-                  </p>
-                </template>
-                <template v-else>
-                  <div class="phone-edit-row">
-                    <input
-                      v-model="phoneDraft[loc.locationId]"
-                      type="tel"
-                      class="phone-input"
-                      inputmode="tel"
-                      autocomplete="tel"
-                      :aria-label="'Phone for ' + (loc.locationName || loc.locationId)"
-                      placeholder="Number"
-                    />
-                    <button
-                      type="button"
-                      class="phone-save-btn tap"
-                      :disabled="phoneSavingId === loc.locationId"
-                      @click="savePhoneForLocation(loc)"
-                    >
-                      {{ phoneSavingId === loc.locationId ? 'Saving…' : 'Save' }}
-                    </button>
-                    <button
-                      type="button"
-                      class="phone-cancel-btn tap"
-                      :disabled="phoneSavingId === loc.locationId"
-                      @click.stop="cancelPhoneEdit(loc)"
-                    >
-                      Cancel
-                    </button>
-                  </div>
-                  <p v-if="phoneSaveError && expandedId === loc.locationId" class="phone-save-err">
-                    {{ phoneSaveError }}
-                  </p>
-                  <p class="phone-hint">
-                    Tap number to copy. Updates the shared directory for everyone.
-                  </p>
-                </template>
+                  </button>
+                  <span v-else class="phone-display">{{ formatPhone(loc.phone) || '—' }}</span>
+                </div>
+                <p class="phone-hint">Tap number to copy. Shared directory for everyone.</p>
               </dd>
             </div>
 
@@ -792,7 +769,73 @@ onUnmounted(() => {
             </div>
           </dl>
 
-          <div class="detail-actions">
+          <form
+            v-else
+            class="details-edit-form"
+            @submit.prevent="saveDetailsEdit(loc)"
+          >
+            <div class="details-edit-fields">
+              <label class="details-edit-label">
+                Location ID <span class="required">*</span>
+                <input
+                  v-model="editForm.locationId"
+                  type="text"
+                  class="details-edit-input"
+                  autocomplete="off"
+                  required
+                  :aria-label="'Location ID for ' + loc.locationId"
+                />
+              </label>
+              <label class="details-edit-label">
+                Location name
+                <input
+                  v-model="editForm.locationName"
+                  type="text"
+                  class="details-edit-input"
+                  autocomplete="off"
+                  placeholder="e.g. Woodbridge"
+                />
+              </label>
+              <label class="details-edit-label">
+                Address
+                <textarea
+                  v-model="editForm.address"
+                  class="details-edit-textarea"
+                  rows="2"
+                  autocomplete="street-address"
+                  placeholder="Street, city, state ZIP"
+                />
+              </label>
+              <label class="details-edit-label">
+                Phone
+                <input
+                  v-model="editForm.phone"
+                  type="tel"
+                  class="details-edit-input"
+                  inputmode="tel"
+                  autocomplete="tel"
+                  placeholder="e.g. (555) 123-4567"
+                />
+              </label>
+            </div>
+            <p v-if="detailsSaveError" class="details-save-err" role="alert">{{ detailsSaveError }}</p>
+            <div class="details-edit-actions">
+              <button
+                type="button"
+                class="phone-cancel-btn tap"
+                :disabled="detailsSaving"
+                @click="cancelDetailsEdit"
+              >
+                Cancel
+              </button>
+              <button type="submit" class="phone-save-btn tap" :disabled="detailsSaving">
+                {{ detailsSaving ? 'Saving…' : 'Save' }}
+              </button>
+            </div>
+            <p class="phone-hint">Updates the shared directory for everyone.</p>
+          </form>
+
+          <div v-if="editingLocationId !== loc.locationId" class="detail-actions">
             <a
               v-if="buildMapsUrl(loc)"
               :href="buildMapsUrl(loc)"
@@ -807,8 +850,8 @@ onUnmounted(() => {
               Open in Maps
             </a>
             <a
-              v-if="buildTelHref(phoneDraft[loc.locationId] || loc.phone)"
-              :href="buildTelHref(phoneDraft[loc.locationId] || loc.phone)"
+              v-if="buildTelHref(loc.phone)"
+              :href="buildTelHref(loc.phone)"
               class="action-btn tap"
             >
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -840,8 +883,8 @@ onUnmounted(() => {
         <div class="add-location-modal">
           <h2 id="add-location-title" class="add-location-heading">Add Location</h2>
           <p class="add-location-desc">
-            Enter a location ID, name, and optional phone. Other details will fill in
-            automatically when you route to this location.
+            Enter location ID, name, address, and optional phone. Coordinates and other
+            fields can fill in when you route to this location from the app.
           </p>
           <form class="add-location-form" @submit.prevent="submitAddLocation">
             <div class="add-location-field">
@@ -863,6 +906,16 @@ onUnmounted(() => {
                 type="text"
                 placeholder="e.g. Woodbridge"
                 autocomplete="off"
+              />
+            </div>
+            <div class="add-location-field">
+              <label for="add-loc-address">Address</label>
+              <textarea
+                id="add-loc-address"
+                v-model="addLocationAddress"
+                rows="2"
+                placeholder="e.g. 6000 Riverside Dr, Keasbey, NJ"
+                autocomplete="street-address"
               />
             </div>
             <div class="add-location-field">
@@ -1103,7 +1156,8 @@ onUnmounted(() => {
   color: var(--color-error, #f87171);
 }
 
-.add-location-field input {
+.add-location-field input,
+.add-location-field textarea {
   padding: var(--space-2, 0.5rem) var(--space-3, 0.75rem);
   font-size: var(--text-base, 1rem);
   color: var(--color-text-primary, #f4f4f8);
@@ -1114,11 +1168,13 @@ onUnmounted(() => {
   transition: border-color 0.15s ease;
 }
 
-.add-location-field input:focus {
+.add-location-field input:focus,
+.add-location-field textarea:focus {
   border-color: rgba(123, 77, 181, 0.6);
 }
 
-.add-location-field input::placeholder {
+.add-location-field input::placeholder,
+.add-location-field textarea::placeholder {
   color: var(--color-text-tertiary, #6e6e7e);
 }
 
@@ -1524,6 +1580,90 @@ onUnmounted(() => {
   border-top: 1px solid rgba(255, 255, 255, 0.06);
   background: rgba(0, 0, 0, 0.15);
   box-sizing: border-box;
+}
+
+.details-toolbar {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: var(--space-2, 0.5rem);
+}
+
+.details-edit-all-btn {
+  padding: var(--space-1, 0.25rem) var(--space-3, 0.75rem);
+  font-size: var(--text-xs, 0.6875rem);
+  font-weight: var(--weight-semibold, 600);
+  color: var(--color-accent-purple, #b794f6);
+  background: rgba(123, 77, 181, 0.2);
+  border: 1px solid rgba(123, 77, 181, 0.35);
+  border-radius: var(--radius-md, 0.5rem);
+}
+
+.details-edit-all-btn:hover {
+  background: rgba(123, 77, 181, 0.3);
+}
+
+.details-edit-form {
+  margin: 0;
+  padding: 0.25rem 0 0;
+}
+
+.details-edit-fields {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3, 0.75rem);
+}
+
+.details-edit-label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  font-size: var(--text-xs, 0.6875rem);
+  font-weight: var(--weight-semibold, 600);
+  color: var(--color-text-secondary, #a0a0b0);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.details-edit-label .required {
+  color: #f87171;
+}
+
+.details-edit-input,
+.details-edit-textarea {
+  width: 100%;
+  box-sizing: border-box;
+  padding: var(--space-2, 0.5rem) var(--space-3, 0.75rem);
+  font-size: var(--text-sm, 0.875rem);
+  color: var(--color-text-primary, #f4f4f8);
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: var(--radius-md, 0.5rem);
+}
+
+.details-edit-textarea {
+  resize: vertical;
+  min-height: 2.75rem;
+  line-height: 1.4;
+}
+
+.details-edit-input:focus,
+.details-edit-textarea:focus {
+  outline: none;
+  border-color: rgba(123, 77, 181, 0.55);
+  box-shadow: 0 0 0 2px rgba(123, 77, 181, 0.2);
+}
+
+.details-edit-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2, 0.5rem);
+  margin-top: var(--space-3, 0.75rem);
+}
+
+.details-save-err {
+  margin: var(--space-2, 0.5rem) 0 0;
+  font-size: var(--text-sm, 0.875rem);
+  color: #f87171;
 }
 
 .details-list {

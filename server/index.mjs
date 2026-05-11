@@ -105,7 +105,7 @@ import { maybeUpdateAssignmentFromContext } from './assignment-logic.mjs'
 import {
   listLocations,
   upsertLocation,
-  updateLocationPhone,
+  patchLocation,
 } from './locations-directory-store.mjs'
 import {
   appendLoginAccessFromBody,
@@ -1297,8 +1297,17 @@ app.patch('/api/directory/:locationId', async (req, reply) => {
       return reply.code(400).send({ error: 'locationId is required' })
     }
     const body = req.body ?? {}
-    const phone = typeof body.phone === 'string' ? body.phone : ''
-    const result = await updateLocationPhone(locationId, phone)
+    /** @type {Record<string, unknown>} */
+    const patch = {}
+    if ('phone' in body) patch.phone = typeof body.phone === 'string' ? body.phone : ''
+    if ('locationName' in body) patch.locationName = body.locationName
+    if ('abbreviation' in body) patch.abbreviation = body.abbreviation
+    if ('address' in body) patch.address = body.address
+    if ('locationId' in body && body.locationId != null) {
+      patch.locationId =
+        typeof body.locationId === 'string' ? body.locationId : String(body.locationId)
+    }
+    const result = await patchLocation(locationId, patch)
     return { ok: true, ...result }
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e)

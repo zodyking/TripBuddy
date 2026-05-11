@@ -1008,18 +1008,34 @@ export async function saveLocationToDirectory(data) {
 }
 
 /**
+ * Update directory fields for one location (shared for all users).
+ * Pass only keys you want to change. To rename the primary key, include `locationId` (new id).
+ * @param {string} locationId current id (URL)
+ * @param {{
+ *   phone?: string,
+ *   locationName?: string,
+ *   abbreviation?: string,
+ *   address?: string,
+ *   locationId?: string,
+ * }} patch
+ */
+export async function patchDirectoryEntry(locationId, patch) {
+  const id = encodeURIComponent(String(locationId))
+  const r = await apiFetch(`/api/directory/${id}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(patch ?? {}),
+  })
+  return handleJson(r)
+}
+
+/**
  * Update shared directory phone for a location (visible to all users).
  * @param {string} locationId
  * @param {string} phone
  */
 export async function patchDirectoryPhone(locationId, phone) {
-  const id = encodeURIComponent(String(locationId))
-  const r = await apiFetch(`/api/directory/${id}`, {
-    method: 'PATCH',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ phone: phone ?? '' }),
-  })
-  return handleJson(r)
+  return patchDirectoryEntry(locationId, { phone: phone ?? '' })
 }
 
 /**
