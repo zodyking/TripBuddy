@@ -19,6 +19,83 @@ import {
   ApiQuotaError,
 } from './api-quota.mjs'
 
+/** GET list hits HERE once per route — cache short responses to avoid tab spam. */
+const MONITORED_GET_CACHE_MS = 90_000
+/** @type {Map<string, { at: number, payload: unknown }>} */
+const monitoredListCache = new Map()
+
+function monitoredListCacheKey(accountKey) {
+  const ak = String(accountKey || '').trim()
+  return ak || '_'
+}
+
+function invalidateMonitoredListCache(accountKey) {
+  monitoredListCache.delete(monitoredListCacheKey(accountKey))
+}
+
+/**
+ * @param {string} key
+ * @param {Awaited<ReturnType<typeof readMonitoredRoutesForUser>>} stored
+ * @param {string} ak
+ */
+async function buildMonitoredRoutesWithLiveFlow(key, stored, ak) {
+  const results = []
+  for (const r of stored) {
+    try {
+      if (ak) await assertApiAllowed(ak, 'here')
+    } catch (e) {
+      if (e instanceof ApiQuotaError) {
+        const polyline = r.polyline || encodeFlexiblePolyline(r.pathPoints)
+        results.push({
+          localId: r.localId,
+          name: r.name,
+          pathPoints: r.pathPoints,
+          polyline,
+          createdAt: r.createdAt,
+          status: null,
+          statusOk: false,
+          statusError: e.message,
+        })
+        continue
+      }
+      throw e
+    }
+    const polyline = r.polyline || encodeFlexiblePolyline(r.pathPoints)
+
+    const flowResult = await getTrafficFlowCorridor(key, polyline, 150)
+    if (flowResult.ok && ak) await recordApiCompletedCall(ak, 'here').catch(() => {})
+    const parsed = flowResult.ok ? parseTrafficFlowResponse(flowResult.data) : null
+
+    results.push({
+      localId: r.localId,
+      name: r.name,
+      pathPoints: r.pathPoints,
+      polyline,
+      createdAt: r.createdAt,
+      status: parsed
+        ? {
+            totalLengthMeters: parsed.totalLengthMeters,
+            avgSpeedMps: parsed.avgSpeedMps,
+            avgSpeedMph: parsed.avgSpeedMps * 2.237,
+            avgFreeFlowMps: parsed.avgFreeFlowMps,
+            avgFreeFlowMph: parsed.avgFreeFlowMps * 2.237,
+            avgJamFactor: parsed.avgJamFactor,
+            travelTimeSeconds: parsed.travelTimeSeconds,
+            freeFlowTimeSeconds: parsed.freeFlowTimeSeconds,
+            delaySeconds: parsed.delaySeconds,
+            segments: parsed.segments,
+            routePathPoints: parsed.segments.flatMap((s) => s.points),
+          }
+        : null,
+      statusOk: flowResult.ok,
+      statusError: flowResult.ok
+        ? null
+        : formatHereApiError(flowResult.data, flowResult.status),
+    })
+  }
+  return results
+}
+
 /**
  * @param {import('fastify').FastifyRequest} req
  */
@@ -264,6 +341,8 @@ export function registerTrafficMonitoredRoutes(app) {
       createdAt: Date.now(),
     })
 
+    invalidateMonitoredListCache(ak)
+
     return {
       ok: true,
       route: {
@@ -293,60 +372,17 @@ export function registerTrafficMonitoredRoutes(app) {
       }
 
       const ak = monitoredTrafficAccountKey(req)
+      const now = Date.now()
+      const ck = monitoredListCacheKey(ak)
+      const hit = monitoredListCache.get(ck)
+      if (hit && now - hit.at < MONITORED_GET_CACHE_MS) {
+        return hit.payload
+      }
 
-      const results = await Promise.all(
-        stored.map(async (r) => {
-          try {
-            if (ak) await assertApiAllowed(ak, 'here')
-          } catch (e) {
-            if (e instanceof ApiQuotaError) {
-              const polyline = r.polyline || encodeFlexiblePolyline(r.pathPoints)
-              return {
-                localId: r.localId,
-                name: r.name,
-                pathPoints: r.pathPoints,
-                polyline,
-                createdAt: r.createdAt,
-                status: null,
-                statusOk: false,
-                statusError: e.message,
-              }
-            }
-            throw e
-          }
-          // Encode polyline if not stored
-          const polyline = r.polyline || encodeFlexiblePolyline(r.pathPoints)
-
-          // Get live traffic flow along the corridor
-          const flowResult = await getTrafficFlowCorridor(key, polyline, 150)
-          if (flowResult.ok && ak) await recordApiCompletedCall(ak, 'here').catch(() => {})
-          const parsed = flowResult.ok ? parseTrafficFlowResponse(flowResult.data) : null
-
-          return {
-            localId: r.localId,
-            name: r.name,
-            pathPoints: r.pathPoints,
-            polyline,
-            createdAt: r.createdAt,
-            status: parsed ? {
-              totalLengthMeters: parsed.totalLengthMeters,
-              avgSpeedMps: parsed.avgSpeedMps,
-              avgSpeedMph: parsed.avgSpeedMps * 2.237,
-              avgFreeFlowMps: parsed.avgFreeFlowMps,
-              avgFreeFlowMph: parsed.avgFreeFlowMps * 2.237,
-              avgJamFactor: parsed.avgJamFactor,
-              travelTimeSeconds: parsed.travelTimeSeconds,
-              freeFlowTimeSeconds: parsed.freeFlowTimeSeconds,
-              delaySeconds: parsed.delaySeconds,
-              segments: parsed.segments,
-              routePathPoints: parsed.segments.flatMap(s => s.points),
-            } : null,
-            statusOk: flowResult.ok,
-            statusError: flowResult.ok ? null : formatHereApiError(flowResult.data, flowResult.status),
-          }
-        }),
-      )
-      return { ok: true, fetchedAt: Date.now(), routes: results }
+      const results = await buildMonitoredRoutesWithLiveFlow(key, stored, ak)
+      const payload = { ok: true, fetchedAt: Date.now(), routes: results }
+      monitoredListCache.set(ck, { at: now, payload })
+      return payload
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e)
       return reply.code(503).send({ ok: false, error: msg })
@@ -366,57 +402,10 @@ export function registerTrafficMonitoredRoutes(app) {
     try {
       const stored = await readMonitoredRoutesForUser()
       const ak = monitoredTrafficAccountKey(req)
-      const results = await Promise.all(
-        stored.map(async (r) => {
-          try {
-            if (ak) await assertApiAllowed(ak, 'here')
-          } catch (e) {
-            if (e instanceof ApiQuotaError) {
-              const polyline = r.polyline || encodeFlexiblePolyline(r.pathPoints)
-              return {
-                localId: r.localId,
-                name: r.name,
-                pathPoints: r.pathPoints,
-                polyline,
-                createdAt: r.createdAt,
-                status: null,
-                statusOk: false,
-                statusError: e.message,
-              }
-            }
-            throw e
-          }
-          const polyline = r.polyline || encodeFlexiblePolyline(r.pathPoints)
-
-          const flowResult = await getTrafficFlowCorridor(key, polyline, 150)
-          if (flowResult.ok && ak) await recordApiCompletedCall(ak, 'here').catch(() => {})
-          const parsed = flowResult.ok ? parseTrafficFlowResponse(flowResult.data) : null
-
-          return {
-            localId: r.localId,
-            name: r.name,
-            pathPoints: r.pathPoints,
-            polyline,
-            createdAt: r.createdAt,
-            status: parsed ? {
-              totalLengthMeters: parsed.totalLengthMeters,
-              avgSpeedMps: parsed.avgSpeedMps,
-              avgSpeedMph: parsed.avgSpeedMps * 2.237,
-              avgFreeFlowMps: parsed.avgFreeFlowMps,
-              avgFreeFlowMph: parsed.avgFreeFlowMps * 2.237,
-              avgJamFactor: parsed.avgJamFactor,
-              travelTimeSeconds: parsed.travelTimeSeconds,
-              freeFlowTimeSeconds: parsed.freeFlowTimeSeconds,
-              delaySeconds: parsed.delaySeconds,
-              segments: parsed.segments,
-              routePathPoints: parsed.segments.flatMap(s => s.points),
-            } : null,
-            statusOk: flowResult.ok,
-            statusError: flowResult.ok ? null : formatHereApiError(flowResult.data, flowResult.status),
-          }
-        }),
-      )
-      return { ok: true, fetchedAt: Date.now(), routes: results }
+      const results = await buildMonitoredRoutesWithLiveFlow(key, stored, ak)
+      const payload = { ok: true, fetchedAt: Date.now(), routes: results }
+      monitoredListCache.set(monitoredListCacheKey(ak), { at: Date.now(), payload })
+      return payload
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e)
       return reply.code(503).send({ ok: false, error: msg })
@@ -433,6 +422,7 @@ export function registerTrafficMonitoredRoutes(app) {
     if (!removed) {
       return reply.code(404).send({ ok: false, error: 'Route not found.' })
     }
+    invalidateMonitoredListCache(monitoredTrafficAccountKey(req))
     return { ok: true, removed: { localId: removed.localId } }
   })
 }

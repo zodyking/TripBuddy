@@ -108,6 +108,8 @@ export async function listLocations() {
  *   abbreviation?: string,
  *   address?: string,
  *   locationId?: string,
+ *   latitude?: number | null,
+ *   longitude?: number | null,
  * }} patch
  * @returns {Promise<{ updated: boolean, entry: LocationEntry }>}
  */
@@ -137,6 +139,19 @@ export async function patchLocation(locationId, patch) {
     throw new Error('Location ID already exists')
   }
 
+  const nextLat =
+    patch.latitude !== undefined
+      ? patch.latitude == null || Number.isNaN(Number(patch.latitude))
+        ? null
+        : Number(patch.latitude)
+      : existing.latitude
+  const nextLng =
+    patch.longitude !== undefined
+      ? patch.longitude == null || Number.isNaN(Number(patch.longitude))
+        ? null
+        : Number(patch.longitude)
+      : existing.longitude
+
   const entry = {
     ...existing,
     locationId: nextId,
@@ -152,6 +167,8 @@ export async function patchLocation(locationId, patch) {
       patch.address !== undefined ? String(patch.address ?? '') : existing.address,
     phone:
       patch.phone !== undefined ? String(patch.phone ?? '').trim() : existing.phone,
+    latitude: nextLat,
+    longitude: nextLng,
     lastUpdated: new Date().toISOString(),
   }
 

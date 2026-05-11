@@ -1,5 +1,6 @@
 /**
- * Per-account API usage: rolling per-minute rate limits + daily hard caps (PostgreSQL).
+ * Per-account API usage: rolling per-minute rate limits, daily caps, and (for HERE)
+ * a calendar-month cap aligned with HERE Traffic free-tier transaction limits (PostgreSQL).
  * Buckets: here, tomtom, fedex_linehaul, panynj, ny511
  */
 import { requestAsyncLocalStorage } from './request-context.mjs'
@@ -18,7 +19,7 @@ export const API_BUCKETS = /** @type {const} */ ([
 /** @typedef {(typeof API_BUCKETS)[number]} ApiBucket */
 
 const BUCKET_LABELS = {
-  here: 'HERE (traffic & routing)',
+  here: 'HERE (Traffic flow + Routing; monthly cap)',
   tomtom: 'TomTom (routing / highway fallback)',
   fedex_linehaul: 'FedEx Linehaul',
   panynj: 'PANYNJ bridge crossing API',
@@ -27,7 +28,8 @@ const BUCKET_LABELS = {
 
 /** Built-in defaults per calendar day (UTC) and per rolling minute. */
 const DEFAULT_DAY = {
-  here: 800,
+  /** HERE: keep a low daily ceiling so burst usage still fails fast; month cap is primary. */
+  here: 180,
   tomtom: 800,
   fedex_linehaul: 80_000,
   panynj: 4000,
@@ -35,7 +37,8 @@ const DEFAULT_DAY = {
 }
 
 const DEFAULT_PER_MINUTE = {
-  here: 40,
+  /** HERE Traffic free tier is monthly — avoid minute bursts from parallel tabs. */
+  here: 8,
   tomtom: 40,
   fedex_linehaul: 200,
   panynj: 30,
@@ -43,6 +46,7 @@ const DEFAULT_PER_MINUTE = {
 }
 
 const MAX_LIMIT_DAY = 50_000_000
+const MAX_LIMIT_MONTH_HERE = 2_000_000
 const MAX_PER_MINUTE = 10_000
 
 /** @type {Map<string, number[]>} */
@@ -50,6 +54,10 @@ const minuteBuckets = new Map()
 
 function utcDayKey(d = new Date()) {
   return d.toISOString().slice(0, 10)
+}
+
+function utcMonthKey(d = new Date()) {
+  return d.toISOString().slice(0, 7)
 }
 
 function envNum(name, fallback) {
@@ -73,11 +81,32 @@ export function defaultPerMinuteLimit(bucket) {
   return envNum(key, DEFAULT_PER_MINUTE[bucket] ?? 60)
 }
 
+/**
+ * HERE Traffic + related calls share one monthly counter (conservative vs free-tier “Traffic” 5k/mo).
+ * Set `API_QUOTA_HERE_MONTH=0` to disable the monthly gate (not recommended on free tier).
+ */
+export function defaultHereMonthlyLimit() {
+  return envNum('API_QUOTA_HERE_MONTH', 4800)
+}
+
+/**
+ * @param {Record<string, number>} limitOverrides
+ */
+function effectiveHereMonthlyLimit(limitOverrides) {
+  const def = defaultHereMonthlyLimit()
+  if (def <= 0) return 0
+  const raw = limitOverrides.here_month
+  if (typeof raw !== 'number' || !Number.isFinite(raw)) return def
+  const n = Math.floor(raw)
+  if (n < 1) return 1
+  return Math.min(MAX_LIMIT_MONTH_HERE, n)
+}
+
 export class ApiQuotaError extends Error {
   /**
    * @param {ApiBucket} bucket
    * @param {string} message
-   * @param {'daily' | 'rate'} kind
+   * @param {'daily' | 'rate' | 'monthly'} kind
    */
   constructor(bucket, message, kind = 'daily') {
     super(message)
@@ -101,20 +130,29 @@ export function getQuotaAccountKey() {
 /**
  * @param {string} accountKey
  * @param {ApiBucket} bucket
- * @returns {Promise<{ dayKey: string, counts: Record<string, number>, limitOverrides: Record<string, number> }>}
+ * @returns {Promise<{ dayKey: string, counts: Record<string, number>, limitOverrides: Record<string, number>, monthKey: string, monthCounts: Record<string, number> }>}
  */
 async function loadQuotaState(accountKey) {
+  const monthNow = utcMonthKey()
   const ak = String(accountKey || '').trim()
   if (!ak) {
     return {
       dayKey: utcDayKey(),
       counts: {},
       limitOverrides: {},
+      monthKey: monthNow,
+      monthCounts: {},
     }
   }
   const p = await getPostgresPool()
   if (!p) {
-    return { dayKey: utcDayKey(), counts: {}, limitOverrides: {} }
+    return {
+      dayKey: utcDayKey(),
+      counts: {},
+      limitOverrides: {},
+      monthKey: monthNow,
+      monthCounts: {},
+    }
   }
   await ensureUserProfileTable()
   const { rows } = await p.query(
@@ -146,12 +184,23 @@ async function loadQuotaState(accountKey) {
   ) {
     limitOverrides = /** @type {Record<string, number>} */ (o.limitOverrides)
   }
-  return { dayKey, counts, limitOverrides }
+
+  let monthKey = typeof o.monthKey === 'string' ? o.monthKey : monthNow
+  /** @type {Record<string, number>} */
+  let monthCounts = {}
+  if (o.monthCounts && typeof o.monthCounts === 'object' && !Array.isArray(o.monthCounts)) {
+    monthCounts = /** @type {Record<string, number>} */ (o.monthCounts)
+  }
+  if (monthKey !== monthNow) {
+    monthKey = monthNow
+    monthCounts = {}
+  }
+  return { dayKey, counts, limitOverrides, monthKey, monthCounts }
 }
 
 /**
  * @param {string} accountKey
- * @param {{ dayKey: string, counts: Record<string, number>, limitOverrides: Record<string, number> }} state
+ * @param {{ dayKey: string, counts: Record<string, number>, limitOverrides: Record<string, number>, monthKey: string, monthCounts: Record<string, number> }} state
  */
 async function saveQuotaState(accountKey, state) {
   const ak = String(accountKey || '').trim()
@@ -163,6 +212,8 @@ async function saveQuotaState(accountKey, state) {
     dayKey: state.dayKey,
     counts: state.counts,
     limitOverrides: state.limitOverrides,
+    monthKey: state.monthKey,
+    monthCounts: state.monthCounts,
   })
   await p.query(
     `INSERT INTO fedextool_user_profile (account_key, api_quota_state, updated_at)
@@ -231,6 +282,21 @@ export async function assertApiAllowed(accountKey, bucket) {
   }
 
   const st = await loadQuotaState(ak)
+
+  if (bucket === 'here') {
+    const mlim = effectiveHereMonthlyLimit(st.limitOverrides)
+    if (mlim > 0) {
+      const curM = typeof st.monthCounts.here === 'number' ? st.monthCounts.here : 0
+      if (curM >= mlim) {
+        throw new ApiQuotaError(
+          bucket,
+          `${BUCKET_LABELS[bucket] || bucket}: monthly limit reached (${curM}/${mlim} for UTC month ${st.monthKey}). Raise API_QUOTA_HERE_MONTH / here_month override or wait until next month.`,
+          'monthly',
+        )
+      }
+    }
+  }
+
   const limit = effectiveDailyLimit(bucket, st.limitOverrides)
   const cur = typeof st.counts[bucket] === 'number' ? st.counts[bucket] : 0
   if (cur >= limit) {
@@ -254,6 +320,11 @@ export async function recordApiCompletedCall(accountKey, bucket) {
   const cur = typeof st.counts[bucket] === 'number' ? st.counts[bucket] : 0
   st.counts[bucket] = cur + 1
   st.dayKey = utcDayKey()
+  if (bucket === 'here' && effectiveHereMonthlyLimit(st.limitOverrides) > 0) {
+    const curM = typeof st.monthCounts.here === 'number' ? st.monthCounts.here : 0
+    st.monthCounts.here = curM + 1
+    st.monthKey = utcMonthKey()
+  }
   await saveQuotaState(ak, st)
 }
 
@@ -268,6 +339,7 @@ export async function getApiQuotaSnapshot(accountKey) {
       ok: false,
       error: 'Not signed in',
       dayKey: utcDayKey(),
+      monthKey: utcMonthKey(),
       buckets: [],
     }
   }
@@ -279,6 +351,13 @@ export async function getApiQuotaSnapshot(accountKey) {
     const mk = minuteKey(ak, id)
     const now = Date.now()
     const arr = (minuteBuckets.get(mk) || []).filter((t) => t > now - 60_000)
+    const mlim = id === 'here' ? effectiveHereMonthlyLimit(st.limitOverrides) : 0
+    const countMonth =
+      id === 'here' && mlim > 0
+        ? typeof st.monthCounts.here === 'number'
+          ? st.monthCounts.here
+          : 0
+        : undefined
     return {
       id,
       label: BUCKET_LABELS[id] || id,
@@ -287,9 +366,17 @@ export async function getApiQuotaSnapshot(accountKey) {
       defaultLimitDay: defaultDailyLimit(id),
       perMinuteLimit: perMinute,
       callsLastMinute: arr.length,
+      ...(id === 'here' && mlim > 0
+        ? {
+            countMonth,
+            limitMonth: mlim,
+            defaultLimitMonth: defaultHereMonthlyLimit(),
+            monthKey: st.monthKey,
+          }
+        : {}),
     }
   })
-  return { ok: true, dayKey: st.dayKey, buckets }
+  return { ok: true, dayKey: st.dayKey, monthKey: st.monthKey, buckets }
 }
 
 /**
@@ -313,6 +400,17 @@ export async function setApiQuotaLimitOverrides(accountKey, limits) {
       const n = Math.floor(Number(v))
       if (!Number.isFinite(n) || n < 1) continue
       next[id] = Math.min(MAX_LIMIT_DAY, n)
+    }
+    if ('here_month' in limits) {
+      const v = /** @type {Record<string, unknown>} */ (limits).here_month
+      if (v === null || v === '') {
+        delete next.here_month
+      } else {
+        const n = Math.floor(Number(v))
+        if (Number.isFinite(n) && n >= 1) {
+          next.here_month = Math.min(MAX_LIMIT_MONTH_HERE, n)
+        }
+      }
     }
   }
   st.limitOverrides = next

@@ -63,3 +63,57 @@ export async function reverseGeocodeNominatim(lat, lng) {
     return null
   }
 }
+
+/** @type {Map<string, { lat: number, lng: number, at: number }>} */
+const forwardGeocodeCache = new Map()
+const FORWARD_GEOCODE_CACHE_MS = 7 * 24 * 60 * 60 * 1000
+
+/**
+ * Normalize free-text address for cache key.
+ * @param {string} q
+ */
+function normalizeForwardGeocodeKey(q) {
+  return String(q ?? '')
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, ' ')
+}
+
+/**
+ * Forward geocode (address → lat/lng) via Nominatim (OSM).
+ * Respects usage policy: callers should not exceed ~1 request/sec per deployment.
+ * @param {string} query
+ * @returns {Promise<{ lat: number, lng: number } | null>}
+ */
+export async function forwardGeocodeNominatim(query) {
+  const raw = String(query ?? '').trim()
+  if (raw.length < 6) return null
+  const key = normalizeForwardGeocodeKey(raw)
+  const now = Date.now()
+  const hit = forwardGeocodeCache.get(key)
+  if (hit && now - hit.at < FORWARD_GEOCODE_CACHE_MS) {
+    return { lat: hit.lat, lng: hit.lng }
+  }
+
+  try {
+    const url = `https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&q=${encodeURIComponent(raw)}`
+    const res = await fetch(url, {
+      headers: {
+        'User-Agent': 'FedExTool/1.0 (directory geocode; self-hosted)',
+      },
+      signal: AbortSignal.timeout(12000),
+    })
+    if (!res.ok) return null
+    const data = await res.json()
+    if (!Array.isArray(data) || data.length === 0) return null
+    const row = data[0]
+    if (!row || typeof row !== 'object') return null
+    const lat = Number(row.lat)
+    const lng = Number(row.lon)
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null
+    forwardGeocodeCache.set(key, { lat, lng, at: now })
+    return { lat, lng }
+  } catch {
+    return null
+  }
+}

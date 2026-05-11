@@ -229,8 +229,11 @@ let lastLive = null
 let lastFetchedAt = 0
 let lastSource = /** @type {'here' | 'tomtom' | null} */ (null)
 let lastError = /** @type {string | null} */ (null)
+/** Coalesce concurrent GETs (multiple tabs) into one HERE refresh. */
+let verrazzanoRefreshInFlight = /** @type {Promise<void> | null} */ (null)
 
-const CACHE_TTL_MS = 90 * 1000
+/** Match highway traffic cadence; see server/highway-traffic.mjs CACHE_TTL_MS */
+const CACHE_TTL_MS = 50 * 60 * 1000
 
 /**
  * Fetch Verrazzano traffic for both directions.
@@ -313,9 +316,16 @@ export async function fetchVerrazzanoTraffic(accountKey) {
  */
 export async function getVerrazzanoResponsePayload(accountKey) {
   const now = Date.now()
-  
+
   if (!lastLive || now - lastFetchedAt > CACHE_TTL_MS) {
-    await fetchVerrazzanoTraffic(accountKey)
+    if (!verrazzanoRefreshInFlight) {
+      verrazzanoRefreshInFlight = (async () => {
+        await fetchVerrazzanoTraffic(accountKey)
+      })().finally(() => {
+        verrazzanoRefreshInFlight = null
+      })
+    }
+    await verrazzanoRefreshInFlight
   }
 
   const st = await readState()

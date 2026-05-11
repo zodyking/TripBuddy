@@ -109,6 +109,10 @@ import {
   bulkUpsertLocations,
 } from './locations-directory-store.mjs'
 import {
+  geocodeDirectoryLocationById,
+  geocodeMissingDirectoryLocations,
+} from './directory-geocode.mjs'
+import {
   appendLoginAccessFromBody,
   appendPageVisitLog,
   listAccessEntries,
@@ -1308,6 +1312,24 @@ app.patch('/api/directory/:locationId', async (req, reply) => {
       patch.locationId =
         typeof body.locationId === 'string' ? body.locationId : String(body.locationId)
     }
+    if ('latitude' in body) {
+      const v = body.latitude
+      if (v == null || v === '') {
+        patch.latitude = null
+      } else {
+        const n = Number(v)
+        patch.latitude = Number.isFinite(n) ? n : null
+      }
+    }
+    if ('longitude' in body) {
+      const v = body.longitude
+      if (v == null || v === '') {
+        patch.longitude = null
+      } else {
+        const n = Number(v)
+        patch.longitude = Number.isFinite(n) ? n : null
+      }
+    }
     const result = await patchLocation(locationId, patch)
     return { ok: true, ...result }
   } catch (e) {
@@ -1329,6 +1351,42 @@ app.post('/api/directory/bulk', async (req, reply) => {
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e)
     return reply.code(400).send({ error: msg })
+  }
+})
+
+app.post('/api/directory/geocode-missing', async (req, reply) => {
+  try {
+    const body = req.body ?? {}
+    const max = Math.min(30, Math.max(1, Number(body.max) || 8))
+    const delayMs = Math.min(5000, Math.max(900, Number(body.delayMs) || 1100))
+    const result = await geocodeMissingDirectoryLocations({ max, delayMs })
+    return result
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e)
+    return reply.code(400).send({ ok: false, error: msg })
+  }
+})
+
+app.post('/api/directory/:locationId/geocode', async (req, reply) => {
+  try {
+    const rawId = req.params?.locationId
+    const locationId =
+      typeof rawId === 'string'
+        ? rawId.trim()
+        : rawId != null
+          ? String(rawId).trim()
+          : ''
+    if (!locationId) {
+      return reply.code(400).send({ ok: false, error: 'locationId is required' })
+    }
+    const result = await geocodeDirectoryLocationById(locationId)
+    if (!result.ok) {
+      return reply.code(400).send(result)
+    }
+    return result
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e)
+    return reply.code(400).send({ ok: false, error: msg })
   }
 })
 

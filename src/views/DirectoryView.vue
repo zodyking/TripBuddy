@@ -1,6 +1,6 @@
 <script setup>
 import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue'
-import { fetchDirectory, patchDirectoryEntry, saveLocationToDirectory } from '../api.js'
+import { fetchDirectory, patchDirectoryEntry, saveLocationToDirectory, postDirectoryGeocodeMissing, postDirectoryGeocodeOne } from '../api.js'
 import DirectoryMap from '../components/DirectoryMap.vue'
 import { useMapVehicleId } from '../composables/useMapVehicleId.js'
 
@@ -46,6 +46,9 @@ const addLocationAddress = ref('')
 const addLocationPhone = ref('')
 const addLocationSaving = ref(false)
 const addLocationError = ref('')
+
+/** True while resolving addresses → coordinates for the directory map (Nominatim). */
+const geocodeBusy = ref(false)
 
 /**
  * Sort directory entries by numeric location id when possible (312 before 3117).
@@ -97,11 +100,31 @@ const mapPins = computed(() => {
   return out
 })
 
+const needsAddressGeocode = computed(() => {
+  for (const loc of locations.value) {
+    const addr = String(loc.address ?? '').trim()
+    if (!addr) continue
+    const lat = loc.latitude != null ? Number(loc.latitude) : NaN
+    const lng = loc.longitude != null ? Number(loc.longitude) : NaN
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) return true
+  }
+  return false
+})
+
 const { vehicleId: mapVehicleId } = useMapVehicleId()
 
 const showMapNoCoordsNotice = computed(
   () =>
     !loading.value &&
+    !geocodeBusy.value &&
+    filteredLocations.value.length > 0 &&
+    mapPins.value.length === 0,
+)
+
+const showMapGeocodeProgress = computed(
+  () =>
+    !loading.value &&
+    geocodeBusy.value &&
     filteredLocations.value.length > 0 &&
     mapPins.value.length === 0,
 )
@@ -169,6 +192,41 @@ function foldVcardContentLine(line) {
   return out
 }
 
+async function refreshDirectoryListOnly() {
+  try {
+    const res = await fetchDirectory()
+    const raw = res.locations ?? []
+    locations.value = [...raw].sort(compareLocationIdNumeric)
+  } catch {
+    /* keep existing list */
+  }
+}
+
+let geocodeBackfillRunning = false
+
+async function runDirectoryGeocodeBackfill() {
+  if (geocodeBackfillRunning || !needsAddressGeocode.value) return
+  geocodeBackfillRunning = true
+  geocodeBusy.value = true
+  try {
+    let rem = 1
+    for (let i = 0; i < 40 && rem > 0; i++) {
+      const r = await postDirectoryGeocodeMissing({ max: 10 })
+      rem = typeof r.remaining === 'number' ? r.remaining : 0
+      if (r.updated > 0) {
+        await refreshDirectoryListOnly()
+      }
+      if (rem <= 0) break
+      if (r.processed === 0) break
+    }
+  } catch {
+    /* ignore — map stays without pins until next load */
+  } finally {
+    geocodeBusy.value = false
+    geocodeBackfillRunning = false
+  }
+}
+
 async function loadDirectory() {
   loading.value = true
   error.value = ''
@@ -180,6 +238,9 @@ async function loadDirectory() {
     error.value = e instanceof Error ? e.message : String(e)
   } finally {
     loading.value = false
+  }
+  if (!error.value) {
+    void runDirectoryGeocodeBackfill()
   }
 }
 
@@ -239,6 +300,25 @@ async function saveDetailsEdit(loc) {
           : locations.value.filter((l) => l.locationId !== oldId)
       locations.value = [...rest, entry].sort(compareLocationIdNumeric)
       if (expandedId.value === oldId) expandedId.value = entry.locationId
+      const addr = String(entry.address ?? '').trim()
+      const lat = entry.latitude != null ? Number(entry.latitude) : NaN
+      const lng = entry.longitude != null ? Number(entry.longitude) : NaN
+      if (addr && (!Number.isFinite(lat) || !Number.isFinite(lng))) {
+        try {
+          const g = await postDirectoryGeocodeOne(entry.locationId)
+          if (g.ok && g.entry) {
+            const id = g.entry.locationId
+            const ix = locations.value.findIndex((l) => l.locationId === id)
+            if (ix >= 0) {
+              const copy = [...locations.value]
+              copy[ix] = g.entry
+              locations.value = copy.sort(compareLocationIdNumeric)
+            }
+          }
+        } catch {
+          /* geocode optional */
+        }
+      }
     }
     editingLocationId.value = ''
   } catch (e) {
@@ -294,20 +374,14 @@ async function submitAddLocation() {
       longitude: null,
       timeZone: '',
     })
-    locations.value = [
-      ...locations.value,
-      {
-        locationId: rawId,
-        locationName: rawName,
-        abbreviation: '',
-        address: addLocationAddress.value.trim(),
-        phone: addLocationPhone.value.trim(),
-        latitude: null,
-        longitude: null,
-        timeZone: '',
-        lastUpdated: new Date().toISOString(),
-      },
-    ].sort(compareLocationIdNumeric)
+    if (addLocationAddress.value.trim()) {
+      try {
+        await postDirectoryGeocodeOne(rawId)
+      } catch {
+        /* optional */
+      }
+    }
+    await refreshDirectoryListOnly()
     closeAddLocationModal()
   } catch (e) {
     addLocationError.value = e instanceof Error ? e.message : String(e)
@@ -567,8 +641,10 @@ onMounted(() => {
     )
     splitMql.addEventListener('change', onSplitMqlChange)
   }
-  loadDirectory()
-  loadFedexLogoForVcard()
+  void (async () => {
+    await loadDirectory()
+    loadFedexLogoForVcard()
+  })()
   directoryPollTimer = setInterval(() => {
     void loadDirectory()
   }, DIRECTORY_POLL_MS)
@@ -603,7 +679,19 @@ onUnmounted(() => {
       </div>
 
       <div
-        v-if="showMapNoCoordsNotice"
+        v-if="showMapGeocodeProgress"
+        class="map-no-coords-notice map-geocode-progress"
+        role="status"
+      >
+        <div class="spinner map-geocode-spinner" aria-hidden="true" />
+        <p>
+          Looking up addresses on the map (OpenStreetMap Nominatim). This may take a
+          minute for large directories.
+        </p>
+      </div>
+
+      <div
+        v-else-if="showMapNoCoordsNotice"
         class="map-no-coords-notice"
         role="status"
       >
@@ -621,9 +709,10 @@ onUnmounted(() => {
           <circle cx="12" cy="10" r="3" />
         </svg>
         <p>
-          None of these locations have saved coordinates yet. Open
+          None of these locations have coordinates on the map yet. If an address is
+          saved, the app will try to resolve it automatically. You can also open
           <strong>Destination</strong> on the Home dispatch card to load details and
-          save them to the directory.
+          save coordinates to the directory.
         </p>
       </div>
     </div>
@@ -1363,6 +1452,14 @@ onUnmounted(() => {
 .map-no-coords-notice strong {
   color: var(--color-text-primary, #f4f4f8);
   font-weight: var(--weight-semibold, 600);
+}
+
+.map-geocode-progress .map-geocode-spinner {
+  width: 1.25rem;
+  height: 1.25rem;
+  margin-bottom: 0;
+  margin-top: 0.125rem;
+  flex-shrink: 0;
 }
 
 .search-bar {

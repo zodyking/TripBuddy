@@ -1021,6 +1021,8 @@ export async function saveLocationToDirectory(data) {
  *   abbreviation?: string,
  *   address?: string,
  *   locationId?: string,
+ *   latitude?: number | null,
+ *   longitude?: number | null,
  * }} patch
  */
 export async function patchDirectoryEntry(locationId, patch) {
@@ -1040,6 +1042,35 @@ export async function patchDirectoryEntry(locationId, patch) {
  */
 export async function patchDirectoryPhone(locationId, phone) {
   return patchDirectoryEntry(locationId, { phone: phone ?? '' })
+}
+
+/**
+ * Geocode directory rows that have an address but no latitude/longitude (batched).
+ * @param {{ max?: number, delayMs?: number }} [body]
+ * @returns {Promise<{ ok: boolean, updated: number, processed: number, failed: Array<{ locationId: string, error: string }>, remaining: number }>}
+ */
+export async function postDirectoryGeocodeMissing(body = {}) {
+  const r = await apiFetch('/api/directory/geocode-missing', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body && typeof body === 'object' ? body : {}),
+  })
+  return handleJson(r)
+}
+
+/**
+ * Geocode one directory location by id (uses saved address).
+ * @param {string} locationId
+ * @returns {Promise<{ ok: boolean, updated?: boolean, error?: string, entry?: unknown }>}
+ */
+export async function postDirectoryGeocodeOne(locationId) {
+  const id = encodeURIComponent(String(locationId))
+  const r = await apiFetch(`/api/directory/${id}/geocode`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({}),
+  })
+  return handleJson(r)
 }
 
 /**

@@ -404,13 +404,17 @@ async function saveNy511ApiKey() {
 
 /** Server-tracked outbound API usage (per UTC day). */
 const apiQuotaRows = ref(
-  /** @type {Array<{ id: string, label: string, countToday: number, limitDay: number, defaultLimitDay: number, perMinuteLimit: number, callsLastMinute: number }>} */ ([]),
+  /** @type {Array<{ id: string, label: string, countToday: number, limitDay: number, defaultLimitDay: number, perMinuteLimit: number, callsLastMinute: number, countMonth?: number, limitMonth?: number, defaultLimitMonth?: number, monthKey?: string }>} */ ([]),
 )
 const apiQuotaDayKey = ref('')
+const apiQuotaMonthKey = ref('')
 const apiQuotaMsg = ref('')
 const apiQuotaBusy = ref(false)
 /** Editable daily caps keyed by bucket id */
 const apiQuotaDraftLimits = ref(/** @type {Record<string, string>} */ ({}))
+const apiQuotaHasMonthCols = computed(() =>
+  apiQuotaRows.value.some((r) => r.limitMonth != null),
+)
 
 async function refreshApiQuota() {
   apiQuotaMsg.value = ''
@@ -421,6 +425,7 @@ async function refreshApiQuota() {
       return
     }
     apiQuotaDayKey.value = typeof r.dayKey === 'string' ? r.dayKey : ''
+    apiQuotaMonthKey.value = typeof r.monthKey === 'string' ? r.monthKey : ''
     apiQuotaRows.value = r.buckets
     const d = { ...apiQuotaDraftLimits.value }
     for (const b of r.buckets) {
@@ -450,6 +455,7 @@ async function saveApiQuotaLimitsFromUi() {
     if (r.ok && Array.isArray(r.buckets)) {
       apiQuotaRows.value = r.buckets
       apiQuotaDayKey.value = typeof r.dayKey === 'string' ? r.dayKey : ''
+      apiQuotaMonthKey.value = typeof r.monthKey === 'string' ? r.monthKey : ''
       apiQuotaMsg.value = 'Daily limits saved.'
     }
   } catch (e) {
@@ -468,6 +474,7 @@ async function resetApiQuotaToday() {
     if (r.ok && Array.isArray(r.buckets)) {
       apiQuotaRows.value = r.buckets
       apiQuotaDayKey.value = typeof r.dayKey === 'string' ? r.dayKey : ''
+      apiQuotaMonthKey.value = typeof r.monthKey === 'string' ? r.monthKey : ''
       apiQuotaMsg.value = "Today's counts reset (UTC)."
     }
   } catch (e) {
@@ -1398,7 +1405,7 @@ onUnmounted(() => {
         </p>
         <p class="cred-hint">
           HERE provides: <strong>speed</strong> (current vs free-flow), <strong>jam factor</strong> (0–10), <strong>travel time</strong> estimates, and segment-level detail.
-          Free tier: <strong>250K transactions/month</strong> (legacy) or <strong>1K/day</strong> (new platform).
+          Real-time <strong>Traffic</strong> on the free plan is billed in small monthly transaction bundles (on the order of a few thousand per month for flow data); this app batches refreshes and enforces a monthly cap server-side (see <strong>API usage & limits</strong> below).
         </p>
         <p class="cred-hint">
           To set up: Go to <a href="https://platform.here.com/" target="_blank" rel="noopener noreferrer" class="ext-link">platform.here.com</a> → Access Manager → Apps → Register new app → Create API Key. Enable <strong>Traffic API</strong> and <strong>Routing API</strong>.
@@ -1432,11 +1439,18 @@ onUnmounted(() => {
       <SettingsSection title="API usage & limits" section-id="settings-api-quota">
         <p class="cred-hint">
           Outbound API calls are counted per account and saved in the database. Caps apply per
-          <strong>UTC calendar day</strong> and per rolling minute (burst protection). When a cap is hit,
-          requests are blocked until tomorrow or you raise the limit.
+          <strong>UTC calendar day</strong>, per rolling minute (burst protection), and for
+          <strong>HERE</strong> also per <strong>UTC calendar month</strong> (default 4800 calls, aligned
+          with HERE Traffic free-tier monthly transactions). When a cap is hit, requests are blocked until
+          the period resets or you raise the limit (daily caps in this table; HERE monthly default via
+          server env <code>API_QUOTA_HERE_MONTH</code> or optional
+          <code>limits.here_month</code> in the quota API).
         </p>
         <p v-if="apiQuotaDayKey" class="cred-hint">
           Current UTC day: <strong>{{ apiQuotaDayKey }}</strong>
+        </p>
+        <p v-if="apiQuotaMonthKey" class="cred-hint">
+          Current UTC month (HERE): <strong>{{ apiQuotaMonthKey }}</strong>
         </p>
         <div v-if="apiQuotaRows.length" class="api-quota-table-wrap">
           <table class="api-quota-table">
@@ -1445,6 +1459,12 @@ onUnmounted(() => {
                 <th scope="col">API</th>
                 <th scope="col">Calls today</th>
                 <th scope="col">Daily limit</th>
+                <th v-if="apiQuotaHasMonthCols" scope="col">
+                  HERE this month
+                </th>
+                <th v-if="apiQuotaHasMonthCols" scope="col">
+                  HERE monthly cap
+                </th>
                 <th scope="col">Calls last min</th>
                 <th scope="col">Max / min</th>
               </tr>
@@ -1462,6 +1482,12 @@ onUnmounted(() => {
                     step="1"
                     :aria-label="`Daily limit for ${row.label}`"
                   />
+                </td>
+                <td v-if="apiQuotaHasMonthCols">
+                  {{ row.limitMonth != null ? row.countMonth ?? 0 : '—' }}
+                </td>
+                <td v-if="apiQuotaHasMonthCols">
+                  {{ row.limitMonth != null ? row.limitMonth : '—' }}
                 </td>
                 <td>{{ row.callsLastMinute }}</td>
                 <td>{{ row.perMinuteLimit }}</td>

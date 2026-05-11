@@ -23,7 +23,24 @@ const KEY = G('traffic:highways:series')
 const SNAPPED_KEY = G('traffic:highways:snapped')
 const MAX_POINTS_PER_HIGHWAY = 500
 const MPS_TO_MPH = 2.23694
-const CACHE_TTL_MS = 90 * 1000
+
+function envInt(name, fallback) {
+  const n = Math.floor(Number(process.env[name]))
+  return Number.isFinite(n) && n >= 1 ? n : fallback
+}
+
+/**
+ * HERE Traffic free tier is ~5k transactions/month; each highway corridor is one request.
+ * Only refresh a subset per upstream pass and keep a long TTL so UI polls mostly hit cache.
+ */
+const HERE_HIGHWAY_FLOW_BATCH = Math.min(20, Math.max(1, envInt('HERE_HIGHWAY_FLOW_BATCH', 3)))
+let highwayFlowRoundStart = 0
+
+/**
+ * Live HERE flow: long TTL + round-robin batching (see HERE_HIGHWAY_FLOW_BATCH).
+ * @see server/bridge-panynj.mjs POLL_MS
+ */
+const CACHE_TTL_MS = 50 * 60 * 1000
 const SNAPPED_CACHE_TTL_MS = 24 * 60 * 60 * 1000
 
 /**
@@ -472,6 +489,8 @@ let lastLive = null
 let lastFetchedAt = 0
 let lastSource = /** @type {'here' | 'tomtom' | null} */ (null)
 let lastError = /** @type {string | null} */ (null)
+/** Coalesce concurrent GETs so many tabs do not each trigger a full multi-highway HERE batch. */
+let highwayRefreshInFlight = /** @type {Promise<void> | null} */ (null)
 
 /**
  * Get list of highway IDs.
@@ -517,7 +536,23 @@ export async function fetchAllHighwayTraffic(accountKey) {
   let usedSource = /** @type {'here' | 'tomtom' | null} */ (null)
   let fetchError = /** @type {string | null} */ (null)
 
-  for (const highwayId of Object.keys(HIGHWAYS)) {
+  const allHwIds = Object.keys(HIGHWAYS)
+  const nHw = allHwIds.length
+  /** When using HERE, refresh a rotating subset per cache miss to cap monthly transactions. */
+  const idsToQuery =
+    hereKey && nHw > 0
+      ? (() => {
+          const batch = Math.min(HERE_HIGHWAY_FLOW_BATCH, nHw)
+          const out = []
+          for (let i = 0; i < batch; i++) {
+            out.push(allHwIds[(highwayFlowRoundStart + i) % nHw])
+          }
+          highwayFlowRoundStart = (highwayFlowRoundStart + batch) % nHw
+          return out
+        })()
+      : allHwIds
+
+  for (const highwayId of idsToQuery) {
     let result = { ok: false, travelMinutes: null, speedMph: null, error: 'No API key' }
 
     if (hereKey) {
@@ -547,9 +582,16 @@ export async function fetchAllHighwayTraffic(accountKey) {
     }
   }
 
-  const hasData = Object.values(results).some(r => r.travelMinutes != null)
+  const merged =
+    hereKey && lastLive
+      ? { ...lastLive, ...results }
+      : hereKey
+        ? { ...(lastLive || {}), ...results }
+        : results
 
-  lastLive = results
+  const hasData = Object.values(merged).some((r) => r.travelMinutes != null)
+
+  lastLive = merged
   lastFetchedAt = Date.now()
   lastSource = usedSource
   lastError = hasData ? null : fetchError
@@ -557,7 +599,7 @@ export async function fetchAllHighwayTraffic(accountKey) {
   return {
     ok: hasData,
     fetchedAt: lastFetchedAt,
-    highways: results,
+    highways: merged,
     source: usedSource,
     error: hasData ? null : fetchError,
   }
@@ -570,9 +612,16 @@ export async function fetchAllHighwayTraffic(accountKey) {
  */
 export async function getHighwayTrafficPayload(accountKey) {
   const now = Date.now()
-  
+
   if (!lastLive || now - lastFetchedAt > CACHE_TTL_MS) {
-    await fetchAllHighwayTraffic(accountKey)
+    if (!highwayRefreshInFlight) {
+      highwayRefreshInFlight = (async () => {
+        await fetchAllHighwayTraffic(accountKey)
+      })().finally(() => {
+        highwayRefreshInFlight = null
+      })
+    }
+    await highwayRefreshInFlight
   }
 
   const st = await readState()

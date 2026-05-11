@@ -14,6 +14,12 @@ import { useMapVehicleId } from '../composables/useMapVehicleId.js'
 
 defineOptions({ name: 'TrafficCrossingsContent' })
 
+/**
+ * Poll PANYNJ + HERE-backed traffic on the same cadence as server-side PANYNJ
+ * refresh (5 min). HERE responses are cached ~6 min server-side so this does not
+ * trigger a full multi-corridor HERE batch on every tick.
+ * @see server/bridge-panynj.mjs POLL_MS
+ */
 const POLL_MS = 5 * 60 * 1000
 
 /** @typedef {'ToNY' | 'ToNJ'} TravelDir */
@@ -694,6 +700,12 @@ watch(rankedRows, () => {
   }
 })
 
+watch(viewMode, (mode) => {
+  if (mode === 'highways') {
+    void loadHighways()
+  }
+})
+
 async function load() {
   error.value = ''
   const gen = ++tick
@@ -1033,7 +1045,9 @@ onMounted(() => {
   intervalId = setInterval(() => {
     void load()
     void loadVerrazzano()
-    void loadHighways()
+    if (viewMode.value === 'highways') {
+      void loadHighways()
+    }
   }, POLL_MS)
 })
 
