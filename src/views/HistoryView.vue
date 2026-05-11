@@ -439,10 +439,12 @@ function computeWeekPayEstimate(items) {
   let sumBillable = 0
   /** @type {{
    *   id: string,
+   *   dailyTripLegSequence: string,
    *   od: string,
    *   when: string,
    *   originId: string,
    *   destId: string,
+   *   routeOd: string,
    *   weekday: string,
    *   dispatchDate: string,
    *   dispatchTime: string,
@@ -467,6 +469,11 @@ function computeWeekPayEstimate(items) {
       when: tripPayWhenWithLeg(e),
       originId: leadingLocationId(e.dispatchHeader?.origin) || '-',
       destId: leadingLocationId(e.dispatchHeader?.destination) || '-',
+      routeOd: (() => {
+        const a = leadingLocationId(e.dispatchHeader?.origin) || '-'
+        const b = leadingLocationId(e.dispatchHeader?.destination) || '-'
+        return `${a} \u2192 ${b}`
+      })(),
       weekday: dispatchCols.weekday,
       dispatchDate: dispatchCols.dispatchDate,
       dispatchTime: dispatchCols.dispatchTime,
@@ -1172,6 +1179,7 @@ async function onDownloadWeekTotalsPdf(wg) {
         rounded: r.rounded,
         originId: r.originId,
         destId: r.destId,
+        routeOd: r.routeOd,
         weekday: r.weekday,
         dispatchDate: r.dispatchDate,
         dispatchTime: r.dispatchTime,
@@ -1179,7 +1187,9 @@ async function onDownloadWeekTotalsPdf(wg) {
         tractorNumber: r.tractorNumber,
         equipmentBlock: r.equipmentPdfBlock,
         dailyTripLegSequence: r.dailyTripLegSequence || '',
-        proofScreenshots: /** @type {{ label: string, jpeg: string, ts: number }[] | undefined} */ (undefined),
+        proofScreenshots: /** @type {{ label: string, jpeg: string, ts: number }[] | undefined} */ (
+          undefined
+        ),
       }))
       days.push({ dayLabel: dg.dayLabel, sumBillable: est.sumBillable, rows: mappedRows })
       allRows.push(...mappedRows)
