@@ -23,6 +23,8 @@ import {
   getApiQuotaSettings,
   putApiQuotaLimits,
   postApiQuotaReset,
+  fetchDirectory,
+  bulkImportDirectory,
 } from '../api.js'
 import {
   refreshLinehaulApis,
@@ -78,7 +80,7 @@ import {
 /** Shown when a secret is on file but the user has not typed a new value (password inputs stay masked). */
 const SECRET_SAVED_MASK = '••••••••••••••••'
 
-/** @type {import('vue').Ref<'general' | 'automation' | 'audio' | 'security'>} */
+/** @type {import('vue').Ref<'general' | 'automation' | 'audio' | 'security' | 'directory'>} */
 const router = useRouter()
 const route = useRoute()
 
@@ -879,6 +881,165 @@ async function runLinehaulTest() {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Directory settings state
+// ---------------------------------------------------------------------------
+
+/** @type {import('vue').Ref<Array<{ locationId: string, locationName: string, abbreviation: string, address: string, phone: string, latitude: number | null, longitude: number | null, timeZone: string, lastUpdated: string }>>} */
+const directoryLocations = ref([])
+const directoryLoading = ref(false)
+const directoryError = ref('')
+
+/** CSV import state */
+const csvImportFile = ref(null)
+const csvImportBusy = ref(false)
+const csvImportMsg = ref('')
+const csvImportError = ref('')
+/** @type {import('vue').Ref<{ total: number, filtered: number, preview: Array<{ locationId: string, locationName: string }> } | null>} */
+const csvImportPreview = ref(null)
+
+/** Statuses to exclude from import */
+const EXCLUDED_STATUSES = ['HUB LOCAL', 'NFS']
+
+async function loadDirectoryStats() {
+  directoryLoading.value = true
+  directoryError.value = ''
+  try {
+    const res = await fetchDirectory()
+    directoryLocations.value = Array.isArray(res.locations) ? res.locations : []
+  } catch (e) {
+    directoryError.value = e instanceof Error ? e.message : String(e)
+    directoryLocations.value = []
+  } finally {
+    directoryLoading.value = false
+  }
+}
+
+const directoryStats = computed(() => {
+  const locs = directoryLocations.value
+  return {
+    total: locs.length,
+    withPhone: locs.filter((l) => l.phone && l.phone.trim()).length,
+    withCoords: locs.filter((l) => l.latitude != null && l.longitude != null).length,
+  }
+})
+
+/**
+ * Parse CSV text into array of row objects using header row as keys.
+ * @param {string} csvText
+ * @returns {Array<Record<string, string>>}
+ */
+function parseCsv(csvText) {
+  const lines = csvText.split(/\r?\n/).filter((l) => l.trim())
+  if (lines.length < 2) return []
+  const headers = lines[0].split(',').map((h) => h.trim())
+  const rows = []
+  for (let i = 1; i < lines.length; i++) {
+    const values = lines[i].split(',').map((v) => v.trim())
+    const obj = {}
+    headers.forEach((h, idx) => {
+      obj[h] = values[idx] ?? ''
+    })
+    rows.push(obj)
+  }
+  return rows
+}
+
+function onCsvFileSelected(event) {
+  csvImportMsg.value = ''
+  csvImportError.value = ''
+  csvImportPreview.value = null
+  const file = event.target?.files?.[0]
+  if (!file) {
+    csvImportFile.value = null
+    return
+  }
+  csvImportFile.value = file
+  const reader = new FileReader()
+  reader.onload = (e) => {
+    try {
+      const text = e.target?.result
+      if (typeof text !== 'string') throw new Error('Failed to read file')
+      const rows = parseCsv(text)
+      const filtered = rows.filter((r) => {
+        const status = (r.Status || '').trim().toUpperCase()
+        return !EXCLUDED_STATUSES.includes(status)
+      })
+      csvImportPreview.value = {
+        total: rows.length,
+        filtered: filtered.length,
+        preview: filtered.slice(0, 5).map((r) => ({
+          locationId: r['Station Number'] || '',
+          locationName: r['Station Name'] || '',
+        })),
+      }
+    } catch (err) {
+      csvImportError.value = err instanceof Error ? err.message : String(err)
+      csvImportPreview.value = null
+    }
+  }
+  reader.onerror = () => {
+    csvImportError.value = 'Failed to read CSV file'
+    csvImportPreview.value = null
+  }
+  reader.readAsText(file)
+}
+
+async function importCsvToDirectory() {
+  if (!csvImportFile.value) return
+  csvImportBusy.value = true
+  csvImportMsg.value = ''
+  csvImportError.value = ''
+  try {
+    const text = await csvImportFile.value.text()
+    const rows = parseCsv(text)
+    const filtered = rows.filter((r) => {
+      const status = (r.Status || '').trim().toUpperCase()
+      return !EXCLUDED_STATUSES.includes(status)
+    })
+    const entries = filtered.map((r) => {
+      const addr1 = (r['Address 1'] || '').trim()
+      const addr2 = (r['Address 2'] || '').trim()
+      const city = (r.City || '').trim()
+      const state = (r.State || '').trim()
+      const zip = (r.Zip || '').trim()
+      const addressParts = [addr1, addr2, city, state, zip].filter(Boolean)
+      return {
+        locationId: (r['Station Number'] || '').trim(),
+        locationName: (r['Station Name'] || '').trim(),
+        abbreviation: (r['Station Abbreviation'] || '').trim(),
+        address: addressParts.join(', '),
+        phone: (r.Phone || '').trim(),
+        latitude: null,
+        longitude: null,
+        timeZone: '',
+        locationType: (r.Status || '').trim().toUpperCase(),
+        district: (r.District || '').trim().toUpperCase(),
+      }
+    }).filter((e) => e.locationId)
+    if (entries.length === 0) {
+      csvImportError.value = 'No valid entries to import after filtering'
+      return
+    }
+    const res = await bulkImportDirectory(entries)
+    csvImportMsg.value = `Import complete: ${res.inserted} inserted, ${res.updated} updated, ${res.skipped} skipped`
+    csvImportFile.value = null
+    csvImportPreview.value = null
+    await loadDirectoryStats()
+  } catch (e) {
+    csvImportError.value = e instanceof Error ? e.message : String(e)
+  } finally {
+    csvImportBusy.value = false
+  }
+}
+
+function clearCsvImport() {
+  csvImportFile.value = null
+  csvImportPreview.value = null
+  csvImportMsg.value = ''
+  csvImportError.value = ''
+}
+
 function applySettingsRouteFragment() {
   const raw = typeof route.hash === 'string' ? route.hash.replace(/^#/, '').trim() : ''
   if (raw !== 'tomtom' && raw !== 'here' && raw !== 'api-quota') return
@@ -923,6 +1084,9 @@ watch(settingsTab, (tab) => {
     void loadSecurityAccessLog()
     void loadGeoFenceSettings()
     nextTick(() => geoFenceEditorRef.value?.invalidateSize?.())
+  }
+  if (tab === 'directory') {
+    void loadDirectoryStats()
   }
 })
 
@@ -974,6 +1138,16 @@ onUnmounted(() => {
         @click="settingsTab = 'security'"
       >
         Security
+      </button>
+      <button
+        type="button"
+        class="tab-btn tap"
+        role="tab"
+        :aria-selected="settingsTab === 'directory'"
+        :class="{ active: settingsTab === 'directory' }"
+        @click="settingsTab = 'directory'"
+      >
+        Directory
       </button>
     </div>
 
@@ -1152,7 +1326,7 @@ onUnmounted(() => {
         </div>
       </SettingsSection>
 
-      <SettingsSection title="Map: TomTom traffic overlay" section-id="settings-tomtom" :open="true">
+      <SettingsSection title="Map: TomTom traffic overlay" section-id="settings-tomtom">
         <p class="cred-hint">
           Live road traffic tiles on the <strong>Traffic</strong> map use
           <a
@@ -1211,7 +1385,7 @@ onUnmounted(() => {
         </div>
       </SettingsSection>
 
-      <SettingsSection title="HERE Traffic API (Route Monitoring)" section-id="settings-here" :open="true">
+      <SettingsSection title="HERE Traffic API (Route Monitoring)" section-id="settings-here">
         <p class="cred-hint">
           <strong>Traffic → Corridors</strong> uses
           <a
@@ -1255,7 +1429,7 @@ onUnmounted(() => {
         </div>
       </SettingsSection>
 
-      <SettingsSection title="API usage & limits" section-id="settings-api-quota" :open="false">
+      <SettingsSection title="API usage & limits" section-id="settings-api-quota">
         <p class="cred-hint">
           Outbound API calls are counted per account and saved in the database. Caps apply per
           <strong>UTC calendar day</strong> and per rolling minute (burst protection). When a cap is hit,
@@ -1315,7 +1489,7 @@ onUnmounted(() => {
         </div>
       </SettingsSection>
 
-      <SettingsSection title="511NY Camera API (Bridge Crossings)" section-id="settings-ny511" :open="true">
+      <SettingsSection title="511NY Camera API (Bridge Crossings)" section-id="settings-ny511">
         <p class="cred-hint">
           <strong>Traffic → Crossings</strong> shows live camera feeds from
           <a
@@ -1714,6 +1888,77 @@ onUnmounted(() => {
           </p>
         </div>
         <button type="button" class="btn ghost tap" @click="loadSecurityAccessLog">Refresh</button>
+      </SettingsSection>
+    </main>
+
+    <main v-show="settingsTab === 'directory'" class="stack directory-panel">
+      <SettingsSection title="Directory Statistics">
+        <p v-if="directoryLoading" class="directory-loading">Loading...</p>
+        <p v-else-if="directoryError" class="directory-error">{{ directoryError }}</p>
+        <div v-else class="directory-stats">
+          <div class="stat-card">
+            <span class="stat-value">{{ directoryStats.total }}</span>
+            <span class="stat-label">Total locations</span>
+          </div>
+          <div class="stat-card">
+            <span class="stat-value">{{ directoryStats.withPhone }}</span>
+            <span class="stat-label">With phone numbers</span>
+          </div>
+          <div class="stat-card">
+            <span class="stat-value">{{ directoryStats.withCoords }}</span>
+            <span class="stat-label">With coordinates</span>
+          </div>
+        </div>
+        <button type="button" class="btn ghost tap" @click="loadDirectoryStats">Refresh stats</button>
+      </SettingsSection>
+
+      <SettingsSection title="Import Locations (CSV)">
+        <p class="directory-hint">
+          Import FedEx Ground facility data from a CSV file. Entries with status <strong>HUB LOCAL</strong> or <strong>NFS</strong> will be excluded.
+        </p>
+
+        <div class="csv-import-area">
+          <label class="csv-file-label">
+            <input
+              type="file"
+              accept=".csv,text/csv"
+              class="csv-file-input"
+              @change="onCsvFileSelected"
+            />
+            <span class="btn secondary tap">{{ csvImportFile ? 'Change file' : 'Select CSV file' }}</span>
+          </label>
+
+          <p v-if="csvImportFile" class="csv-file-name">{{ csvImportFile.name }}</p>
+
+          <div v-if="csvImportPreview" class="csv-preview">
+            <p class="csv-preview-summary">
+              <strong>{{ csvImportPreview.filtered }}</strong> of {{ csvImportPreview.total }} rows will be imported (after filtering)
+            </p>
+            <p v-if="csvImportPreview.preview.length" class="csv-preview-label">Preview (first 5):</p>
+            <ul v-if="csvImportPreview.preview.length" class="csv-preview-list">
+              <li v-for="item in csvImportPreview.preview" :key="item.locationId">
+                <strong>{{ item.locationId }}</strong> — {{ item.locationName }}
+              </li>
+            </ul>
+          </div>
+
+          <p v-if="csvImportError" class="csv-import-error">{{ csvImportError }}</p>
+          <p v-if="csvImportMsg" class="csv-import-msg">{{ csvImportMsg }}</p>
+
+          <div v-if="csvImportFile && csvImportPreview" class="csv-import-actions">
+            <button
+              type="button"
+              class="btn primary tap"
+              :disabled="csvImportBusy || !csvImportPreview?.filtered"
+              @click="importCsvToDirectory"
+            >
+              {{ csvImportBusy ? 'Importing...' : 'Import to directory' }}
+            </button>
+            <button type="button" class="btn ghost tap" :disabled="csvImportBusy" @click="clearCsvImport">
+              Cancel
+            </button>
+          </div>
+        </div>
       </SettingsSection>
     </main>
 
@@ -2477,6 +2722,144 @@ code {
   max-height: 80vh;
   border-radius: 6px;
   object-fit: contain;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   DIRECTORY PANEL — Statistics & CSV Import
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.directory-panel {
+  max-width: 64rem;
+  margin-inline: auto;
+}
+
+.directory-loading,
+.directory-error {
+  margin: 0;
+  font-size: var(--text-sm, 0.8125rem);
+  color: var(--color-text-secondary, #a8a8b8);
+}
+
+.directory-error {
+  color: var(--color-danger, #ff6b6b);
+}
+
+.directory-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: var(--space-3, 0.75rem);
+  margin-bottom: var(--space-4, 1rem);
+}
+
+.stat-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: var(--space-4, 1rem);
+  background: var(--color-glass-subtle, rgba(255, 255, 255, 0.03));
+  border: 1px solid var(--color-border, rgba(255, 255, 255, 0.08));
+  border-radius: var(--radius-lg, 0.75rem);
+}
+
+.stat-value {
+  font-size: var(--text-2xl, 1.5rem);
+  font-weight: var(--weight-bold, 700);
+  color: var(--color-accent-purple, #7b4db5);
+  line-height: 1.2;
+}
+
+.stat-label {
+  font-size: var(--text-xs, 0.6875rem);
+  color: var(--color-text-tertiary, #6e6e7e);
+  text-align: center;
+  margin-top: var(--space-1, 0.25rem);
+}
+
+.directory-hint {
+  font-size: var(--text-sm, 0.8125rem);
+  color: var(--color-text-secondary, #a8a8b8);
+  margin: 0 0 var(--space-4, 1rem);
+  line-height: 1.5;
+}
+
+.csv-import-area {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3, 0.75rem);
+}
+
+.csv-file-label {
+  display: inline-block;
+  cursor: pointer;
+}
+
+.csv-file-input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.csv-file-name {
+  margin: 0;
+  font-size: var(--text-sm, 0.8125rem);
+  color: var(--color-text-secondary, #a8a8b8);
+  word-break: break-all;
+}
+
+.csv-preview {
+  padding: var(--space-3, 0.75rem);
+  background: var(--color-glass-subtle, rgba(255, 255, 255, 0.03));
+  border: 1px solid var(--color-border, rgba(255, 255, 255, 0.08));
+  border-radius: var(--radius-md, 0.5rem);
+}
+
+.csv-preview-summary {
+  margin: 0 0 var(--space-2, 0.5rem);
+  font-size: var(--text-sm, 0.8125rem);
+  color: var(--color-text-primary, #f4f4f8);
+}
+
+.csv-preview-label {
+  margin: var(--space-2, 0.5rem) 0 var(--space-1, 0.25rem);
+  font-size: var(--text-xs, 0.6875rem);
+  color: var(--color-text-tertiary, #6e6e7e);
+}
+
+.csv-preview-list {
+  margin: 0;
+  padding-left: var(--space-4, 1rem);
+  font-size: var(--text-sm, 0.8125rem);
+  color: var(--color-text-secondary, #a8a8b8);
+  list-style: disc;
+}
+
+.csv-preview-list li {
+  margin-bottom: var(--space-1, 0.25rem);
+}
+
+.csv-import-error {
+  margin: 0;
+  font-size: var(--text-sm, 0.8125rem);
+  color: var(--color-danger, #ff6b6b);
+}
+
+.csv-import-msg {
+  margin: 0;
+  font-size: var(--text-sm, 0.8125rem);
+  color: var(--color-success, #4ade80);
+}
+
+.csv-import-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2, 0.5rem);
+  margin-top: var(--space-2, 0.5rem);
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════

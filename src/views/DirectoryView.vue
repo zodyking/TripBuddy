@@ -14,6 +14,8 @@ import { useMapVehicleId } from '../composables/useMapVehicleId.js'
  *   longitude: number | null,
  *   timeZone: string,
  *   lastUpdated: string,
+ *   locationType?: string,
+ *   district?: string,
  * }>>} */
 const locations = ref([])
 const loading = ref(false)
@@ -123,22 +125,31 @@ function onMapSelect(locationId) {
   })
 }
 
-/**
- * Embedded FedEx logo PNG (48x48 purple/orange) for vCard PHOTO.
- * Many contact apps reject SVG or WebP; a small PNG ensures compatibility.
- */
-const VCARD_FEDEX_LOGO_PNG_B64 =
-  'iVBORw0KGgoAAAANSUhEUgAAADAAAAAwCAYAAABXAvmHAAABhklEQVR4nO2ZsU7DMBCGv0IMSNC' +
-  'FhYWJgZU34AVg5w14JCZGxMrOyMgTwMaKQKhCqhDiLI6bNHXi2L5zbPj/KYqT6Pz5fOfzOQgCC' +
-  'CCIlGWZWf1XnSUGSFvgCfiKfL3vwDXwkPoGmsBT4FWe6w3wiHpNqJnABZABm0CZsD4BvAKvQLu' +
-  'Oag0wCOwDc0Aa6bprwB1wD7yUWdYEegALwE7k670BToF74KXMsiZwFPl6j4E+4EaCtT3hGOgG7' +
-  'kmD1gROgFtJVgW6Am+lgGPg0HH9YeAS2HRcfxfoAbYkWNvjD4FNx/UHgCVg23H9LuDQcf0WsO2' +
-  '4fhvw5Li+AKyUWaYJnEmysuMcf5XYBvIl11EFOHZcnwFLJddRAXh2XJ8Cq47rM2DZcX0KHHPHR' +
-  'uAi8O64PgWWHdfHwCn3bHQlHNenQNpx/RJI6yywwB1LxDpQ1xMOsC3B2h5/jHonyaoAl9yxEbj' +
-  'ouD4FEu7ZCFxwXJ8Ay9yz0ZVw57g+AZa4Z6Mr4dpx/QJIuy+AAggICHj//AB0qHKFsRd4pwAAA' +
-  'ABJRU5ErkJggg=='
+/** FedEx logo base64 for vCard PHOTO (loaded from public/FED_EX_LOGO.jpg) */
+const vcardFedexLogoB64 = ref('')
 
-const vcardFedexLogoB64 = ref(VCARD_FEDEX_LOGO_PNG_B64)
+/** Load FedEx logo as base64 for vCard on mount */
+async function loadFedexLogoForVcard() {
+  try {
+    const resp = await fetch('/FED_EX_LOGO.jpg')
+    if (!resp.ok) return
+    const blob = await resp.blob()
+    const reader = new FileReader()
+    reader.onloadend = () => {
+      const dataUrl = reader.result
+      if (typeof dataUrl === 'string' && dataUrl.startsWith('data:image/jpeg;base64,')) {
+        vcardFedexLogoB64.value = dataUrl.replace('data:image/jpeg;base64,', '')
+      }
+    }
+    reader.readAsDataURL(blob)
+  } catch {
+    // fallback: no photo
+  }
+}
+
+/** vCard download district filter: 'ny-metro' | 'ny-metro-northeast' | 'all' */
+const vcardDistrictFilter = ref('all')
+const vcardDropdownOpen = ref(false)
 
 /**
  * Fold one long vCard line to 75-octet chunks (continuation lines start with space).
@@ -429,49 +440,101 @@ function cardLocationTitle(loc) {
 }
 
 /**
- * Single vCard 3.0 with FN FedEx and one TEL per location (label = id + cleaned name).
+ * Filter locations by district for vCard export.
+ * @param {'ny-metro' | 'ny-metro-northeast' | 'all'} filter
+ */
+function filterLocationsByDistrict(locs, filter) {
+  if (filter === 'all') return locs
+  const nyMetroDistricts = ['NEW YORK METRO']
+  const northeastDistricts = ['NORTHEAST']
+  if (filter === 'ny-metro') {
+    return locs.filter((l) => nyMetroDistricts.includes((l.district || '').toUpperCase()))
+  }
+  if (filter === 'ny-metro-northeast') {
+    const allowed = [...nyMetroDistricts, ...northeastDistricts]
+    return locs.filter((l) => allowed.includes((l.district || '').toUpperCase()))
+  }
+  return locs
+}
+
+/**
+ * Parse address string into vCard ADR components.
+ * Address format expected: "street, city, state, zip" or similar
+ * @param {string} addr
+ * @returns {{ street: string, city: string, state: string, zip: string }}
+ */
+function parseAddressForVcard(addr) {
+  const parts = (addr || '').split(',').map((p) => p.trim())
+  if (parts.length >= 4) {
+    return { street: parts.slice(0, -3).join(', '), city: parts[parts.length - 3], state: parts[parts.length - 2], zip: parts[parts.length - 1] }
+  }
+  if (parts.length === 3) {
+    return { street: parts[0], city: parts[1], state: '', zip: parts[2] }
+  }
+  if (parts.length === 2) {
+    return { street: parts[0], city: parts[1], state: '', zip: '' }
+  }
+  return { street: addr, city: '', state: '', zip: '' }
+}
+
+/**
+ * Single vCard 3.0 with FN FedEx and one TEL + ADR per location (label = id + cleaned name).
  */
 function buildDirectoryVcardString() {
-  const lines = ['BEGIN:VCARD', 'VERSION:3.0', 'N:FedEx;;;', 'FN:FedEx']
+  const lines = ['BEGIN:VCARD', 'VERSION:3.0', 'N:;;;;', 'ORG:FedEx;', 'FN:FedEx']
   const b64 = vcardFedexLogoB64.value
   if (b64) {
-    lines.push(...foldVcardContentLine(`PHOTO;ENCODING=b;TYPE=PNG:${b64}`))
+    lines.push(...foldVcardContentLine(`PHOTO;ENCODING=b:${b64}`))
   }
   let item = 1
-  const sorted = [...locations.value].sort(compareLocationIdNumeric)
+  const filtered = filterLocationsByDistrict(locations.value, vcardDistrictFilter.value)
+  const sorted = [...filtered].sort(compareLocationIdNumeric)
   for (const loc of sorted) {
     const raw = loc.phone ?? ''
     const tel = phoneToVcardTel(raw)
-    if (!tel) continue
     const label = vcardContactLabel(loc)
-    lines.push(`item${item}.TEL;type=CELL:${tel}`)
-    lines.push(`item${item}.X-ABLabel:${escapeVcardText(label)}`)
-    item += 1
+    if (tel) {
+      lines.push(`item${item}.TEL:${tel}`)
+      lines.push(`item${item}.X-ABLabel:${escapeVcardText(label)}`)
+      item += 1
+    }
+    if (loc.address) {
+      const { street, city, state, zip } = parseAddressForVcard(loc.address)
+      const adrValue = `;;${escapeVcardText(street)};${escapeVcardText(city)};${escapeVcardText(state)};${escapeVcardText(zip)};`
+      lines.push(`item${item}.ADR;type=WORK:${adrValue}`)
+      lines.push(`item${item}.X-ABLabel:${escapeVcardText(label)}`)
+      item += 1
+    }
   }
   lines.push('END:VCARD')
   return lines.join('\r\n')
 }
 
-const hasVcardPhones = computed(() => {
-  for (const loc of locations.value) {
-    const raw = loc.phone ?? ''
-    if (phoneToVcardTel(raw)) return true
+const hasVcardData = computed(() => {
+  const filtered = filterLocationsByDistrict(locations.value, vcardDistrictFilter.value)
+  for (const loc of filtered) {
+    if (phoneToVcardTel(loc.phone ?? '') || loc.address) return true
   }
   return false
 })
 
-function downloadDirectoryVcard() {
+function downloadDirectoryVcard(filter) {
   if (typeof window === 'undefined') return
-  const body = buildDirectoryVcardString()
-  if (!body.includes('item1.TEL')) return
-  const blob = new Blob([body], { type: 'text/vcard;charset=utf-8' })
-  const url = URL.createObjectURL(blob)
-  const a = document.createElement('a')
-  a.href = url
-  a.download = 'FedEx-directory-contacts.vcf'
-  a.rel = 'noopener'
-  a.click()
-  URL.revokeObjectURL(url)
+  vcardDistrictFilter.value = filter
+  vcardDropdownOpen.value = false
+  nextTick(() => {
+    const body = buildDirectoryVcardString()
+    if (!body.includes('item1.')) return
+    const blob = new Blob([body], { type: 'text/vcard;charset=utf-8' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    const suffix = filter === 'all' ? '' : filter === 'ny-metro' ? '-ny-metro' : '-ny-metro-northeast'
+    a.download = `FedEx-directory-contacts${suffix}.vcf`
+    a.rel = 'noopener'
+    a.click()
+    URL.revokeObjectURL(url)
+  })
 }
 
 /**
@@ -505,6 +568,7 @@ onMounted(() => {
     splitMql.addEventListener('change', onSplitMqlChange)
   }
   loadDirectory()
+  loadFedexLogoForVcard()
   directoryPollTimer = setInterval(() => {
     void loadDirectory()
   }, DIRECTORY_POLL_MS)
@@ -583,16 +647,31 @@ onUnmounted(() => {
             >
               + Add
             </button>
-            <button
-              v-if="locations.length"
-              type="button"
-              class="directory-vcard-btn tap"
-              :disabled="!hasVcardPhones || loading"
-              title="Download one .vcf with all location numbers"
-              @click="downloadDirectoryVcard"
-            >
-              Download contacts
-            </button>
+            <div v-if="locations.length" class="vcard-dropdown-wrap">
+              <button
+                type="button"
+                class="directory-vcard-btn tap"
+                :disabled="loading"
+                title="Download contacts as .vcf file"
+                @click="vcardDropdownOpen = !vcardDropdownOpen"
+              >
+                Download contacts
+                <svg class="vcard-dropdown-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <polyline points="6 9 12 15 18 9" />
+                </svg>
+              </button>
+              <div v-if="vcardDropdownOpen" class="vcard-dropdown-menu">
+                <button type="button" class="vcard-dropdown-item tap" @click="downloadDirectoryVcard('ny-metro')">
+                  New York Metro only
+                </button>
+                <button type="button" class="vcard-dropdown-item tap" @click="downloadDirectoryVcard('ny-metro-northeast')">
+                  NY Metro + Northeast
+                </button>
+                <button type="button" class="vcard-dropdown-item tap" @click="downloadDirectoryVcard('all')">
+                  All locations
+                </button>
+              </div>
+            </div>
           </div>
         </header>
     <div class="search-bar">
@@ -678,7 +757,10 @@ onUnmounted(() => {
         :id="'dir-loc-' + loc.locationId"
         :key="loc.locationId"
         class="location-card"
-        :class="{ 'is-expanded': expandedId === loc.locationId }"
+        :class="{
+          'is-expanded': expandedId === loc.locationId,
+          'is-hub': (loc.locationType || '').toUpperCase() === 'HUB',
+        }"
       >
         <button
           type="button"
@@ -692,6 +774,7 @@ onUnmounted(() => {
               <div class="location-title-row">
                 <span class="location-name">{{ cardLocationTitle(loc) }}</span>
                 <span v-if="loc.abbreviation" class="location-abbr">{{ loc.abbreviation }}</span>
+                <span v-if="(loc.locationType || '').toUpperCase() === 'HUB'" class="location-hub-badge">HUB</span>
               </div>
               <p v-if="loc.address" class="location-address location-address--header">{{ loc.address }}</p>
             </div>
@@ -1889,6 +1972,81 @@ button.phone-copy:hover {
   margin-top: var(--space-4, 1rem);
   font-size: var(--text-sm, 0.875rem);
   color: var(--color-text-tertiary, #6e6e7e);
+}
+
+/* vCard dropdown */
+.vcard-dropdown-wrap {
+  position: relative;
+}
+
+.vcard-dropdown-chevron {
+  width: 0.875rem;
+  height: 0.875rem;
+  margin-left: 0.25rem;
+  flex-shrink: 0;
+}
+
+.vcard-dropdown-menu {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  z-index: 10;
+  min-width: 180px;
+  margin-top: 0.25rem;
+  padding: var(--space-1, 0.25rem);
+  background: var(--color-glass, rgba(22, 22, 29, 0.95));
+  backdrop-filter: blur(var(--blur-lg, 20px));
+  -webkit-backdrop-filter: blur(var(--blur-lg, 20px));
+  border: 1px solid var(--color-glass-border, rgba(255, 255, 255, 0.1));
+  border-radius: var(--radius-lg, 0.75rem);
+  box-shadow: var(--shadow-lg, 0 8px 16px rgba(0, 0, 0, 0.4));
+}
+
+.vcard-dropdown-item {
+  display: block;
+  width: 100%;
+  padding: 0.5rem 0.75rem;
+  font-size: var(--text-sm, 0.8125rem);
+  font-weight: var(--weight-medium, 500);
+  color: var(--color-text-primary, #f4f4f8);
+  text-align: left;
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-md, 0.5rem);
+  cursor: pointer;
+  transition: var(--transition-colors);
+}
+
+.vcard-dropdown-item:hover {
+  background: var(--color-hover, rgba(255, 255, 255, 0.08));
+}
+
+/* Hub card styling */
+.location-card.is-hub {
+  border: 1px solid var(--color-accent-purple, #7b4db5);
+}
+
+.location-card.is-hub .location-card-header {
+  background: linear-gradient(135deg, rgba(123, 77, 181, 0.15), rgba(123, 77, 181, 0.05));
+}
+
+.location-card.is-hub .location-id-chip {
+  background: var(--color-accent-purple, #7b4db5);
+  color: white;
+}
+
+.location-hub-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.125rem 0.375rem;
+  margin-left: 0.375rem;
+  font-size: 0.5625rem;
+  font-weight: var(--weight-bold, 700);
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: white;
+  background: linear-gradient(135deg, var(--color-accent-purple, #7b4db5), var(--color-accent-orange, #ff6b1a));
+  border-radius: var(--radius-sm, 0.25rem);
 }
 
 @media (max-width: 374px) {

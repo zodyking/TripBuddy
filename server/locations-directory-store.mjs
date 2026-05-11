@@ -14,6 +14,8 @@ const DIRECTORY_KV = G('directory:locations')
  * @property {number|null} longitude
  * @property {string} timeZone
  * @property {string} lastUpdated
+ * @property {string} [locationType] - e.g. STATION, SUBSTATION, HUB
+ * @property {string} [district] - e.g. NEW YORK METRO, NORTHEAST
  */
 
 /**
@@ -48,7 +50,9 @@ function entriesEqual(a, b) {
     a.phone === b.phone &&
     a.latitude === b.latitude &&
     a.longitude === b.longitude &&
-    a.timeZone === b.timeZone
+    a.timeZone === b.timeZone &&
+    (a.locationType ?? '') === (b.locationType ?? '') &&
+    (a.district ?? '') === (b.district ?? '')
   )
 }
 
@@ -73,6 +77,8 @@ export async function upsertLocation(data) {
     longitude: data.longitude != null ? Number(data.longitude) : null,
     timeZone: String(data.timeZone ?? ''),
     lastUpdated: new Date().toISOString(),
+    locationType: String(data.locationType ?? ''),
+    district: String(data.district ?? ''),
   }
 
   if (existing && entriesEqual(existing, entry)) {
@@ -168,4 +174,57 @@ export async function patchLocation(locationId, patch) {
  */
 export async function updateLocationPhone(locationId, phone) {
   return patchLocation(locationId, { phone })
+}
+
+/**
+ * Bulk upsert multiple locations at once (import).
+ * @param {Array<Omit<import('./locations-directory-store.mjs').LocationEntry, 'lastUpdated'>>} entries
+ * @returns {Promise<{ inserted: number, updated: number, skipped: number }>}
+ */
+export async function bulkUpsertLocations(entries) {
+  if (!Array.isArray(entries)) {
+    throw new Error('entries must be an array')
+  }
+  const directory = await readDirectory()
+  let inserted = 0
+  let updated = 0
+  let skipped = 0
+  const now = new Date().toISOString()
+
+  for (const data of entries) {
+    if (!data || !data.locationId) {
+      skipped++
+      continue
+    }
+    const entry = {
+      locationId: String(data.locationId),
+      locationName: String(data.locationName ?? ''),
+      abbreviation: String(data.abbreviation ?? ''),
+      address: String(data.address ?? ''),
+      phone: String(data.phone ?? ''),
+      latitude: data.latitude != null ? Number(data.latitude) : null,
+      longitude: data.longitude != null ? Number(data.longitude) : null,
+      timeZone: String(data.timeZone ?? ''),
+      lastUpdated: now,
+      locationType: String(data.locationType ?? ''),
+      district: String(data.district ?? ''),
+    }
+    const existing = directory[data.locationId]
+    if (existing) {
+      if (entriesEqual(existing, entry)) {
+        skipped++
+      } else {
+        directory[data.locationId] = entry
+        updated++
+      }
+    } else {
+      directory[data.locationId] = entry
+      inserted++
+    }
+  }
+
+  if (inserted > 0 || updated > 0) {
+    await writeDirectory(directory)
+  }
+  return { inserted, updated, skipped }
 }

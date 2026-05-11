@@ -106,6 +106,7 @@ import {
   listLocations,
   upsertLocation,
   patchLocation,
+  bulkUpsertLocations,
 } from './locations-directory-store.mjs'
 import {
   appendLoginAccessFromBody,
@@ -1313,6 +1314,21 @@ app.patch('/api/directory/:locationId', async (req, reply) => {
     const msg = e instanceof Error ? e.message : String(e)
     const code = /not found/i.test(msg) ? 404 : 400
     return reply.code(code).send({ error: msg })
+  }
+})
+
+app.post('/api/directory/bulk', async (req, reply) => {
+  try {
+    const body = req.body ?? {}
+    const entries = Array.isArray(body.entries) ? body.entries : []
+    if (entries.length === 0) {
+      return reply.code(400).send({ error: 'entries array is required and must not be empty' })
+    }
+    const result = await bulkUpsertLocations(entries)
+    return { ok: true, ...result }
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e)
+    return reply.code(400).send({ error: msg })
   }
 })
 

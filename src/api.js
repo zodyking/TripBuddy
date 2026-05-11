@@ -977,6 +977,8 @@ export async function installAutomationPreset(presetId) {
  *   longitude: number | null,
  *   timeZone: string,
  *   lastUpdated: string,
+ *   locationType?: string,
+ *   district?: string,
  * }> }>}
  */
 export async function fetchDirectory() {
@@ -995,6 +997,8 @@ export async function fetchDirectory() {
  *   latitude: number | null,
  *   longitude: number | null,
  *   timeZone: string,
+ *   locationType?: string,
+ *   district?: string,
  * }} data
  * @returns {Promise<{ ok: boolean, updated: boolean }>}
  */
@@ -1036,6 +1040,31 @@ export async function patchDirectoryEntry(locationId, patch) {
  */
 export async function patchDirectoryPhone(locationId, phone) {
   return patchDirectoryEntry(locationId, { phone: phone ?? '' })
+}
+
+/**
+ * Bulk import locations to the directory.
+ * @param {Array<{
+ *   locationId: string,
+ *   locationName: string,
+ *   abbreviation: string,
+ *   address: string,
+ *   phone: string,
+ *   latitude: number | null,
+ *   longitude: number | null,
+ *   timeZone: string,
+ *   locationType?: string,
+ *   district?: string,
+ * }>} entries
+ * @returns {Promise<{ ok: boolean, inserted: number, updated: number, skipped: number }>}
+ */
+export async function bulkImportDirectory(entries) {
+  const r = await apiFetch('/api/directory/bulk', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ entries }),
+  })
+  return handleJson(r)
 }
 
 /**
