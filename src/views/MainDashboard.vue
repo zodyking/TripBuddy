@@ -4537,7 +4537,6 @@ button.trailer-nbr.copyable-inline {
 }
 
 .trailer-gps-modal {
-  position: relative;
   width: 100%;
   max-width: none;
   height: 100vh;
@@ -4546,6 +4545,7 @@ button.trailer-nbr.copyable-inline {
   margin: 0;
   border-radius: 0;
   padding: 0;
+  border: none;
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -4554,36 +4554,31 @@ button.trailer-nbr.copyable-inline {
 
 @media (min-width: 720px) {
   .portal-modal-backdrop.trailer-gps-modal-backdrop {
-    padding: 1rem;
-    align-items: center;
-    justify-content: center;
+    padding: 0;
+    align-items: stretch;
   }
   .trailer-gps-modal {
-    width: min(94vw, 64rem);
-    height: min(92vh, 92dvh);
-    border-radius: 14px;
-    margin: 0 auto;
-    border: 1px solid #34343e;
-    box-shadow: 0 24px 80px rgba(0, 0, 0, 0.6);
+    width: 100%;
+    max-width: none;
+    height: 100vh;
+    height: 100dvh;
+    border-radius: 0;
+    margin: 0;
+    border: none;
+    box-shadow: none;
   }
 }
 
 .trailer-gps-topbar {
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  z-index: 1100;
+  flex-shrink: 0;
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 0.75rem;
-  padding: 0.6rem 0.75rem;
-  padding-top: max(0.6rem, env(safe-area-inset-top, 0px));
-  background: rgba(10, 10, 15, 0.88);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
-  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  padding: 0.5rem 0.75rem;
+  padding-top: max(0.5rem, env(safe-area-inset-top, 0px));
+  background: #0a0a0f;
+  border-bottom: 1px solid #1e1e28;
 }
 
 .trailer-gps-topbar-info {
