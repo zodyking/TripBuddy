@@ -844,8 +844,8 @@ watch(compassModeActive, (active) => {
   position: relative;
   width: 100%;
   height: 100%;
-  min-height: 12rem;
-  background: #dfe6ee;
+  min-height: 0;
+  background: #0f172a;
 }
 
 .trailer-loc-el {
@@ -873,19 +873,21 @@ watch(compassModeActive, (active) => {
 .trailer-loc-legend {
   position: absolute;
   z-index: 1000;
-  top: 0.5rem;
+  top: 3.2rem;
   left: 0.5rem;
   display: flex;
   flex-wrap: wrap;
-  gap: 0.5rem 0.75rem;
-  padding: 0.35rem 0.55rem;
-  border-radius: 8px;
-  background: rgba(255, 255, 255, 0.92);
-  border: 1px solid rgba(0, 0, 0, 0.12);
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.12);
-  font-size: 0.7rem;
+  gap: 0.4rem 0.6rem;
+  padding: 0.3rem 0.5rem;
+  border-radius: 6px;
+  background: rgba(15, 15, 20, 0.82);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
+  font-size: 0.65rem;
   font-weight: 600;
-  color: #1e293b;
+  color: #e2e8f0;
   pointer-events: none;
   max-width: calc(100% - 1rem);
 }
@@ -897,17 +899,16 @@ watch(compassModeActive, (active) => {
 }
 
 .trailer-loc-dot {
-  width: 0.55rem;
-  height: 0.55rem;
+  width: 0.5rem;
+  height: 0.5rem;
   border-radius: 999px;
-  border: 2px solid #fff;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.35);
+  border: 1.5px solid rgba(255, 255, 255, 0.5);
 }
 .trailer-loc-dot.is-trailer {
-  background: #ea580c;
+  background: #fb923c;
 }
 .trailer-loc-dot.is-user {
-  background: #0284c7;
+  background: #38bdf8;
 }
 
 .trailer-loc-big-nums {
@@ -1033,14 +1034,15 @@ watch(compassModeActive, (active) => {
   bottom: 5.5rem;
   transform: translateX(-50%);
   margin: 0;
-  padding: 0.35rem 0.65rem;
+  padding: 0.35rem 0.75rem;
   font-size: 0.72rem;
   font-weight: 700;
-  color: #0f172a;
-  background: rgba(254, 240, 138, 0.95);
-  border-radius: 8px;
-  border: 1px solid rgba(0, 0, 0, 0.1);
-  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.2);
+  color: #f8fafc;
+  background: rgba(15, 15, 20, 0.9);
+  backdrop-filter: blur(8px);
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
   pointer-events: none;
 }
 
@@ -1051,23 +1053,24 @@ watch(compassModeActive, (active) => {
   left: 0.65rem;
   right: 0.65rem;
   margin: 0;
-  padding: 0.35rem 0.5rem;
+  padding: 0.4rem 0.6rem;
   font-size: 0.68rem;
   line-height: 1.35;
   text-align: center;
-  color: #475569;
-  background: rgba(255, 255, 255, 0.94);
+  color: #cbd5e1;
+  background: rgba(15, 15, 20, 0.85);
+  backdrop-filter: blur(8px);
   border-radius: 8px;
-  border: 1px solid rgba(0, 0, 0, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.06);
   pointer-events: none;
 }
 
 .trailer-loc-hint.is-muted {
-  color: #64748b;
+  color: #94a3b8;
 }
 
 .trailer-loc-hint.is-warn {
-  color: #ea580c;
+  color: #fb923c;
 }
 
 .map-control-btn--compass {
@@ -1098,7 +1101,7 @@ watch(compassModeActive, (active) => {
 
 :deep(.leaflet-container) {
   font-family: inherit;
-  background: #cbd5e1;
+  background: #1e293b;
 }
 
 

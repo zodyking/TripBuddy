@@ -1954,10 +1954,13 @@ onUnmounted(() => {
           aria-labelledby="trailer-gps-title"
           @click.stop
         >
-          <div class="trailer-gps-header">
-            <h3 id="trailer-gps-title" class="trailer-gps-title">
-              Trailer {{ trailerGpsData.order }} Location
-            </h3>
+          <div class="trailer-gps-topbar">
+            <div class="trailer-gps-topbar-info">
+              <h3 id="trailer-gps-title" class="trailer-gps-title">
+                Trailer {{ trailerGpsData.order }}{{ trailerGpsData.trlrNbr ? `  #${trailerGpsData.trlrNbr}` : '' }}
+              </h3>
+              <span class="trailer-gps-coords-inline">{{ trailerGpsData.lat.toFixed(5) }}, {{ trailerGpsData.lng.toFixed(5) }}</span>
+            </div>
             <button
               type="button"
               class="trailer-gps-close tap"
@@ -1966,12 +1969,6 @@ onUnmounted(() => {
             >
               ×
             </button>
-          </div>
-          <p v-if="trailerGpsData.trlrNbr" class="trailer-gps-id">
-            Trailer #{{ trailerGpsData.trlrNbr }}
-          </p>
-          <div class="trailer-gps-coords">
-            <span>{{ trailerGpsData.lat.toFixed(5) }}, {{ trailerGpsData.lng.toFixed(5) }}</span>
           </div>
           <div class="trailer-gps-map-wrap">
             <TrailerLocationMap
@@ -4531,7 +4528,7 @@ button.trailer-nbr.copyable-inline {
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
-   TRAILER GPS MODAL
+   TRAILER GPS MODAL — full-screen map with overlay top bar
    ═══════════════════════════════════════════════════════════════════════════ */
 
 .portal-modal-backdrop.trailer-gps-modal-backdrop {
@@ -4540,76 +4537,105 @@ button.trailer-nbr.copyable-inline {
 }
 
 .trailer-gps-modal {
+  position: relative;
   width: 100%;
   max-width: none;
   height: 100vh;
   height: 100dvh;
   max-height: none;
-  margin: 0 auto;
+  margin: 0;
   border-radius: 0;
+  padding: 0;
   display: flex;
   flex-direction: column;
-  gap: 0.55rem;
+  overflow: hidden;
+  background: #0a0a0f;
 }
 
 @media (min-width: 720px) {
   .portal-modal-backdrop.trailer-gps-modal-backdrop {
-    padding: 0 0.75rem;
+    padding: 1rem;
     align-items: center;
+    justify-content: center;
   }
   .trailer-gps-modal {
-    width: min(92vw, 58rem);
-    height: min(100vh, 100dvh);
-    border-radius: 12px;
+    width: min(94vw, 64rem);
+    height: min(92vh, 92dvh);
+    border-radius: 14px;
     margin: 0 auto;
+    border: 1px solid #34343e;
+    box-shadow: 0 24px 80px rgba(0, 0, 0, 0.6);
   }
 }
-.trailer-gps-header {
+
+.trailer-gps-topbar {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 1100;
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
   gap: 0.75rem;
+  padding: 0.6rem 0.75rem;
+  padding-top: max(0.6rem, env(safe-area-inset-top, 0px));
+  background: rgba(10, 10, 15, 0.88);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
 }
+
+.trailer-gps-topbar-info {
+  display: flex;
+  align-items: baseline;
+  gap: 0.6rem;
+  min-width: 0;
+  flex: 1;
+}
+
 .trailer-gps-title {
   margin: 0;
-  font-size: 1rem;
-  font-weight: 600;
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: #f4f4f8;
+  white-space: nowrap;
 }
+
+.trailer-gps-coords-inline {
+  font-family: ui-monospace, 'Cascadia Code', monospace;
+  font-size: 0.7rem;
+  font-weight: 500;
+  color: #7dd3fc;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .trailer-gps-close {
   flex-shrink: 0;
   width: 2.25rem;
   height: 2.25rem;
   border-radius: 8px;
-  border: 1px solid var(--border, #2e2e38);
-  background: #2a2a34;
-  color: var(--text, #e8e8ee);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(40, 40, 50, 0.8);
+  color: #e8e8ee;
   font-size: 1.25rem;
   line-height: 1;
   cursor: pointer;
-}
-.trailer-gps-id {
-  margin: 0;
-  font-size: 0.82rem;
-  color: var(--muted, #9898a8);
-}
-.trailer-gps-coords {
   display: flex;
   align-items: center;
-  gap: 0.5rem;
-  padding: 0.4rem 0.6rem;
-  background: #12121a;
-  border: 1px solid #2e2e38;
-  border-radius: 6px;
-  font-family: monospace;
-  font-size: 0.8rem;
-  color: #7dd3fc;
+  justify-content: center;
 }
+
+.trailer-gps-close:hover {
+  background: rgba(60, 60, 70, 0.9);
+}
+
 .trailer-gps-map-wrap {
   flex: 1 1 auto;
   min-height: 0;
-  border-radius: 8px;
   overflow: hidden;
-  border: 1px solid #34343e;
   background: #0a0a0f;
 }
 </style>
