@@ -583,11 +583,21 @@ export async function runInspectCheckoutAfterGate(page, opts) {
   /** Pre-entered trailer numbers from the home page (for empty trailers). */
   /** @type {Map<number, string>} */
   const preEnteredTrailerNbrs = new Map()
+  const fromClient = /** @type {Record<string, unknown>} */ (tripDataEffective).preEnteredTrailerNumbers
+  if (fromClient && typeof fromClient === 'object' && !Array.isArray(fromClient)) {
+    for (const [k, v] of Object.entries(fromClient)) {
+      const idx = parseInt(String(k), 10)
+      const n = String(v ?? '').trim()
+      if (Number.isFinite(idx) && idx >= 1 && n) preEnteredTrailerNbrs.set(idx, n)
+    }
+  }
   const legSeq = String(tripDataEffective.dailyTripLegSequence || '').trim()
   if (legSeq) {
     try {
       const stored = await getTrailerNumberCandidates(legSeq)
-      for (const s of stored) preEnteredTrailerNbrs.set(s.index, s.number)
+      for (const s of stored) {
+        if (!preEnteredTrailerNbrs.has(s.index)) preEnteredTrailerNbrs.set(s.index, s.number)
+      }
       if (preEnteredTrailerNbrs.size) {
         log('info', `Loaded ${preEnteredTrailerNbrs.size} pre-entered trailer number(s) for leg ${legSeq}`)
       }

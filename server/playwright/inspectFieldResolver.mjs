@@ -9,6 +9,8 @@
  * @property {{ number1?: string, number2?: string }} [dolly]
  * @property {Array<{ trlrNbr?: string, sealNumber?: string, emptyFlag?: string }>} [trailers]
  * @property {string} [tractorNumber]
+ * @property {string} [dailyTripLegSequence]
+ * @property {Record<string, string>} [preEnteredTrailerNumbers] keyed by 1-based trailer order
  */
 
 /**

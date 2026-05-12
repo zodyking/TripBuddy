@@ -86,9 +86,12 @@ import {
   getDecryptedLinehaulBearer,
   accountKeyForUsername,
   setLastActiveAccountKey,
+  getLastActiveAccountKey,
   writeUserMeta,
   getEmployeeNumber,
 } from './credentials-store.mjs'
+import { getTrailerNumbers, putTrailerNumber } from './trailer-number-store.mjs'
+import { getDispatchProof } from './dispatch-proof-store.mjs'
 import {
   captureAndSaveLinehaulBearer,
   isLinehaulCaptureBusy,
@@ -666,6 +669,46 @@ app.patch('/api/dolly', async (req, reply) => {
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e)
     return reply.code(400).send({ ok: false, error: msg })
+  }
+})
+
+app.get('/api/trailer-numbers/:legSeq', async (req, reply) => {
+  const legSeq = String(req.params.legSeq || '').trim()
+  if (!legSeq) return reply.code(400).send({ error: 'legSeq required' })
+  try {
+    const numbers = await getTrailerNumbers(legSeq)
+    return { ok: true, legSeq, numbers }
+  } catch (e) {
+    return reply.code(500).send({ error: e instanceof Error ? e.message : String(e) })
+  }
+})
+
+app.put('/api/trailer-numbers', async (req, reply) => {
+  try {
+    const b = req.body ?? {}
+    const legSeq = String(b.legSeq || '').trim()
+    const trailerIndex = Number(b.trailerIndex)
+    const number = String(b.number || '').trim()
+    if (!legSeq) return reply.code(400).send({ error: 'legSeq required' })
+    if (!trailerIndex || trailerIndex < 1) {
+      return reply.code(400).send({ error: 'trailerIndex required (1-based)' })
+    }
+    if (!number) return reply.code(400).send({ error: 'number required' })
+    const numbers = await putTrailerNumber(legSeq, trailerIndex, number)
+    return { ok: true, legSeq, numbers }
+  } catch (e) {
+    return reply.code(400).send({ error: e instanceof Error ? e.message : String(e) })
+  }
+})
+
+app.get('/api/dispatch-proof/:legSeq', async (req, reply) => {
+  const legSeq = String(req.params.legSeq || '').trim()
+  if (!legSeq) return reply.code(400).send({ error: 'legSeq required' })
+  try {
+    const screenshots = await getDispatchProof(legSeq)
+    return { ok: true, legSeq, screenshots }
+  } catch (e) {
+    return reply.code(500).send({ error: e instanceof Error ? e.message : String(e) })
   }
 })
 
@@ -1572,8 +1615,24 @@ app.post('/api/automations/:id/run', async (req, reply) => {
   const auto = await getAutomation(req.params.id)
   if (!auto) return reply.code(404).send({ error: 'Automation not found' })
   const { headless = true, slowMo = 0, tripData = {} } = req.body ?? {}
+
+  /** Playwright + KV reads must stay under the signed-in account (ALS is not bound across the whole HTTP handler). */
+  let automationAccountKey = ''
+  if (isAuthEnabled()) {
+    const sid = req.cookies?.[COOKIE_NAME]
+    if (isValidSession(sid)) automationAccountKey = getSessionAccountKey(sid) || ''
+    if (!automationAccountKey) automationAccountKey = getLastActiveAccountKey() || ''
+  } else {
+    automationAccountKey =
+      (process.env.FEDEX_TOOL_DATA_ACCOUNT_KEY || '').trim() || 'single_user'
+  }
+
   try {
-    const result = await runAutomation(auto, { headless, slowMo, tripData })
+    const invoke = () => runAutomation(auto, { headless, slowMo, tripData })
+    const result =
+      isAuthEnabled() && automationAccountKey
+        ? await runWithCredentialAccountKey(automationAccountKey, invoke)
+        : await invoke()
     return result
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e)
@@ -1647,50 +1706,6 @@ try {
   console.error('[postgres]', (e && e.message) || e)
   process.exit(1)
 }
-
-/* ═══════════════════ Pre-entered trailer numbers ═══════════════════ */
-import { getTrailerNumbers, putTrailerNumber } from './trailer-number-store.mjs'
-
-app.get('/api/trailer-numbers/:legSeq', async (req, reply) => {
-  const legSeq = String(req.params.legSeq || '').trim()
-  if (!legSeq) return reply.code(400).send({ error: 'legSeq required' })
-  try {
-    const numbers = await getTrailerNumbers(legSeq)
-    return { ok: true, legSeq, numbers }
-  } catch (e) {
-    return reply.code(500).send({ error: e instanceof Error ? e.message : String(e) })
-  }
-})
-
-app.put('/api/trailer-numbers', async (req, reply) => {
-  try {
-    const b = req.body ?? {}
-    const legSeq = String(b.legSeq || '').trim()
-    const trailerIndex = Number(b.trailerIndex)
-    const number = String(b.number || '').trim()
-    if (!legSeq) return reply.code(400).send({ error: 'legSeq required' })
-    if (!trailerIndex || trailerIndex < 1) return reply.code(400).send({ error: 'trailerIndex required (1-based)' })
-    if (!number) return reply.code(400).send({ error: 'number required' })
-    const numbers = await putTrailerNumber(legSeq, trailerIndex, number)
-    return { ok: true, legSeq, numbers }
-  } catch (e) {
-    return reply.code(400).send({ error: e instanceof Error ? e.message : String(e) })
-  }
-})
-
-/* ═══════════════════ Dispatch proof screenshots ═══════════════════ */
-import { getDispatchProof } from './dispatch-proof-store.mjs'
-
-app.get('/api/dispatch-proof/:legSeq', async (req, reply) => {
-  const legSeq = String(req.params.legSeq || '').trim()
-  if (!legSeq) return reply.code(400).send({ error: 'legSeq required' })
-  try {
-    const screenshots = await getDispatchProof(legSeq)
-    return { ok: true, legSeq, screenshots }
-  } catch (e) {
-    return reply.code(500).send({ error: e instanceof Error ? e.message : String(e) })
-  }
-})
 
 await refreshPanynjCrossingData().catch((e) => {
   console.error('[bridge-panynj] initial', (e && e.message) || e)
