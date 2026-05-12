@@ -1,6 +1,6 @@
 <script setup>
 import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue'
-import { fetchDirectory, patchDirectoryEntry, saveLocationToDirectory, postDirectoryGeocodeMissing, postDirectoryGeocodeOne } from '../api.js'
+import { fetchDirectory, patchDirectoryEntry, saveLocationToDirectory, fetchDirectoryGeocodeStatus, postDirectoryGeocodeOne } from '../api.js'
 import DirectoryMap from '../components/DirectoryMap.vue'
 import { useMapVehicleId } from '../composables/useMapVehicleId.js'
 
@@ -47,16 +47,21 @@ const addLocationPhone = ref('')
 const addLocationSaving = ref(false)
 const addLocationError = ref('')
 
-/** True while resolving addresses → coordinates for the directory map (Nominatim). */
-const geocodeBusy = ref(false)
-/** Snapshot for progress UI (reset when backfill finishes). */
+/** Server-side directory geocoder is running a batch (Nominatim). */
+const serverGeocodeInBatch = ref(false)
+/** Last reported rows still missing coordinates after the latest server batch. */
+const serverGeocodeRemaining = ref(0)
+/** How many rows this batch updated (for progress copy). */
+const serverGeocodeLastUpdated = ref(0)
+/** How many rows this batch attempted. */
+const serverGeocodeLastProcessed = ref(0)
+const serverGeocodeLastError = ref('')
+/** Snapshot “before” count when a server batch starts (for progress bar). */
 const geocodeInitialMissing = ref(0)
-const geocodeRemaining = ref(0)
-const GEOCODE_HTTP_BATCH = 20
 
 const geocodeMappedCount = computed(() => {
   const init = geocodeInitialMissing.value
-  const rem = geocodeRemaining.value
+  const rem = serverGeocodeRemaining.value
   if (init <= 0) return 0
   return Math.max(0, Math.min(init, init - rem))
 })
@@ -68,17 +73,18 @@ const geocodeProgressPct = computed(() => {
 })
 
 const geocodeEtaHint = computed(() => {
-  if (!geocodeBusy.value) return ''
-  const rem = geocodeRemaining.value
+  if (!serverGeocodeInBatch.value) return ''
+  const rem = serverGeocodeRemaining.value
   if (rem <= 0) return ''
-  const rounds = Math.ceil(rem / GEOCODE_HTTP_BATCH)
-  const perRoundSec = GEOCODE_HTTP_BATCH * 1.05 + 2
-  const sec = Math.ceil(rounds * perRoundSec)
+  const batch = Math.max(1, serverGeocodeLastProcessed.value || 12)
+  const rounds = Math.ceil(rem / batch)
+  const intervalSec = 22
+  const sec = Math.ceil(rounds * intervalSec * 1.1)
   if (sec < 120) {
-    return `Rough ETA ~${sec}s (addresses are resolved sequentially on the server).`
+    return `Rough ETA ~${sec}s (server resolves about one address per second; check back if you leave this page).`
   }
   const m = Math.max(1, Math.round(sec / 60))
-  return `Rough ETA ~${m} min (OpenStreetMap Nominatim allows about one request per second; coordinates are saved so each address is only resolved once).`
+  return `Rough ETA ~${m} min (OpenStreetMap Nominatim rate limits; coordinates persist after each save).`
 })
 
 /**
@@ -147,7 +153,7 @@ const { vehicleId: mapVehicleId } = useMapVehicleId()
 const showMapNoCoordsNotice = computed(
   () =>
     !loading.value &&
-    !geocodeBusy.value &&
+    !serverGeocodeInBatch.value &&
     filteredLocations.value.length > 0 &&
     mapPins.value.length === 0,
 )
@@ -155,7 +161,7 @@ const showMapNoCoordsNotice = computed(
 const showMapGeocodeProgress = computed(
   () =>
     !loading.value &&
-    geocodeBusy.value &&
+    serverGeocodeInBatch.value &&
     needsAddressGeocode.value &&
     filteredLocations.value.length > 0,
 )
@@ -235,39 +241,39 @@ async function refreshDirectoryListOnly() {
   }
 }
 
-let geocodeBackfillRunning = false
-
-async function runDirectoryGeocodeBackfill() {
-  if (geocodeBackfillRunning || !needsAddressGeocode.value) return
-  geocodeBackfillRunning = true
-  geocodeBusy.value = true
-  geocodeInitialMissing.value = 0
-  geocodeRemaining.value = 0
+async function syncDirectoryGeocodeStatus() {
+  if (!needsAddressGeocode.value) {
+    serverGeocodeInBatch.value = false
+    serverGeocodeRemaining.value = 0
+    serverGeocodeLastError.value = ''
+    geocodeInitialMissing.value = 0
+    return
+  }
   try {
-    let rem = 1
-    for (let i = 0; i < 200 && rem > 0; i++) {
-      const r = await postDirectoryGeocodeMissing({
-        max: GEOCODE_HTTP_BATCH,
-        delayMs: 900,
-      })
-      rem = typeof r.remaining === 'number' ? r.remaining : 0
-      if (typeof r.missingBefore === 'number' && r.missingBefore > 0) {
-        geocodeInitialMissing.value = Math.max(geocodeInitialMissing.value, r.missingBefore)
-      }
-      geocodeRemaining.value = rem
-      if (r.updated > 0 || r.processed > 0) {
-        await refreshDirectoryListOnly()
-      }
-      if (rem <= 0) break
-      if (r.processed === 0) break
+    const s = await fetchDirectoryGeocodeStatus()
+    const wasBatch = serverGeocodeInBatch.value
+    serverGeocodeInBatch.value = Boolean(s.inBatch)
+    serverGeocodeRemaining.value =
+      typeof s.lastRemaining === 'number' ? s.lastRemaining : 0
+    serverGeocodeLastUpdated.value =
+      typeof s.lastUpdated === 'number' ? s.lastUpdated : 0
+    serverGeocodeLastProcessed.value =
+      typeof s.lastProcessed === 'number' ? s.lastProcessed : 0
+    serverGeocodeLastError.value =
+      typeof s.lastError === 'string' ? s.lastError : ''
+    if (serverGeocodeInBatch.value && geocodeInitialMissing.value <= 0) {
+      const hint =
+        typeof s.lastMissingBefore === 'number' && s.lastMissingBefore > 0
+          ? s.lastMissingBefore
+          : serverGeocodeRemaining.value
+      geocodeInitialMissing.value = Math.max(geocodeInitialMissing.value, hint)
+    }
+    if (!serverGeocodeInBatch.value && wasBatch) {
+      await refreshDirectoryListOnly()
+      geocodeInitialMissing.value = 0
     }
   } catch {
-    /* ignore — map stays without pins until next load */
-  } finally {
-    geocodeBusy.value = false
-    geocodeBackfillRunning = false
-    geocodeInitialMissing.value = 0
-    geocodeRemaining.value = 0
+    /* ignore */
   }
 }
 
@@ -288,7 +294,7 @@ async function loadDirectory(opts = {}) {
     if (!silent) loading.value = false
   }
   if (!error.value) {
-    void runDirectoryGeocodeBackfill()
+    void syncDirectoryGeocodeStatus()
   }
 }
 
@@ -681,6 +687,10 @@ function onSplitMqlChange() {
 let directoryPollTimer = null
 const DIRECTORY_POLL_MS = 60_000
 
+/** Poll server geocode worker status (does not start geocoding). */
+let geocodeStatusPollTimer = null
+const DIRECTORY_GEOCODE_STATUS_POLL_MS = 4000
+
 onMounted(() => {
   updateLandscapeSplit()
   if (typeof window !== 'undefined' && window.matchMedia) {
@@ -696,6 +706,16 @@ onMounted(() => {
   directoryPollTimer = setInterval(() => {
     void loadDirectory({ silent: true })
   }, DIRECTORY_POLL_MS)
+  if (typeof window !== 'undefined') {
+    geocodeStatusPollTimer = window.setInterval(() => {
+      void (async () => {
+        await syncDirectoryGeocodeStatus()
+        if (serverGeocodeInBatch.value) {
+          await refreshDirectoryListOnly()
+        }
+      })()
+    }, DIRECTORY_GEOCODE_STATUS_POLL_MS)
+  }
 })
 
 onUnmounted(() => {
@@ -709,6 +729,10 @@ onUnmounted(() => {
   if (directoryPollTimer) {
     clearInterval(directoryPollTimer)
     directoryPollTimer = null
+  }
+  if (geocodeStatusPollTimer) {
+    clearInterval(geocodeStatusPollTimer)
+    geocodeStatusPollTimer = null
   }
 })
 </script>
@@ -739,11 +763,11 @@ onUnmounted(() => {
           </p>
           <p v-if="geocodeInitialMissing > 0" class="map-geocode-progress-count">
             {{ geocodeMappedCount }} of {{ geocodeInitialMissing }} addresses with coordinates so far
-            <span v-if="geocodeRemaining > 0" class="map-geocode-remain"
-              >({{ geocodeRemaining }} left)</span
+            <span v-if="serverGeocodeRemaining > 0" class="map-geocode-remain"
+              >({{ serverGeocodeRemaining }} left)</span
             >
           </p>
-          <p v-else class="map-geocode-progress-count">Starting address lookup…</p>
+          <p v-else class="map-geocode-progress-count">Resolving addresses on the server…</p>
           <div
             v-if="geocodeInitialMissing > 0"
             class="dir-geocode-meter"
@@ -755,6 +779,10 @@ onUnmounted(() => {
           >
             <div class="dir-geocode-meter-fill" :style="{ width: `${geocodeProgressPct}%` }" />
           </div>
+          <p v-if="serverGeocodeLastProcessed > 0" class="map-geocode-progress-batch">
+            This batch: {{ serverGeocodeLastUpdated }} saved · {{ serverGeocodeLastProcessed }} looked up
+          </p>
+          <p v-if="serverGeocodeLastError" class="map-geocode-progress-warn">{{ serverGeocodeLastError }}</p>
           <p class="map-geocode-progress-hint">{{ geocodeEtaHint }}</p>
         </div>
       </div>
@@ -778,10 +806,12 @@ onUnmounted(() => {
           <circle cx="12" cy="10" r="3" />
         </svg>
         <p>
-          None of these locations have coordinates on the map yet. If an address is
-          saved, the app will try to resolve it automatically. You can also open
-          <strong>Destination</strong> on the Home dispatch card to load details and
-          save coordinates to the directory.
+          None of these locations have coordinates on the map yet. The server fills in latitude and
+          longitude automatically when an address is on file (you do not need to keep this page open).
+          If nothing progresses for a long time, set the environment variable
+          <strong>NOMINATIM_CONTACT_EMAIL</strong> on the API server to a valid address (OpenStreetMap
+          policy). You can also open <strong>Destination</strong> on the Home dispatch card to load details
+          and save coordinates to the directory.
         </p>
       </div>
 
@@ -790,7 +820,7 @@ onUnmounted(() => {
         class="map-split-map-hint"
         role="status"
       >
-        No map pins yet — addresses are being resolved or open Destination from a trip to save coordinates.
+        No map pins yet — the server resolves addresses in the background, or open Destination from a trip to save coordinates.
       </p>
     </div>
 
@@ -813,7 +843,7 @@ onUnmounted(() => {
               <span class="directory-geocode-banner-text">
                 <template v-if="geocodeInitialMissing > 0">
                   Geocoding: {{ geocodeMappedCount }} / {{ geocodeInitialMissing }} saved —
-                  {{ geocodeRemaining }} queued
+                  {{ serverGeocodeRemaining }} queued
                 </template>
                 <template v-else> Geocoding addresses… </template>
               </span>
@@ -1668,6 +1698,20 @@ onUnmounted(() => {
   font-size: var(--text-xs, 0.6875rem);
   line-height: var(--leading-snug, 1.375);
   color: var(--color-text-tertiary, #6e6e7e);
+}
+
+.map-geocode-progress-batch {
+  margin: 0.35rem 0 0;
+  font-size: var(--text-xs, 0.6875rem);
+  line-height: var(--leading-snug, 1.375);
+  color: rgba(196, 181, 253, 0.95);
+}
+
+.map-geocode-progress-warn {
+  margin: 0.35rem 0 0;
+  font-size: 0.65rem;
+  line-height: 1.35;
+  color: #fcd34d;
 }
 
 .search-bar {

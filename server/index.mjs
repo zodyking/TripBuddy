@@ -111,6 +111,8 @@ import {
 import {
   geocodeDirectoryLocationById,
   geocodeMissingDirectoryLocations,
+  getDirectoryGeocodeStatus,
+  startDirectoryGeocodeBackground,
 } from './directory-geocode.mjs'
 import {
   appendLoginAccessFromBody,
@@ -1275,6 +1277,8 @@ app.get('/api/directory', async () => {
   return { ok: true, locations }
 })
 
+app.get('/api/directory/geocode-status', async () => getDirectoryGeocodeStatus())
+
 app.post('/api/directory', async (req, reply) => {
   try {
     const data = req.body ?? {}
@@ -1778,6 +1782,7 @@ try {
   const url = `http://${host}:${API_PORT}`
   console.log(`FedEx tool API listening on ${url}`)
   emitLog('info', `FedEx tool API listening on ${url}`)
+  startDirectoryGeocodeBackground()
 } catch (e) {
   console.error(e)
   process.exit(1)

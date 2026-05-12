@@ -1,4 +1,5 @@
 import { isPrivateOrLocalIp } from './client-ip.mjs'
+import { emitLog } from './log-bus.mjs'
 
 /** @type {Map<string, { lat: number, lng: number, at: number }>} */
 const cache = new Map()
@@ -46,15 +47,11 @@ export async function lookupIpLatLng(ip) {
 export async function reverseGeocodeNominatim(lat, lng) {
   if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null
   try {
-    const url = `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${encodeURIComponent(String(lat))}&lon=${encodeURIComponent(String(lng))}`
-    const res = await fetch(url, {
-      headers: {
-        'User-Agent': 'FedExTool/1.0 (geo-fence; self-hosted)',
-      },
-      signal: AbortSignal.timeout(8000),
-    })
-    if (!res.ok) return null
-    const data = await res.json()
+    const url = buildNominatimUrl(
+      `reverse?format=jsonv2&lat=${encodeURIComponent(String(lat))}&lon=${encodeURIComponent(String(lng))}`,
+    )
+    const data = await nominatimGetJson(url, 'reverse')
+    if (!data || typeof data !== 'object') return null
     if (typeof data.display_name === 'string' && data.display_name.trim()) {
       return data.display_name.trim()
     }
@@ -93,12 +90,127 @@ function normalizeForwardGeocodeKey(q) {
  */
 function prepareAddressForNominatim(raw) {
   let q = raw
-  q = q.replace(/,\s*(\d{3,4})$/,  (_, z) => `, ${z.padStart(5, '0')}`)
-  q = q.replace(/,\s*(\d{3,4})\s*$/,  (_, z) => `, ${z.padStart(5, '0')}`)
+  q = q.replace(/,\s*(\d{3,4})\s*$/, (_, z) => `, ${z.padStart(5, '0')}`)
   if (/\b[A-Z]{2}\b/.test(q) && !/\bUS(A)?\b/i.test(q)) {
     q += ', USA'
   }
   return q
+}
+
+const NOMINATIM_BASE = (
+  process.env.NOMINATIM_API_BASE || 'https://nominatim.openstreetmap.org'
+).replace(/\/$/, '')
+const NOMINATIM_USER_AGENT =
+  (process.env.NOMINATIM_USER_AGENT || '').trim() ||
+  'FedExTool/1.0 (https://github.com/zodyking/TripBuddy; directory geocode)'
+const NOMINATIM_EMAIL = (process.env.NOMINATIM_CONTACT_EMAIL || '').trim()
+const NOMINATIM_MIN_INTERVAL_MS = Math.max(
+  800,
+  Math.floor(Number(process.env.NOMINATIM_MIN_INTERVAL_MS) || 1100),
+)
+
+let nextNominatimSlot = 0
+let warnedMissingEmail = false
+
+/**
+ * @param {string} pathQuery path + query (no leading slash)
+ */
+function buildNominatimUrl(pathQuery) {
+  if (!NOMINATIM_EMAIL) return `${NOMINATIM_BASE}/${pathQuery}`
+  const glue = pathQuery.includes('?') ? '&' : '?'
+  return `${NOMINATIM_BASE}/${pathQuery}${glue}email=${encodeURIComponent(NOMINATIM_EMAIL)}`
+}
+
+async function sleep(ms) {
+  await new Promise((r) => setTimeout(r, ms))
+}
+
+async function waitForNominatimSlot() {
+  const now = Date.now()
+  const wait = Math.max(0, nextNominatimSlot - now)
+  if (wait > 0) await sleep(wait)
+}
+
+function markNominatimRequestDone() {
+  nextNominatimSlot = Date.now() + NOMINATIM_MIN_INTERVAL_MS
+}
+
+/**
+ * @param {string} url full URL
+ * @param {string} kind log label
+ * @returns {Promise<unknown | null>} parsed JSON or null
+ */
+async function nominatimGetJson(url, kind) {
+  if (!NOMINATIM_EMAIL && !warnedMissingEmail) {
+    warnedMissingEmail = true
+    emitLog(
+      'warn',
+      '[nominatim] NOMINATIM_CONTACT_EMAIL is unset — set it in .env for reliable public Nominatim usage (usage policy).',
+    )
+  }
+
+  for (let attempt = 0; attempt < 5; attempt++) {
+    await waitForNominatimSlot()
+    try {
+      const res = await fetch(url, {
+        headers: {
+          'User-Agent': NOMINATIM_USER_AGENT,
+          Accept: 'application/json',
+          'Accept-Language': 'en',
+        },
+        signal: AbortSignal.timeout(18_000),
+      })
+      markNominatimRequestDone()
+
+      if (res.status === 429 || res.status === 503) {
+        const ra = res.headers.get('retry-after')
+        const sec = ra ? parseInt(ra, 10) : NaN
+        const backoff = Number.isFinite(sec) && sec > 0 ? sec * 1000 : 2500 * (attempt + 1)
+        emitLog('warn', `[nominatim] ${kind} HTTP ${res.status} — backing off ${Math.round(backoff)}ms`)
+        await sleep(Math.min(backoff, 60_000))
+        continue
+      }
+
+      if (res.status === 403) {
+        emitLog('warn', `[nominatim] ${kind} HTTP 403 — check User-Agent / email policy`)
+        await sleep(5000 * (attempt + 1))
+        continue
+      }
+
+      if (!res.ok) {
+        emitLog('warn', `[nominatim] ${kind} HTTP ${res.status}`)
+        return null
+      }
+
+      return await res.json()
+    } catch (e) {
+      markNominatimRequestDone()
+      const msg = e instanceof Error ? e.message : String(e)
+      emitLog('warn', `[nominatim] ${kind} fetch error: ${msg}`)
+      await sleep(1500 * (attempt + 1))
+    }
+  }
+  return null
+}
+
+/**
+ * @param {string} q address query
+ * @returns {Promise<Array<Record<string, unknown>> | null>}
+ */
+async function nominatimSearch(q) {
+  const path = `search?format=jsonv2&limit=1&countrycodes=us&q=${encodeURIComponent(q)}`
+  const url = buildNominatimUrl(path)
+  const data = await nominatimGetJson(url, 'search')
+  if (!Array.isArray(data)) return null
+  return data
+}
+
+function rowToLatLng(row) {
+  if (!row || typeof row !== 'object') return null
+  const lat = Number(row.lat)
+  const lng = Number(row.lon)
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null
+  return { lat, lng }
 }
 
 export async function forwardGeocodeNominatim(query) {
@@ -114,39 +226,18 @@ export async function forwardGeocodeNominatim(query) {
   const prepared = prepareAddressForNominatim(raw)
 
   try {
-    const url = `https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&countrycodes=us&q=${encodeURIComponent(prepared)}`
-    const res = await fetch(url, {
-      headers: {
-        'User-Agent': 'FedExTool/1.0 (directory geocode; self-hosted)',
-      },
-      signal: AbortSignal.timeout(12000),
-    })
-    if (!res.ok) return null
-    const data = await res.json()
-    if (!Array.isArray(data) || data.length === 0) {
-      const fallbackUrl = `https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&countrycodes=us&q=${encodeURIComponent(raw)}`
-      const fallbackRes = await fetch(fallbackUrl, {
-        headers: { 'User-Agent': 'FedExTool/1.0 (directory geocode; self-hosted)' },
-        signal: AbortSignal.timeout(12000),
-      })
-      if (!fallbackRes.ok) return null
-      const fallbackData = await fallbackRes.json()
-      if (!Array.isArray(fallbackData) || fallbackData.length === 0) return null
-      const row = fallbackData[0]
-      if (!row || typeof row !== 'object') return null
-      const lat = Number(row.lat)
-      const lng = Number(row.lon)
-      if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null
-      forwardGeocodeCache.set(key, { lat, lng, at: now })
-      return { lat, lng }
+    let data = await nominatimSearch(prepared)
+    let row = data && data.length > 0 ? data[0] : null
+    let coords = rowToLatLng(row)
+    if (!coords && prepared !== raw) {
+      await sleep(NOMINATIM_MIN_INTERVAL_MS)
+      data = await nominatimSearch(raw)
+      row = data && data.length > 0 ? data[0] : null
+      coords = rowToLatLng(row)
     }
-    const row = data[0]
-    if (!row || typeof row !== 'object') return null
-    const lat = Number(row.lat)
-    const lng = Number(row.lon)
-    if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null
-    forwardGeocodeCache.set(key, { lat, lng, at: now })
-    return { lat, lng }
+    if (!coords) return null
+    forwardGeocodeCache.set(key, { lat: coords.lat, lng: coords.lng, at: now })
+    return coords
   } catch {
     return null
   }

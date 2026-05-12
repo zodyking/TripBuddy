@@ -1044,6 +1044,11 @@ export async function patchDirectoryPhone(locationId, phone) {
   return patchDirectoryEntry(locationId, { phone: phone ?? '' })
 }
 
+export async function fetchDirectoryGeocodeStatus() {
+  const r = await apiFetch('/api/directory/geocode-status', { method: 'GET' })
+  return handleJson(r)
+}
+
 /**
  * Geocode directory rows that have an address but no latitude/longitude (batched).
  * @param {{ max?: number, delayMs?: number }} [body]
