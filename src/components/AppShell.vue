@@ -654,6 +654,19 @@ onUnmounted(() => {
   }
 }
 
+/* Directory + Traffic: fill viewport height in landscape (no scroll on app-main) */
+@media (orientation: landscape) and (min-width: 700px) {
+  .app-scroll:has(.app-main--directory),
+  .app-scroll:has(.app-main--traffic) {
+    overflow-y: hidden;
+  }
+  .app-main.app-main--directory,
+  .app-main.app-main--traffic {
+    flex: 1;
+    overflow-y: hidden;
+  }
+}
+
 /* ═══════════════════════════════════════════════════════════════════════════
    BOTTOM NAVIGATION — Opaque bar (content must not show through)
    ═══════════════════════════════════════════════════════════════════════════ */
