@@ -7,9 +7,9 @@ export { ARRIVE_XPATH } from './arriveXpathDefaults.mjs'
 /**
  * Timeouts aligned with checkInFlow for blazing fast speed.
  */
-export const ARRIVE_LOC_VISIBLE_MS = 30_000
-export const ARRIVE_LOC_VISIBLE_SHORT_MS = 20_000
-export const ARRIVE_LOC_AFTER_NAV_MS = 15_000
+export const ARRIVE_LOC_VISIBLE_MS = 18_000
+export const ARRIVE_LOC_VISIBLE_SHORT_MS = 12_000
+export const ARRIVE_LOC_AFTER_NAV_MS = 10_000
 
 const LOC_VISIBLE_MS = ARRIVE_LOC_VISIBLE_MS
 const LOC_VISIBLE_SHORT_MS = ARRIVE_LOC_VISIBLE_SHORT_MS
@@ -67,27 +67,47 @@ export async function runFullArrive({ page, tractorNumber, log, signal }) {
   assertNotStuckOnPurpleId(page)
   const AX = ARRIVE_XPATH
 
+  let arriveClicked = false
   const arriveLoc = page.locator(xp(AX.arriveHome))
   try {
-    await arriveLoc.waitFor({ state: 'visible', timeout: LOC_VISIBLE_MS })
+    await arriveLoc.waitFor({ state: 'visible', timeout: 8_000 })
+    await arriveLoc.click({ timeout: 3_000 })
+    arriveClicked = true
+    log('info', 'Clicked Arrive (xpath)')
   } catch {
-    log('warn', 'Arrive button not visible, trying menu fallback')
-    const ok = await clickMenuIfEnabled(page, 'arrive', log)
-    if (!ok) {
-      throw new Error('Arrive button not available on homepage')
-    }
-    await sleep(500, signal)
+    log('detail', 'Arrive xpath not found, trying menu')
   }
 
-  if (signal?.aborted) throw new Error('Aborted')
-
-  try {
-    await arriveLoc.click({ timeout: 5_000 })
-    log('info', 'Clicked Arrive')
-  } catch {
-    log('warn', 'Direct click failed, using menu')
+  if (!arriveClicked) {
     const ok = await clickMenuIfEnabled(page, 'arrive', log)
-    if (!ok) throw new Error('Could not open Arrive')
+    if (ok) {
+      arriveClicked = true
+      log('info', 'Clicked Arrive (menu)')
+    }
+  }
+
+  if (!arriveClicked) {
+    const byRole = page.getByRole('button', { name: /arrive/i }).first()
+    try {
+      await byRole.waitFor({ state: 'visible', timeout: 5_000 })
+      await byRole.click()
+      arriveClicked = true
+      log('info', 'Clicked Arrive (role fallback)')
+    } catch { /* not found */ }
+  }
+
+  if (!arriveClicked) {
+    const byText = page.getByText(/^arrive$/i).first()
+    try {
+      await byText.waitFor({ state: 'visible', timeout: 3_000 })
+      await byText.click()
+      arriveClicked = true
+      log('info', 'Clicked Arrive (text fallback)')
+    } catch { /* not found */ }
+  }
+
+  if (!arriveClicked) {
+    throw new Error('Arrive button not available on homepage')
   }
 
   await page.waitForLoadState('domcontentloaded', { timeout: 8_000 }).catch(() => {})

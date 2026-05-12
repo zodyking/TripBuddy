@@ -68,27 +68,61 @@ export async function clickMenuIfEnabled(page, key, log) {
  * >}
  */
 export async function inspectCheckoutHomeGate(page, log) {
+  const GATE_TIMEOUT_MS = 15_000
+  const POLL_MS = 600
+  const deadline = Date.now() + GATE_TIMEOUT_MS
+
+  while (Date.now() < deadline) {
+    const checkIn = await homepageMenuButtonOrRole(page, 'checkIn')
+    const inspect = await homepageMenuButtonOrRole(page, 'inspectAndCheckOut')
+    const ciVis = await checkIn.isVisible().catch(() => false)
+    const inVis = await inspect.isVisible().catch(() => false)
+
+    if (!ciVis || !inVis) {
+      log('detail', 'Gate: buttons not visible yet, waiting…')
+      await page.waitForTimeout(POLL_MS)
+      continue
+    }
+
+    const ciEn = await checkIn.isEnabled().catch(() => false)
+    const inEn = await inspect.isEnabled().catch(() => false)
+
+    if (!ciEn && inEn) {
+      await inspect.click()
+      log('info', 'Opened Inspect and Check Out (home gate passed)')
+      return { outcome: 'opened' }
+    }
+
+    if (ciEn && inEn) {
+      log('detail', 'Gate: both buttons enabled, waiting for Inspect to become sole enabled…')
+      await page.waitForTimeout(POLL_MS)
+      continue
+    }
+
+    if (ciEn && !inEn) {
+      return { outcome: 'no_trip' }
+    }
+
+    log('detail', `Gate: ciEn=${ciEn} inEn=${inEn}, retrying…`)
+    await page.waitForTimeout(POLL_MS)
+  }
+
   const checkIn = await homepageMenuButtonOrRole(page, 'checkIn')
   const inspect = await homepageMenuButtonOrRole(page, 'inspectAndCheckOut')
-  const ciVis = await checkIn.isVisible().catch(() => false)
-  const inVis = await inspect.isVisible().catch(() => false)
-  if (!ciVis || !inVis) {
-    log('warn', 'Inspect/checkout gate: Check In or Inspect and Check Out not visible')
-    return { outcome: 'ambiguous', reason: 'buttons_not_visible' }
-  }
   const ciEn = await checkIn.isEnabled().catch(() => false)
   const inEn = await inspect.isEnabled().catch(() => false)
   if (!ciEn && inEn) {
     await inspect.click()
-    log('info', 'Opened Inspect and Check Out (home gate passed)')
+    log('info', 'Opened Inspect and Check Out (gate passed on final check)')
     return { outcome: 'opened' }
   }
   if (ciEn && !inEn) {
     return { outcome: 'no_trip' }
   }
+  log('warn', 'Inspect/checkout gate timed out with ambiguous button states')
   return {
     outcome: 'ambiguous',
-    reason: 'unexpected_button_states',
+    reason: 'gate_timeout',
     checkInEnabled: ciEn,
     inspectEnabled: inEn,
   }
