@@ -2250,37 +2250,27 @@ onUnmounted(() => {
           {{ linehaulLocationMatch ? 'Aligned' : 'Mismatch' }}
         </span>
       </div>
-      <div class="driver-status-surface">
-        <p v-if="linehaulFetching" class="driver-status-fetching" aria-live="polite">Updating…</p>
-        <p
-          v-else-if="linehaulLastFetchAt != null"
-          class="driver-status-fetched-at"
-        >
-          <time :datetime="new Date(linehaulLastFetchAt).toISOString()">{{
-            new Date(linehaulLastFetchAt).toLocaleString()
-          }}</time>
-        </p>
-
-        <div
-          v-if="
-            !suppressHomeLinehaulErrors &&
-            (linehaulTractorError || linehaulDriverError)
-          "
-          class="linehaul-errors"
-        >
-          <p v-if="linehaulTractorError" class="err">Tractor Details: {{ linehaulTractorError }}</p>
-          <p v-if="linehaulDriverError" class="err">Driver Details: {{ linehaulDriverError }}</p>
-        </div>
-        <div
-          v-else-if="suppressHomeLinehaulErrors && (linehaulTractorError || linehaulDriverError)"
-          class="linehaul-loading-placeholder"
-          aria-hidden="true"
-        >
-          <span class="linehaul-loading-dot" />
-          <span class="linehaul-loading-dot" />
-          <span class="linehaul-loading-dot" />
-        </div>
-        <div class="driver-status-cards">
+      <div
+        v-if="
+          !suppressHomeLinehaulErrors &&
+          (linehaulTractorError || linehaulDriverError)
+        "
+        class="linehaul-errors"
+      >
+        <p v-if="linehaulTractorError" class="err">Tractor: {{ linehaulTractorError }}</p>
+        <p v-if="linehaulDriverError" class="err">Driver: {{ linehaulDriverError }}</p>
+      </div>
+      <div
+        v-else-if="suppressHomeLinehaulErrors && (linehaulTractorError || linehaulDriverError)"
+        class="linehaul-loading-placeholder"
+        aria-hidden="true"
+      >
+        <span class="linehaul-loading-dot" />
+        <span class="linehaul-loading-dot" />
+        <span class="linehaul-loading-dot" />
+      </div>
+      <div v-if="linehaulFetching" class="driver-status-fetching" aria-live="polite">Updating…</div>
+      <div class="driver-status-cards">
           <div v-if="linehaulTractorBody" class="linehaul-block">
             <h4 class="linehaul-h3">Tractor</h4>
             <dl class="linehaul-dl">
@@ -2437,19 +2427,18 @@ onUnmounted(() => {
           </div>
         </div>
 
-        <p
-          v-if="
-            !linehaulFetching &&
-            linehaulLastFetchAt == null &&
-            !linehaulTractorError &&
-            !linehaulDriverError &&
-            apiOk === true
-          "
-          class="empty driver-status-idle"
-        >
-          Linehaul not loaded — use Settings → Manual fetch or set a refresh interval (save credentials).
-        </p>
-      </div>
+      <p
+        v-if="
+          !linehaulFetching &&
+          linehaulLastFetchAt == null &&
+          !linehaulTractorError &&
+          !linehaulDriverError &&
+          apiOk === true
+        "
+        class="empty driver-status-idle"
+      >
+        Linehaul not loaded — use Settings to fetch.
+      </p>
     </section>
 
     <section
@@ -3354,25 +3343,10 @@ button.trailer-nbr.copyable-inline {
   color: var(--color-error, #ef4444);
   border: 1px solid var(--color-error-border, rgba(239, 68, 68, 0.3));
 }
-.driver-status-surface {
-  margin-top: 0.15rem;
-  border: 1px solid #34343e;
-  border-radius: 10px;
-  background: #18181f;
-  padding: 0.5rem 0.6rem 0.6rem;
-}
 .driver-status-fetching {
   margin: 0 0 0.35rem;
-  font-size: 0.78rem;
-  color: #90caf9;
-}
-.driver-status-fetched-at {
-  margin: 0 0 0.4rem;
   font-size: 0.72rem;
-  color: var(--muted, #9898a8);
-}
-.driver-status-fetched-at time {
-  font-variant-numeric: tabular-nums;
+  color: #90caf9;
 }
 .driver-status-cards {
   display: grid;
