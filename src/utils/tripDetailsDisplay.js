@@ -165,10 +165,12 @@ export function buildTrailerCards(body) {
 /**
  * Parse trailer metadata for display badges.
  * @param {Record<string, unknown>} trailer
+ * @param {{ force20ft?: boolean }} [opts] When `force20ft`, size is always 20′ (e.g. multi-trailer trips).
  */
-export function parseTrailerMeta(trailer) {
+export function parseTrailerMeta(trailer, opts = {}) {
   const trlrNbr = String(trailer.trlrNbr ?? '').trim()
-  const size = trlrNbr.startsWith('8') ? '20ft' : '53ft'
+  const size =
+    opts.force20ft === true ? '20ft' : trlrNbr.startsWith('8') ? '20ft' : '53ft'
 
   const loadStatus = String(trailer.detlCodeLoadStatus ?? '').toUpperCase()
   let statusLabel = '—'
@@ -352,6 +354,8 @@ export function buildEnhancedTrailerCards(body) {
       return a.i - b.i
     })
 
+  const multiTrailerTrip = indexed.length >= 2
+
   const summaryKeys = new Set([
     'sealNumber',
     'loadNumber',
@@ -377,7 +381,7 @@ export function buildEnhancedTrailerCards(body) {
   return indexed
     .map(({ tr, i }) => {
       const order = tr.trlrOrder != null ? String(tr.trlrOrder) : String(i + 1)
-      const meta = parseTrailerMeta(tr)
+      const meta = parseTrailerMeta(tr, { force20ft: multiTrailerTrip })
 
       const summaryRows = [
         { label: 'Seal', value: meta.sealNumber },
