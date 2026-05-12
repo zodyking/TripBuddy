@@ -260,8 +260,8 @@ function trailerTopDivIcon(rasterHref, vw, imgH, trailerNumber = '', pulseClass 
     html,
     className: 'map-marker-raster-div-icon map-marker-raster-div-icon--trailer',
     iconSize: [vw, boxH],
-    iconAnchor: [Math.round(vw / 2), boxH],
-    popupAnchor: [0, -Math.round(boxH * 0.52)],
+    iconAnchor: [Math.round(vw / 2), Math.round(imgH / 2)],
+    popupAnchor: [0, -Math.round(imgH / 2)],
   })
 }
 
