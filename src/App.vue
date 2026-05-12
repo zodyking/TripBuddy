@@ -504,41 +504,45 @@ body {
   border-color: rgba(196, 181, 253, 0.45);
 }
 
-/* Trailer map markers: outer glow (heavy = red, other = green) */
+/* Trailer map markers: quick beacon-style outer glow (heavy = red, other = green) */
 @keyframes trailer-marker-heavy-glow {
   0%,
+  28%,
   100% {
     filter:
-      drop-shadow(0 0 6px rgba(239, 68, 68, 0.85))
-      drop-shadow(0 0 14px rgba(239, 68, 68, 0.55));
+      drop-shadow(0 0 3px rgba(239, 68, 68, 0.35))
+      drop-shadow(0 0 7px rgba(239, 68, 68, 0.18));
   }
-  50% {
+  9% {
     filter:
-      drop-shadow(0 0 10px rgba(239, 68, 68, 1))
-      drop-shadow(0 0 22px rgba(239, 68, 68, 0.75));
+      drop-shadow(0 0 11px rgba(239, 68, 68, 1))
+      drop-shadow(0 0 22px rgba(239, 68, 68, 0.72))
+      drop-shadow(0 0 34px rgba(239, 68, 68, 0.35));
   }
 }
 
 @keyframes trailer-marker-light-glow {
   0%,
+  28%,
   100% {
     filter:
-      drop-shadow(0 0 5px rgba(34, 197, 94, 0.75))
-      drop-shadow(0 0 12px rgba(34, 197, 94, 0.45));
+      drop-shadow(0 0 3px rgba(34, 197, 94, 0.32))
+      drop-shadow(0 0 7px rgba(34, 197, 94, 0.16));
   }
-  50% {
+  9% {
     filter:
-      drop-shadow(0 0 9px rgba(52, 211, 153, 0.95))
-      drop-shadow(0 0 20px rgba(34, 197, 94, 0.6));
+      drop-shadow(0 0 10px rgba(52, 211, 153, 0.98))
+      drop-shadow(0 0 20px rgba(34, 197, 94, 0.62))
+      drop-shadow(0 0 30px rgba(34, 197, 94, 0.28));
   }
 }
 
 .map-marker-trailer-pulse-heavy {
-  animation: trailer-marker-heavy-glow 2.2s ease-in-out infinite;
+  animation: trailer-marker-heavy-glow 0.88s cubic-bezier(0.33, 0, 0.2, 1) infinite;
 }
 
 .map-marker-trailer-pulse-light {
-  animation: trailer-marker-light-glow 2.4s ease-in-out infinite;
+  animation: trailer-marker-light-glow 0.96s cubic-bezier(0.33, 0, 0.2, 1) infinite;
 }
 
 @media (prefers-reduced-motion: reduce) {
