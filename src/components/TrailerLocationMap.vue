@@ -13,11 +13,8 @@ import 'leaflet-rotate'
 import {
   trailer20ftTopIcon,
   trailer53ftTopIcon,
-  trailer20ftTopIconGeoScaled,
-  trailer53ftTopIconGeoScaled,
   trailerFallbackPinIcon,
   userLocationTruckIcon,
-  userLocationTruckIconGeoScaled,
 } from '../utils/mapMarkers.js'
 import { useCompassOrientation } from '../composables/useCompassOrientation.js'
 
@@ -307,27 +304,11 @@ let geoStopped = false
 let watchStarted = false
 let didFitWithUser = false
 
-/** Fixed pixel icons only — same raster sizes as Directory / Bridges “my location” truck. */
-const useGeoScaledMarkers = ref(false)
-
 function prefersReducedMotion() {
   if (typeof window === 'undefined') return false
   return window.matchMedia('(prefers-reduced-motion: reduce)').matches
 }
 
-/** Trailer icons stay map-north-up (no road follow, no extra spin). */
-function resetTrailerMarkerRotation(mk) {
-  if (!mk) return
-  const mkAny = /** @type {any} */ (mk)
-  if (typeof mkAny.setRotationAngle === 'function') {
-    mkAny.setRotationAngle(0)
-  }
-  const el = mk.getElement?.()
-  if (el) {
-    el.style.transform = ''
-    el.style.transformOrigin = ''
-  }
-}
 
 /**
  * Create trailer icon — geo-scaled to real-world size when enabled.
@@ -354,9 +335,6 @@ function makeUserTruckIcon() {
   return userLocationTruckIcon(props.userVehicleId || '')
 }
 
-function updateMarkersForZoom() {
-  /* no-op: fixed-pixel icons do not resize on zoom */
-}
 
 function setBaseLayer(mode) {
   if (!map || !streetLayer || !satelliteLayer) return
@@ -437,14 +415,19 @@ function syncUserOverlay() {
 
 function applyUserMarkerRotation() {
   if (!userMarker) return
-  const el = userMarker.getElement()
-  if (!el) return
+  const outer = userMarker.getElement()
+  if (!outer) return
+  const inner = outer.querySelector('.map-marker-raster-root')
+  if (!inner) return
 
   if (compassModeActive.value && smoothHeading.value !== null) {
     const mapBearing = map && typeof map.getBearing === 'function' ? map.getBearing() : 0
     const transform = getMarkerRotationTransform(smoothHeading.value, mapBearing)
-    el.style.transform = el.style.transform.replace(/rotate\([^)]*\)/g, '') + ` ${transform}`
-    el.style.transformOrigin = 'center center'
+    inner.style.transform = transform
+    inner.style.transformOrigin = 'center center'
+  } else {
+    inner.style.transform = ''
+    inner.style.transformOrigin = ''
   }
 }
 
@@ -458,6 +441,8 @@ function applyMapCompassRotation() {
 async function handleCompassToggle() {
   if (compassModeActive.value) {
     compassModeActive.value = false
+    await toggleCompass()
+    applyUserMarkerRotation()
     if (map && typeof map.setBearing === 'function') {
       map.setBearing(0)
     }
@@ -592,7 +577,6 @@ function syncTrailerMarkers() {
       mk.setPopupContent(label)
       mk.setZIndexOffset(t.highlightHeavy ? 450 : 400)
     }
-    nextTick(() => resetTrailerMarkerRotation(mk))
   }
 
   if (!didFitWithUser) {
@@ -647,8 +631,6 @@ function initMap() {
   syncTrailerMarkers()
   applyUserCoordsFromProps()
 
-  map.on('zoomend', updateMarkersForZoom)
-
   nextTick(() => {
     map?.invalidateSize()
     setTimeout(() => map?.invalidateSize(), 320)
@@ -658,9 +640,6 @@ function initMap() {
 function destroyMap() {
   geoStopped = true
   stopWatch()
-  if (map) {
-    map.off('zoomend', updateMarkersForZoom)
-  }
   if (fitDebounce) {
     clearTimeout(fitDebounce)
     fitDebounce = null
@@ -994,6 +973,12 @@ watch(compassModeActive, (active) => {
   }
   50% {
     box-shadow: 0 4px 14px rgba(0,0,0,0.35), 0 0 16px rgba(34,197,94,0.55), 0 0 32px rgba(34,197,94,0.3);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .trailer-loc-big-num-row.is-heavy,
+  .trailer-loc-big-num-row:not(.is-heavy) {
+    animation: none;
   }
 }
 
