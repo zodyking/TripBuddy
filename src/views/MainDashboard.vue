@@ -4472,17 +4472,16 @@ button.trailer-nbr.copyable-inline {
 @media (orientation: landscape) and (min-width: 768px) {
   .main {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) minmax(0, 1.6fr);
+    grid-template-columns: minmax(14rem, 1fr) minmax(0, 1.8fr);
     grid-template-rows: auto auto 1fr;
     grid-template-areas:
       "status  trip"
       "actions trip"
       ".       trip";
     align-items: start;
-    gap: var(--space-4, 1rem);
-    padding: var(--space-4, 1rem) 0;
-    min-height: calc(100vh - var(--nav-height, 4rem));
-    min-height: calc(100dvh - var(--nav-height, 4rem));
+    align-content: start;
+    gap: var(--space-3, 0.75rem);
+    padding: var(--space-3, 0.75rem) 0;
   }
 
   .main > .copy-toast { grid-area: 1 / 1 / 2 / 3; }
@@ -4497,8 +4496,9 @@ button.trailer-nbr.copyable-inline {
   }
   .panel.trip-panel {
     grid-area: trip;
-    align-self: stretch;
-    min-height: 0;
+    align-self: start;
+    max-height: calc(100vh - var(--nav-height, 4rem) - 1.5rem);
+    max-height: calc(100dvh - var(--nav-height, 4rem) - 1.5rem);
     overflow-y: auto;
   }
   .panel.actions.actions-panel--ruled {
@@ -4506,16 +4506,40 @@ button.trailer-nbr.copyable-inline {
     align-self: start;
   }
 
+  .panel {
+    padding: var(--space-4, 1rem);
+  }
+
+  .driver-status-cards {
+    grid-template-columns: 1fr;
+  }
+
   .quick-actions-grid {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+  .quick-action-btn {
+    min-height: 2.5rem;
+    padding: 0.5rem 0.75rem;
+    font-size: 0.85rem;
   }
 }
 
 @media (orientation: landscape) and (min-width: 1100px) {
   .main {
-    grid-template-columns: minmax(0, 1fr) minmax(0, 2fr);
-    gap: var(--space-5, 1.25rem);
+    grid-template-columns: minmax(16rem, 1fr) minmax(0, 2.2fr);
+    gap: var(--space-4, 1rem);
+  }
+
+  .driver-status-cards {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .quick-actions-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0.5rem;
   }
 }
 

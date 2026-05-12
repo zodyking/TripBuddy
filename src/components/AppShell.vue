@@ -181,6 +181,7 @@ onUnmounted(() => {
         <main
           class="app-main"
           :class="{
+            'app-main--home': route.name === 'home' || route.name === 'dispatch',
             'app-main--directory': route.name === 'directory',
             'app-main--traffic': route.name === 'traffic',
           }"
@@ -641,6 +642,15 @@ onUnmounted(() => {
   .app-main.app-main--directory > * {
     flex: 1;
     min-height: 0;
+  }
+}
+
+/* Home page: full-width grid in landscape */
+@media (orientation: landscape) and (min-width: 768px) {
+  .app-main.app-main--home {
+    max-width: none;
+    margin-inline: 0;
+    padding-inline: var(--space-4, 1rem);
   }
 }
 
