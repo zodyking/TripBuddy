@@ -20,7 +20,17 @@ import {
   buildPromptMessage,
   buildTripDataFromAssignment,
 } from './inspectFieldResolver.mjs'
-import { getTrailerNumberCandidates } from '../trailer-number-store.mjs'
+/** @type {typeof import('../trailer-number-store.mjs').getTrailerNumberCandidates | null} */
+let _getTrailerNumberCandidates = null
+async function loadTrailerNumberCandidates(legSeq) {
+  try {
+    if (!_getTrailerNumberCandidates) {
+      const mod = await import('../trailer-number-store.mjs')
+      _getTrailerNumberCandidates = mod.getTrailerNumberCandidates
+    }
+    return await _getTrailerNumberCandidates(legSeq)
+  } catch { return [] }
+}
 
 /** FedEx copy patterns — tune if the app changes. */
 const RX = {
@@ -585,13 +595,11 @@ export async function runInspectCheckoutAfterGate(page, opts) {
   const preEnteredTrailerNbrs = new Map()
   const legSeq = String(tripDataEffective.dailyTripLegSequence || '').trim()
   if (legSeq) {
-    try {
-      const stored = await getTrailerNumberCandidates(legSeq)
-      for (const s of stored) preEnteredTrailerNbrs.set(s.index, s.number)
-      if (preEnteredTrailerNbrs.size) {
-        log('info', `Loaded ${preEnteredTrailerNbrs.size} pre-entered trailer number(s) for leg ${legSeq}`)
-      }
-    } catch { /* store unavailable */ }
+    const stored = await loadTrailerNumberCandidates(legSeq)
+    for (const s of stored) preEnteredTrailerNbrs.set(s.index, s.number)
+    if (preEnteredTrailerNbrs.size) {
+      log('info', `Loaded ${preEnteredTrailerNbrs.size} pre-entered trailer number(s) for leg ${legSeq}`)
+    }
   }
 
   /** Per-trailer seal tracking — seals that failed for trailer N may still be valid for trailer M (swap). */
