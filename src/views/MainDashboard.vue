@@ -2946,8 +2946,22 @@ onUnmounted(() => {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  padding: clamp(0.5rem, 2vw, 1.25rem) 0;
-  min-height: min(78dvh, 42rem);
+  padding: clamp(0.5rem, 2vw, 1.25rem) var(--space-3, 0.75rem);
+  min-height: min(82dvh, 46rem);
+}
+
+.automation-preview-host .preview-panel {
+  width: 100%;
+  max-width: min(96vw, 58rem);
+  margin-inline: auto;
+}
+
+.automation-preview-host .preview-panel .preview-frame {
+  width: 100%;
+}
+
+.automation-preview-host .preview-img {
+  max-height: min(72dvh, 720px);
 }
 
 .copy-toast {
@@ -4494,7 +4508,47 @@ button.trailer-nbr.copyable-inline {
   .main > .run-error-banner { grid-area: 1 / 1 / 2 / 3; }
   .main > .msg,
   .main > .err { grid-area: 1 / 1 / 2 / 3; }
-  .main > .preview-panel { grid-area: 1 / 1 / 2 / 3; }
+  /* Preview lives inside .automation-preview-host (not a direct .preview-panel child). */
+  .main > .automation-preview-host {
+    grid-column: 1 / -1;
+    grid-row: 1 / -1;
+    justify-self: center;
+    align-self: center;
+    width: 100%;
+    max-width: min(96vw, 60rem);
+    z-index: 2;
+  }
+
+  /* Quick-action live preview: drop the home grid so the frame centers and can grow wide/tall. */
+  .main.main--automation-preview {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: var(--space-3, 0.75rem);
+    min-height: min(88dvh, 52rem);
+    padding-inline: var(--space-3, 0.75rem);
+  }
+
+  .main.main--automation-preview .automation-preview-host {
+    flex: 1 1 auto;
+    display: flex;
+    min-height: min(78dvh, 44rem);
+    width: 100%;
+    max-width: min(96vw, 62rem);
+    align-items: center;
+    justify-content: center;
+    padding-inline: 0;
+  }
+
+  .main.main--automation-preview .preview-panel {
+    width: 100%;
+    max-width: 100%;
+  }
+
+  .main.main--automation-preview .preview-img {
+    max-height: min(74dvh, 760px);
+  }
 
   .panel.driver-status-panel {
     grid-area: status;
