@@ -1116,15 +1116,6 @@ watch(compassModeActive, (active) => {
   background: #cbd5e1;
 }
 
-:deep(.map-marker-raster-div-icon--trailer) {
-  background: transparent !important;
-  border: none !important;
-}
-
-:deep(.map-marker-raster-div-icon--trailer .map-marker-raster-root--trailer) {
-  transform: none !important;
-  transform-origin: center center !important;
-}
 
 :deep(.leaflet-control-zoom a) {
   background: rgba(255, 255, 255, 0.95);
