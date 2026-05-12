@@ -837,7 +837,7 @@ watch(compassModeActive, (active) => {
     class="trailer-loc-root"
     :class="{
       'has-terminal-card': !!terminalCardDisplay,
-      'has-trailer-ledger': trailerNumRows.length > 0,
+      'has-trailer-ledger': trailerNumRows.length > 0 || !!terminalCardDisplay,
     }"
     role="region"
     aria-label="Trailers and your location map"
@@ -889,38 +889,97 @@ watch(compassModeActive, (active) => {
       </button>
     </div>
     <div
-      v-if="trailerNumRows.length"
-      class="trailer-loc-big-nums"
-      aria-label="Trailer numbers and seals"
+      v-if="trailerNumRows.length || terminalCardDisplay"
+      class="trailer-loc-ledger-dock"
+      :class="{ 'is-terminal-only': trailerNumRows.length === 0 }"
     >
-      <button
-        v-for="row in trailerNumRows"
-        :key="row.key"
-        type="button"
-        class="trailer-loc-big-num-row tap"
-        :class="{ 'is-heavy': row.heavy, 'is-seal': modeForOrder(row.orderKey) === 'seal' }"
-        :title="
-          row.seal
-            ? 'Tap to copy · double-tap to switch trailer / seal'
-            : 'Tap to copy trailer number'
-        "
-        @click="onBigNumClick(row, $event)"
+      <div
+        v-if="trailerNumRows.length"
+        class="trailer-loc-big-nums"
+        aria-label="Trailer numbers and seals"
       >
-        <span class="trailer-loc-big-num-label">
-          <template v-if="modeForOrder(row.orderKey) === 'seal'">
-            Seal<span
-              v-if="row.nbr && row.nbr !== '—'"
-              class="trailer-loc-big-num-label-trailer"
-            >&nbsp;{{ row.nbr }}</span>
-          </template>
-          <template v-else>
-            {{ bigNumLabel(row)
-            }}<span v-if="row.weightDisplay" class="trailer-loc-big-num-weight-inline">
-              &nbsp;{{ row.weightDisplay }}</span>
-          </template>
-        </span>
-        <span class="trailer-loc-big-num-val">{{ bigNumDisplayValue(row) }}</span>
-      </button>
+        <button
+          v-for="row in trailerNumRows"
+          :key="row.key"
+          type="button"
+          class="trailer-loc-big-num-row tap"
+          :class="{ 'is-heavy': row.heavy, 'is-seal': modeForOrder(row.orderKey) === 'seal' }"
+          :title="
+            row.seal
+              ? 'Tap to copy · double-tap to switch trailer / seal'
+              : 'Tap to copy trailer number'
+          "
+          @click="onBigNumClick(row, $event)"
+        >
+          <span class="trailer-loc-big-num-label">
+            <template v-if="modeForOrder(row.orderKey) === 'seal'">
+              Seal<span
+                v-if="row.nbr && row.nbr !== '—'"
+                class="trailer-loc-big-num-label-trailer"
+              >&nbsp;{{ row.nbr }}</span>
+            </template>
+            <template v-else>
+              {{ bigNumLabel(row)
+              }}<span v-if="row.weightDisplay" class="trailer-loc-big-num-weight-inline">
+                &nbsp;{{ row.weightDisplay }}</span>
+            </template>
+          </span>
+          <span class="trailer-loc-big-num-val">{{ bigNumDisplayValue(row) }}</span>
+        </button>
+      </div>
+      <div
+        v-if="terminalCardDisplay"
+        class="trailer-loc-terminal-card"
+        :class="{
+          'is-toggleable': canToggleTerminalLeg,
+          'is-no-call': !terminalCardDisplay.telHref,
+        }"
+        role="region"
+        :aria-label="`${terminalCardDisplay.legLabel}: ${terminalCardDisplay.locationId}, ${terminalCardDisplay.name}`"
+        :title="
+          canToggleTerminalLeg
+            ? `${terminalCardDisplay.legLabel} — double-tap to switch origin / destination`
+            : undefined
+        "
+        @click="onTerminalPairTap($event)"
+      >
+        <div class="trailer-loc-terminal-text">
+          <p class="trailer-loc-terminal-id-name">
+            {{ terminalCardDisplay.locationId }} - {{ terminalCardDisplay.name }}
+          </p>
+          <p
+            class="trailer-loc-terminal-phone-line"
+            :title="terminalCardDisplay.phoneDisplay || undefined"
+          >
+            <template v-if="terminalCardDisplay.loading">Loading…</template>
+            <template v-else>{{ terminalCardDisplay.phoneDisplay || '—' }}</template>
+          </p>
+        </div>
+        <a
+          v-if="terminalCardDisplay.telHref"
+          :href="terminalCardDisplay.telHref"
+          class="trailer-loc-call-btn-full tap"
+          rel="noopener"
+          aria-label="Call terminal phone"
+          @click.stop
+          @dblclick.stop
+        >
+          <svg
+            class="trailer-loc-call-icon"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2.15"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            aria-hidden="true"
+          >
+            <path
+              d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"
+            />
+          </svg>
+        </a>
+      </div>
     </div>
     <p
       v-if="copyToast"
@@ -930,56 +989,6 @@ watch(compassModeActive, (active) => {
     >
       {{ copyToast }}
     </p>
-    <div
-      v-if="terminalCardDisplay"
-      class="trailer-loc-terminal-card"
-      :class="{ 'is-toggleable': canToggleTerminalLeg }"
-      role="region"
-      :aria-label="`${terminalCardDisplay.legLabel}: ${terminalCardDisplay.locationId}, ${terminalCardDisplay.name}`"
-      :title="
-        canToggleTerminalLeg
-          ? `${terminalCardDisplay.legLabel} — double-tap to switch origin / destination`
-          : undefined
-      "
-      @click="onTerminalPairTap($event)"
-    >
-      <div class="trailer-loc-terminal-text">
-        <p class="trailer-loc-terminal-id-name">
-          {{ terminalCardDisplay.locationId }} - {{ terminalCardDisplay.name }}
-        </p>
-        <p
-          class="trailer-loc-terminal-phone-line"
-          :title="terminalCardDisplay.phoneDisplay || undefined"
-        >
-          <template v-if="terminalCardDisplay.loading">Loading…</template>
-          <template v-else>{{ terminalCardDisplay.phoneDisplay || '—' }}</template>
-        </p>
-      </div>
-      <a
-        v-if="terminalCardDisplay.telHref"
-        :href="terminalCardDisplay.telHref"
-        class="trailer-loc-call-btn-full tap"
-        rel="noopener"
-        aria-label="Call terminal phone"
-        @click.stop
-        @dblclick.stop
-      >
-        <svg
-          class="trailer-loc-call-icon"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          stroke-width="2.15"
-          stroke-linecap="round"
-          stroke-linejoin="round"
-          aria-hidden="true"
-        >
-          <path
-            d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"
-          />
-        </svg>
-      </a>
-    </div>
     <p
       v-if="userLocationPending && !hasUserFix"
       class="trailer-loc-hint"
@@ -1003,6 +1012,8 @@ watch(compassModeActive, (active) => {
 
 <style scoped>
 .trailer-loc-root {
+  --trailer-loc-ledger-min-h: 4.85rem;
+  --trailer-loc-ledger-radius: 0.45rem;
   position: relative;
   width: 100%;
   height: 100%;
@@ -1032,33 +1043,56 @@ watch(compassModeActive, (active) => {
   border: 0;
 }
 
-/* Match trailer ledger row: same shell, purple top accent (app brand). */
-.trailer-loc-terminal-card {
+.trailer-loc-ledger-dock {
   position: absolute;
-  z-index: 1001;
+  left: 0;
   right: 0;
   bottom: 0;
-  left: auto;
+  z-index: 1001;
+  display: flex;
+  flex-direction: row;
+  align-items: stretch;
+  justify-content: flex-start;
+  gap: 0.4rem;
+  padding: 0 0.4rem max(0.5rem, env(safe-area-inset-bottom, 0px));
+  pointer-events: none;
+}
+
+.trailer-loc-ledger-dock.is-terminal-only {
+  justify-content: flex-end;
+}
+
+.trailer-loc-ledger-dock > * {
+  pointer-events: auto;
+}
+
+/* Match trailer ledger row: same shell, purple top accent (app brand). */
+.trailer-loc-terminal-card {
+  position: static;
   box-sizing: border-box;
   display: flex;
   flex-direction: row;
   align-items: stretch;
-  width: auto;
-  max-width: min(20rem, calc(100% - 9.5rem));
+  flex: 0 1 auto;
   margin: 0;
-  padding: 0.4rem 0 0.5rem 0.65rem;
-  padding-bottom: max(0.5rem, env(safe-area-inset-bottom, 0px));
-  border-radius: 0;
+  margin-left: auto;
+  min-height: var(--trailer-loc-ledger-min-h);
+  width: max-content;
+  max-width: min(36rem, calc(100% - 0.85rem));
+  padding: 0;
+  border-radius: var(--trailer-loc-ledger-radius);
   background: rgba(10, 10, 15, 0.94);
   border: none;
   border-top: 2px solid var(--color-accent-purple, #7b4db5);
-  border-right: none;
-  border-bottom: none;
   box-shadow: inset 0 2px 12px rgba(123, 77, 181, 0.16);
   pointer-events: auto;
   overflow: hidden;
   -webkit-tap-highlight-color: transparent;
   touch-action: manipulation;
+}
+
+.trailer-loc-terminal-card.is-no-call .trailer-loc-terminal-text {
+  padding-right: 0.65rem;
 }
 
 .trailer-loc-terminal-card.is-toggleable {
@@ -1069,31 +1103,28 @@ watch(compassModeActive, (active) => {
   opacity: 0.94;
 }
 
-.trailer-loc-root:not(.has-trailer-ledger) .trailer-loc-terminal-card {
-  max-width: min(21rem, calc(100% - 1rem));
-}
-
 .trailer-loc-terminal-text {
   flex: 1 1 auto;
-  min-width: 0;
+  min-width: 10rem;
   display: flex;
   flex-direction: column;
   justify-content: center;
   gap: 0.18rem;
-  padding-right: 0.45rem;
+  padding: 0.4rem 0.45rem 0.5rem 0.65rem;
+  overflow: hidden;
 }
 
 .trailer-loc-terminal-id-name {
   margin: 0;
   font-size: clamp(1.05rem, 3.6vw, 1.48rem);
   font-weight: 800;
-  line-height: 1.12;
+  line-height: 1.18;
   font-variant-numeric: tabular-nums;
   letter-spacing: 0.02em;
   color: #f8fafc;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .trailer-loc-terminal-phone-line {
@@ -1104,9 +1135,8 @@ watch(compassModeActive, (active) => {
   line-height: 1.25;
   letter-spacing: 0.03em;
   color: rgba(226, 232, 240, 0.88);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 
 .trailer-loc-call-btn-full {
@@ -1115,8 +1145,8 @@ watch(compassModeActive, (active) => {
   justify-content: center;
   align-self: stretch;
   flex: 0 0 auto;
-  min-width: 3.85rem;
-  width: 3.85rem;
+  width: 4.45rem;
+  min-width: 4.45rem;
   padding: 0;
   text-decoration: none;
   color: var(--color-text-inverse, #08080a);
@@ -1127,14 +1157,15 @@ watch(compassModeActive, (active) => {
   );
   border: none;
   border-left: 1px solid rgba(0, 0, 0, 0.22);
+  border-radius: 0;
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.22),
     0 0 0 1px rgba(92, 45, 145, 0.35);
 }
 
 .trailer-loc-call-icon {
-  width: 1.42rem;
-  height: 1.42rem;
+  width: 1.48rem;
+  height: 1.48rem;
   flex-shrink: 0;
 }
 
@@ -1169,40 +1200,44 @@ watch(compassModeActive, (active) => {
 }
 
 .trailer-loc-root.has-trailer-ledger .trailer-loc-hint {
-  bottom: 4.75rem;
+  bottom: 5.65rem;
 }
 
 .trailer-loc-root.has-trailer-ledger .trailer-loc-copy-toast {
-  bottom: 6.25rem;
+  bottom: 7.1rem;
 }
 
 .trailer-loc-big-nums {
-  position: absolute;
-  z-index: 1001;
-  left: 0;
-  bottom: 0;
   display: flex;
   flex-direction: row;
-  gap: 0;
-  max-width: calc(100% - 12.25rem);
+  align-items: stretch;
+  flex: 1 1 auto;
+  min-width: 0;
+  gap: 0.35rem;
+  overflow-x: auto;
+  overflow-y: visible;
+  scrollbar-width: thin;
+  -webkit-overflow-scrolling: touch;
 }
 
 .trailer-loc-root:not(.has-terminal-card) .trailer-loc-big-nums {
-  max-width: 100%;
+  max-width: none;
 }
 
 .trailer-loc-big-num-row {
-  display: block;
-  flex: 1 1 0;
-  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  flex: 1 1 auto;
+  min-width: fit-content;
+  min-height: var(--trailer-loc-ledger-min-h);
+  overflow: visible;
   margin: 0;
   padding: 0.4rem 0.65rem 0.5rem;
-  padding-bottom: max(0.5rem, env(safe-area-inset-bottom, 0px));
-  border-radius: 0;
+  border-radius: var(--trailer-loc-ledger-radius);
   background: rgba(10, 10, 15, 0.94);
   border: none;
   border-top: 1px solid rgba(255, 255, 255, 0.08);
-  border-right: 1px solid rgba(255, 255, 255, 0.06);
   text-align: left;
   font: inherit;
   color: inherit;
@@ -1266,6 +1301,8 @@ watch(compassModeActive, (active) => {
   text-transform: uppercase;
   color: rgba(226, 232, 240, 0.85);
   margin-bottom: 0.12rem;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 
 .trailer-loc-big-num-label-trailer {
@@ -1288,6 +1325,9 @@ watch(compassModeActive, (active) => {
   font-variant-numeric: tabular-nums;
   color: #f8fafc;
   letter-spacing: 0.02em;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .trailer-loc-big-num-row.is-heavy .trailer-loc-big-num-val {
