@@ -75,6 +75,119 @@ const {
 
 const compassModeActive = ref(false)
 
+/** Bottom-left cards: trailer # / seal toggle + copy */
+const trailerBigNumMode = ref(/** @type {Record<string, 'trailer' | 'seal'>} */ ({}))
+const DOUBLE_TAP_MS = 450
+const SINGLE_COPY_DELAY_MS = 260
+/** @type {Record<string, number>} */
+const bigNumLastTapAt = {}
+/** @type {Record<string, ReturnType<typeof setTimeout>>} */
+const bigNumSingleCopyTimers = {}
+const copyToast = ref('')
+/** @type {ReturnType<typeof setTimeout> | null} */
+let copyToastTimer = null
+
+function clearBigNumSingleCopyTimer(orderKey) {
+  const k = String(orderKey)
+  const t = bigNumSingleCopyTimers[k]
+  if (t) {
+    clearTimeout(t)
+    delete bigNumSingleCopyTimers[k]
+  }
+}
+
+function modeForOrder(orderKey) {
+  return trailerBigNumMode.value[String(orderKey)] === 'seal' ? 'seal' : 'trailer'
+}
+
+/**
+ * @param {unknown} lbs
+ */
+function formatWeightLbsDisplay(lbs) {
+  const n = typeof lbs === 'number' ? lbs : Number(lbs)
+  if (!Number.isFinite(n) || n <= 0) return ''
+  const rounded = Math.round(n)
+  return `${rounded.toLocaleString(undefined)} lb`
+}
+
+/**
+ * @param {{ orderKey: string, nbr: string, seal: string, slot: number }} row
+ */
+function bigNumDisplayValue(row) {
+  if (modeForOrder(row.orderKey) === 'seal') {
+    return row.seal || '—'
+  }
+  return row.nbr
+}
+
+/**
+ * @param {{ orderKey: string, seal: string, slot: number }} row
+ */
+function bigNumLabel(row) {
+  return modeForOrder(row.orderKey) === 'seal' ? 'Seal' : `Trailer ${row.slot}`
+}
+
+function toggleSealModeForOrder(row) {
+  if (!row.seal) return
+  const key = String(row.orderKey)
+  clearBigNumSingleCopyTimer(key)
+  bigNumLastTapAt[key] = 0
+  const cur = modeForOrder(key)
+  trailerBigNumMode.value = {
+    ...trailerBigNumMode.value,
+    [key]: cur === 'seal' ? 'trailer' : 'seal',
+  }
+}
+
+/**
+ * @param {{ orderKey: string, nbr: string, seal: string, slot: number }} row
+ * @param {MouseEvent} [e]
+ */
+function onBigNumClick(row, e) {
+  e?.preventDefault?.()
+  const key = String(row.orderKey)
+
+  if (e && /** @type {MouseEvent} */ (e).detail === 2 && row.seal) {
+    toggleSealModeForOrder(row)
+    return
+  }
+
+  const now = Date.now()
+  const prev = bigNumLastTapAt[key] || 0
+  if (now - prev > 0 && now - prev < DOUBLE_TAP_MS) {
+    clearBigNumSingleCopyTimer(key)
+    bigNumLastTapAt[key] = 0
+    if (row.seal) {
+      toggleSealModeForOrder(row)
+    }
+    return
+  }
+  bigNumLastTapAt[key] = now
+  clearBigNumSingleCopyTimer(key)
+  bigNumSingleCopyTimers[key] = setTimeout(() => {
+    delete bigNumSingleCopyTimers[key]
+    const v = bigNumDisplayValue(row)
+    if (!v || v === '—') return
+    void copyToClipboard(v)
+  }, SINGLE_COPY_DELAY_MS)
+}
+
+async function copyToClipboard(text) {
+  const t = String(text ?? '').trim()
+  if (!t) return
+  try {
+    await navigator.clipboard.writeText(t)
+    if (copyToastTimer) clearTimeout(copyToastTimer)
+    copyToast.value = 'Copied'
+    copyToastTimer = setTimeout(() => {
+      copyToast.value = ''
+      copyToastTimer = null
+    }, 1200)
+  } catch {
+    /* clipboard may be denied */
+  }
+}
+
 const userFix = ref(
   /** @type {{ lat: number, lng: number, accuracyM: number } | null} */ (null),
 )
@@ -137,6 +250,46 @@ const effectiveTrailers = computed(() => {
   }
   return []
 })
+
+/** Bottom-left: one row per trailer (order), sorted for display. */
+const trailerNumRows = computed(() => {
+  const list = [...effectiveTrailers.value].sort((a, b) => {
+    const na = Number(a.order)
+    const nb = Number(b.order)
+    if (Number.isFinite(na) && Number.isFinite(nb) && na !== nb) return na - nb
+    return String(a.order).localeCompare(String(b.order), undefined, { numeric: true })
+  })
+  return list.map((t, i) => {
+    const seal = String(t.sealNumber ?? '').trim()
+    return {
+      key: `${t.order}-${i}`,
+      slot: i + 1,
+      orderKey: String(t.order),
+      nbr: String(t.trlrNbr ?? '').trim() || '—',
+      seal: seal && seal !== '—' ? seal : '',
+      heavy: Boolean(t.highlightHeavy),
+      weightDisplay: formatWeightLbsDisplay(
+        /** @type {TrailerMapPin} */ (t).pkgWeightLbs,
+      ),
+    }
+  })
+})
+
+watch(
+  () =>
+    effectiveTrailers.value
+      .map((x) => `${x.order}:${x.trlrNbr}:${x.sealNumber ?? ''}`)
+      .join('|'),
+  () => {
+    trailerBigNumMode.value = {}
+    for (const k of Object.keys(bigNumLastTapAt)) {
+      delete bigNumLastTapAt[k]
+    }
+    for (const k of Object.keys(bigNumSingleCopyTimers)) {
+      clearBigNumSingleCopyTimer(k)
+    }
+  },
+)
 
 const terminalCardDisplay = computed(() => {
   const c = props.terminalCard
@@ -540,6 +693,13 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   destroyMap()
+  if (copyToastTimer) {
+    clearTimeout(copyToastTimer)
+    copyToastTimer = null
+  }
+  for (const k of Object.keys(bigNumSingleCopyTimers)) {
+    clearBigNumSingleCopyTimer(k)
+  }
 })
 
 watch(
@@ -589,7 +749,10 @@ watch(compassModeActive, (active) => {
 <template>
   <div
     class="trailer-loc-root"
-    :class="{ 'has-terminal-card': !!terminalCardDisplay }"
+    :class="{
+      'has-terminal-card': !!terminalCardDisplay,
+      'has-trailer-ledger': trailerNumRows.length > 0,
+    }"
     role="region"
     aria-label="Trailers and your location map"
   >
@@ -639,6 +802,48 @@ watch(compassModeActive, (active) => {
         </span>
       </button>
     </div>
+    <div
+      v-if="trailerNumRows.length"
+      class="trailer-loc-big-nums"
+      aria-label="Trailer numbers and seals"
+    >
+      <button
+        v-for="row in trailerNumRows"
+        :key="row.key"
+        type="button"
+        class="trailer-loc-big-num-row tap"
+        :class="{ 'is-heavy': row.heavy, 'is-seal': modeForOrder(row.orderKey) === 'seal' }"
+        :title="
+          row.seal
+            ? 'Tap to copy · double-tap to switch trailer / seal'
+            : 'Tap to copy trailer number'
+        "
+        @click="onBigNumClick(row, $event)"
+      >
+        <span class="trailer-loc-big-num-label">
+          <template v-if="modeForOrder(row.orderKey) === 'seal'">
+            Seal<span
+              v-if="row.nbr && row.nbr !== '—'"
+              class="trailer-loc-big-num-label-trailer"
+            >&nbsp;{{ row.nbr }}</span>
+          </template>
+          <template v-else>
+            {{ bigNumLabel(row)
+            }}<span v-if="row.weightDisplay" class="trailer-loc-big-num-weight-inline">
+              &nbsp;{{ row.weightDisplay }}</span>
+          </template>
+        </span>
+        <span class="trailer-loc-big-num-val">{{ bigNumDisplayValue(row) }}</span>
+      </button>
+    </div>
+    <p
+      v-if="copyToast"
+      class="trailer-loc-copy-toast"
+      role="status"
+      aria-live="polite"
+    >
+      {{ copyToast }}
+    </p>
     <div
       v-if="terminalCardDisplay"
       class="trailer-loc-terminal-card"
@@ -722,15 +927,15 @@ watch(compassModeActive, (active) => {
   min-height: 4.75rem;
   padding: 0.55rem 0.65rem 0.6rem;
   border-radius: var(--radius-lg, 0.75rem);
-  background: linear-gradient(
-    165deg,
-    rgba(255, 255, 255, 0.06) 0%,
-    rgba(255, 255, 255, 0.025) 100%
-  );
-  border: 1px solid rgba(123, 77, 181, 0.45);
+  background: linear-gradient(165deg, #1a1a24 0%, #12121a 100%);
+  background-color: rgba(18, 18, 26, 0.96);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  border: 1px solid rgba(123, 77, 181, 0.55);
   box-shadow:
-    0 4px 18px rgba(0, 0, 0, 0.35),
-    0 0 0 1px rgba(0, 0, 0, 0.2);
+    0 6px 24px rgba(0, 0, 0, 0.55),
+    0 0 0 1px rgba(0, 0, 0, 0.35),
+    inset 0 1px 0 rgba(255, 255, 255, 0.06);
   pointer-events: auto;
 }
 
@@ -836,6 +1041,189 @@ watch(compassModeActive, (active) => {
   left: 50%;
   transform: translateX(-50%);
   max-width: min(20rem, calc(100% - 13.5rem));
+}
+
+.trailer-loc-root.has-trailer-ledger .trailer-loc-hint {
+  bottom: 4.75rem;
+}
+
+.trailer-loc-root.has-trailer-ledger .trailer-loc-copy-toast {
+  bottom: 6.25rem;
+}
+
+.trailer-loc-big-nums {
+  position: absolute;
+  z-index: 1001;
+  left: 0;
+  bottom: 0;
+  display: flex;
+  flex-direction: row;
+  gap: 0;
+  max-width: calc(100% - 13rem);
+}
+
+.trailer-loc-root:not(.has-terminal-card) .trailer-loc-big-nums {
+  max-width: 100%;
+}
+
+.trailer-loc-big-num-row {
+  display: block;
+  flex: 1 1 0;
+  min-width: 0;
+  margin: 0;
+  padding: 0.4rem 0.65rem 0.5rem;
+  padding-bottom: max(0.5rem, env(safe-area-inset-bottom, 0px));
+  border-radius: 0;
+  background: rgba(10, 10, 15, 0.94);
+  border: none;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  border-right: 1px solid rgba(255, 255, 255, 0.06);
+  text-align: left;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+}
+
+.trailer-loc-big-num-row:last-child {
+  border-right: none;
+}
+
+.trailer-loc-big-num-row:active {
+  opacity: 0.92;
+}
+
+.trailer-loc-big-num-row.is-heavy {
+  border-top: 2px solid rgba(248, 113, 113, 0.95);
+  box-shadow:
+    inset 0 0 32px rgba(239, 68, 68, 0.42),
+    inset 0 2px 20px rgba(239, 68, 68, 0.55),
+    0 0 26px rgba(239, 68, 68, 0.65),
+    0 0 52px rgba(239, 68, 68, 0.45),
+    0 0 80px rgba(239, 68, 68, 0.22);
+  animation: heavy-card-pulse 1.5s ease-in-out infinite;
+}
+
+.trailer-loc-big-num-row:not(.is-heavy) {
+  border-top: 2px solid rgba(52, 211, 153, 0.9);
+  box-shadow:
+    inset 0 0 32px rgba(34, 197, 94, 0.28),
+    inset 0 2px 20px rgba(34, 197, 94, 0.42),
+    0 0 26px rgba(34, 197, 94, 0.55),
+    0 0 52px rgba(34, 197, 94, 0.38),
+    0 0 80px rgba(34, 197, 94, 0.2);
+  animation: light-card-pulse 1.65s ease-in-out infinite;
+}
+
+@keyframes heavy-card-pulse {
+  0%,
+  100% {
+    box-shadow:
+      inset 0 0 32px rgba(239, 68, 68, 0.42),
+      inset 0 2px 20px rgba(239, 68, 68, 0.55),
+      0 0 26px rgba(239, 68, 68, 0.65),
+      0 0 52px rgba(239, 68, 68, 0.45),
+      0 0 80px rgba(239, 68, 68, 0.22);
+  }
+  50% {
+    box-shadow:
+      inset 0 0 48px rgba(239, 68, 68, 0.62),
+      inset 0 2px 28px rgba(239, 68, 68, 0.75),
+      0 0 38px rgba(239, 68, 68, 0.88),
+      0 0 72px rgba(239, 68, 68, 0.62),
+      0 0 110px rgba(239, 68, 68, 0.38);
+  }
+}
+
+@keyframes light-card-pulse {
+  0%,
+  100% {
+    box-shadow:
+      inset 0 0 32px rgba(34, 197, 94, 0.28),
+      inset 0 2px 20px rgba(34, 197, 94, 0.42),
+      0 0 26px rgba(34, 197, 94, 0.55),
+      0 0 52px rgba(34, 197, 94, 0.38),
+      0 0 80px rgba(34, 197, 94, 0.2);
+  }
+  50% {
+    box-shadow:
+      inset 0 0 48px rgba(34, 197, 94, 0.45),
+      inset 0 2px 28px rgba(34, 197, 94, 0.58),
+      0 0 38px rgba(52, 211, 153, 0.72),
+      0 0 72px rgba(34, 197, 94, 0.52),
+      0 0 110px rgba(34, 197, 94, 0.32);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .trailer-loc-big-num-row.is-heavy,
+  .trailer-loc-big-num-row:not(.is-heavy) {
+    animation: none;
+  }
+}
+
+.trailer-loc-big-num-label {
+  display: block;
+  font-size: 0.65rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: rgba(226, 232, 240, 0.85);
+  margin-bottom: 0.12rem;
+}
+
+.trailer-loc-big-num-label-trailer {
+  color: #ef4444;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: none;
+}
+
+.trailer-loc-big-num-weight-inline {
+  font-weight: 700;
+  color: #ef4444;
+}
+
+.trailer-loc-big-num-val {
+  display: block;
+  font-size: clamp(1.35rem, 4.5vw, 1.85rem);
+  font-weight: 800;
+  line-height: 1.1;
+  font-variant-numeric: tabular-nums;
+  color: #f8fafc;
+  letter-spacing: 0.02em;
+}
+
+.trailer-loc-big-num-row.is-heavy .trailer-loc-big-num-val {
+  color: #fecaca;
+}
+
+.trailer-loc-big-num-row:not(.is-heavy) .trailer-loc-big-num-val {
+  color: #bbf7d0;
+}
+
+.trailer-loc-big-num-row.is-seal .trailer-loc-big-num-val {
+  color: #fde68a;
+}
+
+.trailer-loc-copy-toast {
+  position: absolute;
+  z-index: 1002;
+  left: 50%;
+  bottom: 5.5rem;
+  transform: translateX(-50%);
+  margin: 0;
+  padding: 0.35rem 0.75rem;
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: #f8fafc;
+  background: rgba(15, 15, 20, 0.92);
+  backdrop-filter: blur(8px);
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
+  pointer-events: none;
 }
 
 .trailer-loc-hint.is-muted {
