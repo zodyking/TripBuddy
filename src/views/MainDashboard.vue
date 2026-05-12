@@ -758,7 +758,11 @@ const tripOriginLocationId = computed(() => {
 const trailerGpsOdHeader = computed(() => {
   const b = tripDetailsBodyForSlide.value
   if (!b || typeof b !== 'object') {
-    return { originLine: 'Origin: —', destLine: 'Destination: —' }
+    return {
+      originLine: 'Origin: —',
+      destLine: 'Destination: —',
+      singleLine: 'Origin: — · Destination: —',
+    }
   }
   const o = /** @type {Record<string, unknown>} */ (b)
   const oid = String(o.currentLocationNumber ?? o.originLocation ?? '').trim()
@@ -770,6 +774,7 @@ const trailerGpsOdHeader = computed(() => {
   return {
     originLine: `Origin: ${origin}`,
     destLine: `Destination: ${dest}`,
+    singleLine: `Origin: ${origin} · Destination: ${dest}`,
   }
 })
 
@@ -2153,10 +2158,9 @@ onUnmounted(() => {
             <div
               class="trailer-gps-topbar-info"
               role="group"
-              :aria-label="`${trailerGpsOdHeader.originLine}. ${trailerGpsOdHeader.destLine}`"
+              :aria-label="trailerGpsOdHeader.singleLine"
             >
-              <p class="trailer-gps-od-line">{{ trailerGpsOdHeader.originLine }}</p>
-              <p class="trailer-gps-od-line trailer-gps-od-muted">{{ trailerGpsOdHeader.destLine }}</p>
+              <p class="trailer-gps-od-single">{{ trailerGpsOdHeader.singleLine }}</p>
               <span
                 v-if="trailerGpsData.lat != null && trailerGpsData.lng != null"
                 class="sr-only"
@@ -4785,28 +4789,24 @@ button.trailer-nbr.copyable-inline {
 
 .trailer-gps-topbar-info {
   display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 0.15rem;
+  flex-direction: row;
+  align-items: center;
+  gap: 0.5rem;
   min-width: 0;
   flex: 1;
 }
 
-.trailer-gps-od-line {
+.trailer-gps-od-single {
   margin: 0;
-  max-width: 100%;
-  font-size: clamp(0.74rem, 2.3vw + 0.2vh, 0.95rem);
+  min-width: 0;
+  flex: 1;
+  font-size: clamp(0.72rem, 2.2vw + 0.15vh, 0.92rem);
   font-weight: 600;
   line-height: 1.28;
-  color: #f4f4f8;
-  word-break: break-word;
-  overflow-wrap: anywhere;
-}
-
-.trailer-gps-od-line.trailer-gps-od-muted {
-  font-size: clamp(0.68rem, 2.1vw + 0.15vh, 0.88rem);
-  font-weight: 500;
-  color: #b4b4c4;
+  color: #ececf4;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .trailer-gps-close {

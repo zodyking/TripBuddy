@@ -838,6 +838,16 @@ watch(compassModeActive, (active) => {
     map.setBearing(0)
   }
 })
+
+watch(
+  () => [trailerNumRows.value.length, terminalCardDisplay.value != null],
+  () => {
+    nextTick(() => {
+      map?.invalidateSize()
+      setTimeout(() => map?.invalidateSize(), 200)
+    })
+  },
+)
 </script>
 
 <template>
@@ -850,11 +860,12 @@ watch(compassModeActive, (active) => {
     role="region"
     aria-label="Trailers and your location map"
   >
-    <div ref="containerRef" class="trailer-loc-el" />
-    <div class="map-controls-stack trailer-loc-controls">
-      <button
-        type="button"
-        class="map-control-btn map-control-btn--sat tap"
+    <div class="trailer-loc-map-stage">
+      <div ref="containerRef" class="trailer-loc-el" />
+      <div class="map-controls-stack trailer-loc-controls">
+        <button
+          type="button"
+          class="map-control-btn map-control-btn--sat tap"
         :class="{ 'is-on': activeBaseLayer === 'satellite' }"
         :aria-pressed="activeBaseLayer === 'satellite'"
         title="Satellite imagery"
@@ -895,6 +906,33 @@ watch(compassModeActive, (active) => {
           {{ compassModeActive ? 'Exit compass mode' : 'Compass mode' }}
         </span>
       </button>
+      </div>
+    <p
+      v-if="copyToast"
+      class="trailer-loc-copy-toast"
+      role="status"
+      aria-live="polite"
+    >
+      {{ copyToast }}
+    </p>
+    <p
+      v-if="userLocationPending && !hasUserFix"
+      class="trailer-loc-hint"
+    >
+      Finding your location…
+    </p>
+    <p
+      v-if="userLocationDenied && !hasUserFix && !userLocationPending"
+      class="trailer-loc-hint is-muted"
+    >
+      Location unavailable — trailers only. Check site permission in browser settings.
+    </p>
+    <p
+      v-if="compassError"
+      class="trailer-loc-hint is-warn"
+    >
+      {{ compassError }}
+    </p>
     </div>
     <div
       v-if="trailerNumRows.length || terminalCardDisplay"
@@ -985,32 +1023,6 @@ watch(compassModeActive, (active) => {
         </div>
       </div>
     </div>
-    <p
-      v-if="copyToast"
-      class="trailer-loc-copy-toast"
-      role="status"
-      aria-live="polite"
-    >
-      {{ copyToast }}
-    </p>
-    <p
-      v-if="userLocationPending && !hasUserFix"
-      class="trailer-loc-hint"
-    >
-      Finding your location…
-    </p>
-    <p
-      v-if="userLocationDenied && !hasUserFix && !userLocationPending"
-      class="trailer-loc-hint is-muted"
-    >
-      Location unavailable — trailers only. Check site permission in browser settings.
-    </p>
-    <p
-      v-if="compassError"
-      class="trailer-loc-hint is-warn"
-    >
-      {{ compassError }}
-    </p>
   </div>
 </template>
 
@@ -1018,16 +1030,26 @@ watch(compassModeActive, (active) => {
 .trailer-loc-root {
   --trailer-loc-ledger-radius: 0.45rem;
   position: relative;
+  display: flex;
+  flex-direction: column;
   width: 100%;
   height: 100%;
   min-height: 0;
   background: #0f172a;
 }
 
+.trailer-loc-map-stage {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
 .trailer-loc-el {
+  flex: 1 1 auto;
+  min-height: 0;
   width: 100%;
-  height: 100%;
-  min-height: inherit;
 }
 
 .trailer-loc-controls {
@@ -1047,17 +1069,19 @@ watch(compassModeActive, (active) => {
 }
 
 .trailer-loc-unified-bar {
-  position: absolute;
-  left: clamp(0.3rem, 2vw, 0.55rem);
-  right: clamp(0.3rem, 2vw, 0.55rem);
-  bottom: max(0.35rem, env(safe-area-inset-bottom, 0px));
-  z-index: 1001;
+  position: relative;
+  z-index: 2;
+  flex-shrink: 0;
+  width: 100%;
   box-sizing: border-box;
-  padding: clamp(0.35rem, 2vw, 0.5rem);
-  border-radius: var(--trailer-loc-ledger-radius);
-  background: rgba(10, 10, 15, 0.97);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  box-shadow: 0 -6px 28px rgba(0, 0, 0, 0.45);
+  margin: 0;
+  padding: 0;
+  padding-bottom: max(0, env(safe-area-inset-bottom, 0px));
+  border-radius: 0;
+  border: none;
+  border-top: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(10, 10, 15, 0.98);
+  box-shadow: none;
   pointer-events: auto;
 }
 
@@ -1202,15 +1226,15 @@ watch(compassModeActive, (active) => {
   right: auto;
   left: 50%;
   transform: translateX(-50%);
-  max-width: min(22rem, calc(100% - 1.25rem));
+  max-width: min(22rem, calc(100% - 1rem));
 }
 
 .trailer-loc-root.has-trailer-ledger .trailer-loc-hint {
-  bottom: clamp(6.75rem, 38vw, 12.5rem);
+  bottom: 0.5rem;
 }
 
 .trailer-loc-root.has-trailer-ledger .trailer-loc-copy-toast {
-  bottom: clamp(8.25rem, 44vw, 14rem);
+  bottom: 3.75rem;
 }
 
 .trailer-loc-big-num-row {
