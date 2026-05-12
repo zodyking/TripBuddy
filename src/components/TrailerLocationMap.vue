@@ -873,7 +873,7 @@ watch(compassModeActive, (active) => {
 .trailer-loc-legend {
   position: absolute;
   z-index: 1000;
-  top: 3.2rem;
+  top: 0.5rem;
   left: 0.5rem;
   display: flex;
   flex-wrap: wrap;
@@ -914,23 +914,26 @@ watch(compassModeActive, (active) => {
 .trailer-loc-big-nums {
   position: absolute;
   z-index: 1001;
-  left: 0.5rem;
-  bottom: 3.25rem;
+  left: 0;
+  bottom: 0;
   display: flex;
-  flex-direction: column;
-  gap: 0.45rem;
-  max-width: min(16rem, calc(100% - 1rem));
+  flex-direction: row;
+  gap: 0;
+  max-width: 100%;
 }
 
 .trailer-loc-big-num-row {
   display: block;
-  width: 100%;
+  flex: 1 1 0;
+  min-width: 0;
   margin: 0;
   padding: 0.4rem 0.65rem 0.5rem;
-  border-radius: 10px;
-  background: rgba(15, 23, 42, 0.88);
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
+  padding-bottom: max(0.5rem, env(safe-area-inset-bottom, 0px));
+  border-radius: 0;
+  background: rgba(10, 10, 15, 0.92);
+  border: none;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  border-right: 1px solid rgba(255, 255, 255, 0.06);
   text-align: left;
   font: inherit;
   color: inherit;
@@ -939,42 +942,31 @@ watch(compassModeActive, (active) => {
   touch-action: manipulation;
 }
 
+.trailer-loc-big-num-row:last-child {
+  border-right: none;
+}
+
 .trailer-loc-big-num-row:active {
-  transform: scale(0.99);
-  opacity: 0.95;
+  opacity: 0.9;
 }
 
 .trailer-loc-big-num-row.is-heavy {
-  border-color: rgba(239, 68, 68, 0.7);
-  box-shadow:
-    0 4px 14px rgba(0, 0, 0, 0.35),
-    0 0 12px rgba(239, 68, 68, 0.5),
-    0 0 24px rgba(239, 68, 68, 0.25);
+  border-top: 2px solid rgba(239, 68, 68, 0.7);
+  box-shadow: inset 0 2px 12px rgba(239, 68, 68, 0.2);
   animation: heavy-card-pulse 1.8s ease-in-out infinite;
 }
 .trailer-loc-big-num-row:not(.is-heavy) {
-  border-color: rgba(34, 197, 94, 0.5);
-  box-shadow:
-    0 4px 14px rgba(0, 0, 0, 0.35),
-    0 0 10px rgba(34, 197, 94, 0.35),
-    0 0 20px rgba(34, 197, 94, 0.15);
+  border-top: 2px solid rgba(34, 197, 94, 0.5);
+  box-shadow: inset 0 2px 12px rgba(34, 197, 94, 0.15);
   animation: light-card-pulse 2s ease-in-out infinite;
 }
 @keyframes heavy-card-pulse {
-  0%, 100% {
-    box-shadow: 0 4px 14px rgba(0,0,0,0.35), 0 0 12px rgba(239,68,68,0.5), 0 0 24px rgba(239,68,68,0.25);
-  }
-  50% {
-    box-shadow: 0 4px 14px rgba(0,0,0,0.35), 0 0 20px rgba(239,68,68,0.7), 0 0 40px rgba(239,68,68,0.4);
-  }
+  0%, 100% { box-shadow: inset 0 2px 12px rgba(239,68,68,0.2); }
+  50% { box-shadow: inset 0 2px 20px rgba(239,68,68,0.4); }
 }
 @keyframes light-card-pulse {
-  0%, 100% {
-    box-shadow: 0 4px 14px rgba(0,0,0,0.35), 0 0 10px rgba(34,197,94,0.35), 0 0 20px rgba(34,197,94,0.15);
-  }
-  50% {
-    box-shadow: 0 4px 14px rgba(0,0,0,0.35), 0 0 16px rgba(34,197,94,0.55), 0 0 32px rgba(34,197,94,0.3);
-  }
+  0%, 100% { box-shadow: inset 0 2px 12px rgba(34,197,94,0.15); }
+  50% { box-shadow: inset 0 2px 18px rgba(34,197,94,0.3); }
 }
 @media (prefers-reduced-motion: reduce) {
   .trailer-loc-big-num-row.is-heavy,
