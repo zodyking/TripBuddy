@@ -355,7 +355,7 @@ function onTerminalPairTap(e) {
   if (!canToggleTerminalLeg.value) return
   const t = /** @type {unknown} */ (e.target)
   if (t && typeof t === 'object' && 'closest' in t && typeof t.closest === 'function') {
-    if (/** @type {Element} */ (t).closest('a.trailer-loc-call-btn')) return
+    if (/** @type {Element} */ (t).closest('a.trailer-loc-call-btn-full')) return
   }
   if (e && 'detail' in e && /** @type {MouseEvent} */ (e).detail === 2) {
     toggleTerminalLeg()
@@ -935,40 +935,34 @@ watch(compassModeActive, (active) => {
       class="trailer-loc-terminal-card"
       :class="{ 'is-toggleable': canToggleTerminalLeg }"
       role="region"
-      :aria-label="`Trip terminal — ${terminalCardDisplay.legLabel}`"
+      :aria-label="`${terminalCardDisplay.legLabel}: ${terminalCardDisplay.locationId}, ${terminalCardDisplay.name}`"
       :title="
         canToggleTerminalLeg
-          ? 'Double-tap or double-click to switch origin / destination'
+          ? `${terminalCardDisplay.legLabel} — double-tap to switch origin / destination`
           : undefined
       "
       @click="onTerminalPairTap($event)"
     >
-      <div class="trailer-loc-terminal-main">
-        <div class="trailer-loc-terminal-inline">
-          <span class="trailer-loc-terminal-w">{{ terminalCardDisplay.legLabel }}</span>
-          <span class="trailer-loc-terminal-name">{{ terminalCardDisplay.name }}</span>
-          <span class="trailer-loc-terminal-sep" aria-hidden="true">·</span>
-          <span class="trailer-loc-terminal-id">ID {{ terminalCardDisplay.locationId }}</span>
-          <span class="trailer-loc-terminal-sep" aria-hidden="true">·</span>
-          <span
-            class="trailer-loc-terminal-phone"
-            :title="terminalCardDisplay.phoneDisplay || undefined"
-          >{{ terminalCardDisplay.phoneDisplay || '—' }}</span>
-        </div>
-        <div class="trailer-loc-terminal-actions">
-          <span v-if="terminalCardDisplay.loading" class="trailer-loc-terminal-loading-inline"
-            >Loading…</span
-          >
-          <a
-            v-if="terminalCardDisplay.telHref"
-            :href="terminalCardDisplay.telHref"
-            class="trailer-loc-call-btn tap"
-            rel="noopener"
-            @click.stop
-            @dblclick.stop
-          >Call</a>
-        </div>
+      <div class="trailer-loc-terminal-text">
+        <p class="trailer-loc-terminal-id-name">
+          {{ terminalCardDisplay.locationId }} - {{ terminalCardDisplay.name }}
+        </p>
+        <p
+          class="trailer-loc-terminal-phone-line"
+          :title="terminalCardDisplay.phoneDisplay || undefined"
+        >
+          <template v-if="terminalCardDisplay.loading">Loading…</template>
+          <template v-else>{{ terminalCardDisplay.phoneDisplay || '—' }}</template>
+        </p>
       </div>
+      <a
+        v-if="terminalCardDisplay.telHref"
+        :href="terminalCardDisplay.telHref"
+        class="trailer-loc-call-btn-full tap"
+        rel="noopener"
+        @click.stop
+        @dblclick.stop
+      >Call</a>
     </div>
     <p
       v-if="userLocationPending && !hasUserFix"
@@ -1029,15 +1023,14 @@ watch(compassModeActive, (active) => {
   bottom: 0;
   left: auto;
   box-sizing: border-box;
-  width: calc(100% - 11.25rem);
-  min-width: 14rem;
-  min-height: 3.85rem;
   display: flex;
-  flex-direction: column;
-  justify-content: center;
-  padding: 0.4rem 0 max(0.5rem, env(safe-area-inset-bottom, 0px))
-    max(0.55rem, env(safe-area-inset-right, 0px));
-  padding-left: 0.65rem;
+  flex-direction: row;
+  align-items: stretch;
+  width: auto;
+  max-width: min(15.5rem, calc(100% - 9.5rem));
+  min-height: 3.85rem;
+  padding: 0;
+  padding-bottom: max(0, env(safe-area-inset-bottom, 0px));
   border-radius: 0.5rem 0 0 0;
   background: linear-gradient(165deg, #1a1a24 0%, #12121a 100%);
   background-color: rgba(18, 18, 26, 0.96);
@@ -1050,6 +1043,7 @@ watch(compassModeActive, (active) => {
     0 -2px 18px rgba(0, 0, 0, 0.35),
     inset 0 1px 0 rgba(255, 255, 255, 0.06);
   pointer-events: auto;
+  overflow: hidden;
 }
 
 .trailer-loc-terminal-card.is-toggleable {
@@ -1057,104 +1051,63 @@ watch(compassModeActive, (active) => {
 }
 
 .trailer-loc-root:not(.has-trailer-ledger) .trailer-loc-terminal-card {
-  width: min(40rem, calc(100% - 0.75rem));
+  max-width: min(16rem, calc(100% - 1rem));
 }
 
-.trailer-loc-terminal-main {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.5rem;
-  min-height: 2.95rem;
-}
-
-.trailer-loc-terminal-inline {
-  display: flex;
-  align-items: baseline;
-  flex-wrap: nowrap;
-  gap: 0.3rem;
-  min-width: 0;
+.trailer-loc-terminal-text {
   flex: 1 1 auto;
-  font-size: 0.75rem;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 0.15rem;
+  padding: 0.35rem 0.5rem 0.4rem 0.55rem;
+}
+
+.trailer-loc-terminal-id-name {
+  margin: 0;
+  font-size: 0.72rem;
+  font-weight: 800;
   line-height: 1.2;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.trailer-loc-terminal-w {
-  flex-shrink: 0;
-  font-size: 0.5625rem;
-  font-weight: 800;
-  letter-spacing: 0.07em;
-  text-transform: uppercase;
-  color: rgba(196, 181, 253, 0.95);
-}
-
-.trailer-loc-terminal-name {
-  flex-shrink: 0;
-  font-weight: 800;
   color: #f8fafc;
-  max-width: 38%;
   overflow: hidden;
   text-overflow: ellipsis;
-}
-
-.trailer-loc-terminal-sep {
-  flex-shrink: 0;
-  color: rgba(148, 163, 184, 0.65);
-  font-weight: 700;
-}
-
-.trailer-loc-terminal-id {
-  flex-shrink: 0;
-  font-weight: 700;
-  font-variant-numeric: tabular-nums;
-  color: rgba(226, 232, 240, 0.78);
-}
-
-.trailer-loc-terminal-phone {
-  flex: 1 1 auto;
-  min-width: 0;
-  font-weight: 700;
-  font-variant-numeric: tabular-nums;
-  color: #e2e8f0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.trailer-loc-terminal-actions {
-  display: flex;
-  align-items: center;
-  gap: 0.4rem;
-  flex-shrink: 0;
-}
-
-.trailer-loc-terminal-loading-inline {
-  font-size: 0.625rem;
-  font-weight: 700;
-  color: rgba(148, 163, 184, 0.95);
   white-space: nowrap;
 }
 
-.trailer-loc-call-btn {
-  display: inline-flex;
+.trailer-loc-terminal-phone-line {
+  margin: 0;
+  font-size: 0.65rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.2;
+  color: rgba(226, 232, 240, 0.88);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.trailer-loc-call-btn-full {
+  display: flex;
   align-items: center;
   justify-content: center;
-  padding: 0.3rem 0.55rem;
+  align-self: stretch;
+  flex: 0 0 auto;
+  min-width: 2.85rem;
+  padding: 0 0.5rem;
   font-size: 0.625rem;
   font-weight: 800;
-  letter-spacing: 0.05em;
+  letter-spacing: 0.06em;
   text-transform: uppercase;
   text-decoration: none;
   color: #0f172a;
-  background: linear-gradient(145deg, #4ade80, #22c55e);
-  border: 1px solid rgba(34, 197, 94, 0.65);
-  border-radius: var(--radius-md, 0.5rem);
-  box-shadow: 0 1px 4px rgba(34, 197, 94, 0.35);
+  background: linear-gradient(180deg, #4ade80, #22c55e);
+  border: none;
+  border-left: 1px solid rgba(15, 23, 42, 0.2);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.2);
 }
 
-.trailer-loc-call-btn:hover {
+.trailer-loc-call-btn-full:hover {
   filter: brightness(1.06);
 }
 
@@ -1181,7 +1134,7 @@ watch(compassModeActive, (active) => {
   right: auto;
   left: 50%;
   transform: translateX(-50%);
-  max-width: min(20rem, calc(100% - 12rem));
+  max-width: min(20rem, calc(100% - 10rem));
 }
 
 .trailer-loc-root.has-trailer-ledger .trailer-loc-hint {
@@ -1200,7 +1153,7 @@ watch(compassModeActive, (active) => {
   display: flex;
   flex-direction: row;
   gap: 0;
-  max-width: calc(100% - 11.5rem);
+  max-width: calc(100% - 9.25rem);
 }
 
 .trailer-loc-root:not(.has-terminal-card) .trailer-loc-big-nums {
