@@ -211,6 +211,11 @@ let previewPollTimer = null
 let linehaulPollTimer = null
 const lastPreviewBusy = ref(false)
 
+/** Home: while automation preview is active, only the preview is shown (centered); other cards unmount. */
+const showAutomationPreviewFocus = computed(
+  () => lastPreviewBusy.value && !automationPreviewHidden.value,
+)
+
 const quickActionAutomations = ref([])
 const runningAutomationId = ref(null)
 
@@ -1881,7 +1886,7 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div class="main">
+  <div class="main" :class="{ 'main--automation-preview': showAutomationPreviewFocus }">
     <p v-if="copyToast" class="copy-toast" role="status" aria-live="polite">{{ copyToast }}</p>
     <Teleport to="body">
       <div
@@ -2210,29 +2215,35 @@ onUnmounted(() => {
     <p v-if="loadError" class="err">{{ loadError }}</p>
     <p v-if="runMsg" class="msg">{{ runMsg }}</p>
 
-    <section
-      v-if="lastPreviewBusy && !automationPreviewHidden"
-      class="panel preview-panel"
-      aria-label="Browser automation preview"
+    <div
+      v-if="showAutomationPreviewFocus"
+      class="automation-preview-host"
+      aria-live="polite"
     >
-      <button
-        type="button"
-        class="preview-close tap"
-        aria-label="Stop automation and close preview"
-        @click="dismissAutomationPreview"
+      <section
+        class="panel preview-panel"
+        aria-label="Browser automation preview"
       >
-        ×
-      </button>
-      <div v-if="automationPreview" class="preview-frame">
-        <img
-          :src="automationPreview.src"
-          alt=""
-          class="preview-img"
-        />
-      </div>
-      <div v-else class="preview-frame preview-frame-empty" aria-hidden="true" />
-    </section>
+        <button
+          type="button"
+          class="preview-close tap"
+          aria-label="Stop automation and close preview"
+          @click="dismissAutomationPreview"
+        >
+          ×
+        </button>
+        <div v-if="automationPreview" class="preview-frame">
+          <img
+            :src="automationPreview.src"
+            alt=""
+            class="preview-img"
+          />
+        </div>
+        <div v-else class="preview-frame preview-frame-empty" aria-hidden="true" />
+      </section>
+    </div>
 
+    <template v-if="!showAutomationPreviewFocus">
     <section class="panel driver-status-panel">
       <div class="driver-status-card-head">
         <h2 class="driver-status-heading">Driver Status</h2>
@@ -2909,6 +2920,7 @@ onUnmounted(() => {
         </button>
       </div>
     </section>
+    </template>
   </div>
 </template>
 
@@ -2919,6 +2931,23 @@ onUnmounted(() => {
   flex-direction: column;
   gap: var(--space-4, 1rem);
   position: relative;
+}
+
+.main--automation-preview {
+  flex: 1 1 auto;
+  min-height: 0;
+  justify-content: center;
+}
+
+.automation-preview-host {
+  box-sizing: border-box;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: clamp(0.5rem, 2vw, 1.25rem) 0;
+  min-height: min(78dvh, 42rem);
 }
 
 .copy-toast {
@@ -4337,6 +4366,9 @@ button.trailer-nbr.copyable-inline {
 .preview-panel {
   position: relative;
   padding-top: 2.5rem;
+  width: 100%;
+  max-width: min(40rem, 100%);
+  margin-inline: auto;
 }
 .preview-close {
   position: absolute;
@@ -4372,7 +4404,7 @@ button.trailer-nbr.copyable-inline {
   display: block;
   max-height: min(55vh, 520px);
   object-fit: contain;
-  object-position: top center;
+  object-position: center center;
 }
 .quick-actions-grid {
   display: flex;
