@@ -248,7 +248,7 @@ async function runDirectoryGeocodeBackfill() {
     for (let i = 0; i < 200 && rem > 0; i++) {
       const r = await postDirectoryGeocodeMissing({
         max: GEOCODE_HTTP_BATCH,
-        delayMs: 1000,
+        delayMs: 900,
       })
       rem = typeof r.remaining === 'number' ? r.remaining : 0
       if (typeof r.missingBefore === 'number' && r.missingBefore > 0) {
@@ -271,8 +271,12 @@ async function runDirectoryGeocodeBackfill() {
   }
 }
 
-async function loadDirectory() {
-  loading.value = true
+/**
+ * @param {{ silent?: boolean }} [opts] When `silent` (e.g. auto-refresh poll), skip the loading flag so actions stay enabled.
+ */
+async function loadDirectory(opts = {}) {
+  const silent = opts.silent === true
+  if (!silent) loading.value = true
   error.value = ''
   try {
     const res = await fetchDirectory()
@@ -281,7 +285,7 @@ async function loadDirectory() {
   } catch (e) {
     error.value = e instanceof Error ? e.message : String(e)
   } finally {
-    loading.value = false
+    if (!silent) loading.value = false
   }
   if (!error.value) {
     void runDirectoryGeocodeBackfill()
@@ -690,7 +694,7 @@ onMounted(() => {
     loadFedexLogoForVcard()
   })()
   directoryPollTimer = setInterval(() => {
-    void loadDirectory()
+    void loadDirectory({ silent: true })
   }, DIRECTORY_POLL_MS)
 })
 
@@ -723,7 +727,7 @@ onUnmounted(() => {
       </div>
 
       <div
-        v-if="showMapGeocodeProgress"
+        v-if="showMapGeocodeProgress && !isLandscapeSplit"
         class="map-no-coords-notice map-geocode-progress"
         role="status"
         aria-live="polite"
@@ -756,7 +760,7 @@ onUnmounted(() => {
       </div>
 
       <div
-        v-else-if="showMapNoCoordsNotice"
+        v-else-if="showMapNoCoordsNotice && !isLandscapeSplit"
         class="map-no-coords-notice"
         role="status"
       >
@@ -780,6 +784,14 @@ onUnmounted(() => {
           save coordinates to the directory.
         </p>
       </div>
+
+      <p
+        v-else-if="showMapNoCoordsNotice && isLandscapeSplit"
+        class="map-split-map-hint"
+        role="status"
+      >
+        No map pins yet — addresses are being resolved or open Destination from a trip to save coordinates.
+      </p>
     </div>
 
     <div class="directory-list-column" :class="{ 'is-scroll-pane': isLandscapeSplit }">
@@ -1222,11 +1234,12 @@ onUnmounted(() => {
   padding-right: max(env(safe-area-inset-right, 0px), var(--space-2, 0.5rem));
 }
 
-/* Landscape + wide: map left (fixed pane), list scrolls right */
+/* Landscape + wide: map left (most width), list scrolls right — grid keeps map from being squeezed by list content */
 .directory-view.is-split {
   flex: 1;
   min-height: 0;
-  flex-direction: row;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(280px, min(42vw, 28rem));
   align-items: stretch;
   padding-bottom: calc(var(--nav-height, 4rem) + env(safe-area-inset-bottom, 0));
   padding-left: 0;
@@ -1241,7 +1254,6 @@ onUnmounted(() => {
 }
 
 .directory-view.is-split .directory-map-column {
-  flex: 1.35 1 0;
   min-width: 0;
   border-right: 1px solid var(--color-border, rgba(255, 255, 255, 0.08));
 }
@@ -1263,6 +1275,10 @@ onUnmounted(() => {
   min-height: 0;
   display: flex;
   flex-direction: column;
+}
+
+.directory-view.is-split .directory-list-column {
+  overflow-x: hidden;
 }
 
 .directory-list-inner {
@@ -1557,6 +1573,18 @@ onUnmounted(() => {
 .directory-view.is-split .map-no-coords-notice {
   margin: 0 var(--space-2, 0.5rem) var(--space-2, 0.5rem);
   flex-shrink: 0;
+}
+
+.map-split-map-hint {
+  margin: 0 var(--space-2, 0.5rem) var(--space-2, 0.5rem);
+  padding: var(--space-2, 0.5rem) var(--space-3, 0.75rem);
+  flex-shrink: 0;
+  font-size: var(--text-xs, 0.6875rem);
+  line-height: var(--leading-snug, 1.375);
+  color: var(--color-text-tertiary, #6e6e7e);
+  border-radius: var(--radius-md, 0.5rem);
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--color-border, rgba(255, 255, 255, 0.08));
 }
 
 .map-no-coords-icon {
