@@ -4511,7 +4511,13 @@ button.trailer-nbr.copyable-inline {
   }
 
   .driver-status-cards {
-    grid-template-columns: 1fr;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .driver-status-cards .linehaul-dl-row {
+    font-size: clamp(0.6rem, 1.4vw, 0.75rem);
+  }
+  .driver-status-cards .linehaul-dl-row dt {
+    font-size: clamp(0.52rem, 1vw, 0.65rem);
   }
 
   .quick-actions-grid {
@@ -4520,6 +4526,7 @@ button.trailer-nbr.copyable-inline {
     gap: 0.5rem;
   }
   .quick-action-btn {
+    width: 100%;
     min-height: 2.5rem;
     padding: 0.5rem 0.75rem;
     font-size: 0.85rem;
@@ -4528,18 +4535,8 @@ button.trailer-nbr.copyable-inline {
 
 @media (orientation: landscape) and (min-width: 1100px) {
   .main {
-    grid-template-columns: minmax(16rem, 1fr) minmax(0, 2.2fr);
+    grid-template-columns: minmax(18rem, 1fr) minmax(0, 2.2fr);
     gap: var(--space-4, 1rem);
-  }
-
-  .driver-status-cards {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
-  .quick-actions-grid {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 0.5rem;
   }
 }
 
