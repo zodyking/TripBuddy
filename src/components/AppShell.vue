@@ -259,11 +259,13 @@ onUnmounted(() => {
 
 <style scoped>
 .app-shell {
-  height: 100vh;
-  height: 100dvh;
+  flex: 1 1 auto;
+  min-height: 0;
+  width: 100%;
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  overscroll-behavior: none;
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
@@ -563,7 +565,8 @@ onUnmounted(() => {
   min-height: 0;
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
-  overscroll-behavior-y: contain;
+  /* Block scroll chaining to the pinned #app shell (avoids “whole app” drag). */
+  overscroll-behavior: contain;
   display: flex;
   flex-direction: column;
 }
@@ -657,6 +660,8 @@ onUnmounted(() => {
   border-top: 1px solid var(--color-border, rgba(255, 255, 255, 0.08));
   box-shadow: 0 -4px 24px rgba(0, 0, 0, 0.35);
   padding-bottom: env(safe-area-inset-bottom, 0);
+  overscroll-behavior: none;
+  touch-action: manipulation;
 }
 
 .nav-item {

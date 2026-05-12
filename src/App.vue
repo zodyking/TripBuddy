@@ -251,8 +251,6 @@ onMounted(() => {
 
 html {
   height: 100%;
-  height: 100dvh;
-  max-height: 100dvh;
   overflow: hidden;
   overscroll-behavior: none;
   -webkit-tap-highlight-color: transparent;
@@ -262,20 +260,31 @@ html {
 body {
   margin: 0;
   height: 100%;
-  height: 100dvh;
-  max-height: 100dvh;
   overflow: hidden;
   overscroll-behavior: none;
   background: var(--color-bg-base);
 }
 
+/*
+ * Pin the Vue root to the layout viewport so mobile Safari cannot vertically
+ * rubber-band the whole page (which makes the bottom nav appear to “scroll”).
+ * Routed views fill this box via flex; inner panes keep their own overflow.
+ */
 #app {
-  height: 100%;
+  position: fixed;
+  inset: 0;
+  width: 100%;
   min-height: 0;
-  max-height: 100dvh;
   overflow: hidden;
+  overscroll-behavior: none;
   display: flex;
   flex-direction: column;
+}
+
+#app > * {
+  flex: 1 1 auto;
+  min-height: 0;
+  min-width: 0;
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
