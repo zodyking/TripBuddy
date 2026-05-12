@@ -143,7 +143,7 @@ export async function geocodeDirectoryLocationById(locationId) {
 
 /**
  * Geocode up to `max` locations that have an address but no coordinates.
- * Waits `delayMs` between Nominatim calls (usage policy: ~1 req/s per deployment).
+ * Waits `delayMs` between addresses (in addition to per-provider rate limits inside forward geocode).
  * @param {{ max?: number, delayMs?: number }} [opts]
  */
 async function geocodeMissingDirectoryLocationsImpl(opts = {}) {

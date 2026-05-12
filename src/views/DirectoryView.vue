@@ -830,58 +830,64 @@ onUnmounted(() => {
         :class="{ 'is-scroll-pane': isLandscapeSplit }"
       >
         <header class="directory-list-heading">
-          <div class="directory-heading-text">
-            <h1 class="directory-title">Directory</h1>
-            <p class="directory-subtitle">Updates automatically</p>
-            <div
-              v-if="showDirectoryGeocodeBanner"
-              class="directory-geocode-banner"
-              role="status"
-              aria-live="polite"
-            >
-              <span class="directory-geocode-banner-dot" aria-hidden="true" />
-              <span class="directory-geocode-banner-text">
-                <template v-if="geocodeInitialMissing > 0">
-                  Geocoding: {{ geocodeMappedCount }} / {{ geocodeInitialMissing }} saved —
-                  {{ serverGeocodeRemaining }} queued
-                </template>
-                <template v-else> Geocoding addresses… </template>
-              </span>
+          <div class="directory-list-heading-top">
+            <div class="directory-heading-text">
+              <h1 class="directory-title">Directory</h1>
+              <p class="directory-subtitle">Updates automatically</p>
             </div>
-          </div>
-          <div class="directory-header-actions">
-            <button
-              type="button"
-              class="directory-add-btn tap"
-              title="Manually add a location by ID and phone"
-              @click="openAddLocationModal"
-            >
-              + Add
-            </button>
-            <div v-if="locations.length" class="vcard-dropdown-wrap">
+            <div class="directory-header-actions">
               <button
                 type="button"
-                class="directory-vcard-btn tap"
-                :disabled="loading"
-                title="Download contacts as .vcf file"
-                @click="vcardDropdownOpen = !vcardDropdownOpen"
+                class="directory-add-btn tap"
+                title="Manually add a location by ID and phone"
+                @click="openAddLocationModal"
               >
-                Download contacts
-                <svg class="vcard-dropdown-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                  <polyline points="6 9 12 15 18 9" />
-                </svg>
+                + Add
               </button>
-              <div v-if="vcardDropdownOpen" class="vcard-dropdown-menu">
-                <button type="button" class="vcard-dropdown-item tap" @click="downloadDirectoryVcard('ny-metro')">
-                  New York Metro only
+              <div v-if="locations.length" class="vcard-dropdown-wrap">
+                <button
+                  type="button"
+                  class="directory-vcard-btn tap"
+                  :disabled="loading"
+                  title="Download contacts as .vcf file"
+                  @click="vcardDropdownOpen = !vcardDropdownOpen"
+                >
+                  Download contacts
+                  <svg class="vcard-dropdown-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <polyline points="6 9 12 15 18 9" />
+                  </svg>
                 </button>
-                <button type="button" class="vcard-dropdown-item tap" @click="downloadDirectoryVcard('ny-metro-northeast')">
-                  NY Metro + Northeast
-                </button>
-                <button type="button" class="vcard-dropdown-item tap" @click="downloadDirectoryVcard('all')">
-                  All locations
-                </button>
+                <div v-if="vcardDropdownOpen" class="vcard-dropdown-menu">
+                  <button type="button" class="vcard-dropdown-item tap" @click="downloadDirectoryVcard('ny-metro')">
+                    New York Metro only
+                  </button>
+                  <button type="button" class="vcard-dropdown-item tap" @click="downloadDirectoryVcard('ny-metro-northeast')">
+                    NY Metro + Northeast
+                  </button>
+                  <button type="button" class="vcard-dropdown-item tap" @click="downloadDirectoryVcard('all')">
+                    All locations
+                  </button>
+                </div>
               </div>
+            </div>
+          </div>
+          <div
+            v-if="showDirectoryGeocodeBanner"
+            class="directory-geocode-banner"
+            role="status"
+            aria-live="polite"
+          >
+            <span class="directory-geocode-banner-dot" aria-hidden="true" />
+            <div class="directory-geocode-banner-body">
+              <p v-if="geocodeInitialMissing > 0" class="directory-geocode-banner-line directory-geocode-banner-line--primary">
+                Geocoding: {{ geocodeMappedCount }} / {{ geocodeInitialMissing }} saved
+              </p>
+              <p v-if="geocodeInitialMissing > 0" class="directory-geocode-banner-line directory-geocode-banner-line--secondary">
+                {{ serverGeocodeRemaining }} still in queue — each address is tried against several free geocoders on the server.
+              </p>
+              <p v-else class="directory-geocode-banner-line directory-geocode-banner-line--primary">
+                Resolving addresses on the server…
+              </p>
             </div>
           </div>
         </header>
@@ -1332,15 +1338,23 @@ onUnmounted(() => {
 
 .directory-list-heading {
   display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
+  flex-direction: column;
+  align-items: stretch;
   gap: var(--space-3, 0.75rem);
   margin-bottom: var(--space-4, 1rem);
   flex-shrink: 0;
 }
 
+.directory-list-heading-top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-3, 0.75rem);
+}
+
 .directory-heading-text {
   min-width: 0;
+  flex: 1;
 }
 
 .directory-vcard-btn {
@@ -1542,13 +1556,43 @@ onUnmounted(() => {
 
 .directory-geocode-banner {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: var(--space-2, 0.5rem);
-  margin-top: var(--space-2, 0.5rem);
-  padding: var(--space-2, 0.5rem) var(--space-3, 0.75rem);
-  border-radius: var(--radius-md, 0.5rem);
+  width: 100%;
+  box-sizing: border-box;
+  margin: 0;
+  padding: var(--space-3, 0.75rem) var(--space-4, 1rem);
+  border-radius: var(--radius-lg, 0.75rem);
   background: rgba(123, 77, 181, 0.12);
   border: 1px solid rgba(123, 77, 181, 0.35);
+}
+
+.directory-geocode-banner-body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+
+.directory-geocode-banner-line {
+  margin: 0;
+  line-height: var(--leading-snug, 1.375);
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.directory-geocode-banner-line--primary {
+  font-size: var(--text-sm, 0.8125rem);
+  font-weight: var(--weight-semibold, 600);
+  color: var(--color-text-primary, #f4f4f8);
+}
+
+.directory-geocode-banner-line--secondary {
+  font-size: var(--text-xs, 0.6875rem);
+  font-weight: var(--weight-medium, 500);
+  color: var(--color-text-secondary, #a0a0b0);
 }
 
 .directory-geocode-banner-dot {
@@ -1576,13 +1620,6 @@ onUnmounted(() => {
     opacity: 1;
     transform: scale(1.15);
   }
-}
-
-.directory-geocode-banner-text {
-  font-size: var(--text-xs, 0.6875rem);
-  font-weight: var(--weight-medium, 500);
-  color: var(--color-text-secondary, #a0a0b0);
-  line-height: var(--leading-snug, 1.375);
 }
 
 .directory-view.is-split .directory-title {

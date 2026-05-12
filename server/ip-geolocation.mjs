@@ -77,12 +77,6 @@ function normalizeForwardGeocodeKey(q) {
 }
 
 /**
- * Forward geocode (address → lat/lng) via Nominatim (OSM).
- * Respects usage policy: callers should not exceed ~1 request/sec per deployment.
- * @param {string} query
- * @returns {Promise<{ lat: number, lng: number } | null>}
- */
-/**
  * Normalize FedEx-style addresses for Nominatim:
  * - Pad short ZIP codes (e.g. "1022" → "01022")
  * - Append ", USA" if it looks like a US address
@@ -104,12 +98,15 @@ const NOMINATIM_USER_AGENT =
   (process.env.NOMINATIM_USER_AGENT || '').trim() ||
   'FedExTool/1.0 (https://github.com/zodyking/TripBuddy; directory geocode)'
 const NOMINATIM_EMAIL = (process.env.NOMINATIM_CONTACT_EMAIL || '').trim()
-const NOMINATIM_MIN_INTERVAL_MS = Math.max(
+const FORWARD_GEOCODE_MIN_INTERVAL_MS = Math.max(
   800,
-  Math.floor(Number(process.env.NOMINATIM_MIN_INTERVAL_MS) || 1100),
+  Math.floor(
+    Number(process.env.FORWARD_GEOCODE_MIN_INTERVAL_MS || process.env.NOMINATIM_MIN_INTERVAL_MS) ||
+      1100,
+  ),
 )
 
-let nextNominatimSlot = 0
+let nextForwardGeocodeSlot = 0
 let warnedMissingEmail = false
 
 /**
@@ -125,14 +122,14 @@ async function sleep(ms) {
   await new Promise((r) => setTimeout(r, ms))
 }
 
-async function waitForNominatimSlot() {
+async function waitForwardGeocodeSlot() {
   const now = Date.now()
-  const wait = Math.max(0, nextNominatimSlot - now)
+  const wait = Math.max(0, nextForwardGeocodeSlot - now)
   if (wait > 0) await sleep(wait)
 }
 
-function markNominatimRequestDone() {
-  nextNominatimSlot = Date.now() + NOMINATIM_MIN_INTERVAL_MS
+function markForwardGeocodeRequestDone() {
+  nextForwardGeocodeSlot = Date.now() + FORWARD_GEOCODE_MIN_INTERVAL_MS
 }
 
 /**
@@ -150,7 +147,7 @@ async function nominatimGetJson(url, kind) {
   }
 
   for (let attempt = 0; attempt < 5; attempt++) {
-    await waitForNominatimSlot()
+    await waitForwardGeocodeSlot()
     try {
       const res = await fetch(url, {
         headers: {
@@ -160,7 +157,7 @@ async function nominatimGetJson(url, kind) {
         },
         signal: AbortSignal.timeout(18_000),
       })
-      markNominatimRequestDone()
+      markForwardGeocodeRequestDone()
 
       if (res.status === 429 || res.status === 503) {
         const ra = res.headers.get('retry-after')
@@ -184,7 +181,7 @@ async function nominatimGetJson(url, kind) {
 
       return await res.json()
     } catch (e) {
-      markNominatimRequestDone()
+      markForwardGeocodeRequestDone()
       const msg = e instanceof Error ? e.message : String(e)
       emitLog('warn', `[nominatim] ${kind} fetch error: ${msg}`)
       await sleep(1500 * (attempt + 1))
@@ -213,6 +210,90 @@ function rowToLatLng(row) {
   return { lat, lng }
 }
 
+/**
+ * Photon (Komoot) — OSM-backed, no API key.
+ * @param {string} q
+ * @returns {Promise<{ lat: number, lng: number } | null>}
+ */
+function coordsFromPhotonFeature(f) {
+  if (!f || typeof f !== 'object') return null
+  const geom = /** @type {{ coordinates?: unknown }} */ (f).geometry
+  if (!geom || typeof geom !== 'object') return null
+  const c = geom.coordinates
+  if (!Array.isArray(c) || c.length < 2) return null
+  const lng = Number(c[0])
+  const lat = Number(c[1])
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null
+  return { lat, lng }
+}
+
+async function forwardGeocodePhoton(q) {
+  const s = String(q ?? '').trim()
+  if (s.length < 4) return null
+  await waitForwardGeocodeSlot()
+  try {
+    const url = `https://photon.komoot.io/api/?q=${encodeURIComponent(s.slice(0, 500))}&limit=1&lang=en&bbox=-125,24,-66,50`
+    const res = await fetch(url, {
+      headers: {
+        Accept: 'application/json',
+        'User-Agent': NOMINATIM_USER_AGENT,
+      },
+      signal: AbortSignal.timeout(18_000),
+    })
+    markForwardGeocodeRequestDone()
+    if (!res.ok) return null
+    const data = await res.json()
+    const feat = Array.isArray(data.features) && data.features[0] ? data.features[0] : null
+    return coordsFromPhotonFeature(feat)
+  } catch {
+    markForwardGeocodeRequestDone()
+    return null
+  }
+}
+
+/**
+ * Open-Meteo geocoding — free, no key (non-commercial use per their terms).
+ * @param {string} q
+ * @returns {Promise<{ lat: number, lng: number } | null>}
+ */
+async function forwardGeocodeOpenMeteo(q) {
+  const s = String(q ?? '').trim()
+  if (s.length < 4) return null
+  await waitForwardGeocodeSlot()
+  try {
+    const url = `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(s.slice(0, 256))}&count=8&language=en&format=json`
+    const res = await fetch(url, {
+      headers: {
+        Accept: 'application/json',
+        'User-Agent': NOMINATIM_USER_AGENT,
+      },
+      signal: AbortSignal.timeout(18_000),
+    })
+    markForwardGeocodeRequestDone()
+    if (!res.ok) return null
+    const data = await res.json()
+    const results = Array.isArray(data.results) ? data.results : []
+    for (const r of results) {
+      if (!r || typeof r !== 'object') continue
+      const lat = Number(r.latitude)
+      const lng = Number(r.longitude)
+      if (Number.isFinite(lat) && Number.isFinite(lng)) {
+        return { lat, lng }
+      }
+    }
+    return null
+  } catch {
+    markForwardGeocodeRequestDone()
+    return null
+  }
+}
+
+/**
+ * Forward geocode (address → lat/lng): OpenStreetMap Nominatim, then Photon, then Open-Meteo.
+ * All are free with no API key; a shared min interval applies across providers.
+ * @param {string} query
+ * @returns {Promise<{ lat: number, lng: number } | null>}
+ */
 export async function forwardGeocodeNominatim(query) {
   const raw = String(query ?? '').trim()
   if (raw.length < 6) return null
@@ -229,12 +310,26 @@ export async function forwardGeocodeNominatim(query) {
     let data = await nominatimSearch(prepared)
     let row = data && data.length > 0 ? data[0] : null
     let coords = rowToLatLng(row)
+
     if (!coords && prepared !== raw) {
-      await sleep(NOMINATIM_MIN_INTERVAL_MS)
       data = await nominatimSearch(raw)
       row = data && data.length > 0 ? data[0] : null
       coords = rowToLatLng(row)
     }
+
+    if (!coords) {
+      coords = await forwardGeocodePhoton(prepared)
+    }
+    if (!coords && prepared !== raw) {
+      coords = await forwardGeocodePhoton(raw)
+    }
+    if (!coords) {
+      coords = await forwardGeocodeOpenMeteo(prepared)
+    }
+    if (!coords && prepared !== raw) {
+      coords = await forwardGeocodeOpenMeteo(raw)
+    }
+
     if (!coords) return null
     forwardGeocodeCache.set(key, { lat: coords.lat, lng: coords.lng, at: now })
     return coords
