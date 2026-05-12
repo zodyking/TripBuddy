@@ -271,8 +271,10 @@ function trailerTopDivIcon(rasterHref, vw, imgH, trailerNumber = '', pulseClass 
  * @param {{ pulseHeavy?: boolean }} [opts]
  */
 export function trailer20ftTopIcon(trailerNumber = '', opts = {}) {
-  const pulse = opts.pulseHeavy ? 'map-marker-trailer-pulse-heavy' : ''
-  return trailerTopDivIcon(trailer20ftTopImg, TRAILER_20_IMG_W, TRAILER_20_IMG_H, trailerNumber, pulse)
+  const pulseClass = opts.pulseHeavy
+    ? 'map-marker-trailer-pulse-heavy'
+    : 'map-marker-trailer-pulse-light'
+  return trailerTopDivIcon(trailer20ftTopImg, TRAILER_20_IMG_W, TRAILER_20_IMG_H, trailerNumber, pulseClass)
 }
 
 /**
@@ -281,8 +283,10 @@ export function trailer20ftTopIcon(trailerNumber = '', opts = {}) {
  * @param {{ pulseHeavy?: boolean }} [opts]
  */
 export function trailer53ftTopIcon(trailerNumber = '', opts = {}) {
-  const pulse = opts.pulseHeavy ? 'map-marker-trailer-pulse-heavy' : ''
-  return trailerTopDivIcon(trailer53ftTopImg, TRAILER_53_IMG_W, TRAILER_53_IMG_H, trailerNumber, pulse)
+  const pulseClass = opts.pulseHeavy
+    ? 'map-marker-trailer-pulse-heavy'
+    : 'map-marker-trailer-pulse-light'
+  return trailerTopDivIcon(trailer53ftTopImg, TRAILER_53_IMG_W, TRAILER_53_IMG_H, trailerNumber, pulseClass)
 }
 
 /**
@@ -295,8 +299,8 @@ export function trailer53ftTopIcon(trailerNumber = '', opts = {}) {
 export function trailer20ftTopIconGeoScaled(trailerNumber = '', lat, zoom, opts = {}) {
   const { pulseHeavy, minWidth, maxWidth } = opts
   const { width, height } = getTrailer20ftGeoSize(lat, zoom, { minWidth, maxWidth })
-  const pulse = pulseHeavy ? 'map-marker-trailer-pulse-heavy' : ''
-  return trailerTopDivIcon(trailer20ftTopImg, width, height, trailerNumber, pulse)
+  const pulseClass = pulseHeavy ? 'map-marker-trailer-pulse-heavy' : 'map-marker-trailer-pulse-light'
+  return trailerTopDivIcon(trailer20ftTopImg, width, height, trailerNumber, pulseClass)
 }
 
 /**
@@ -309,8 +313,8 @@ export function trailer20ftTopIconGeoScaled(trailerNumber = '', lat, zoom, opts 
 export function trailer53ftTopIconGeoScaled(trailerNumber = '', lat, zoom, opts = {}) {
   const { pulseHeavy, minWidth, maxWidth } = opts
   const { width, height } = getTrailer53ftGeoSize(lat, zoom, { minWidth, maxWidth })
-  const pulse = pulseHeavy ? 'map-marker-trailer-pulse-heavy' : ''
-  return trailerTopDivIcon(trailer53ftTopImg, width, height, trailerNumber, pulse)
+  const pulseClass = pulseHeavy ? 'map-marker-trailer-pulse-heavy' : 'map-marker-trailer-pulse-light'
+  return trailerTopDivIcon(trailer53ftTopImg, width, height, trailerNumber, pulseClass)
 }
 
 /**

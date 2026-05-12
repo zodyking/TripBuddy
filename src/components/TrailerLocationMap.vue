@@ -850,21 +850,30 @@ watch(compassModeActive, (active) => {
       role="region"
       aria-label="Trip destination terminal"
     >
-      <div class="trailer-loc-terminal-kicker">Destination terminal</div>
-      <div class="trailer-loc-terminal-name">{{ terminalCardDisplay.name }}</div>
-      <div class="trailer-loc-terminal-id">ID {{ terminalCardDisplay.locationId }}</div>
-      <div class="trailer-loc-terminal-phone-row">
-        <span class="trailer-loc-terminal-phone">{{
-          terminalCardDisplay.phoneDisplay || '—'
-        }}</span>
-        <a
-          v-if="terminalCardDisplay.telHref"
-          :href="terminalCardDisplay.telHref"
-          class="trailer-loc-call-btn tap"
-          rel="noopener"
-        >Call</a>
+      <div class="trailer-loc-terminal-main">
+        <div class="trailer-loc-terminal-inline">
+          <span class="trailer-loc-terminal-w">Destination</span>
+          <span class="trailer-loc-terminal-name">{{ terminalCardDisplay.name }}</span>
+          <span class="trailer-loc-terminal-sep" aria-hidden="true">·</span>
+          <span class="trailer-loc-terminal-id">ID {{ terminalCardDisplay.locationId }}</span>
+          <span class="trailer-loc-terminal-sep" aria-hidden="true">·</span>
+          <span
+            class="trailer-loc-terminal-phone"
+            :title="terminalCardDisplay.phoneDisplay || undefined"
+          >{{ terminalCardDisplay.phoneDisplay || '—' }}</span>
+        </div>
+        <div class="trailer-loc-terminal-actions">
+          <span v-if="terminalCardDisplay.loading" class="trailer-loc-terminal-loading-inline"
+            >Loading…</span
+          >
+          <a
+            v-if="terminalCardDisplay.telHref"
+            :href="terminalCardDisplay.telHref"
+            class="trailer-loc-call-btn tap"
+            rel="noopener"
+          >Call</a>
+        </div>
       </div>
-      <p v-if="terminalCardDisplay.loading" class="trailer-loc-terminal-loading">Loading details…</p>
     </div>
     <p
       v-if="userLocationPending && !hasUserFix"
@@ -921,82 +930,122 @@ watch(compassModeActive, (active) => {
 .trailer-loc-terminal-card {
   position: absolute;
   z-index: 1001;
-  right: max(0.45rem, env(safe-area-inset-right, 0px));
-  bottom: max(0.45rem, env(safe-area-inset-bottom, 0px));
-  width: min(12.5rem, calc(100vw - 5rem));
-  min-height: 4.75rem;
-  padding: 0.55rem 0.65rem 0.6rem;
-  border-radius: var(--radius-lg, 0.75rem);
+  right: 0;
+  bottom: 0;
+  left: auto;
+  box-sizing: border-box;
+  width: calc(100% - 11.25rem);
+  min-width: 14rem;
+  min-height: 3.85rem;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  padding: 0.4rem 0 max(0.5rem, env(safe-area-inset-bottom, 0px))
+    max(0.55rem, env(safe-area-inset-right, 0px));
+  padding-left: 0.65rem;
+  border-radius: 0.5rem 0 0 0;
   background: linear-gradient(165deg, #1a1a24 0%, #12121a 100%);
   background-color: rgba(18, 18, 26, 0.96);
   backdrop-filter: blur(14px);
   -webkit-backdrop-filter: blur(14px);
   border: 1px solid rgba(123, 77, 181, 0.55);
+  border-right: none;
+  border-bottom: none;
   box-shadow:
-    0 6px 24px rgba(0, 0, 0, 0.55),
-    0 0 0 1px rgba(0, 0, 0, 0.35),
+    0 -2px 18px rgba(0, 0, 0, 0.35),
     inset 0 1px 0 rgba(255, 255, 255, 0.06);
   pointer-events: auto;
 }
 
-.trailer-loc-terminal-kicker {
-  font-size: 0.5625rem;
-  font-weight: 700;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: rgba(196, 181, 253, 0.95);
-  margin-bottom: 0.2rem;
+.trailer-loc-root:not(.has-trailer-ledger) .trailer-loc-terminal-card {
+  width: min(40rem, calc(100% - 0.75rem));
 }
 
-.trailer-loc-terminal-name {
-  font-size: 0.8125rem;
-  font-weight: 700;
-  line-height: 1.25;
-  color: #f8fafc;
-  margin-bottom: 0.15rem;
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-}
-
-.trailer-loc-terminal-id {
-  font-size: 0.6875rem;
-  font-weight: 600;
-  font-variant-numeric: tabular-nums;
-  color: rgba(226, 232, 240, 0.72);
-  margin-bottom: 0.35rem;
-}
-
-.trailer-loc-terminal-phone-row {
+.trailer-loc-terminal-main {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 0.5rem;
-  min-height: 1.75rem;
+  min-height: 2.95rem;
+}
+
+.trailer-loc-terminal-inline {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: nowrap;
+  gap: 0.3rem;
+  min-width: 0;
+  flex: 1 1 auto;
+  font-size: 0.75rem;
+  line-height: 1.2;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.trailer-loc-terminal-w {
+  flex-shrink: 0;
+  font-size: 0.5625rem;
+  font-weight: 800;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: rgba(196, 181, 253, 0.95);
+}
+
+.trailer-loc-terminal-name {
+  flex-shrink: 0;
+  font-weight: 800;
+  color: #f8fafc;
+  max-width: 38%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.trailer-loc-terminal-sep {
+  flex-shrink: 0;
+  color: rgba(148, 163, 184, 0.65);
+  font-weight: 700;
+}
+
+.trailer-loc-terminal-id {
+  flex-shrink: 0;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: rgba(226, 232, 240, 0.78);
 }
 
 .trailer-loc-terminal-phone {
-  font-size: 0.75rem;
-  font-weight: 600;
+  flex: 1 1 auto;
+  min-width: 0;
+  font-weight: 700;
   font-variant-numeric: tabular-nums;
   color: #e2e8f0;
-  min-width: 0;
-  flex: 1;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.trailer-loc-terminal-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex-shrink: 0;
+}
+
+.trailer-loc-terminal-loading-inline {
+  font-size: 0.625rem;
+  font-weight: 700;
+  color: rgba(148, 163, 184, 0.95);
   white-space: nowrap;
 }
 
 .trailer-loc-call-btn {
-  flex-shrink: 0;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  padding: 0.35rem 0.65rem;
-  font-size: 0.6875rem;
-  font-weight: 700;
-  letter-spacing: 0.04em;
+  padding: 0.3rem 0.55rem;
+  font-size: 0.625rem;
+  font-weight: 800;
+  letter-spacing: 0.05em;
   text-transform: uppercase;
   text-decoration: none;
   color: #0f172a;
@@ -1008,13 +1057,6 @@ watch(compassModeActive, (active) => {
 
 .trailer-loc-call-btn:hover {
   filter: brightness(1.06);
-}
-
-.trailer-loc-terminal-loading {
-  margin: 0.35rem 0 0;
-  font-size: 0.625rem;
-  font-weight: 600;
-  color: rgba(148, 163, 184, 0.95);
 }
 
 .trailer-loc-hint {
@@ -1040,7 +1082,7 @@ watch(compassModeActive, (active) => {
   right: auto;
   left: 50%;
   transform: translateX(-50%);
-  max-width: min(20rem, calc(100% - 13.5rem));
+  max-width: min(20rem, calc(100% - 12rem));
 }
 
 .trailer-loc-root.has-trailer-ledger .trailer-loc-hint {
@@ -1059,7 +1101,7 @@ watch(compassModeActive, (active) => {
   display: flex;
   flex-direction: row;
   gap: 0;
-  max-width: calc(100% - 13rem);
+  max-width: calc(100% - 11.5rem);
 }
 
 .trailer-loc-root:not(.has-terminal-card) .trailer-loc-big-nums {
@@ -1095,64 +1137,34 @@ watch(compassModeActive, (active) => {
 }
 
 .trailer-loc-big-num-row.is-heavy {
-  border-top: 2px solid rgba(248, 113, 113, 0.95);
-  box-shadow:
-    inset 0 0 32px rgba(239, 68, 68, 0.42),
-    inset 0 2px 20px rgba(239, 68, 68, 0.55),
-    0 0 26px rgba(239, 68, 68, 0.65),
-    0 0 52px rgba(239, 68, 68, 0.45),
-    0 0 80px rgba(239, 68, 68, 0.22);
-  animation: heavy-card-pulse 1.5s ease-in-out infinite;
+  border-top: 2px solid rgba(239, 68, 68, 0.7);
+  box-shadow: inset 0 2px 12px rgba(239, 68, 68, 0.2);
+  animation: heavy-card-pulse 1.8s ease-in-out infinite;
 }
 
 .trailer-loc-big-num-row:not(.is-heavy) {
-  border-top: 2px solid rgba(52, 211, 153, 0.9);
-  box-shadow:
-    inset 0 0 32px rgba(34, 197, 94, 0.28),
-    inset 0 2px 20px rgba(34, 197, 94, 0.42),
-    0 0 26px rgba(34, 197, 94, 0.55),
-    0 0 52px rgba(34, 197, 94, 0.38),
-    0 0 80px rgba(34, 197, 94, 0.2);
-  animation: light-card-pulse 1.65s ease-in-out infinite;
+  border-top: 2px solid rgba(34, 197, 94, 0.5);
+  box-shadow: inset 0 2px 12px rgba(34, 197, 94, 0.15);
+  animation: light-card-pulse 2s ease-in-out infinite;
 }
 
 @keyframes heavy-card-pulse {
   0%,
   100% {
-    box-shadow:
-      inset 0 0 32px rgba(239, 68, 68, 0.42),
-      inset 0 2px 20px rgba(239, 68, 68, 0.55),
-      0 0 26px rgba(239, 68, 68, 0.65),
-      0 0 52px rgba(239, 68, 68, 0.45),
-      0 0 80px rgba(239, 68, 68, 0.22);
+    box-shadow: inset 0 2px 12px rgba(239, 68, 68, 0.2);
   }
   50% {
-    box-shadow:
-      inset 0 0 48px rgba(239, 68, 68, 0.62),
-      inset 0 2px 28px rgba(239, 68, 68, 0.75),
-      0 0 38px rgba(239, 68, 68, 0.88),
-      0 0 72px rgba(239, 68, 68, 0.62),
-      0 0 110px rgba(239, 68, 68, 0.38);
+    box-shadow: inset 0 2px 20px rgba(239, 68, 68, 0.4);
   }
 }
 
 @keyframes light-card-pulse {
   0%,
   100% {
-    box-shadow:
-      inset 0 0 32px rgba(34, 197, 94, 0.28),
-      inset 0 2px 20px rgba(34, 197, 94, 0.42),
-      0 0 26px rgba(34, 197, 94, 0.55),
-      0 0 52px rgba(34, 197, 94, 0.38),
-      0 0 80px rgba(34, 197, 94, 0.2);
+    box-shadow: inset 0 2px 12px rgba(34, 197, 94, 0.15);
   }
   50% {
-    box-shadow:
-      inset 0 0 48px rgba(34, 197, 94, 0.45),
-      inset 0 2px 28px rgba(34, 197, 94, 0.58),
-      0 0 38px rgba(52, 211, 153, 0.72),
-      0 0 72px rgba(34, 197, 94, 0.52),
-      0 0 110px rgba(34, 197, 94, 0.32);
+    box-shadow: inset 0 2px 18px rgba(34, 197, 94, 0.3);
   }
 }
 
