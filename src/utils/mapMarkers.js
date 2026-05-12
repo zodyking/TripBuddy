@@ -209,13 +209,21 @@ export function userLocationTruckIcon(vehicleId = '') {
   const raw = String(vehicleId ?? '').trim()
   const showChip = raw !== '' && directoryMarkerIdLabel(raw) !== ''
   const boxH = showChip ? imgH + chipH + gap : imgH
-  return rasterMarkerDivIconBottomChip(
-    userLocationTruckImg,
-    { vw, vh: boxH, chipH },
-    raw,
-    'map-marker-raster-root--user-truck',
-    'map-marker-raster-chip--tractor',
-  )
+  const idRaw = raw ? directoryMarkerIdLabel(raw) : ''
+  const fsPx =
+    idRaw.length === 0 ? 0 : idRaw.length <= 5 ? 7.5 : idRaw.length <= 7 ? 6.5 : 6
+  const chipHtml =
+    idRaw !== ''
+      ? `<div class="map-marker-raster-chip map-marker-raster-chip--tractor" style="font-size:${fsPx}px">${escapeHtmlText(idRaw)}</div>`
+      : ''
+  const html = `<div class="map-marker-raster-root map-marker-raster-root--user-truck" style="width:${vw}px;height:${boxH}px"><img class="map-marker-raster-img" src="${escapeHtmlAttr(userLocationTruckImg)}" alt="" role="presentation" decoding="async" width="${vw}" height="${imgH}"/>${chipHtml}</div>`
+  return L.divIcon({
+    html,
+    className: 'map-marker-raster-div-icon',
+    iconSize: [vw, boxH],
+    iconAnchor: [Math.round(vw / 2), Math.round(imgH / 2)],
+    popupAnchor: [0, -Math.round(imgH / 2)],
+  })
 }
 
 /**
