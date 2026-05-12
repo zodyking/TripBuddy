@@ -4466,6 +4466,60 @@ button.trailer-nbr.copyable-inline {
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
+   LANDSCAPE GRID — wider-than-tall on screens >= 768px wide
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+@media (orientation: landscape) and (min-width: 768px) {
+  .main {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1.6fr);
+    grid-template-rows: auto auto 1fr;
+    grid-template-areas:
+      "status  trip"
+      "actions trip"
+      ".       trip";
+    align-items: start;
+    gap: var(--space-4, 1rem);
+    padding: var(--space-4, 1rem) 0;
+    min-height: calc(100vh - var(--nav-height, 4rem));
+    min-height: calc(100dvh - var(--nav-height, 4rem));
+  }
+
+  .main > .copy-toast { grid-area: 1 / 1 / 2 / 3; }
+  .main > .run-error-banner { grid-area: 1 / 1 / 2 / 3; }
+  .main > .msg,
+  .main > .err { grid-area: 1 / 1 / 2 / 3; }
+  .main > .preview-panel { grid-area: 1 / 1 / 2 / 3; }
+
+  .panel.driver-status-panel {
+    grid-area: status;
+    align-self: start;
+  }
+  .panel.trip-panel {
+    grid-area: trip;
+    align-self: stretch;
+    min-height: 0;
+    overflow-y: auto;
+  }
+  .panel.actions.actions-panel--ruled {
+    grid-area: actions;
+    align-self: start;
+  }
+
+  .quick-actions-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+@media (orientation: landscape) and (min-width: 1100px) {
+  .main {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 2fr);
+    gap: var(--space-5, 1.25rem);
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
    TRAILER CARDS — Enhanced design
    ═══════════════════════════════════════════════════════════════════════════ */
 
