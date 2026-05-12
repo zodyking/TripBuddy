@@ -49,6 +49,17 @@ const props = defineProps({
   userLocationPending: { type: Boolean, default: false },
   userLocationDenied: { type: Boolean, default: false },
   userVehicleId: { type: String, default: '' },
+  /**
+   * Trip destination terminal for overlay card (from Linehaul location + trip id).
+   * @type {import('vue').PropType<{
+   *   locationId: string,
+   *   name: string,
+   *   phoneDisplay?: string,
+   *   telHref?: string,
+   *   loading?: boolean
+   * } | null>}
+   */
+  terminalCard: { type: Object, default: null },
 })
 
 const containerRef = ref(null)
@@ -63,120 +74,6 @@ const {
 } = useCompassOrientation()
 
 const compassModeActive = ref(false)
-
-/** Bottom-left big number: 'trailer' | 'seal' per trailer order */
-const trailerBigNumMode = ref(/** @type {Record<string, 'trailer' | 'seal'>} */ ({}))
-const DOUBLE_TAP_MS = 450
-const SINGLE_COPY_DELAY_MS = 260
-/** @type {Record<string, number>} */
-const bigNumLastTapAt = {}
-/** @type {Record<string, ReturnType<typeof setTimeout>>} */
-const bigNumSingleCopyTimers = {}
-const copyToast = ref('')
-/** @type {ReturnType<typeof setTimeout> | null} */
-let copyToastTimer = null
-
-function clearBigNumSingleCopyTimer(orderKey) {
-  const k = String(orderKey)
-  const t = bigNumSingleCopyTimers[k]
-  if (t) {
-    clearTimeout(t)
-    delete bigNumSingleCopyTimers[k]
-  }
-}
-
-function modeForOrder(orderKey) {
-  return trailerBigNumMode.value[String(orderKey)] === 'seal' ? 'seal' : 'trailer'
-}
-
-/**
- * @param {unknown} lbs
- */
-function formatWeightLbsDisplay(lbs) {
-  const n = typeof lbs === 'number' ? lbs : Number(lbs)
-  if (!Number.isFinite(n) || n <= 0) return ''
-  const rounded = Math.round(n)
-  return `${rounded.toLocaleString(undefined)} lb`
-}
-
-/**
- * @param {{ orderKey: string, nbr: string, seal: string, slot: number }} row
- */
-function bigNumDisplayValue(row) {
-  if (modeForOrder(row.orderKey) === 'seal') {
-    return row.seal || '—'
-  }
-  return row.nbr
-}
-
-/**
- * @param {{ orderKey: string, seal: string, slot: number }} row
- */
-function bigNumLabel(row) {
-  return modeForOrder(row.orderKey) === 'seal' ? 'Seal' : `Trailer ${row.slot}`
-}
-
-function toggleSealModeForOrder(row) {
-  if (!row.seal) return
-  const key = String(row.orderKey)
-  clearBigNumSingleCopyTimer(key)
-  bigNumLastTapAt[key] = 0
-  const cur = modeForOrder(key)
-  trailerBigNumMode.value = {
-    ...trailerBigNumMode.value,
-    [key]: cur === 'seal' ? 'trailer' : 'seal',
-  }
-}
-
-/**
- * @param {{ orderKey: string, nbr: string, seal: string, slot: number }} row
- * @param {MouseEvent} [e]
- */
-function onBigNumClick(row, e) {
-  e?.preventDefault?.()
-  const key = String(row.orderKey)
-
-  /** Desktop double-click: second click has detail === 2 (timing-based detection often misses it). */
-  if (e && /** @type {MouseEvent} */ (e).detail === 2 && row.seal) {
-    toggleSealModeForOrder(row)
-    return
-  }
-
-  const now = Date.now()
-  const prev = bigNumLastTapAt[key] || 0
-  if (now - prev > 0 && now - prev < DOUBLE_TAP_MS) {
-    clearBigNumSingleCopyTimer(key)
-    bigNumLastTapAt[key] = 0
-    if (row.seal) {
-      toggleSealModeForOrder(row)
-    }
-    return
-  }
-  bigNumLastTapAt[key] = now
-  clearBigNumSingleCopyTimer(key)
-  bigNumSingleCopyTimers[key] = setTimeout(() => {
-    delete bigNumSingleCopyTimers[key]
-    const v = bigNumDisplayValue(row)
-    if (!v || v === '—') return
-    void copyToClipboard(v)
-  }, SINGLE_COPY_DELAY_MS)
-}
-
-async function copyToClipboard(text) {
-  const t = String(text ?? '').trim()
-  if (!t) return
-  try {
-    await navigator.clipboard.writeText(t)
-    if (copyToastTimer) clearTimeout(copyToastTimer)
-    copyToast.value = 'Copied'
-    copyToastTimer = setTimeout(() => {
-      copyToast.value = ''
-      copyToastTimer = null
-    }, 1200)
-  } catch {
-    /* clipboard may be denied */
-  }
-}
 
 const userFix = ref(
   /** @type {{ lat: number, lng: number, accuracyM: number } | null} */ (null),
@@ -241,45 +138,23 @@ const effectiveTrailers = computed(() => {
   return []
 })
 
-/** Bottom-left legend: Trailer 1 / 2 with large numbers. */
-const trailerNumRows = computed(() => {
-  const list = [...effectiveTrailers.value].sort((a, b) => {
-    const na = Number(a.order)
-    const nb = Number(b.order)
-    if (Number.isFinite(na) && Number.isFinite(nb) && na !== nb) return na - nb
-    return String(a.order).localeCompare(String(b.order), undefined, { numeric: true })
-  })
-  return list.map((t, i) => {
-    const seal = String(t.sealNumber ?? '').trim()
-    return {
-      key: `${t.order}-${i}`,
-      slot: i + 1,
-      orderKey: String(t.order),
-      nbr: String(t.trlrNbr ?? '').trim() || '—',
-      seal: seal && seal !== '—' ? seal : '',
-      heavy: Boolean(t.highlightHeavy),
-      weightDisplay: formatWeightLbsDisplay(
-        /** @type {TrailerMapPin} */ (t).pkgWeightLbs,
-      ),
-    }
-  })
+const terminalCardDisplay = computed(() => {
+  const c = props.terminalCard
+  if (!c || typeof c !== 'object' || Array.isArray(c)) return null
+  const o = /** @type {Record<string, unknown>} */ (c)
+  const id = String(o.locationId ?? '').trim()
+  if (!id) return null
+  const name = String(o.name ?? '').trim() || `Terminal ${id}`
+  const phoneDisplay = String(o.phoneDisplay ?? '').trim()
+  const telHref = String(o.telHref ?? '').trim()
+  return {
+    locationId: id,
+    name,
+    phoneDisplay,
+    telHref,
+    loading: Boolean(o.loading),
+  }
 })
-
-watch(
-  () =>
-    effectiveTrailers.value
-      .map((x) => `${x.order}:${x.trlrNbr}:${x.sealNumber ?? ''}`)
-      .join('|'),
-  () => {
-    trailerBigNumMode.value = {}
-    for (const k of Object.keys(bigNumLastTapAt)) {
-      delete bigNumLastTapAt[k]
-    }
-    for (const k of Object.keys(bigNumSingleCopyTimers)) {
-      clearBigNumSingleCopyTimer(k)
-    }
-  },
-)
 
 /** @type {L.Map | null} */
 let map = null
@@ -665,13 +540,6 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   destroyMap()
-  if (copyToastTimer) {
-    clearTimeout(copyToastTimer)
-    copyToastTimer = null
-  }
-  for (const k of Object.keys(bigNumSingleCopyTimers)) {
-    clearBigNumSingleCopyTimer(k)
-  }
 })
 
 watch(
@@ -719,7 +587,12 @@ watch(compassModeActive, (active) => {
 </script>
 
 <template>
-  <div class="trailer-loc-root" role="region" aria-label="Trailers and your location map">
+  <div
+    class="trailer-loc-root"
+    :class="{ 'has-terminal-card': !!terminalCardDisplay }"
+    role="region"
+    aria-label="Trailers and your location map"
+  >
     <div ref="containerRef" class="trailer-loc-el" />
     <div class="map-controls-stack trailer-loc-controls">
       <button
@@ -766,58 +639,28 @@ watch(compassModeActive, (active) => {
         </span>
       </button>
     </div>
-    <div class="trailer-loc-legend" aria-hidden="true">
-      <span class="trailer-loc-legend-item">
-        <span class="trailer-loc-dot is-trailer" />
-        Trailer(s)
-      </span>
-      <span class="trailer-loc-legend-item">
-        <span class="trailer-loc-dot is-user" />
-        You
-      </span>
-    </div>
     <div
-      v-if="trailerNumRows.length"
-      class="trailer-loc-big-nums"
-      aria-label="Trailer numbers and seals"
+      v-if="terminalCardDisplay"
+      class="trailer-loc-terminal-card"
+      role="region"
+      aria-label="Trip destination terminal"
     >
-      <button
-        v-for="row in trailerNumRows"
-        :key="row.key"
-        type="button"
-        class="trailer-loc-big-num-row tap"
-        :class="{ 'is-heavy': row.heavy, 'is-seal': modeForOrder(row.orderKey) === 'seal' }"
-        :title="
-          row.seal
-            ? 'Tap to copy · double-tap to switch trailer / seal'
-            : 'Tap to copy trailer number'
-        "
-        @click="onBigNumClick(row, $event)"
-      >
-        <span class="trailer-loc-big-num-label">
-          <template v-if="modeForOrder(row.orderKey) === 'seal'">
-            Seal<span
-              v-if="row.nbr && row.nbr !== '—'"
-              class="trailer-loc-big-num-label-trailer"
-            >&nbsp;{{ row.nbr }}</span>
-          </template>
-          <template v-else>
-            {{ bigNumLabel(row)
-            }}<span v-if="row.weightDisplay" class="trailer-loc-big-num-weight-inline">
-              &nbsp;{{ row.weightDisplay }}</span>
-          </template>
-        </span>
-        <span class="trailer-loc-big-num-val">{{ bigNumDisplayValue(row) }}</span>
-      </button>
+      <div class="trailer-loc-terminal-kicker">Destination terminal</div>
+      <div class="trailer-loc-terminal-name">{{ terminalCardDisplay.name }}</div>
+      <div class="trailer-loc-terminal-id">ID {{ terminalCardDisplay.locationId }}</div>
+      <div class="trailer-loc-terminal-phone-row">
+        <span class="trailer-loc-terminal-phone">{{
+          terminalCardDisplay.phoneDisplay || '—'
+        }}</span>
+        <a
+          v-if="terminalCardDisplay.telHref"
+          :href="terminalCardDisplay.telHref"
+          class="trailer-loc-call-btn tap"
+          rel="noopener"
+        >Call</a>
+      </div>
+      <p v-if="terminalCardDisplay.loading" class="trailer-loc-terminal-loading">Loading details…</p>
     </div>
-    <p
-      v-if="copyToast"
-      class="trailer-loc-copy-toast"
-      role="status"
-      aria-live="polite"
-    >
-      {{ copyToast }}
-    </p>
     <p
       v-if="userLocationPending && !hasUserFix"
       class="trailer-loc-hint"
@@ -870,172 +713,103 @@ watch(compassModeActive, (active) => {
   border: 0;
 }
 
-.trailer-loc-legend {
-  position: absolute;
-  z-index: 1000;
-  top: 0.5rem;
-  left: 0.5rem;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.4rem 0.6rem;
-  padding: 0.3rem 0.5rem;
-  border-radius: 6px;
-  background: rgba(15, 15, 20, 0.82);
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
-  font-size: 0.65rem;
-  font-weight: 600;
-  color: #e2e8f0;
-  pointer-events: none;
-  max-width: calc(100% - 1rem);
-}
-
-.trailer-loc-legend-item {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.35rem;
-}
-
-.trailer-loc-dot {
-  width: 0.5rem;
-  height: 0.5rem;
-  border-radius: 999px;
-  border: 1.5px solid rgba(255, 255, 255, 0.5);
-}
-.trailer-loc-dot.is-trailer {
-  background: #fb923c;
-}
-.trailer-loc-dot.is-user {
-  background: #38bdf8;
-}
-
-.trailer-loc-big-nums {
+.trailer-loc-terminal-card {
   position: absolute;
   z-index: 1001;
-  left: 0;
-  bottom: 0;
+  right: max(0.45rem, env(safe-area-inset-right, 0px));
+  bottom: max(0.45rem, env(safe-area-inset-bottom, 0px));
+  width: min(12.5rem, calc(100vw - 5rem));
+  min-height: 4.75rem;
+  padding: 0.55rem 0.65rem 0.6rem;
+  border-radius: var(--radius-lg, 0.75rem);
+  background: linear-gradient(
+    165deg,
+    rgba(255, 255, 255, 0.06) 0%,
+    rgba(255, 255, 255, 0.025) 100%
+  );
+  border: 1px solid rgba(123, 77, 181, 0.45);
+  box-shadow:
+    0 4px 18px rgba(0, 0, 0, 0.35),
+    0 0 0 1px rgba(0, 0, 0, 0.2);
+  pointer-events: auto;
+}
+
+.trailer-loc-terminal-kicker {
+  font-size: 0.5625rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: rgba(196, 181, 253, 0.95);
+  margin-bottom: 0.2rem;
+}
+
+.trailer-loc-terminal-name {
+  font-size: 0.8125rem;
+  font-weight: 700;
+  line-height: 1.25;
+  color: #f8fafc;
+  margin-bottom: 0.15rem;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.trailer-loc-terminal-id {
+  font-size: 0.6875rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: rgba(226, 232, 240, 0.72);
+  margin-bottom: 0.35rem;
+}
+
+.trailer-loc-terminal-phone-row {
   display: flex;
-  flex-direction: row;
-  gap: 0;
-  max-width: 100%;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  min-height: 1.75rem;
 }
 
-.trailer-loc-big-num-row {
-  display: block;
-  flex: 1 1 0;
+.trailer-loc-terminal-phone {
+  font-size: 0.75rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: #e2e8f0;
   min-width: 0;
-  margin: 0;
-  padding: 0.4rem 0.65rem 0.5rem;
-  padding-bottom: max(0.5rem, env(safe-area-inset-bottom, 0px));
-  border-radius: 0;
-  background: rgba(10, 10, 15, 0.92);
-  border: none;
-  border-top: 1px solid rgba(255, 255, 255, 0.08);
-  border-right: 1px solid rgba(255, 255, 255, 0.06);
-  text-align: left;
-  font: inherit;
-  color: inherit;
-  cursor: pointer;
-  -webkit-tap-highlight-color: transparent;
-  touch-action: manipulation;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.trailer-loc-big-num-row:last-child {
-  border-right: none;
-}
-
-.trailer-loc-big-num-row:active {
-  opacity: 0.9;
-}
-
-.trailer-loc-big-num-row.is-heavy {
-  border-top: 2px solid rgba(239, 68, 68, 0.7);
-  box-shadow: inset 0 2px 12px rgba(239, 68, 68, 0.2);
-  animation: heavy-card-pulse 1.8s ease-in-out infinite;
-}
-.trailer-loc-big-num-row:not(.is-heavy) {
-  border-top: 2px solid rgba(34, 197, 94, 0.5);
-  box-shadow: inset 0 2px 12px rgba(34, 197, 94, 0.15);
-  animation: light-card-pulse 2s ease-in-out infinite;
-}
-@keyframes heavy-card-pulse {
-  0%, 100% { box-shadow: inset 0 2px 12px rgba(239,68,68,0.2); }
-  50% { box-shadow: inset 0 2px 20px rgba(239,68,68,0.4); }
-}
-@keyframes light-card-pulse {
-  0%, 100% { box-shadow: inset 0 2px 12px rgba(34,197,94,0.15); }
-  50% { box-shadow: inset 0 2px 18px rgba(34,197,94,0.3); }
-}
-@media (prefers-reduced-motion: reduce) {
-  .trailer-loc-big-num-row.is-heavy,
-  .trailer-loc-big-num-row:not(.is-heavy) {
-    animation: none;
-  }
-}
-
-.trailer-loc-big-num-label {
-  display: block;
-  font-size: 0.65rem;
+.trailer-loc-call-btn {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.35rem 0.65rem;
+  font-size: 0.6875rem;
   font-weight: 700;
   letter-spacing: 0.04em;
   text-transform: uppercase;
-  color: rgba(226, 232, 240, 0.85);
-  margin-bottom: 0.12rem;
+  text-decoration: none;
+  color: #0f172a;
+  background: linear-gradient(145deg, #4ade80, #22c55e);
+  border: 1px solid rgba(34, 197, 94, 0.65);
+  border-radius: var(--radius-md, 0.5rem);
+  box-shadow: 0 1px 4px rgba(34, 197, 94, 0.35);
 }
 
-.trailer-loc-big-num-label-trailer {
-  color: #ef4444;
-  font-weight: 700;
-  letter-spacing: 0.04em;
-  text-transform: none;
+.trailer-loc-call-btn:hover {
+  filter: brightness(1.06);
 }
 
-.trailer-loc-big-num-weight-inline {
-  font-weight: 700;
-  color: #ef4444;
-}
-
-.trailer-loc-big-num-val {
-  display: block;
-  font-size: clamp(1.35rem, 4.5vw, 1.85rem);
-  font-weight: 800;
-  line-height: 1.1;
-  font-variant-numeric: tabular-nums;
-  color: #f8fafc;
-  letter-spacing: 0.02em;
-}
-
-.trailer-loc-big-num-row.is-heavy .trailer-loc-big-num-val {
-  color: #fecaca;
-}
-
-.trailer-loc-big-num-row:not(.is-heavy) .trailer-loc-big-num-val {
-  color: #bbf7d0;
-}
-
-.trailer-loc-big-num-row.is-seal .trailer-loc-big-num-val {
-  color: #fde68a;
-}
-
-.trailer-loc-copy-toast {
-  position: absolute;
-  z-index: 1002;
-  left: 50%;
-  bottom: 5.5rem;
-  transform: translateX(-50%);
-  margin: 0;
-  padding: 0.35rem 0.75rem;
-  font-size: 0.72rem;
-  font-weight: 700;
-  color: #f8fafc;
-  background: rgba(15, 15, 20, 0.9);
-  backdrop-filter: blur(8px);
-  border-radius: 999px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
-  pointer-events: none;
+.trailer-loc-terminal-loading {
+  margin: 0.35rem 0 0;
+  font-size: 0.625rem;
+  font-weight: 600;
+  color: rgba(148, 163, 184, 0.95);
 }
 
 .trailer-loc-hint {
@@ -1055,6 +829,13 @@ watch(compassModeActive, (active) => {
   border-radius: 8px;
   border: 1px solid rgba(255, 255, 255, 0.06);
   pointer-events: none;
+}
+
+.trailer-loc-root.has-terminal-card .trailer-loc-hint {
+  right: auto;
+  left: 50%;
+  transform: translateX(-50%);
+  max-width: min(20rem, calc(100% - 13.5rem));
 }
 
 .trailer-loc-hint.is-muted {
