@@ -1242,7 +1242,6 @@ onUnmounted(() => {
   grid-template-columns: minmax(0, 1fr) minmax(280px, min(42vw, 28rem));
   align-items: stretch;
   padding-bottom: 0;
-  padding-bottom: calc(var(--nav-height, 4rem) + env(safe-area-inset-bottom, 0));
   padding-left: 0;
   padding-right: 0;
 }

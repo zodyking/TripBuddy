@@ -85,6 +85,22 @@ function normalizeForwardGeocodeKey(q) {
  * @param {string} query
  * @returns {Promise<{ lat: number, lng: number } | null>}
  */
+/**
+ * Normalize FedEx-style addresses for Nominatim:
+ * - Pad short ZIP codes (e.g. "1022" → "01022")
+ * - Append ", USA" if it looks like a US address
+ * @param {string} raw
+ */
+function prepareAddressForNominatim(raw) {
+  let q = raw
+  q = q.replace(/,\s*(\d{3,4})$/,  (_, z) => `, ${z.padStart(5, '0')}`)
+  q = q.replace(/,\s*(\d{3,4})\s*$/,  (_, z) => `, ${z.padStart(5, '0')}`)
+  if (/\b[A-Z]{2}\b/.test(q) && !/\bUS(A)?\b/i.test(q)) {
+    q += ', USA'
+  }
+  return q
+}
+
 export async function forwardGeocodeNominatim(query) {
   const raw = String(query ?? '').trim()
   if (raw.length < 6) return null
@@ -95,8 +111,10 @@ export async function forwardGeocodeNominatim(query) {
     return { lat: hit.lat, lng: hit.lng }
   }
 
+  const prepared = prepareAddressForNominatim(raw)
+
   try {
-    const url = `https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&q=${encodeURIComponent(raw)}`
+    const url = `https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&countrycodes=us&q=${encodeURIComponent(prepared)}`
     const res = await fetch(url, {
       headers: {
         'User-Agent': 'FedExTool/1.0 (directory geocode; self-hosted)',
@@ -105,7 +123,23 @@ export async function forwardGeocodeNominatim(query) {
     })
     if (!res.ok) return null
     const data = await res.json()
-    if (!Array.isArray(data) || data.length === 0) return null
+    if (!Array.isArray(data) || data.length === 0) {
+      const fallbackUrl = `https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&countrycodes=us&q=${encodeURIComponent(raw)}`
+      const fallbackRes = await fetch(fallbackUrl, {
+        headers: { 'User-Agent': 'FedExTool/1.0 (directory geocode; self-hosted)' },
+        signal: AbortSignal.timeout(12000),
+      })
+      if (!fallbackRes.ok) return null
+      const fallbackData = await fallbackRes.json()
+      if (!Array.isArray(fallbackData) || fallbackData.length === 0) return null
+      const row = fallbackData[0]
+      if (!row || typeof row !== 'object') return null
+      const lat = Number(row.lat)
+      const lng = Number(row.lon)
+      if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null
+      forwardGeocodeCache.set(key, { lat, lng, at: now })
+      return { lat, lng }
+    }
     const row = data[0]
     if (!row || typeof row !== 'object') return null
     const lat = Number(row.lat)
