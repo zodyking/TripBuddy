@@ -745,6 +745,107 @@ const tripDestLocationId = computed(() => {
   return n != null && String(n).trim() !== '' ? String(n).trim() : ''
 })
 
+function linehaulBodyLocationId(body) {
+  if (!body || typeof body !== 'object' || Array.isArray(body)) return ''
+  const o = /** @type {Record<string, unknown>} */ (body)
+  const v = o.locationId ?? o.id
+  return v != null && String(v).trim() !== '' ? String(v).trim() : ''
+}
+
+/**
+ * Trip destination terminal summary for the trailer GPS map overlay.
+ * Uses cached destination location body when it matches the active trip dest id.
+ */
+function buildTrailerGpsTerminalCardSkeleton() {
+  const id = tripDestLocationId.value
+  if (!id) return null
+  const b = tripDetailsBodyForSlide.value
+  const o = b && typeof b === 'object' ? /** @type {Record<string, unknown>} */ (b) : {}
+  const tripName = String(o.tripDest ?? o.tripDestAbbrv ?? '').trim()
+  const name = tripName || `Terminal ${id}`
+  const cached = destLocationBody.value
+  if (
+    cached &&
+    typeof cached === 'object' &&
+    !Array.isArray(cached) &&
+    linehaulBodyLocationId(cached) === id
+  ) {
+    const fmt = formatLinehaulLocationForDisplay(cached)
+    const locRow = fmt.rows.find((x) => x.label === 'Location')
+    const phoneR = fmt.rows.find((x) => x.label === 'Phone')
+    return {
+      locationId: id,
+      name: (locRow?.value && String(locRow.value).trim()) || name,
+      phoneDisplay: phoneR?.value ? String(phoneR.value).trim() : '',
+      telHref: phoneR?.href ? String(phoneR.href) : '',
+      loading: false,
+    }
+  }
+  return {
+    locationId: id,
+    name,
+    phoneDisplay: '',
+    telHref: '',
+    loading: true,
+  }
+}
+
+async function hydrateTrailerGpsTerminalCard() {
+  const data = trailerGpsData.value
+  const tc = data?.terminalCard
+  if (!tc || typeof tc !== 'object' || tc.loading !== true) return
+  const id = String(tc.locationId ?? '').trim()
+  if (!id) return
+
+  const cached = destLocationBody.value
+  let body =
+    cached &&
+    typeof cached === 'object' &&
+    !Array.isArray(cached) &&
+    linehaulBodyLocationId(cached) === id
+      ? cached
+      : null
+  if (!body) {
+    const r = await fetchFedexLinehaulLocation({
+      locationId: id,
+      originId: linehaulOriginIdForApi.value || undefined,
+    })
+    if (!trailerGpsModalOpen.value) return
+    const cur = trailerGpsData.value?.terminalCard
+    if (!cur || String(cur.locationId) !== id) return
+    body = r.ok ? r.body : null
+  }
+
+  if (!trailerGpsModalOpen.value) return
+  const cur2 = trailerGpsData.value?.terminalCard
+  if (!cur2 || String(cur2.locationId) !== id) return
+
+  if (!body || typeof body !== 'object') {
+    trailerGpsData.value = {
+      ...trailerGpsData.value,
+      terminalCard: {
+        ...cur2,
+        loading: false,
+      },
+    }
+    return
+  }
+  const fmt = formatLinehaulLocationForDisplay(body)
+  const locRow = fmt.rows.find((x) => x.label === 'Location')
+  const phoneR = fmt.rows.find((x) => x.label === 'Phone')
+  const fallbackName = String(cur2.name ?? '').trim() || `Terminal ${id}`
+  trailerGpsData.value = {
+    ...trailerGpsData.value,
+    terminalCard: {
+      locationId: id,
+      name: (locRow?.value && String(locRow.value).trim()) || fallbackName,
+      phoneDisplay: phoneR?.value ? String(phoneR.value).trim() : '',
+      telHref: phoneR?.href ? String(phoneR.href) : '',
+      loading: false,
+    },
+  }
+}
+
 /** originId header for Linehaul calls: tractor snapshot, else trip current location (active slide). */
 const linehaulOriginIdForApi = computed(() => {
   const tid = linehaulTractorBody.value?.locationId
@@ -1441,6 +1542,8 @@ function openTrailerGpsModal(card) {
     if (ft53.length === 1) heavyTrailerOrder = String(ft53[0].order)
   }
 
+  const terminalCard = buildTrailerGpsTerminalCardSkeleton()
+
   trailerGpsData.value = {
     order: card.order,
     trlrNbr: card.trlrNbr,
@@ -1449,6 +1552,7 @@ function openTrailerGpsModal(card) {
     lng: card.lng,
     trailerMapPins,
     heavyTrailerOrder,
+    terminalCard,
     userLat: null,
     userLng: null,
     userGpsPending: hasGeo,
@@ -1456,6 +1560,10 @@ function openTrailerGpsModal(card) {
     userVehicleId: vehicleIdForUserMapMarker(linehaulTractorBody.value, linehaulCredMeta.value),
   }
   trailerGpsModalOpen.value = true
+
+  if (terminalCard?.loading) {
+    void hydrateTrailerGpsTerminalCard()
+  }
 
   if (!hasGeo) return
 
@@ -1974,6 +2082,7 @@ onUnmounted(() => {
             <TrailerLocationMap
               :trailers="trailerGpsData.trailerMapPins || []"
               :heavy-trailer-order="trailerGpsData.heavyTrailerOrder || ''"
+              :terminal-card="trailerGpsData.terminalCard ?? null"
               :user-lat="trailerGpsData.userLat"
               :user-lng="trailerGpsData.userLng"
               :user-location-pending="trailerGpsData.userGpsPending"
