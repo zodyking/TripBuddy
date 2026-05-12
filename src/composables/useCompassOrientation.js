@@ -29,6 +29,17 @@ const errorMessage = ref(/** @type {string | null} */ (null))
 /** Smooth heading with low-pass filter to reduce jitter. */
 const smoothHeading = ref(/** @type {number | null} */ (null))
 
+/** User-configurable heading offset in degrees (calibration). */
+const headingOffsetDeg = ref(0)
+
+/**
+ * Set the compass heading offset for calibration.
+ * @param {number} deg
+ */
+export function setCompassHeadingOffset(deg) {
+  headingOffsetDeg.value = ((Number(deg) || 0) % 360 + 360) % 360
+}
+
 const SMOOTHING_FACTOR = 0.15
 
 /**
@@ -102,7 +113,7 @@ function getMapBearingFromDeviceOrientation(event) {
     deviceOrientation = getViewportOrientationDegrees()
   }
 
-  let bearing = angle - deviceOrientation
+  let bearing = angle - deviceOrientation + headingOffsetDeg.value
   bearing = ((bearing % 360) + 360) % 360
   return bearing
 }
@@ -309,6 +320,7 @@ export function useCompassOrientation() {
     isSupported,
     heading,
     smoothHeading,
+    headingOffsetDeg,
     permissionState,
     isTracking,
     errorMessage,

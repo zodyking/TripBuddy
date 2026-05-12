@@ -1,5 +1,6 @@
 <script setup>
 import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
+import { setCompassHeadingOffset } from '../composables/useCompassOrientation.js'
 import { useRouter, useRoute } from 'vue-router'
 import {
   getAssignment,
@@ -225,6 +226,23 @@ const arrivalAlertsOn = ref(isArrivalAlertsEnabled())
 const trailerNearbyOn = ref(isTrailerGpsTtsEnabled())
 const nearTrailerRadiusFeet = ref(getNearTrailerRadiusFeet())
 const audioMoreExpanded = ref(false)
+
+const compassOffsetDeg = ref(0)
+function onCompassOffsetInput(e) {
+  const v = Number(e?.target?.value)
+  if (!Number.isFinite(v)) return
+  const clamped = Math.round(Math.max(-180, Math.min(180, v)))
+  compassOffsetDeg.value = clamped
+  setCompassHeadingOffset(clamped)
+  try { localStorage.setItem('compass_heading_offset', String(clamped)) } catch {}
+}
+try {
+  const saved = Number(localStorage.getItem('compass_heading_offset'))
+  if (Number.isFinite(saved)) {
+    compassOffsetDeg.value = saved
+    setCompassHeadingOffset(saved)
+  }
+} catch {}
 
 function saveNearTrailerRadius() {
   setNearTrailerRadiusFeet(nearTrailerRadiusFeet.value)
@@ -1659,6 +1677,26 @@ onUnmounted(() => {
           </p>
         </div>
 
+        <div class="audio-compass-offset">
+          <p class="audio-compass-offset-title">Compass Calibration</p>
+          <p class="audio-compass-offset-hint">Heading offset in degrees. Adjust if the follow-mode arrow doesn't match your actual direction.</p>
+          <div class="audio-near-trailer-row">
+            <input
+              id="compass-offset-deg"
+              :value="compassOffsetDeg"
+              class="inp tap audio-near-trailer-input"
+              type="number"
+              min="-180"
+              max="180"
+              step="5"
+              inputmode="numeric"
+              @input="onCompassOffsetInput"
+              @blur="onCompassOffsetInput"
+            />
+            <span class="audio-near-trailer-unit" aria-hidden="true">deg</span>
+          </div>
+        </div>
+
         <div v-if="ttsEnabled" class="audio-more-wrap">
           <button
             type="button"
@@ -2241,6 +2279,23 @@ onUnmounted(() => {
 .audio-near-trailer-hint {
   margin: 0.45rem 0 0;
   font-size: 0.78rem;
+  line-height: 1.4;
+  color: var(--color-text-tertiary, #8e8e9e);
+}
+.audio-compass-offset {
+  margin-top: 0.75rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--color-border, rgba(255, 255, 255, 0.08));
+}
+.audio-compass-offset-title {
+  margin: 0 0 0.25rem;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--color-text-primary, #f4f4f8);
+}
+.audio-compass-offset-hint {
+  margin: 0 0 0.5rem;
+  font-size: 0.75rem;
   line-height: 1.4;
   color: var(--color-text-tertiary, #8e8e9e);
 }

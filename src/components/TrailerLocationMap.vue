@@ -406,10 +406,12 @@ const unifiedColCount = computed(() => {
 /** @type {L.Map | null} */
 let map = null
 /** @type {L.TileLayer | null} */
+let darkLayer = null
+/** @type {L.TileLayer | null} */
 let streetLayer = null
 /** @type {L.TileLayer | null} */
 let satelliteLayer = null
-const activeBaseLayer = ref(/** @type {'street' | 'satellite'} */ ('street'))
+const activeBaseLayer = ref(/** @type {'dark' | 'street' | 'satellite'} */ ('dark'))
 /** @type {L.LayerGroup | null} */
 let overlayLayer = null
 /** @type {L.LayerGroup | null} */
@@ -438,40 +440,37 @@ function prefersReducedMotion() {
  */
 function makeTrailerIcon(trailer) {
   const sz = String(trailer?.size ?? '').trim().toLowerCase()
-  const num = String(trailer?.trlrNbr ?? '').trim()
   const pulse = Boolean(trailer?.highlightHeavy)
 
   if (sz === '20ft' || sz === "20'") {
-    return trailer20ftTopIcon(num, { pulseHeavy: pulse })
+    return trailer20ftTopIcon('', { pulseHeavy: pulse })
   }
   if (sz === '53ft' || sz === "53'") {
-    return trailer53ftTopIcon(num, { pulseHeavy: pulse })
+    return trailer53ftTopIcon('', { pulseHeavy: pulse })
   }
   return trailerFallbackPinIcon()
 }
 
-/**
- * Create user truck icon — geo-scaled to real-world size when enabled.
- */
 function makeUserTruckIcon() {
-  return userLocationTruckIcon(props.userVehicleId || '')
+  return userLocationTruckIcon('')
 }
 
 
 function setBaseLayer(mode) {
-  if (!map || !streetLayer || !satelliteLayer) return
+  if (!map || !darkLayer || !streetLayer || !satelliteLayer) return
   activeBaseLayer.value = mode
-  if (mode === 'satellite') {
-    map.removeLayer(streetLayer)
-    satelliteLayer.addTo(map)
-  } else {
-    map.removeLayer(satelliteLayer)
-    streetLayer.addTo(map)
-  }
+  map.removeLayer(darkLayer)
+  map.removeLayer(streetLayer)
+  map.removeLayer(satelliteLayer)
+  if (mode === 'satellite') satelliteLayer.addTo(map)
+  else if (mode === 'street') streetLayer.addTo(map)
+  else darkLayer.addTo(map)
 }
 
-function toggleSatellite() {
-  setBaseLayer(activeBaseLayer.value === 'street' ? 'satellite' : 'street')
+function cycleBaseLayer() {
+  const order = /** @type {const} */ (['dark', 'street', 'satellite'])
+  const idx = order.indexOf(activeBaseLayer.value)
+  setBaseLayer(order[(idx + 1) % order.length])
 }
 
 function scheduleFitBounds() {
@@ -725,11 +724,19 @@ function initMap() {
 
   L.control.zoom({ position: 'topright' }).addTo(map)
 
+  darkLayer = L.tileLayer(
+    'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
+    {
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a> &copy; <a href="https://carto.com/attributions">CARTO</a>',
+      subdomains: 'abcd',
+      maxZoom: 20,
+    },
+  )
+
   streetLayer = L.tileLayer(
     'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png',
     {
-      attribution:
-        '&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a> &copy; <a href="https://carto.com/attributions">CARTO</a>',
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a> &copy; <a href="https://carto.com/attributions">CARTO</a>',
       subdomains: 'abcd',
       maxZoom: 20,
     },
@@ -738,14 +745,13 @@ function initMap() {
   satelliteLayer = L.tileLayer(
     'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
     {
-      attribution:
-        'Tiles &copy; Esri &mdash; Source: Esri, Maxar, Earthstar Geographics',
+      attribution: 'Tiles &copy; Esri &mdash; Source: Esri, Maxar, Earthstar Geographics',
       maxZoom: 19,
     },
   )
 
-  streetLayer.addTo(map)
-  activeBaseLayer.value = 'street'
+  darkLayer.addTo(map)
+  activeBaseLayer.value = 'dark'
 
   overlayLayer = L.layerGroup().addTo(map)
   userLayer = L.layerGroup().addTo(map)
@@ -771,6 +777,7 @@ function destroyMap() {
   userFix.value = null
   overlayLayer = null
   userLayer = null
+  darkLayer = null
   streetLayer = null
   satelliteLayer = null
   if (map) {
@@ -865,19 +872,13 @@ watch(
       <div class="map-controls-stack trailer-loc-controls">
         <button
           type="button"
-          class="map-control-btn map-control-btn--sat tap"
-        :class="{ 'is-on': activeBaseLayer === 'satellite' }"
-        :aria-pressed="activeBaseLayer === 'satellite'"
-        title="Satellite imagery"
-        @click="toggleSatellite"
-      >
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-          <circle cx="12" cy="12" r="9" />
-          <ellipse cx="12" cy="12" rx="9" ry="4" />
-          <path d="M3 12h18" />
-        </svg>
-        <span class="sr-only">Toggle satellite view</span>
-      </button>
+          class="map-control-btn map-control-btn--layer tap"
+          :class="{ 'is-on': activeBaseLayer !== 'dark' }"
+          :title="`Map: ${activeBaseLayer} — tap to cycle`"
+          @click="cycleBaseLayer"
+        >
+          <span class="map-layer-label">{{ activeBaseLayer === 'dark' ? 'DK' : activeBaseLayer === 'street' ? 'ST' : 'SAT' }}</span>
+        </button>
       <button
         v-if="showCompassToggle"
         type="button"
@@ -1376,6 +1377,20 @@ watch(
 
 .trailer-loc-hint.is-warn {
   color: #fb923c;
+}
+
+.map-layer-label {
+  font-size: 0.55rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  line-height: 1;
+}
+
+.map-control-btn--layer.is-on {
+  color: #c4b5fd;
+  border-color: rgba(167, 139, 250, 0.55);
+  background: rgba(123, 77, 181, 0.28);
 }
 
 .map-control-btn--compass {
