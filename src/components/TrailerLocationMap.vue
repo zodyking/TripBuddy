@@ -355,7 +355,7 @@ function onTerminalPairTap(e) {
   if (!canToggleTerminalLeg.value) return
   const t = /** @type {unknown} */ (e.target)
   if (t && typeof t === 'object' && 'closest' in t && typeof t.closest === 'function') {
-    if (/** @type {Element} */ (t).closest('a.trailer-loc-call-btn-full')) return
+    if (/** @type {Element} */ (t).closest('a.trailer-loc-unified-call')) return
   }
   if (e && 'detail' in e && /** @type {MouseEvent} */ (e).detail === 2) {
     toggleTerminalLeg()
@@ -393,6 +393,14 @@ const terminalCardDisplay = computed(() => {
     ...leg,
     legLabel,
   }
+})
+
+/** Columns in the unified bottom bar (trailers + location), capped at 3. */
+const unifiedColCount = computed(() => {
+  const n = trailerNumRows.value.length
+  const loc = terminalCardDisplay.value != null ? 1 : 0
+  const sum = n + loc
+  return sum < 1 ? 1 : Math.min(3, sum)
 })
 
 /** @type {L.Map | null} */
@@ -890,19 +898,18 @@ watch(compassModeActive, (active) => {
     </div>
     <div
       v-if="trailerNumRows.length || terminalCardDisplay"
-      class="trailer-loc-ledger-dock"
-      :class="{ 'is-terminal-only': trailerNumRows.length === 0 }"
+      class="trailer-loc-unified-bar"
+      aria-label="Trailers, seals, and terminal"
     >
       <div
-        v-if="trailerNumRows.length"
-        class="trailer-loc-big-nums"
-        aria-label="Trailer numbers and seals"
+        class="trailer-loc-unified-grid"
+        :style="{ '--unified-cols': unifiedColCount }"
       >
         <button
           v-for="row in trailerNumRows"
           :key="row.key"
           type="button"
-          class="trailer-loc-big-num-row tap"
+          class="trailer-loc-unified-cell trailer-loc-big-num-row tap"
           :class="{ 'is-heavy': row.heavy, 'is-seal': modeForOrder(row.orderKey) === 'seal' }"
           :title="
             row.seal
@@ -926,59 +933,56 @@ watch(compassModeActive, (active) => {
           </span>
           <span class="trailer-loc-big-num-val">{{ bigNumDisplayValue(row) }}</span>
         </button>
-      </div>
-      <div
-        v-if="terminalCardDisplay"
-        class="trailer-loc-terminal-card"
-        :class="{
-          'is-toggleable': canToggleTerminalLeg,
-          'is-no-call': !terminalCardDisplay.telHref,
-        }"
-        role="region"
-        :aria-label="`${terminalCardDisplay.legLabel}: ${terminalCardDisplay.locationId}, ${terminalCardDisplay.name}`"
-        :title="
-          canToggleTerminalLeg
-            ? `${terminalCardDisplay.legLabel} — double-tap to switch origin / destination`
-            : undefined
-        "
-        @click="onTerminalPairTap($event)"
-      >
-        <div class="trailer-loc-terminal-text">
-          <p class="trailer-loc-terminal-id-name">
-            {{ terminalCardDisplay.locationId }} - {{ terminalCardDisplay.name }}
-          </p>
-          <p
-            class="trailer-loc-terminal-phone-line"
-            :title="terminalCardDisplay.phoneDisplay || undefined"
-          >
-            <template v-if="terminalCardDisplay.loading">Loading…</template>
-            <template v-else>{{ terminalCardDisplay.phoneDisplay || '—' }}</template>
-          </p>
-        </div>
-        <a
-          v-if="terminalCardDisplay.telHref"
-          :href="terminalCardDisplay.telHref"
-          class="trailer-loc-call-btn-full tap"
-          rel="noopener"
-          aria-label="Call terminal phone"
-          @click.stop
-          @dblclick.stop
+        <div
+          v-if="terminalCardDisplay"
+          class="trailer-loc-unified-cell trailer-loc-unified-location"
+          :class="{ 'is-toggleable': canToggleTerminalLeg }"
+          role="region"
+          :aria-label="`${terminalCardDisplay.legLabel}: ${terminalCardDisplay.locationId}, ${terminalCardDisplay.name}`"
+          :title="
+            canToggleTerminalLeg
+              ? `${terminalCardDisplay.legLabel} — double-tap to switch origin / destination`
+              : undefined
+          "
+          @click="onTerminalPairTap($event)"
         >
-          <svg
-            class="trailer-loc-call-icon"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="2.15"
-            stroke-linecap="round"
-            stroke-linejoin="round"
-            aria-hidden="true"
+          <div class="trailer-loc-unified-loc-body">
+            <p class="trailer-loc-unified-loc-title">
+              {{ terminalCardDisplay.locationId }} - {{ terminalCardDisplay.name }}
+            </p>
+            <p
+              class="trailer-loc-unified-loc-phone"
+              :title="terminalCardDisplay.phoneDisplay || undefined"
+            >
+              <template v-if="terminalCardDisplay.loading">Loading…</template>
+              <template v-else>{{ terminalCardDisplay.phoneDisplay || '—' }}</template>
+            </p>
+          </div>
+          <a
+            v-if="terminalCardDisplay.telHref"
+            :href="terminalCardDisplay.telHref"
+            class="trailer-loc-unified-call tap"
+            rel="noopener"
+            aria-label="Call terminal phone"
+            @click.stop
+            @dblclick.stop
           >
-            <path
-              d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"
-            />
-          </svg>
-        </a>
+            <svg
+              class="trailer-loc-call-icon"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2.15"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              aria-hidden="true"
+            >
+              <path
+                d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"
+              />
+            </svg>
+          </a>
+        </div>
       </div>
     </div>
     <p
@@ -1012,7 +1016,6 @@ watch(compassModeActive, (active) => {
 
 <style scoped>
 .trailer-loc-root {
-  --trailer-loc-ledger-min-h: 4.85rem;
   --trailer-loc-ledger-radius: 0.45rem;
   position: relative;
   width: 100%;
@@ -1043,82 +1046,87 @@ watch(compassModeActive, (active) => {
   border: 0;
 }
 
-.trailer-loc-ledger-dock {
+.trailer-loc-unified-bar {
   position: absolute;
-  left: 0;
-  right: 0;
-  bottom: 0;
+  left: clamp(0.3rem, 2vw, 0.55rem);
+  right: clamp(0.3rem, 2vw, 0.55rem);
+  bottom: max(0.35rem, env(safe-area-inset-bottom, 0px));
   z-index: 1001;
-  display: flex;
-  flex-direction: row;
-  align-items: stretch;
-  justify-content: flex-start;
-  gap: 0.4rem;
-  padding: 0 0.4rem max(0.5rem, env(safe-area-inset-bottom, 0px));
-  pointer-events: none;
-}
-
-.trailer-loc-ledger-dock.is-terminal-only {
-  justify-content: flex-end;
-}
-
-.trailer-loc-ledger-dock > * {
-  pointer-events: auto;
-}
-
-/* Match trailer ledger row: same shell, purple top accent (app brand). */
-.trailer-loc-terminal-card {
-  position: static;
   box-sizing: border-box;
+  padding: clamp(0.35rem, 2vw, 0.5rem);
+  border-radius: var(--trailer-loc-ledger-radius);
+  background: rgba(10, 10, 15, 0.97);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  box-shadow: 0 -6px 28px rgba(0, 0, 0, 0.45);
+  pointer-events: auto;
+}
+
+.trailer-loc-unified-grid {
+  display: grid;
+  width: 100%;
+  gap: 0;
+  grid-template-columns: repeat(var(--unified-cols, 1), minmax(0, 1fr));
+  align-items: stretch;
+  min-height: clamp(4.1rem, 14vw, 5.25rem);
+}
+
+@media (max-width: 560px) {
+  .trailer-loc-unified-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.trailer-loc-unified-cell {
+  min-width: 0;
+}
+
+.trailer-loc-unified-cell + .trailer-loc-unified-cell {
+  border-left: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+@media (max-width: 560px) {
+  .trailer-loc-unified-cell + .trailer-loc-unified-cell {
+    border-left: none;
+    border-top: 1px solid rgba(255, 255, 255, 0.1);
+  }
+}
+
+.trailer-loc-unified-location {
   display: flex;
   flex-direction: row;
   align-items: stretch;
-  flex: 0 1 auto;
-  margin: 0;
-  margin-left: auto;
-  min-height: var(--trailer-loc-ledger-min-h);
-  width: max-content;
-  max-width: min(36rem, calc(100% - 0.85rem));
+  min-width: 0;
   padding: 0;
-  border-radius: var(--trailer-loc-ledger-radius);
-  background: rgba(10, 10, 15, 0.94);
-  border: none;
   border-top: 2px solid var(--color-accent-purple, #7b4db5);
-  box-shadow: inset 0 2px 12px rgba(123, 77, 181, 0.16);
-  pointer-events: auto;
+  box-shadow: inset 0 2px 12px rgba(123, 77, 181, 0.14);
   overflow: hidden;
   -webkit-tap-highlight-color: transparent;
   touch-action: manipulation;
 }
 
-.trailer-loc-terminal-card.is-no-call .trailer-loc-terminal-text {
-  padding-right: 0.65rem;
-}
-
-.trailer-loc-terminal-card.is-toggleable {
+.trailer-loc-unified-location.is-toggleable {
   cursor: pointer;
 }
 
-.trailer-loc-terminal-card:active {
+.trailer-loc-unified-location:active {
   opacity: 0.94;
 }
 
-.trailer-loc-terminal-text {
+.trailer-loc-unified-loc-body {
   flex: 1 1 auto;
-  min-width: 10rem;
+  min-width: 0;
   display: flex;
   flex-direction: column;
   justify-content: center;
-  gap: 0.18rem;
-  padding: 0.4rem 0.45rem 0.5rem 0.65rem;
-  overflow: hidden;
+  gap: clamp(0.1rem, 0.8vw, 0.2rem);
+  padding: clamp(0.35rem, 2vw, 0.5rem) clamp(0.4rem, 2.2vw, 0.6rem);
 }
 
-.trailer-loc-terminal-id-name {
+.trailer-loc-unified-loc-title {
   margin: 0;
-  font-size: clamp(1.05rem, 3.6vw, 1.48rem);
+  font-size: clamp(0.82rem, 2.8vw + 0.35vh, 1.35rem);
   font-weight: 800;
-  line-height: 1.18;
+  line-height: 1.2;
   font-variant-numeric: tabular-nums;
   letter-spacing: 0.02em;
   color: #f8fafc;
@@ -1127,27 +1135,26 @@ watch(compassModeActive, (active) => {
   word-break: break-word;
 }
 
-.trailer-loc-terminal-phone-line {
+.trailer-loc-unified-loc-phone {
   margin: 0;
-  font-size: 0.78rem;
+  font-size: clamp(0.65rem, 2vw + 0.2vh, 0.82rem);
   font-weight: 700;
   font-variant-numeric: tabular-nums;
   line-height: 1.25;
   letter-spacing: 0.03em;
-  color: rgba(226, 232, 240, 0.88);
+  color: rgba(226, 232, 240, 0.9);
   white-space: normal;
   overflow-wrap: anywhere;
 }
 
-.trailer-loc-call-btn-full {
+.trailer-loc-unified-call {
   display: flex;
   align-items: center;
   justify-content: center;
-  align-self: stretch;
   flex: 0 0 auto;
-  width: 4.45rem;
-  min-width: 4.45rem;
-  padding: 0;
+  width: clamp(3.35rem, 11vw, 4.75rem);
+  min-width: clamp(3.35rem, 11vw, 4.75rem);
+  align-self: stretch;
   text-decoration: none;
   color: var(--color-text-inverse, #08080a);
   background: linear-gradient(
@@ -1157,20 +1164,19 @@ watch(compassModeActive, (active) => {
   );
   border: none;
   border-left: 1px solid rgba(0, 0, 0, 0.22);
-  border-radius: 0;
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.22),
     0 0 0 1px rgba(92, 45, 145, 0.35);
 }
 
-.trailer-loc-call-icon {
-  width: 1.48rem;
-  height: 1.48rem;
-  flex-shrink: 0;
+.trailer-loc-unified-call:hover {
+  filter: brightness(1.07);
 }
 
-.trailer-loc-call-btn-full:hover {
-  filter: brightness(1.07);
+.trailer-loc-call-icon {
+  width: clamp(1.2rem, 4.5vw, 1.55rem);
+  height: clamp(1.2rem, 4.5vw, 1.55rem);
+  flex-shrink: 0;
 }
 
 .trailer-loc-hint {
@@ -1196,46 +1202,29 @@ watch(compassModeActive, (active) => {
   right: auto;
   left: 50%;
   transform: translateX(-50%);
-  max-width: min(20rem, calc(100% - 10rem));
+  max-width: min(22rem, calc(100% - 1.25rem));
 }
 
 .trailer-loc-root.has-trailer-ledger .trailer-loc-hint {
-  bottom: 5.65rem;
+  bottom: clamp(6.75rem, 38vw, 12.5rem);
 }
 
 .trailer-loc-root.has-trailer-ledger .trailer-loc-copy-toast {
-  bottom: 7.1rem;
-}
-
-.trailer-loc-big-nums {
-  display: flex;
-  flex-direction: row;
-  align-items: stretch;
-  flex: 1 1 auto;
-  min-width: 0;
-  gap: 0.35rem;
-  overflow-x: auto;
-  overflow-y: visible;
-  scrollbar-width: thin;
-  -webkit-overflow-scrolling: touch;
-}
-
-.trailer-loc-root:not(.has-terminal-card) .trailer-loc-big-nums {
-  max-width: none;
+  bottom: clamp(8.25rem, 44vw, 14rem);
 }
 
 .trailer-loc-big-num-row {
   display: flex;
   flex-direction: column;
   justify-content: center;
-  flex: 1 1 auto;
-  min-width: fit-content;
-  min-height: var(--trailer-loc-ledger-min-h);
+  width: 100%;
+  min-width: 0;
+  min-height: 0;
   overflow: visible;
   margin: 0;
-  padding: 0.4rem 0.65rem 0.5rem;
-  border-radius: var(--trailer-loc-ledger-radius);
-  background: rgba(10, 10, 15, 0.94);
+  padding: clamp(0.32rem, 1.8vw, 0.48rem) clamp(0.45rem, 2.2vw, 0.65rem);
+  border-radius: 0;
+  background: transparent;
   border: none;
   border-top: 1px solid rgba(255, 255, 255, 0.08);
   text-align: left;
@@ -1244,10 +1233,6 @@ watch(compassModeActive, (active) => {
   cursor: pointer;
   -webkit-tap-highlight-color: transparent;
   touch-action: manipulation;
-}
-
-.trailer-loc-big-num-row:last-child {
-  border-right: none;
 }
 
 .trailer-loc-big-num-row:active {
@@ -1295,7 +1280,7 @@ watch(compassModeActive, (active) => {
 
 .trailer-loc-big-num-label {
   display: block;
-  font-size: 0.65rem;
+  font-size: clamp(0.56rem, 2vw + 0.1vh, 0.72rem);
   font-weight: 700;
   letter-spacing: 0.04em;
   text-transform: uppercase;
@@ -1319,7 +1304,7 @@ watch(compassModeActive, (active) => {
 
 .trailer-loc-big-num-val {
   display: block;
-  font-size: clamp(1.35rem, 4.5vw, 1.85rem);
+  font-size: clamp(1rem, 3.8vw + 0.5vh, 1.75rem);
   font-weight: 800;
   line-height: 1.1;
   font-variant-numeric: tabular-nums;

@@ -754,6 +754,25 @@ const tripOriginLocationId = computed(() => {
   return cur != null && String(cur).trim() !== '' ? String(cur).trim() : ''
 })
 
+/** Trailer GPS modal top bar: origin / destination lines from active trip. */
+const trailerGpsOdHeader = computed(() => {
+  const b = tripDetailsBodyForSlide.value
+  if (!b || typeof b !== 'object') {
+    return { originLine: 'Origin: —', destLine: 'Destination: —' }
+  }
+  const o = /** @type {Record<string, unknown>} */ (b)
+  const oid = String(o.currentLocationNumber ?? o.originLocation ?? '').trim()
+  const oname = String(o.currentLocationName ?? '').trim()
+  const did = String(o.tripDestNumber ?? '').trim()
+  const dname = String(o.tripDest ?? o.tripDestAbbrv ?? '').trim()
+  const origin = [oid, oname].filter(Boolean).join(' · ') || '—'
+  const dest = [did, dname].filter(Boolean).join(' · ') || '—'
+  return {
+    originLine: `Origin: ${origin}`,
+    destLine: `Destination: ${dest}`,
+  }
+})
+
 function linehaulBodyLocationId(body) {
   if (!body || typeof body !== 'object' || Array.isArray(body)) return ''
   const o = /** @type {Record<string, unknown>} */ (body)
@@ -2127,15 +2146,21 @@ onUnmounted(() => {
           class="portal-modal trailer-gps-modal"
           role="dialog"
           aria-modal="true"
-          aria-labelledby="trailer-gps-title"
+          aria-label="Trailer location map"
           @click.stop
         >
           <div class="trailer-gps-topbar">
-            <div class="trailer-gps-topbar-info">
-              <h3 id="trailer-gps-title" class="trailer-gps-title">
-                Trailer {{ trailerGpsData.order }}{{ trailerGpsData.trlrNbr ? `  #${trailerGpsData.trlrNbr}` : '' }}
-              </h3>
-              <span class="trailer-gps-coords-inline">{{ trailerGpsData.lat.toFixed(5) }}, {{ trailerGpsData.lng.toFixed(5) }}</span>
+            <div
+              class="trailer-gps-topbar-info"
+              role="group"
+              :aria-label="`${trailerGpsOdHeader.originLine}. ${trailerGpsOdHeader.destLine}`"
+            >
+              <p class="trailer-gps-od-line">{{ trailerGpsOdHeader.originLine }}</p>
+              <p class="trailer-gps-od-line trailer-gps-od-muted">{{ trailerGpsOdHeader.destLine }}</p>
+              <span
+                v-if="trailerGpsData.lat != null && trailerGpsData.lng != null"
+                class="sr-only"
+              >Selected trailer coordinates {{ trailerGpsData.lat.toFixed(5) }}, {{ trailerGpsData.lng.toFixed(5) }}</span>
             </div>
             <button
               type="button"
@@ -4760,28 +4785,28 @@ button.trailer-nbr.copyable-inline {
 
 .trailer-gps-topbar-info {
   display: flex;
-  align-items: baseline;
-  gap: 0.6rem;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.15rem;
   min-width: 0;
   flex: 1;
 }
 
-.trailer-gps-title {
+.trailer-gps-od-line {
   margin: 0;
-  font-size: 0.95rem;
-  font-weight: 700;
+  max-width: 100%;
+  font-size: clamp(0.74rem, 2.3vw + 0.2vh, 0.95rem);
+  font-weight: 600;
+  line-height: 1.28;
   color: #f4f4f8;
-  white-space: nowrap;
+  word-break: break-word;
+  overflow-wrap: anywhere;
 }
 
-.trailer-gps-coords-inline {
-  font-family: ui-monospace, 'Cascadia Code', monospace;
-  font-size: 0.7rem;
+.trailer-gps-od-line.trailer-gps-od-muted {
+  font-size: clamp(0.68rem, 2.1vw + 0.15vh, 0.88rem);
   font-weight: 500;
-  color: #7dd3fc;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  color: #b4b4c4;
 }
 
 .trailer-gps-close {
