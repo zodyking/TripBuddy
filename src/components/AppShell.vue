@@ -270,8 +270,7 @@ onUnmounted(() => {
    HEADER — Glass morphism with gradient accent
    ═══════════════════════════════════════════════════════════════════════════ */
 .app-header {
-  position: sticky;
-  top: 0;
+  flex-shrink: 0;
   z-index: var(--z-header, 30);
   background: var(--color-glass, rgba(22, 22, 29, 0.72));
   backdrop-filter: blur(var(--blur-lg, 20px));
@@ -579,7 +578,7 @@ onUnmounted(() => {
   width: 100%;
   margin-inline: auto;
   padding-inline: var(--space-4, 1rem);
-  padding-bottom: calc(var(--nav-height, 4rem) + env(safe-area-inset-bottom, 0) + 1rem);
+  padding-bottom: var(--space-5, 1.25rem);
   min-height: 0;
 }
 
@@ -646,13 +645,13 @@ onUnmounted(() => {
    BOTTOM NAVIGATION — Opaque bar (content must not show through)
    ═══════════════════════════════════════════════════════════════════════════ */
 .bottom-nav {
-  position: fixed;
-  left: 0;
-  right: 0;
-  bottom: 0;
+  flex-shrink: 0;
+  position: relative;
   z-index: var(--z-sticky, 20);
   display: flex;
+  width: 100%;
   height: calc(var(--nav-height, 4rem) + env(safe-area-inset-bottom, 0px));
+  min-height: calc(var(--nav-height, 4rem) + env(safe-area-inset-bottom, 0px));
   max-height: calc(var(--nav-height, 4rem) + env(safe-area-inset-bottom, 0px));
   background: var(--color-bg-base, #08080a);
   border-top: 1px solid var(--color-border, rgba(255, 255, 255, 0.08));

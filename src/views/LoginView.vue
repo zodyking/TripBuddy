@@ -357,12 +357,15 @@ async function onSubmit() {
 
 <style scoped>
 .login-page {
-  min-height: 100vh;
-  min-height: 100dvh;
+  flex: 1;
+  min-height: 0;
+  height: 100%;
   display: flex;
   flex-direction: column;
   position: relative;
   overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior-y: contain;
 }
 
 .login-bg-glow {
