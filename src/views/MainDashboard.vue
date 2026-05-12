@@ -745,6 +745,15 @@ const tripDestLocationId = computed(() => {
   return n != null && String(n).trim() !== '' ? String(n).trim() : ''
 })
 
+/** Trip origin / current location id (same notion as dispatch “where you are”). */
+const tripOriginLocationId = computed(() => {
+  const b = tripDetailsBodyForSlide.value
+  if (!b || typeof b !== 'object') return ''
+  const o = /** @type {Record<string, unknown>} */ (b)
+  const cur = o.currentLocationNumber ?? o.originLocation
+  return cur != null && String(cur).trim() !== '' ? String(cur).trim() : ''
+})
+
 function linehaulBodyLocationId(body) {
   if (!body || typeof body !== 'object' || Array.isArray(body)) return ''
   const o = /** @type {Record<string, unknown>} */ (body)
@@ -753,16 +762,12 @@ function linehaulBodyLocationId(body) {
 }
 
 /**
- * Trip destination terminal summary for the trailer GPS map overlay.
- * Uses cached destination location body when it matches the active trip dest id.
+ * One terminal row for the trailer GPS map (origin or destination).
+ * Uses cached Linehaul location body when `destLocationBody` matches this id.
  */
-function buildTrailerGpsTerminalCardSkeleton() {
-  const id = tripDestLocationId.value
+function trailerGpsTerminalSlotSkeleton(locationId, tripLabel) {
+  const id = String(locationId ?? '').trim()
   if (!id) return null
-  const b = tripDetailsBodyForSlide.value
-  const o = b && typeof b === 'object' ? /** @type {Record<string, unknown>} */ (b) : {}
-  const tripName = String(o.tripDest ?? o.tripDestAbbrv ?? '').trim()
-  const name = tripName || `Terminal ${id}`
   const cached = destLocationBody.value
   if (
     cached &&
@@ -773,9 +778,13 @@ function buildTrailerGpsTerminalCardSkeleton() {
     const fmt = formatLinehaulLocationForDisplay(cached)
     const locRow = fmt.rows.find((x) => x.label === 'Location')
     const phoneR = fmt.rows.find((x) => x.label === 'Phone')
+    const name =
+      (locRow?.value && String(locRow.value).trim()) ||
+      String(tripLabel ?? '').trim() ||
+      `Location ${id}`
     return {
       locationId: id,
-      name: (locRow?.value && String(locRow.value).trim()) || name,
+      name,
       phoneDisplay: phoneR?.value ? String(phoneR.value).trim() : '',
       telHref: phoneR?.href ? String(phoneR.href) : '',
       loading: false,
@@ -783,67 +792,122 @@ function buildTrailerGpsTerminalCardSkeleton() {
   }
   return {
     locationId: id,
-    name,
+    name: String(tripLabel ?? '').trim() || `Location ${id}`,
     phoneDisplay: '',
     telHref: '',
     loading: true,
   }
 }
 
-async function hydrateTrailerGpsTerminalCard() {
-  const data = trailerGpsData.value
-  const tc = data?.terminalCard
-  if (!tc || typeof tc !== 'object' || tc.loading !== true) return
-  const id = String(tc.locationId ?? '').trim()
-  if (!id) return
-
-  const cached = destLocationBody.value
-  let body =
-    cached &&
-    typeof cached === 'object' &&
-    !Array.isArray(cached) &&
-    linehaulBodyLocationId(cached) === id
-      ? cached
-      : null
-  if (!body) {
-    const r = await fetchFedexLinehaulLocation({
-      locationId: id,
-      originId: linehaulOriginIdForApi.value || undefined,
-    })
-    if (!trailerGpsModalOpen.value) return
-    const cur = trailerGpsData.value?.terminalCard
-    if (!cur || String(cur.locationId) !== id) return
-    body = r.ok ? r.body : null
+/**
+ * Origin (default) + destination terminals for the trailer map overlay.
+ */
+function buildTrailerGpsTerminalPair() {
+  const origId = tripOriginLocationId.value
+  const destId = tripDestLocationId.value
+  if (!origId && !destId) return null
+  if (origId && destId && origId === destId) {
+    const b = tripDetailsBodyForSlide.value
+    const o = b && typeof b === 'object' ? /** @type {Record<string, unknown>} */ (b) : {}
+    const label =
+      String(o.currentLocationName ?? '').trim() ||
+      String(o.tripDest ?? o.tripDestAbbrv ?? '').trim() ||
+      ''
+    return {
+      origin: trailerGpsTerminalSlotSkeleton(origId, label),
+      destination: null,
+    }
   }
+  const b = tripDetailsBodyForSlide.value
+  const o = b && typeof b === 'object' ? /** @type {Record<string, unknown>} */ (b) : {}
+  const origLabel = String(o.currentLocationName ?? '').trim()
+  const destLabel = String(o.tripDest ?? o.tripDestAbbrv ?? '').trim()
+  return {
+    origin: origId ? trailerGpsTerminalSlotSkeleton(origId, origLabel) : null,
+    destination: destId ? trailerGpsTerminalSlotSkeleton(destId, destLabel) : null,
+  }
+}
 
-  if (!trailerGpsModalOpen.value) return
-  const cur2 = trailerGpsData.value?.terminalCard
-  if (!cur2 || String(cur2.locationId) !== id) return
+async function hydrateTrailerGpsTerminalPair() {
+  const data = trailerGpsData.value
+  const pair = data?.terminalPair
+  if (!pair || typeof pair !== 'object') return
 
-  if (!body || typeof body !== 'object') {
+  /**
+   * @param {'origin' | 'destination'} slotKey
+   * @param {string} id
+   * @param {string} [otherTripLegId]
+   */
+  async function fillSlot(slotKey, id, otherTripLegId) {
+    const idStr = String(id).trim()
+    if (!idStr) return
+    const slot0 = trailerGpsData.value?.terminalPair?.[slotKey]
+    if (!slot0 || slot0.loading !== true || String(slot0.locationId) !== idStr) return
+
+    const cached = destLocationBody.value
+    let body =
+      cached &&
+      typeof cached === 'object' &&
+      !Array.isArray(cached) &&
+      linehaulBodyLocationId(cached) === idStr
+        ? cached
+        : null
+    if (!body) {
+      const r = await fetchFedexLinehaulLocation({
+        locationId: idStr,
+        originId: otherTripLegId || linehaulOriginIdForApi.value || undefined,
+      })
+      if (!trailerGpsModalOpen.value) return
+      const curPair = trailerGpsData.value?.terminalPair
+      if (!curPair?.[slotKey] || String(curPair[slotKey].locationId) !== idStr) return
+      body = r.ok ? r.body : null
+    }
+
+    if (!trailerGpsModalOpen.value) return
+    const cur2 = trailerGpsData.value?.terminalPair
+    if (!cur2?.[slotKey] || String(cur2[slotKey].locationId) !== idStr) return
+
+    if (!body || typeof body !== 'object') {
+      trailerGpsData.value = {
+        ...trailerGpsData.value,
+        terminalPair: {
+          ...cur2,
+          [slotKey]: { ...cur2[slotKey], loading: false },
+        },
+      }
+      return
+    }
+    const fmt = formatLinehaulLocationForDisplay(body)
+    const locRow = fmt.rows.find((x) => x.label === 'Location')
+    const phoneR = fmt.rows.find((x) => x.label === 'Phone')
+    const fallbackName = String(cur2[slotKey].name ?? '').trim() || `Location ${idStr}`
     trailerGpsData.value = {
       ...trailerGpsData.value,
-      terminalCard: {
+      terminalPair: {
         ...cur2,
-        loading: false,
+        [slotKey]: {
+          locationId: idStr,
+          name: (locRow?.value && String(locRow.value).trim()) || fallbackName,
+          phoneDisplay: phoneR?.value ? String(phoneR.value).trim() : '',
+          telHref: phoneR?.href ? String(phoneR.href) : '',
+          loading: false,
+        },
       },
     }
-    return
   }
-  const fmt = formatLinehaulLocationForDisplay(body)
-  const locRow = fmt.rows.find((x) => x.label === 'Location')
-  const phoneR = fmt.rows.find((x) => x.label === 'Phone')
-  const fallbackName = String(cur2.name ?? '').trim() || `Terminal ${id}`
-  trailerGpsData.value = {
-    ...trailerGpsData.value,
-    terminalCard: {
-      locationId: id,
-      name: (locRow?.value && String(locRow.value).trim()) || fallbackName,
-      phoneDisplay: phoneR?.value ? String(phoneR.value).trim() : '',
-      telHref: phoneR?.href ? String(phoneR.href) : '',
-      loading: false,
-    },
-  }
+
+  await Promise.all([
+    pair.origin?.locationId && pair.origin.loading === true
+      ? fillSlot('origin', String(pair.origin.locationId), tripDestLocationId.value || undefined)
+      : Promise.resolve(),
+    pair.destination?.locationId && pair.destination.loading === true
+      ? fillSlot(
+          'destination',
+          String(pair.destination.locationId),
+          tripOriginLocationId.value || undefined,
+        )
+      : Promise.resolve(),
+  ])
 }
 
 /** originId header for Linehaul calls: tractor snapshot, else trip current location (active slide). */
@@ -1542,7 +1606,7 @@ function openTrailerGpsModal(card) {
     if (ft53.length === 1) heavyTrailerOrder = String(ft53[0].order)
   }
 
-  const terminalCard = buildTrailerGpsTerminalCardSkeleton()
+  const terminalPair = buildTrailerGpsTerminalPair()
 
   trailerGpsData.value = {
     order: card.order,
@@ -1552,7 +1616,7 @@ function openTrailerGpsModal(card) {
     lng: card.lng,
     trailerMapPins,
     heavyTrailerOrder,
-    terminalCard,
+    terminalPair,
     userLat: null,
     userLng: null,
     userGpsPending: hasGeo,
@@ -1561,8 +1625,12 @@ function openTrailerGpsModal(card) {
   }
   trailerGpsModalOpen.value = true
 
-  if (terminalCard?.loading) {
-    void hydrateTrailerGpsTerminalCard()
+  if (
+    terminalPair &&
+    ((terminalPair.origin?.loading === true) ||
+      (terminalPair.destination?.loading === true))
+  ) {
+    void hydrateTrailerGpsTerminalPair()
   }
 
   if (!hasGeo) return
@@ -2082,7 +2150,7 @@ onUnmounted(() => {
             <TrailerLocationMap
               :trailers="trailerGpsData.trailerMapPins || []"
               :heavy-trailer-order="trailerGpsData.heavyTrailerOrder || ''"
-              :terminal-card="trailerGpsData.terminalCard ?? null"
+              :terminal-pair="trailerGpsData.terminalPair ?? null"
               :user-lat="trailerGpsData.userLat"
               :user-lng="trailerGpsData.userLng"
               :user-location-pending="trailerGpsData.userGpsPending"

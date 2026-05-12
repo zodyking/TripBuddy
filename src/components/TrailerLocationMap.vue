@@ -50,16 +50,25 @@ const props = defineProps({
   userLocationDenied: { type: Boolean, default: false },
   userVehicleId: { type: String, default: '' },
   /**
-   * Trip destination terminal for overlay card (from Linehaul location + trip id).
+   * Origin + destination terminal rows for the map overlay (double-tap to switch).
    * @type {import('vue').PropType<{
-   *   locationId: string,
-   *   name: string,
-   *   phoneDisplay?: string,
-   *   telHref?: string,
-   *   loading?: boolean
+   *   origin: {
+   *     locationId: string,
+   *     name: string,
+   *     phoneDisplay?: string,
+   *     telHref?: string,
+   *     loading?: boolean
+   *   } | null,
+   *   destination: {
+   *     locationId: string,
+   *     name: string,
+   *     phoneDisplay?: string,
+   *     telHref?: string,
+   *     loading?: boolean
+   *   } | null
    * } | null>}
    */
-  terminalCard: { type: Object, default: null },
+  terminalPair: { type: Object, default: null },
 })
 
 const containerRef = ref(null)
@@ -291,13 +300,29 @@ watch(
   },
 )
 
-const terminalCardDisplay = computed(() => {
-  const c = props.terminalCard
-  if (!c || typeof c !== 'object' || Array.isArray(c)) return null
-  const o = /** @type {Record<string, unknown>} */ (c)
+/** Active leg for the terminal bar (default: trip origin). */
+const activeTerminalLeg = ref(/** @type {'origin' | 'destination'} */ ('origin'))
+/** @type {number} */
+let terminalTapLast = 0
+
+watch(
+  () => props.terminalPair,
+  () => {
+    activeTerminalLeg.value = 'origin'
+    terminalTapLast = 0
+  },
+  { deep: true },
+)
+
+/**
+ * @param {unknown} raw
+ */
+function normTerminalSlot(raw) {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null
+  const o = /** @type {Record<string, unknown>} */ (raw)
   const id = String(o.locationId ?? '').trim()
   if (!id) return null
-  const name = String(o.name ?? '').trim() || `Terminal ${id}`
+  const name = String(o.name ?? '').trim() || `Location ${id}`
   const phoneDisplay = String(o.phoneDisplay ?? '').trim()
   const telHref = String(o.telHref ?? '').trim()
   return {
@@ -306,6 +331,67 @@ const terminalCardDisplay = computed(() => {
     phoneDisplay,
     telHref,
     loading: Boolean(o.loading),
+  }
+}
+
+const canToggleTerminalLeg = computed(() => {
+  const p = props.terminalPair
+  if (!p || typeof p !== 'object' || Array.isArray(p)) return false
+  const o = normTerminalSlot(/** @type {Record<string, unknown>} */ (p).origin)
+  const d = normTerminalSlot(/** @type {Record<string, unknown>} */ (p).destination)
+  return !!(o && d && o.locationId !== d.locationId)
+})
+
+function toggleTerminalLeg() {
+  if (!canToggleTerminalLeg.value) return
+  activeTerminalLeg.value =
+    activeTerminalLeg.value === 'destination' ? 'origin' : 'destination'
+}
+
+/**
+ * @param {MouseEvent | TouchEvent} e
+ */
+function onTerminalPairTap(e) {
+  if (!canToggleTerminalLeg.value) return
+  const t = /** @type {unknown} */ (e.target)
+  if (t && typeof t === 'object' && 'closest' in t && typeof t.closest === 'function') {
+    if (/** @type {Element} */ (t).closest('a.trailer-loc-call-btn')) return
+  }
+  if (e && 'detail' in e && /** @type {MouseEvent} */ (e).detail === 2) {
+    toggleTerminalLeg()
+    terminalTapLast = 0
+    return
+  }
+  const now = Date.now()
+  if (terminalTapLast > 0 && now - terminalTapLast < DOUBLE_TAP_MS) {
+    toggleTerminalLeg()
+    terminalTapLast = 0
+  } else {
+    terminalTapLast = now
+  }
+}
+
+const terminalCardDisplay = computed(() => {
+  const p = props.terminalPair
+  if (!p || typeof p !== 'object' || Array.isArray(p)) return null
+  const po = /** @type {Record<string, unknown>} */ (p)
+  const o = normTerminalSlot(po.origin)
+  const d = normTerminalSlot(po.destination)
+  if (!o && !d) return null
+  const both = o && d && o.locationId !== d.locationId
+  const wantDest = activeTerminalLeg.value === 'destination'
+  let leg = wantDest ? d : o
+  let legLabel = wantDest ? 'Destination' : 'Origin'
+  if (!leg) {
+    leg = o || d
+    legLabel = leg === o ? 'Origin' : 'Destination'
+  } else if (!both) {
+    legLabel = leg === o ? 'Origin' : 'Destination'
+  }
+  if (!leg) return null
+  return {
+    ...leg,
+    legLabel,
   }
 })
 
@@ -847,12 +933,19 @@ watch(compassModeActive, (active) => {
     <div
       v-if="terminalCardDisplay"
       class="trailer-loc-terminal-card"
+      :class="{ 'is-toggleable': canToggleTerminalLeg }"
       role="region"
-      aria-label="Trip destination terminal"
+      :aria-label="`Trip terminal — ${terminalCardDisplay.legLabel}`"
+      :title="
+        canToggleTerminalLeg
+          ? 'Double-tap or double-click to switch origin / destination'
+          : undefined
+      "
+      @click="onTerminalPairTap($event)"
     >
       <div class="trailer-loc-terminal-main">
         <div class="trailer-loc-terminal-inline">
-          <span class="trailer-loc-terminal-w">Destination</span>
+          <span class="trailer-loc-terminal-w">{{ terminalCardDisplay.legLabel }}</span>
           <span class="trailer-loc-terminal-name">{{ terminalCardDisplay.name }}</span>
           <span class="trailer-loc-terminal-sep" aria-hidden="true">·</span>
           <span class="trailer-loc-terminal-id">ID {{ terminalCardDisplay.locationId }}</span>
@@ -871,6 +964,8 @@ watch(compassModeActive, (active) => {
             :href="terminalCardDisplay.telHref"
             class="trailer-loc-call-btn tap"
             rel="noopener"
+            @click.stop
+            @dblclick.stop
           >Call</a>
         </div>
       </div>
@@ -955,6 +1050,10 @@ watch(compassModeActive, (active) => {
     0 -2px 18px rgba(0, 0, 0, 0.35),
     inset 0 1px 0 rgba(255, 255, 255, 0.06);
   pointer-events: auto;
+}
+
+.trailer-loc-terminal-card.is-toggleable {
+  cursor: pointer;
 }
 
 .trailer-loc-root:not(.has-trailer-ledger) .trailer-loc-terminal-card {
