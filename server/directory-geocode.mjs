@@ -85,7 +85,7 @@ function envInt(name, fallback, min, max) {
  */
 export async function geocodeMissingDirectoryLocations(opts = {}) {
   const defMax = envInt('DIRECTORY_GEOCODE_BATCH_MAX', 18, 1, 40)
-  const defDelay = envInt('DIRECTORY_GEOCODE_DELAY_MS', 1000, 850, 3000)
+  const defDelay = envInt('DIRECTORY_GEOCODE_DELAY_MS', 950, 850, 3000)
   const max = Math.min(40, Math.max(1, Number(opts.max) || defMax))
   const delayMs = Math.min(3000, Math.max(850, Number(opts.delayMs) || defDelay))
 
@@ -127,16 +127,16 @@ export async function geocodeMissingDirectoryLocations(opts = {}) {
         longitude: coords.lng,
       })
       if (result.updated) updated++
+      directory[id] = result.entry
     } catch (err) {
       failed.push({
         locationId: id,
         error: err instanceof Error ? err.message : String(err),
       })
     }
-    directory = await readDirectory()
   }
 
-  const remaining = countMissingCoords(await readDirectory())
+  const remaining = countMissingCoords(directory)
 
   return {
     ok: true,
