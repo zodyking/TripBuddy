@@ -84,10 +84,10 @@ function envInt(name, fallback, min, max) {
  * @param {{ max?: number, delayMs?: number }} [opts]
  */
 export async function geocodeMissingDirectoryLocations(opts = {}) {
-  const defMax = envInt('DIRECTORY_GEOCODE_BATCH_MAX', 18, 1, 40)
-  const defDelay = envInt('DIRECTORY_GEOCODE_DELAY_MS', 950, 850, 3000)
-  const max = Math.min(40, Math.max(1, Number(opts.max) || defMax))
-  const delayMs = Math.min(3000, Math.max(850, Number(opts.delayMs) || defDelay))
+  const defMax = envInt('DIRECTORY_GEOCODE_BATCH_MAX', 30, 1, 60)
+  const defDelay = envInt('DIRECTORY_GEOCODE_DELAY_MS', 1100, 1000, 3000)
+  const max = Math.min(60, Math.max(1, Number(opts.max) || defMax))
+  const delayMs = Math.min(3000, Math.max(1000, Number(opts.delayMs) || defDelay))
 
   let directory = await readDirectory()
   const missingBefore = countMissingCoords(directory)
