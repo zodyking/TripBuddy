@@ -960,9 +960,25 @@ watch(compassModeActive, (active) => {
         :href="terminalCardDisplay.telHref"
         class="trailer-loc-call-btn-full tap"
         rel="noopener"
+        aria-label="Call terminal phone"
         @click.stop
         @dblclick.stop
-      >Call</a>
+      >
+        <svg
+          class="trailer-loc-call-icon"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2.15"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          aria-hidden="true"
+        >
+          <path
+            d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"
+          />
+        </svg>
+      </a>
     </div>
     <p
       v-if="userLocationPending && !hasUserFix"
@@ -1016,6 +1032,7 @@ watch(compassModeActive, (active) => {
   border: 0;
 }
 
+/* Match trailer ledger row: same shell, purple top accent (app brand). */
 .trailer-loc-terminal-card {
   position: absolute;
   z-index: 1001;
@@ -1027,31 +1044,33 @@ watch(compassModeActive, (active) => {
   flex-direction: row;
   align-items: stretch;
   width: auto;
-  max-width: min(15.5rem, calc(100% - 9.5rem));
-  min-height: 3.85rem;
-  padding: 0;
-  padding-bottom: max(0, env(safe-area-inset-bottom, 0px));
-  border-radius: 0.5rem 0 0 0;
-  background: linear-gradient(165deg, #1a1a24 0%, #12121a 100%);
-  background-color: rgba(18, 18, 26, 0.96);
-  backdrop-filter: blur(14px);
-  -webkit-backdrop-filter: blur(14px);
-  border: 1px solid rgba(123, 77, 181, 0.55);
+  max-width: min(20rem, calc(100% - 9.5rem));
+  margin: 0;
+  padding: 0.4rem 0 0.5rem 0.65rem;
+  padding-bottom: max(0.5rem, env(safe-area-inset-bottom, 0px));
+  border-radius: 0;
+  background: rgba(10, 10, 15, 0.94);
+  border: none;
+  border-top: 2px solid var(--color-accent-purple, #7b4db5);
   border-right: none;
   border-bottom: none;
-  box-shadow:
-    0 -2px 18px rgba(0, 0, 0, 0.35),
-    inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  box-shadow: inset 0 2px 12px rgba(123, 77, 181, 0.16);
   pointer-events: auto;
   overflow: hidden;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
 }
 
 .trailer-loc-terminal-card.is-toggleable {
   cursor: pointer;
 }
 
+.trailer-loc-terminal-card:active {
+  opacity: 0.94;
+}
+
 .trailer-loc-root:not(.has-trailer-ledger) .trailer-loc-terminal-card {
-  max-width: min(16rem, calc(100% - 1rem));
+  max-width: min(21rem, calc(100% - 1rem));
 }
 
 .trailer-loc-terminal-text {
@@ -1060,15 +1079,17 @@ watch(compassModeActive, (active) => {
   display: flex;
   flex-direction: column;
   justify-content: center;
-  gap: 0.15rem;
-  padding: 0.35rem 0.5rem 0.4rem 0.55rem;
+  gap: 0.18rem;
+  padding-right: 0.45rem;
 }
 
 .trailer-loc-terminal-id-name {
   margin: 0;
-  font-size: 0.72rem;
+  font-size: clamp(1.05rem, 3.6vw, 1.48rem);
   font-weight: 800;
-  line-height: 1.2;
+  line-height: 1.12;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
   color: #f8fafc;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1077,10 +1098,11 @@ watch(compassModeActive, (active) => {
 
 .trailer-loc-terminal-phone-line {
   margin: 0;
-  font-size: 0.65rem;
+  font-size: 0.78rem;
   font-weight: 700;
   font-variant-numeric: tabular-nums;
-  line-height: 1.2;
+  line-height: 1.25;
+  letter-spacing: 0.03em;
   color: rgba(226, 232, 240, 0.88);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1093,22 +1115,31 @@ watch(compassModeActive, (active) => {
   justify-content: center;
   align-self: stretch;
   flex: 0 0 auto;
-  min-width: 2.85rem;
-  padding: 0 0.5rem;
-  font-size: 0.625rem;
-  font-weight: 800;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
+  min-width: 3.85rem;
+  width: 3.85rem;
+  padding: 0;
   text-decoration: none;
-  color: #0f172a;
-  background: linear-gradient(180deg, #4ade80, #22c55e);
+  color: var(--color-text-inverse, #08080a);
+  background: linear-gradient(
+    180deg,
+    var(--color-accent-purple-light, #9d6fd7),
+    var(--color-accent-purple, #7b4db5)
+  );
   border: none;
-  border-left: 1px solid rgba(15, 23, 42, 0.2);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.2);
+  border-left: 1px solid rgba(0, 0, 0, 0.22);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.22),
+    0 0 0 1px rgba(92, 45, 145, 0.35);
+}
+
+.trailer-loc-call-icon {
+  width: 1.42rem;
+  height: 1.42rem;
+  flex-shrink: 0;
 }
 
 .trailer-loc-call-btn-full:hover {
-  filter: brightness(1.06);
+  filter: brightness(1.07);
 }
 
 .trailer-loc-hint {
@@ -1153,7 +1184,7 @@ watch(compassModeActive, (active) => {
   display: flex;
   flex-direction: row;
   gap: 0;
-  max-width: calc(100% - 9.25rem);
+  max-width: calc(100% - 12.25rem);
 }
 
 .trailer-loc-root:not(.has-terminal-card) .trailer-loc-big-nums {
