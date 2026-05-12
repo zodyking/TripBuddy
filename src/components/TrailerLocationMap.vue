@@ -337,23 +337,12 @@ function makeTrailerIcon(trailer) {
   const sz = String(trailer?.size ?? '').trim().toLowerCase()
   const num = String(trailer?.trlrNbr ?? '').trim()
   const pulse = Boolean(trailer?.highlightHeavy)
-  const lat = Number(trailer?.lat)
-  const zoom = map?.getZoom() ?? 15
 
-  if (useGeoScaledMarkers.value && Number.isFinite(lat)) {
-    if (sz === '20ft' || sz === "20'") {
-      return trailer20ftTopIconGeoScaled(num, lat, zoom, { pulseHeavy: pulse })
-    }
-    if (sz === '53ft' || sz === "53'") {
-      return trailer53ftTopIconGeoScaled(num, lat, zoom, { pulseHeavy: pulse })
-    }
-  } else {
-    if (sz === '20ft' || sz === "20'") {
-      return trailer20ftTopIcon(num, { pulseHeavy: pulse })
-    }
-    if (sz === '53ft' || sz === "53'") {
-      return trailer53ftTopIcon(num, { pulseHeavy: pulse })
-    }
+  if (sz === '20ft' || sz === "20'") {
+    return trailer20ftTopIcon(num, { pulseHeavy: pulse })
+  }
+  if (sz === '53ft' || sz === "53'") {
+    return trailer53ftTopIcon(num, { pulseHeavy: pulse })
   }
   return trailerFallbackPinIcon()
 }
@@ -362,36 +351,11 @@ function makeTrailerIcon(trailer) {
  * Create user truck icon — geo-scaled to real-world size when enabled.
  */
 function makeUserTruckIcon() {
-  const vehicleId = props.userVehicleId || ''
-  if (!useGeoScaledMarkers.value || !userFix.value) {
-    return userLocationTruckIcon(vehicleId)
-  }
-  const lat = userFix.value.lat
-  const zoom = map?.getZoom() ?? 15
-  if (!Number.isFinite(lat)) {
-    return userLocationTruckIcon(vehicleId)
-  }
-  return userLocationTruckIconGeoScaled(vehicleId, lat, zoom)
+  return userLocationTruckIcon(props.userVehicleId || '')
 }
 
-/**
- * Update all marker icons after zoom change (for geo-scaled sizing).
- */
 function updateMarkersForZoom() {
-  if (!map || !useGeoScaledMarkers.value) return
-
-  for (const t of effectiveTrailers.value) {
-    const key = String(t.order)
-    const mk = trailerMarkers.get(key)
-    if (mk) {
-      mk.setIcon(makeTrailerIcon(t))
-      resetTrailerMarkerRotation(mk)
-    }
-  }
-
-  if (userMarker && userFix.value) {
-    userMarker.setIcon(makeUserTruckIcon())
-  }
+  /* no-op: fixed-pixel icons do not resize on zoom */
 }
 
 function setBaseLayer(mode) {
@@ -1001,10 +965,36 @@ watch(compassModeActive, (active) => {
 }
 
 .trailer-loc-big-num-row.is-heavy {
-  border-color: rgba(239, 68, 68, 0.55);
+  border-color: rgba(239, 68, 68, 0.7);
   box-shadow:
     0 4px 14px rgba(0, 0, 0, 0.35),
-    0 0 0 1px rgba(239, 68, 68, 0.25);
+    0 0 12px rgba(239, 68, 68, 0.5),
+    0 0 24px rgba(239, 68, 68, 0.25);
+  animation: heavy-card-pulse 1.8s ease-in-out infinite;
+}
+.trailer-loc-big-num-row:not(.is-heavy) {
+  border-color: rgba(34, 197, 94, 0.5);
+  box-shadow:
+    0 4px 14px rgba(0, 0, 0, 0.35),
+    0 0 10px rgba(34, 197, 94, 0.35),
+    0 0 20px rgba(34, 197, 94, 0.15);
+  animation: light-card-pulse 2s ease-in-out infinite;
+}
+@keyframes heavy-card-pulse {
+  0%, 100% {
+    box-shadow: 0 4px 14px rgba(0,0,0,0.35), 0 0 12px rgba(239,68,68,0.5), 0 0 24px rgba(239,68,68,0.25);
+  }
+  50% {
+    box-shadow: 0 4px 14px rgba(0,0,0,0.35), 0 0 20px rgba(239,68,68,0.7), 0 0 40px rgba(239,68,68,0.4);
+  }
+}
+@keyframes light-card-pulse {
+  0%, 100% {
+    box-shadow: 0 4px 14px rgba(0,0,0,0.35), 0 0 10px rgba(34,197,94,0.35), 0 0 20px rgba(34,197,94,0.15);
+  }
+  50% {
+    box-shadow: 0 4px 14px rgba(0,0,0,0.35), 0 0 16px rgba(34,197,94,0.55), 0 0 32px rgba(34,197,94,0.3);
+  }
 }
 
 .trailer-loc-big-num-label {
@@ -1041,6 +1031,10 @@ watch(compassModeActive, (active) => {
 
 .trailer-loc-big-num-row.is-heavy .trailer-loc-big-num-val {
   color: #fecaca;
+}
+
+.trailer-loc-big-num-row:not(.is-heavy) .trailer-loc-big-num-val {
+  color: #bbf7d0;
 }
 
 .trailer-loc-big-num-row.is-seal .trailer-loc-big-num-val {
@@ -1120,6 +1114,16 @@ watch(compassModeActive, (active) => {
 :deep(.leaflet-container) {
   font-family: inherit;
   background: #cbd5e1;
+}
+
+:deep(.map-marker-raster-div-icon--trailer) {
+  background: transparent !important;
+  border: none !important;
+}
+
+:deep(.map-marker-raster-div-icon--trailer .map-marker-raster-root--trailer) {
+  transform: none !important;
+  transform-origin: center center !important;
 }
 
 :deep(.leaflet-control-zoom a) {
