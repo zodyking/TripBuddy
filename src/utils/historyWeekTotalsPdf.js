@@ -698,56 +698,6 @@ export function downloadHistoryWeekTotalsPdf(opts) {
       doc.text(lines, cx, titleY + 11, { align: 'center', maxWidth: maxW })
     }
 
-    /**
-     * Short black strip above each proof image: leg id(s) prominently; optional capture label below.
-     * @param {ProofTripAppendix} trip
-     * @param {string} shotLabel
-     * @param {number} contentTopY
-     * @returns {number} y to start image
-     */
-    function drawProofCaptureHeader(trip, shotLabel, contentTopY) {
-      const bandTop = contentTopY
-      const bandH = 8.2
-      doc.setFillColor(...BLACK)
-      doc.rect(MX, bandTop, IW, bandH, 'F')
-
-      const s1 = ascii(String(trip.legLabel ?? '-').trim() || '-')
-      const s2 = ascii(String(trip.dailyTripLegSequence ?? '').trim())
-      let legPair
-      if (s2 && s1 !== '-' && s2 !== s1) {
-        legPair = `${s1}  ${s2}`
-      } else if (s1 !== '-') {
-        legPair = `${s1}  ${s1}`
-      } else if (s2) {
-        legPair = `${s2}  ${s2}`
-      } else {
-        legPair = '-'
-      }
-
-      doc.setFont('helvetica', 'bold')
-      doc.setFontSize(12)
-      doc.setTextColor(...WHITE)
-      doc.text(legPair, MX + IW / 2, bandTop + bandH / 2 + 1, {
-        align: 'center',
-        baseline: 'middle',
-        maxWidth: IW - 4,
-      })
-
-      let y = bandTop + bandH + 2.2
-      const cap = ascii(String(shotLabel || '').trim())
-      if (cap) {
-        doc.setFont('helvetica', 'normal')
-        doc.setFontSize(7)
-        doc.setTextColor(...MGRAY)
-        const capLines = doc.splitTextToSize(cap, IW)
-        doc.text(capLines, MX + IW / 2, y, { align: 'center', maxWidth: IW })
-        y += capLines.length * 3.1 + 1.2
-      } else {
-        y += 1
-      }
-      return y
-    }
-
     for (const trip of proofTrips) {
       doc.addPage()
       drawDispatchProofTitlePage(trip)
@@ -756,7 +706,7 @@ export function downloadHistoryWeekTotalsPdf(opts) {
       for (const shot of trip.screenshots) {
         doc.addPage()
         paintPdfFooter(doc, 'light')
-        const yp = drawProofCaptureHeader(trip, shot.label, MX + 4)
+        const yp = MX + 4
 
         try {
           const imgData = `data:image/jpeg;base64,${shot.jpeg}`

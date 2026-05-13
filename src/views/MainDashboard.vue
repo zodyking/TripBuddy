@@ -305,7 +305,7 @@ const directoryLocationMapForTrip = computed(() =>
 const tripDirectoryStops = computed(() => {
   const b = tripDetailsBodyForSlide.value
   if (!b || typeof b !== 'object') {
-    return { pickup: '', delivery: '', pickupName: '', deliveryName: '' }
+    return { pickup: '', delivery: '' }
   }
   const { originId, destinationId } = extractTripOrgIds(b)
   const map = directoryLocationMapForTrip.value
@@ -314,8 +314,6 @@ const tripDirectoryStops = computed(() => {
   return {
     pickup: pick?.address?.trim() || '',
     delivery: drop?.address?.trim() || '',
-    pickupName: pick?.locationName?.trim() || '',
-    deliveryName: drop?.locationName?.trim() || '',
   }
 })
 
@@ -2560,77 +2558,73 @@ onUnmounted(() => {
         </div>
         <p v-if="hasPrePlanTrip" class="dispatch-swipe-hint">Swipe to switch trips</p>
 
-        <div v-if="dispatchSlideIndex === 0 && linehaulTripsBody" class="dispatch-slide">
-          <div class="dispatch-od-row" aria-label="Trip origin and destination">
-            <div class="dispatch-od-pair dispatch-od-pair--origin">
-              <span class="dispatch-od-label">Origin</span>
-              <span class="dispatch-od-val dispatch-od-val--text">{{ tripOriginDest.origin }}</span>
+        <div class="trip-route-main-row">
+          <div class="trip-route-od-cell">
+            <div v-if="dispatchSlideIndex === 0 && linehaulTripsBody" class="dispatch-slide">
+              <div class="dispatch-od-row" aria-label="Trip origin and destination">
+                <div class="dispatch-od-pair dispatch-od-pair--origin">
+                  <span class="dispatch-od-label">Origin</span>
+                  <span class="dispatch-od-val dispatch-od-val--text">{{ tripOriginDest.origin }}</span>
+                </div>
+                <span class="dispatch-od-arrow" aria-hidden="true">→</span>
+                <div class="dispatch-od-pair dispatch-od-pair--dest">
+                  <span class="dispatch-od-label">Destination</span>
+                  <button
+                    v-if="tripDestLocationId && !linehaulTripsError"
+                    type="button"
+                    class="dispatch-od-val dispatch-od-dest-open tap"
+                    title="View destination details"
+                    @click.stop="openDestLocationModal"
+                  >
+                    {{ tripOriginDest.destination }}
+                  </button>
+                  <span v-else class="dispatch-od-val dispatch-od-val--text">{{ tripOriginDest.destination }}</span>
+                </div>
+              </div>
             </div>
-            <span class="dispatch-od-arrow" aria-hidden="true">→</span>
-            <div class="dispatch-od-pair dispatch-od-pair--dest">
-              <span class="dispatch-od-label">Destination</span>
-              <button
-                v-if="tripDestLocationId && !linehaulTripsError"
-                type="button"
-                class="dispatch-od-val dispatch-od-dest-open tap"
-                title="View destination details"
-                @click.stop="openDestLocationModal"
-              >
-                {{ tripOriginDest.destination }}
-              </button>
-              <span v-else class="dispatch-od-val dispatch-od-val--text">{{ tripOriginDest.destination }}</span>
+
+            <div v-if="dispatchSlideIndex === 1 && prePlanTripSnapshot" class="dispatch-slide">
+              <span class="dispatch-preplan-badge">Pre-Plan</span>
+              <div class="dispatch-od-row" aria-label="Pre-plan trip origin and destination">
+                <div class="dispatch-od-pair dispatch-od-pair--origin">
+                  <span class="dispatch-od-label">Origin</span>
+                  <span class="dispatch-od-val dispatch-od-val--text">{{ prePlanOriginDest.origin }}</span>
+                </div>
+                <span class="dispatch-od-arrow" aria-hidden="true">→</span>
+                <div class="dispatch-od-pair dispatch-od-pair--dest">
+                  <span class="dispatch-od-label">Destination</span>
+                  <span class="dispatch-od-val dispatch-od-val--text">{{ prePlanOriginDest.destination }}</span>
+                </div>
+              </div>
             </div>
           </div>
-        </div>
 
-        <div v-if="dispatchSlideIndex === 1 && prePlanTripSnapshot" class="dispatch-slide">
-          <span class="dispatch-preplan-badge">Pre-Plan</span>
-          <div class="dispatch-od-row" aria-label="Pre-plan trip origin and destination">
-            <div class="dispatch-od-pair dispatch-od-pair--origin">
-              <span class="dispatch-od-label">Origin</span>
-              <span class="dispatch-od-val dispatch-od-val--text">{{ prePlanOriginDest.origin }}</span>
-            </div>
-            <span class="dispatch-od-arrow" aria-hidden="true">→</span>
-            <div class="dispatch-od-pair dispatch-od-pair--dest">
-              <span class="dispatch-od-label">Destination</span>
-              <span class="dispatch-od-val dispatch-od-val--text">{{ prePlanOriginDest.destination }}</span>
-            </div>
-          </div>
-        </div>
-
-        <div class="trip-directory-stops" aria-label="Directory pickup and delivery">
-          <h3 class="trip-section-label">Directory</h3>
-          <p v-if="tripDirectoryStops.pickupName || tripDirectoryStops.deliveryName" class="trip-directory-names">
-            <span v-if="tripDirectoryStops.pickupName">{{ tripDirectoryStops.pickupName }}</span>
-            <span v-if="tripDirectoryStops.pickupName && tripDirectoryStops.deliveryName"> → </span>
-            <span v-if="tripDirectoryStops.deliveryName">{{ tripDirectoryStops.deliveryName }}</span>
-          </p>
-          <dl class="trip-details-dl">
-            <dt>Pickup (origin)</dt>
-            <dd>
+          <div class="trip-address-column" aria-label="Pickup and delivery addresses">
+            <div class="trip-stop-block">
+              <span class="trip-stop-label">Pickup</span>
               <button
                 type="button"
-                class="copyable-dd tap"
+                class="trip-stop-val copyable-dd tap"
                 :disabled="!tripDirectoryStops.pickup"
                 :title="tripDirectoryStops.pickup ? 'Tap to copy address' : ''"
                 @click="tripDirectoryStops.pickup && copyTripDetailValue(tripDirectoryStops.pickup, 'Pickup address')"
               >
                 {{ tripDirectoryStops.pickup || '—' }}
               </button>
-            </dd>
-            <dt>Delivery (destination)</dt>
-            <dd>
+            </div>
+            <div class="trip-stop-block">
+              <span class="trip-stop-label">Delivery</span>
               <button
                 type="button"
-                class="copyable-dd tap"
+                class="trip-stop-val copyable-dd tap"
                 :disabled="!tripDirectoryStops.delivery"
                 :title="tripDirectoryStops.delivery ? 'Tap to copy address' : ''"
                 @click="tripDirectoryStops.delivery && copyTripDetailValue(tripDirectoryStops.delivery, 'Delivery address')"
               >
                 {{ tripDirectoryStops.delivery || '—' }}
               </button>
-            </dd>
-          </dl>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -3848,14 +3842,55 @@ button.trailer-nbr.copyable-inline {
   gap: 0.5rem;
   margin-bottom: 0.75rem;
 }
-.trip-directory-stops {
-  padding-top: 0.25rem;
+.trip-route-main-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: stretch;
+  gap: 0.55rem 0.75rem;
 }
-.trip-directory-names {
-  margin: 0 0 0.45rem;
-  font-size: 0.78rem;
-  color: var(--text, #e8e8ee);
+.trip-route-od-cell {
+  flex: 1 1 14rem;
+  min-width: 0;
+}
+.trip-route-od-cell .dispatch-slide {
+  height: 100%;
+}
+.trip-address-column {
+  flex: 0 1 13.5rem;
+  min-width: min(100%, 11rem);
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  align-items: flex-end;
+  text-align: right;
+  padding: 0.55rem 0.65rem;
+  border-radius: 10px;
+  background: #22222c;
+  border: 1px solid #34343e;
+  box-sizing: border-box;
+}
+.trip-stop-block {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0.12rem;
+  width: 100%;
+  min-width: 0;
+}
+.trip-stop-label {
+  font-size: 0.68rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted, #9898a8);
+}
+.trip-stop-val {
+  font-size: 0.8rem;
+  font-weight: 600;
   line-height: 1.35;
+  word-break: break-word;
+  width: 100%;
+  text-align: right;
 }
 .trip-instructions-section {
   margin-bottom: 0.75rem;

@@ -636,8 +636,8 @@ export function formatTripEquipmentPdfBlock(body, dirOpts) {
     const pick = String(dirOpts.pickupAddress ?? '').trim()
     const drop = String(dirOpts.deliveryAddress ?? '').trim()
     lines.push(
-      pdfEquipmentAscii(`Pickup (origin): ${pick || '—'}`),
-      pdfEquipmentAscii(`Delivery (destination): ${drop || '—'}`),
+      pdfEquipmentAscii(`Pickup: ${pick || '—'}`),
+      pdfEquipmentAscii(`Delivery: ${drop || '—'}`),
     )
   }
   const dolly = pdfDollyEquipmentLine(body)
