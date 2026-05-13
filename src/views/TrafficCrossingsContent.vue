@@ -368,6 +368,92 @@ function bridgeChartStrokeColor(row) {
 }
 
 const MAX_CHART_POINTS = 96
+/** Cap time-axis labels — long Verrazzano / highway histories used 4h ticks across weeks and overlapped. */
+const MAX_X_AXIS_TICKS = 6
+
+/**
+ * Pick tick step so we stay at or under `maxTicks` labels across [tMin, tMax].
+ * @param {number} tMin
+ * @param {number} tMax
+ * @param {number} maxTicks
+ * @returns {number[]}
+ */
+function buildSparseTimeTickTimestamps(tMin, tMax, maxTicks) {
+  const span = Math.max(tMax - tMin, 60_000)
+  const n = Math.max(2, Math.min(8, maxTicks))
+  const minStep = span / (n - 1)
+
+  const STEPS_MS = [
+    5 * 60 * 1000,
+    10 * 60 * 1000,
+    15 * 60 * 1000,
+    30 * 60 * 1000,
+    60 * 60 * 1000,
+    2 * 60 * 60 * 1000,
+    3 * 60 * 60 * 1000,
+    4 * 60 * 60 * 1000,
+    6 * 60 * 60 * 1000,
+    12 * 60 * 60 * 1000,
+    24 * 60 * 60 * 1000,
+    2 * 24 * 60 * 60 * 1000,
+    4 * 24 * 60 * 60 * 1000,
+    7 * 24 * 60 * 60 * 1000,
+    14 * 24 * 60 * 60 * 1000,
+    30 * 24 * 60 * 60 * 1000,
+  ]
+
+  let step = STEPS_MS.find((s) => s >= minStep) ?? STEPS_MS[STEPS_MS.length - 1]
+
+  /** @type {number[]} */
+  let ticks = []
+  for (let guard = 0; guard < 12; guard++) {
+    ticks = []
+    let t = Math.floor(tMin / step) * step
+    if (t < tMin) t += step
+    while (t <= tMax + step * 0.001) {
+      ticks.push(t)
+      t += step
+      if (ticks.length > maxTicks + 40) break
+    }
+    if (ticks.length <= maxTicks) break
+    const idx = STEPS_MS.indexOf(step)
+    step = idx >= 0 && idx < STEPS_MS.length - 1 ? STEPS_MS[idx + 1] : step * 2
+  }
+
+  if (ticks.length === 0) return [tMin, tMax]
+  if (ticks.length === 1 && tMax !== tMin) return [tMin, tMax]
+  return ticks
+}
+
+/**
+ * @param {number} spanMs
+ * @returns {(ts: number) => string}
+ */
+function makeAxisTimeFormatter(spanMs) {
+  return (ts) => {
+    try {
+      const d = new Date(ts)
+      if (spanMs <= 40 * 60 * 60 * 1000) {
+        return d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })
+      }
+      if (spanMs <= 16 * 24 * 60 * 60 * 1000) {
+        return d.toLocaleString(undefined, {
+          weekday: 'short',
+          hour: 'numeric',
+          minute: '2-digit',
+        })
+      }
+      return d.toLocaleString(undefined, {
+        month: 'short',
+        day: 'numeric',
+        hour: 'numeric',
+        minute: '2-digit',
+      })
+    } catch {
+      return ''
+    }
+  }
+}
 
 /**
  * @param {Array<{ t: number, m: number, s: number }>} points
@@ -490,48 +576,13 @@ function bridgeChartModel(row) {
     yTicks.push({ y: yOf(v), lab })
   }
 
-  const fmtHour = (ts) => {
-    try {
-      return new Date(ts).toLocaleTimeString(undefined, {
-        hour: 'numeric',
-        minute: '2-digit',
-      })
-    } catch {
-      return ''
-    }
-  }
-
-  /** Time axis: tick every 4 hours on local clock boundaries (…, 12:00, 16:00, …). */
-  const FOUR_MS = 4 * 60 * 60 * 1000
-  /** @type {number[]} */
-  let xTickTs = []
-  {
-    const d = new Date(tMin)
-    d.setMinutes(0, 0, 0)
-    d.setMilliseconds(0)
-    const h = d.getHours()
-    let nextH = Math.ceil(h / 4) * 4
-    if (nextH >= 24) {
-      d.setDate(d.getDate() + 1)
-      d.setHours(0, 0, 0, 0)
-    } else {
-      d.setHours(nextH, 0, 0, 0)
-    }
-    let t = d.getTime()
-    while (t < tMin) t += FOUR_MS
-    while (t <= tMax) {
-      xTickTs.push(t)
-      t += FOUR_MS
-    }
-    if (xTickTs.length === 0) {
-      xTickTs = [tMin, tMax]
-    }
-  }
+  const xTickTs = buildSparseTimeTickTimestamps(tMin, tMax, MAX_X_AXIS_TICKS)
+  const fmtAxisT = makeAxisTimeFormatter(spanT)
   /** @type {{ x: number, lab: string }[]} */
-  const xTicks = xTickTs.map((ts) => ({ x: xOf(ts), lab: fmtHour(ts) }))
+  const xTicks = xTickTs.map((ts) => ({ x: xOf(ts), lab: fmtAxisT(ts) }))
   if (xTicks.length === 0) {
-    xTicks.push({ x: xOf(tMin), lab: fmtHour(tMin) })
-    if (tMax !== tMin) xTicks.push({ x: xOf(tMax), lab: fmtHour(tMax) })
+    xTicks.push({ x: xOf(tMin), lab: fmtAxisT(tMin) })
+    if (tMax !== tMin) xTicks.push({ x: xOf(tMax), lab: fmtAxisT(tMax) })
   }
 
   /** @type {{ x1: number, y1: number, x2: number, y2: number }[]} */
@@ -917,47 +968,13 @@ function hwChartModel(hw) {
     yTicks.push({ y: yOf(v), lab })
   }
 
-  const fmtHour = (ts) => {
-    try {
-      return new Date(ts).toLocaleTimeString(undefined, {
-        hour: 'numeric',
-        minute: '2-digit',
-      })
-    } catch {
-      return ''
-    }
-  }
-
-  const FOUR_MS = 4 * 60 * 60 * 1000
-  /** @type {number[]} */
-  let xTickTs = []
-  {
-    const d = new Date(tMin)
-    d.setMinutes(0, 0, 0)
-    d.setMilliseconds(0)
-    const h = d.getHours()
-    let nextH = Math.ceil(h / 4) * 4
-    if (nextH >= 24) {
-      d.setDate(d.getDate() + 1)
-      d.setHours(0, 0, 0, 0)
-    } else {
-      d.setHours(nextH, 0, 0, 0)
-    }
-    let t = d.getTime()
-    while (t < tMin) t += FOUR_MS
-    while (t <= tMax) {
-      xTickTs.push(t)
-      t += FOUR_MS
-    }
-    if (xTickTs.length === 0) {
-      xTickTs = [tMin, tMax]
-    }
-  }
+  const xTickTs = buildSparseTimeTickTimestamps(tMin, tMax, MAX_X_AXIS_TICKS)
+  const fmtAxisT = makeAxisTimeFormatter(spanT)
   /** @type {{ x: number, lab: string }[]} */
-  const xTicks = xTickTs.map((ts) => ({ x: xOf(ts), lab: fmtHour(ts) }))
+  const xTicks = xTickTs.map((ts) => ({ x: xOf(ts), lab: fmtAxisT(ts) }))
   if (xTicks.length === 0) {
-    xTicks.push({ x: xOf(tMin), lab: fmtHour(tMin) })
-    if (tMax !== tMin) xTicks.push({ x: xOf(tMax), lab: fmtHour(tMax) })
+    xTicks.push({ x: xOf(tMin), lab: fmtAxisT(tMin) })
+    if (tMax !== tMin) xTicks.push({ x: xOf(tMax), lab: fmtAxisT(tMax) })
   }
 
   /** @type {{ x1: number, y1: number, x2: number, y2: number }[]} */
