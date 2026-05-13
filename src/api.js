@@ -164,6 +164,12 @@ export async function getVerrazzanoTraffic() {
   return handleJson(r)
 }
 
+/** GWB @gwblivetrafficcam — active live YouTube video id (server uses YouTube Data API v3). */
+export async function getGwbYoutubeLive() {
+  const r = await apiFetch('/api/bridges/gwb-youtube-live')
+  return handleJson(r)
+}
+
 /** Highway traffic data (HERE/TomTom) + stored series for trend charts. */
 export async function getHighwayTraffic() {
   const r = await apiFetch('/api/traffic/highways')

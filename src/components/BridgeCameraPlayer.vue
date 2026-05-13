@@ -18,6 +18,11 @@ const props = defineProps({
     type: String,
     default: 'Bridge',
   },
+  /** Shown when there is no video/image/YouTube source (e.g. GWB when not live). */
+  noFeedMessage: {
+    type: String,
+    default: 'No camera',
+  },
   fillColumn: {
     type: Boolean,
     default: false,
@@ -393,7 +398,7 @@ onUnmounted(() => {
     
     <div v-else class="camera-no-feed">
       <span class="camera-no-feed-icon">📷</span>
-      <span class="camera-no-feed-text">No camera</span>
+      <span class="camera-no-feed-text">{{ noFeedMessage }}</span>
     </div>
   </div>
 </template>

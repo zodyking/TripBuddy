@@ -150,6 +150,14 @@ const needsAddressGeocode = computed(() => {
 
 const { vehicleId: mapVehicleId } = useMapVehicleId()
 
+/** True when a server batch has finished and counts show an empty queue (clears stale “Saving” UI). */
+const geocodeServerQueueComplete = computed(() => {
+  const init = geocodeInitialMissing.value
+  if (init <= 0) return false
+  if (serverGeocodeInBatch.value) return false
+  return serverGeocodeRemaining.value <= 0 && geocodeMappedCount.value >= init
+})
+
 const showMapNoCoordsNotice = computed(
   () =>
     !loading.value &&
@@ -162,6 +170,7 @@ const showMapGeocodeProgress = computed(
   () =>
     !loading.value &&
     serverGeocodeInBatch.value &&
+    !geocodeServerQueueComplete.value &&
     needsAddressGeocode.value &&
     filteredLocations.value.length > 0,
 )
@@ -271,6 +280,14 @@ async function syncDirectoryGeocodeStatus() {
     if (!serverGeocodeInBatch.value && wasBatch) {
       await refreshDirectoryListOnly()
       geocodeInitialMissing.value = 0
+    }
+    const rem = typeof s.lastRemaining === 'number' ? s.lastRemaining : 0
+    if (rem <= 0 && !serverGeocodeInBatch.value) {
+      await refreshDirectoryListOnly()
+      if (!needsAddressGeocode.value) {
+        serverGeocodeLastError.value = ''
+        geocodeInitialMissing.value = 0
+      }
     }
   } catch {
     /* ignore */
@@ -711,6 +728,8 @@ onMounted(() => {
       void (async () => {
         await syncDirectoryGeocodeStatus()
         if (serverGeocodeInBatch.value) {
+          await refreshDirectoryListOnly()
+        } else if (geocodeServerQueueComplete.value && needsAddressGeocode.value) {
           await refreshDirectoryListOnly()
         }
       })()

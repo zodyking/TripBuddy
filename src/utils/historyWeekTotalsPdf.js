@@ -35,17 +35,6 @@ function fmtMi(n) {
 }
 
 /**
- * @param {{ originId?: string, destId?: string, routeOd?: string }} r
- * @returns {string}
- */
-function routeDisplay(r) {
-  const o = String(r.originId ?? '-').trim()
-  const dest = String(r.destId ?? '-').trim()
-  if (typeof r.routeOd === 'string' && r.routeOd.trim()) return r.routeOd.trim()
-  return `${o} \u2192 ${dest}`
-}
-
-/**
  * @param {string | undefined} seq
  * @param {string} o
  * @param {string} dest
@@ -110,13 +99,123 @@ const BG = [245, 245, 245]
 const BGALT = [250, 250, 250]
 const WHITE = [255, 255, 255]
 
+/**
+ * Draw origin → dest inside table cell (Helvetica often omits Unicode → in embedded fonts).
+ * @param {import('jspdf').jsPDF} doc
+ * @param {{ x: number, y: number, width: number, height: number }} cell
+ * @param {{ origin: string, dest: string, routeOd?: string }} parts
+ */
+function drawRouteCellWithArrow(doc, cell, parts) {
+  const padL = 1.2
+  const padR = 1.2
+  const padT = 0.55
+  const x = cell.x + padL
+  const yTop = cell.y + padT
+  const innerW = cell.width - padL - padR
+  const innerH = cell.height - padT - 0.55
+  const midY = yTop + innerH / 2
+  const fs = 7
+
+  doc.setFont('helvetica', 'bold')
+  doc.setFontSize(fs)
+  doc.setTextColor(...DARK)
+
+  const routeOd = typeof parts.routeOd === 'string' ? parts.routeOd.trim() : ''
+  if (routeOd) {
+    const line = asciiRoute(routeOd)
+    const arrowSplit = line.split(/\s*(?:\u2192|->)\s*/)
+    if (arrowSplit.length === 2) {
+      const o = arrowSplit[0].trim() || '-'
+      const d = arrowSplit[1].trim() || '-'
+      const gap = 0.9
+      const arrowStem = 2.2
+      const arrowHead = 0.9
+      const wO = doc.getTextDimensions(o, { fontSize: fs }).w
+      const wD = doc.getTextDimensions(d, { fontSize: fs }).w
+      const need = wO + gap + arrowStem + arrowHead + gap + wD
+      if (need <= innerW) {
+        doc.text(o, x, midY, { baseline: 'middle' })
+        const ax = x + wO + gap
+        doc.setDrawColor(...DARK)
+        doc.setLineWidth(0.22)
+        doc.line(ax, midY, ax + arrowStem, midY)
+        doc.line(ax + arrowStem, midY, ax + arrowStem - arrowHead * 0.55, midY - arrowHead * 0.45)
+        doc.line(ax + arrowStem, midY, ax + arrowStem - arrowHead * 0.55, midY + arrowHead * 0.45)
+        doc.text(d, ax + arrowStem + gap, midY, { baseline: 'middle' })
+        return
+      }
+    }
+    const lines = doc.splitTextToSize(line, innerW)
+    doc.text(lines, x, yTop + innerH / 2 - ((lines.length - 1) * fs * 0.35), {
+      baseline: 'middle',
+      maxWidth: innerW,
+    })
+    return
+  }
+
+  const o = ascii(String(parts.origin ?? '-').trim() || '-')
+  const d = ascii(String(parts.dest ?? '-').trim() || '-')
+  const gap = 0.9
+  const arrowStem = 2.2
+  const arrowHead = 0.9
+
+  const wO = doc.getTextDimensions(o, { fontSize: fs }).w
+  const wD = doc.getTextDimensions(d, { fontSize: fs }).w
+  const need = wO + gap + arrowStem + arrowHead + gap + wD
+  if (need <= innerW) {
+    doc.text(o, x, midY, { baseline: 'middle' })
+    const ax = x + wO + gap
+    doc.setDrawColor(...DARK)
+    doc.setLineWidth(0.22)
+    doc.line(ax, midY, ax + arrowStem, midY)
+    doc.line(ax + arrowStem, midY, ax + arrowStem - arrowHead * 0.55, midY - arrowHead * 0.45)
+    doc.line(ax + arrowStem, midY, ax + arrowStem - arrowHead * 0.55, midY + arrowHead * 0.45)
+    doc.text(d, ax + arrowStem + gap, midY, { baseline: 'middle' })
+  } else {
+    const lines = doc.splitTextToSize(`${o} → ${d}`, innerW)
+    doc.text(lines, x, yTop + innerH / 2 - ((lines.length - 1) * fs * 0.35), {
+      baseline: 'middle',
+      maxWidth: innerW,
+    })
+  }
+}
+
+/**
+ * Horizontal origin → dest for appendix headers (vector arrow).
+ * @param {import('jspdf').jsPDF} doc
+ * @param {number} x
+ * @param {number} y
+ * @param {string} originId
+ * @param {string} destId
+ */
+function drawProofInlineRoute(doc, x, y, originId, destId) {
+  const fs = 8
+  const O = asciiRoute(String(originId ?? '-').trim() || '-')
+  const D = asciiRoute(String(destId ?? '-').trim() || '-')
+  doc.setFont('helvetica', 'bold')
+  doc.setFontSize(fs)
+  doc.setTextColor(...DARK)
+  doc.text(O, x, y, { baseline: 'middle' })
+  const wO = doc.getTextDimensions(O, { fontSize: fs }).w
+  const gap = 0.75
+  const stem = 2.1
+  const head = 0.78
+  const ax = x + wO + gap
+  doc.setDrawColor(...DARK)
+  doc.setLineWidth(0.2)
+  doc.line(ax, y, ax + stem, y)
+  doc.line(ax + stem, y, ax + stem - head * 0.52, y - head * 0.42)
+  doc.line(ax + stem, y, ax + stem - head * 0.52, y + head * 0.42)
+  doc.text(D, ax + stem + gap, y, { baseline: 'middle' })
+}
+
 const COLS = 8
 
 /** @typedef {{ key: string, originId: string, destId: string, dispatchDate: string, dispatchTime: string, legLabel: string, tractorNumber: string, when: string, od: string, screenshots: { label: string, jpeg: string }[] }} ProofTripAppendix */
 
 /**
  * @param {WeekTotalsPdfOpts} opts
- * @param {Map<string, string> | null} proofRangeByKey padded "007-012" inclusive page span in appendix (two pages per capture: title + image)
+ * @param {Map<string, string> | null} proofRangeByKey inclusive page span "9-16" (appendix; two pages per capture)
  * @returns {{ body: unknown[][], proofTrips: ProofTripAppendix[] }}
  */
 function buildTableBody(opts, proofRangeByKey) {
@@ -179,7 +278,15 @@ function buildTableBody(opts, proofRangeByKey) {
 
       body.push([
         { content: String(i + 1), styles: { halign: 'center', textColor: MGRAY } },
-        { content: asciiRoute(routeDisplay(r)), styles: { fontStyle: 'bold' } },
+        {
+          content: '',
+          styles: { fontStyle: 'bold' },
+          _routeDraw: {
+            origin: o,
+            dest,
+            routeOd: typeof r.routeOd === 'string' ? r.routeOd.trim() : '',
+          },
+        },
         ascii(r.weekday || '-'),
         ascii(r.dispatchDate || '-'),
         ascii(r.dispatchTime || '-'),
@@ -192,8 +299,8 @@ function buildTableBody(opts, proofRangeByKey) {
       const eqLine = eq ? ascii(eq) : ''
       let proofLine = ''
       if (hasProof) {
-        const span = proofRangeByKey?.get(pk) ?? '000-000'
-        proofLine = `Proof pages ${span}`
+        const span = proofRangeByKey?.get(pk) ?? '0-0'
+        proofLine = `Proof of Dispatch: ${span.replace('-', ' - ')}`
       }
       const subContent = [eqLine, proofLine].filter(Boolean).join('\n')
       if (subContent) {
@@ -218,7 +325,7 @@ function buildTableBody(opts, proofRangeByKey) {
 /**
  * @param {ReturnType<typeof buildTableBody>['proofTrips']} proofTrips
  * @param {number} appendixStartPage 1-based page index of first appendix page
- * @returns {Map<string, string>} key -> "000-012"
+ * @returns {Map<string, string>} key -> "9-16" (unpadded inclusive appendix page range)
  */
 function computeProofPageRanges(proofTrips, appendixStartPage) {
   /** @type {Map<string, string>} */
@@ -228,10 +335,7 @@ function computeProofPageRanges(proofTrips, appendixStartPage) {
     const blockStart = p
     p += trip.screenshots.length * 2
     const blockEnd = p - 1
-    map.set(
-      trip.key,
-      `${String(blockStart).padStart(3, '0')}-${String(blockEnd).padStart(3, '0')}`,
-    )
+    map.set(trip.key, `${blockStart}-${blockEnd}`)
   }
   return map
 }
@@ -246,7 +350,123 @@ export function downloadHistoryWeekTotalsPdf(opts) {
   const genLabel = genAt.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })
 
   const MX = 10
-  const MB = 10
+  const MB = 12
+
+  /**
+   * Shared footer: week-totals table pages and proof pages (light or dark background).
+   * @param {import('jspdf').jsPDF} doc
+   * @param {'light' | 'dark'} surface
+   */
+  function paintPdfFooter(doc, surface) {
+    const W = doc.internal.pageSize.getWidth()
+    const H = doc.internal.pageSize.getHeight()
+    const yLine = H - MB + 2
+    const yPrimary = H - MB + 6.2
+    const yDisc = H - MB + 9.2
+    if (surface === 'dark') {
+      doc.setDrawColor(72, 72, 72)
+      doc.setLineWidth(0.15)
+      doc.line(MX, yLine, W - MX, yLine)
+      doc.setFont('helvetica', 'bold')
+      doc.setFontSize(6.5)
+      doc.setTextColor(...WHITE)
+      doc.text('LBP LINES INC', MX, yPrimary)
+      doc.setFont('helvetica', 'normal')
+      doc.setFontSize(5.5)
+      doc.setTextColor(168, 168, 168)
+      doc.text(
+        'Confidential  ·  Driver reference only  ·  Not an official FedEx document',
+        MX,
+        yDisc,
+      )
+      doc.setTextColor(218, 218, 218)
+      doc.text(genLabel, W - MX, yPrimary, { align: 'right' })
+    } else {
+      doc.setDrawColor(...RULE)
+      doc.setLineWidth(0.15)
+      doc.line(MX, yLine, W - MX, yLine)
+      doc.setFont('helvetica', 'bold')
+      doc.setFontSize(6.5)
+      doc.setTextColor(...DARK)
+      doc.text('LBP LINES INC', MX, yPrimary)
+      doc.setFont('helvetica', 'normal')
+      doc.setFontSize(5.5)
+      doc.setTextColor(...GRAY)
+      doc.text(
+        'Confidential  ·  Driver reference only  ·  Not an official FedEx document',
+        MX,
+        yDisc,
+      )
+      doc.text(genLabel, W - MX, yPrimary, { align: 'right' })
+    }
+  }
+
+  /**
+   * Same letterhead as page 1 of the week report: title, week range, pay/calendar + grouping, driver, truck.
+   * @param {import('jspdf').jsPDF} doc
+   * @param {string} titleText
+   * @param {'mainBand' | 'darkPageTop'} kind mainBand fills black bar; darkPageTop only text (full page already black).
+   * @returns {number} height (mm) of the letterhead block
+   */
+  function drawWeekTotalsLetterhead(doc, titleText, kind) {
+    const W = doc.internal.pageSize.getWidth()
+    const IW = W - MX * 2
+    const metaParts = [opts.calendarContext?.trim(), `Grouping: ${opts.groupingModeLabel}`]
+      .filter(Boolean)
+      .map(ascii)
+      .join('   ·   ')
+
+    const driverBody = ascii((opts.driverBlock ?? '').trim().replace(/\s*\n\s*/g, '  ·  ') || '-')
+    const truckBody = ascii((opts.truckBlock ?? '').trim().replace(/\s*\n\s*/g, '  ·  ') || '-')
+    doc.setFont('helvetica', 'bold')
+    doc.setFontSize(6.4)
+    const driverLines = doc.splitTextToSize(`DRIVER  ${driverBody}`, IW)
+    const truckLines = doc.splitTextToSize(`TRUCK  ${truckBody}`, IW)
+    const dShow = driverLines.slice(0, 2)
+    const tShow = truckLines.slice(0, 2)
+    const lineGap = 3.55
+
+    const titleY = 11
+    const weekY = titleY + 6.2
+    const blockY0 = weekY + 5.2
+    const headerH = Math.max(34, blockY0 + dShow.length * lineGap + tShow.length * lineGap + 4)
+
+    if (kind === 'mainBand') {
+      doc.setFillColor(...BLACK)
+      doc.rect(0, 0, W, headerH, 'F')
+    }
+
+    doc.setFont('helvetica', 'bold')
+    doc.setFontSize(15)
+    doc.setTextColor(...WHITE)
+    doc.text(titleText, MX, titleY)
+
+    doc.setFont('helvetica', 'normal')
+    doc.setFontSize(8)
+    doc.setTextColor(...LGRAY)
+    doc.text(ascii(opts.weekRangeLabel), MX, weekY)
+    if (metaParts) {
+      doc.setFontSize(6.2)
+      doc.setTextColor(...GRAY)
+      doc.text(metaParts, W - MX, weekY, { align: 'right' })
+    }
+
+    let y = blockY0
+    doc.setFont('helvetica', 'bold')
+    doc.setFontSize(6.4)
+    doc.setTextColor(...WHITE)
+    for (const ln of dShow) {
+      doc.text(ln, MX, y)
+      y += lineGap
+    }
+    doc.setTextColor(...LGRAY)
+    for (const ln of tShow) {
+      doc.text(ln, MX, y)
+      y += lineGap
+    }
+
+    return headerH
+  }
 
   /**
    * @param {import('jspdf').jsPDF} doc
@@ -259,21 +479,14 @@ export function downloadHistoryWeekTotalsPdf(opts) {
     const IW = W - MX * 2
 
     function pageFooter() {
-      doc.setDrawColor(...RULE)
-      doc.setLineWidth(0.15)
-      doc.line(MX, H - MB + 1, W - MX, H - MB + 1)
-
-      doc.setFont('helvetica', 'normal')
-      doc.setFontSize(6)
-      doc.setTextColor(...GRAY)
-      doc.text('Confidential  ·  Driver reference only  ·  Not an official FedEx document', MX, H - MB + 5.5)
-      doc.text(genLabel, W - MX, H - MB + 5.5, { align: 'right' })
+      paintPdfFooter(doc, 'light')
     }
 
     autoTable(doc, {
       startY: cfg.startY,
       tableWidth: IW,
       margin: { left: MX, right: MX, bottom: MB },
+      showFoot: 'lastPage',
 
       head: [['#', 'Route', 'Day', 'Date', 'Time', 'Leg #', 'Tractor', 'Miles']],
       body,
@@ -330,6 +543,9 @@ export function downloadHistoryWeekTotalsPdf(opts) {
         textColor: WHITE,
         fontStyle: 'bold',
         lineColor: BLACK,
+        minCellHeight: 5.5,
+        valign: 'middle',
+        overflow: 'visible',
       },
 
       alternateRowStyles: { fillColor: BGALT },
@@ -337,16 +553,34 @@ export function downloadHistoryWeekTotalsPdf(opts) {
       columnStyles: {
         0: { cellWidth: 6, halign: 'center' },
         1: { cellWidth: 'auto' },
-        2: { cellWidth: 13 },
-        3: { cellWidth: 17 },
-        4: { cellWidth: 13, halign: 'center' },
-        5: { cellWidth: 11, halign: 'center', overflow: 'ellipsize' },
-        6: { cellWidth: 15, halign: 'center' },
+        2: { cellWidth: 12 },
+        3: { cellWidth: 16 },
+        4: { cellWidth: 12, halign: 'center' },
+        5: { cellWidth: 20, halign: 'center', overflow: 'linebreak' },
+        6: { cellWidth: 14, halign: 'center' },
         7: { cellWidth: 11, halign: 'right' },
+      },
+
+      willDrawCell(data) {
+        const raw = data.cell.raw
+        if (raw && typeof raw === 'object' && '_routeDraw' in raw) {
+          data.cell.text = ['']
+        }
+      },
+
+      didDrawCell(data) {
+        const raw = data.cell.raw
+        if (raw && typeof raw === 'object' && '_routeDraw' in raw && data.section === 'body') {
+          const p = raw._routeDraw
+          if (p && typeof p === 'object') drawRouteCellWithArrow(doc, data.cell, p)
+        }
       },
 
       didParseCell(data) {
         const raw = data.cell.raw
+        if (raw && typeof raw === 'object' && '_routeDraw' in raw) {
+          data.cell.styles.minCellHeight = 4.8
+        }
         if (raw && typeof raw === 'object' && '_equipSpacer' in raw) {
           data.cell.styles.fillColor = BG
           data.cell.styles.textColor = BG
@@ -378,76 +612,8 @@ export function downloadHistoryWeekTotalsPdf(opts) {
    * @param {unknown[][]} body
    */
   function drawMain(doc, body) {
-    const W = doc.internal.pageSize.getWidth()
-    const IW = W - MX * 2
-
-    doc.setFillColor(...BLACK)
-    doc.rect(0, 0, W, 28, 'F')
-
-    let y = 12
-    doc.setFont('helvetica', 'bold')
-    doc.setFontSize(15)
-    doc.setTextColor(...WHITE)
-    doc.text(title, MX, y)
-
-    y += 6.5
-    doc.setFont('helvetica', 'normal')
-    doc.setFontSize(8)
-    doc.setTextColor(...LGRAY)
-    doc.text(ascii(opts.weekRangeLabel), MX, y)
-
-    const metaParts = [opts.calendarContext?.trim(), `Grouping: ${opts.groupingModeLabel}`]
-      .filter(Boolean)
-      .map(ascii)
-      .join('   ·   ')
-    if (metaParts) {
-      doc.setFontSize(6.2)
-      doc.setTextColor(...GRAY)
-      doc.text(metaParts, W - MX, y, { align: 'right' })
-    }
-
-    y = 33
-
-    const boxGap = 4
-    const boxW = (IW - boxGap) / 2
-
-    doc.setFont('helvetica', 'normal')
-    doc.setFontSize(7)
-    const driverBody = opts.driverBlock?.trim() || '-'
-    const truckBody = opts.truckBlock?.trim() || '-'
-    const linesDriver = doc.splitTextToSize(ascii(driverBody), boxW - 7)
-    const linesTruck = doc.splitTextToSize(ascii(truckBody), boxW - 7)
-    const maxBodyLines = Math.max(linesDriver.length, linesTruck.length, 1)
-    const lineStepMm = 7 * 0.352778 * 1.35
-    const boxH = Math.max(22, 9 + maxBodyLines * lineStepMm + 2.5)
-
-    /** @param {number} bx @param {number} by @param {string} label @param {string[]} lines */
-    function infoBlock(bx, by, label, lines) {
-      doc.setDrawColor(...RULE)
-      doc.setLineWidth(0.15)
-      doc.setFillColor(...BG)
-      doc.roundedRect(bx, by, boxW, boxH, 1.5, 1.5, 'FD')
-
-      doc.setDrawColor(...BLACK)
-      doc.setLineWidth(0.45)
-      doc.line(bx, by, bx + boxW, by)
-
-      doc.setFont('helvetica', 'bold')
-      doc.setFontSize(7)
-      doc.setTextColor(...BLACK)
-      doc.text(label.toUpperCase(), bx + 3.5, by + 4.8)
-
-      doc.setFont('helvetica', 'normal')
-      doc.setFontSize(7)
-      doc.setTextColor(...DGRAY)
-      doc.text(lines, bx + 3.5, by + 9, { lineHeightFactor: 1.35 })
-    }
-
-    infoBlock(MX, y, 'Driver', linesDriver)
-    infoBlock(MX + boxW + boxGap, y, 'Truck', linesTruck)
-    y += boxH + 3
-
-    runAutoTable(doc, body, { startY: y })
+    const headerH = drawWeekTotalsLetterhead(doc, title, 'mainBand')
+    runAutoTable(doc, body, { startY: headerH + 4 })
   }
 
   /**
@@ -459,76 +625,128 @@ export function downloadHistoryWeekTotalsPdf(opts) {
     const H = doc.internal.pageSize.getHeight()
     const IW = W - MX * 2
 
-    function pageFooter() {
-      doc.setDrawColor(...RULE)
-      doc.setLineWidth(0.15)
-      doc.line(MX, H - MB + 1, W - MX, H - MB + 1)
+    /** Full-bleed black slide: same week/pay/driver letterhead as report, then centered dispatch title. */
+    function drawDispatchProofTitlePage(captureTitle) {
+      doc.setFillColor(...BLACK)
+      doc.rect(0, 0, W, H, 'F')
+      const hh = drawWeekTotalsLetterhead(doc, title, 'darkPageTop')
+      const cx = W / 2
+      const mainTitle = 'DISPATCH PROOF'
+      doc.setFont('helvetica', 'bold')
+      doc.setFontSize(26)
+      doc.setTextColor(...WHITE)
+      const centerY = Math.max(hh + 16, H * 0.36)
+      doc.text(mainTitle, cx, centerY, { align: 'center', maxWidth: IW })
       doc.setFont('helvetica', 'normal')
-      doc.setFontSize(6)
-      doc.setTextColor(...GRAY)
-      doc.text('Confidential  ·  Driver reference only  ·  Not an official FedEx document', MX, H - MB + 5.5)
-      doc.text(genLabel, W - MX, H - MB + 5.5, { align: 'right' })
+      doc.setFontSize(12)
+      doc.setTextColor(...LGRAY)
+      const sub = doc.splitTextToSize(ascii(captureTitle), IW * 0.88)
+      const subY = centerY + 12
+      doc.text(sub, cx, subY, { align: 'center', maxWidth: IW * 0.88 })
     }
 
-    /** @param {number} y0 @param {ProofTripAppendix} trip @param {string} captureTitle */
-    function drawTripTitleBlock(y0, trip, captureTitle) {
+    /**
+     * Compact trip metadata header for screenshot pages.
+     * @param {ProofTripAppendix} trip
+     * @param {string} shotLabel
+     * @param {number} contentTopY
+     * @returns {number} y to start image
+     */
+    function drawProofCaptureHeader(trip, shotLabel, contentTopY) {
+      const labelCol = MX
+      const valX = MX + 28
+      const splitX = MX + IW * 0.5
+      const valRight = splitX + 24
+      const textWRight = W - MX - valRight
+      const textWLeft = splitX - valX - 3
+      let y = contentTopY
+
       doc.setFont('helvetica', 'bold')
-      doc.setFontSize(12)
+      doc.setFontSize(9)
       doc.setTextColor(...BLACK)
-      doc.text('Dispatch proof', MX, y0)
-      let yl = y0 + 5.5
-      doc.setFont('helvetica', 'normal')
-      doc.setFontSize(8)
-      doc.setTextColor(...DGRAY)
-      doc.text(ascii(captureTitle), MX, yl)
-      yl += 7
+      doc.text(ascii(shotLabel), labelCol, y)
+      y += 5.2
 
       doc.setDrawColor(...RULE)
-      doc.setLineWidth(0.2)
-      doc.line(MX, yl, W - MX, yl)
-      yl += 5
+      doc.setLineWidth(0.22)
+      doc.line(MX, y, W - MX, y)
+      y += 4
+
+      const lh = 4.6
 
       doc.setFont('helvetica', 'bold')
-      doc.setFontSize(7.5)
+      doc.setFontSize(7)
       doc.setTextColor(...MGRAY)
-      const labels = ['Route', 'Dispatch date', 'Dispatch time', 'Leg', 'Tractor', 'OD line', 'Scheduled / notes']
-      const vals = [
-        `${asciiRoute(trip.originId)} \u2192 ${asciiRoute(trip.destId)}`,
-        ascii(trip.dispatchDate),
-        ascii(trip.dispatchTime),
-        ascii(trip.legLabel),
-        ascii(trip.tractorNumber),
-        ascii(trip.od),
-        ascii(trip.when),
-      ]
-      const lh = 5.2
-      for (let i = 0; i < labels.length; i++) {
-        doc.setFont('helvetica', 'bold')
-        doc.setTextColor(...MGRAY)
-        doc.text(`${labels[i]}:`, MX, yl)
-        doc.setFont('helvetica', 'normal')
-        doc.setTextColor(...DARK)
-        const lines = doc.splitTextToSize(vals[i] || '-', IW - 34)
-        doc.text(lines, MX + 32, yl)
-        yl += Math.max(lh, lines.length * lh * 0.85)
-      }
+      doc.text('Route', labelCol, y)
+      drawProofInlineRoute(doc, valX, y, trip.originId, trip.destId)
+      doc.setFont('helvetica', 'bold')
+      doc.setTextColor(...MGRAY)
+      doc.text('Dispatch', splitX, y)
+      doc.setFont('helvetica', 'normal')
+      doc.setFontSize(7.5)
+      doc.setTextColor(...DARK)
+      const disp = `${ascii(trip.dispatchDate)}   ${ascii(trip.dispatchTime)}`
+      const dispLines = doc.splitTextToSize(disp, Math.max(28, textWRight))
+      doc.text(dispLines, valRight, y)
+      y += Math.max(lh, dispLines.length * lh * 0.88) + 0.6
+
+      doc.setFont('helvetica', 'bold')
+      doc.setFontSize(7)
+      doc.setTextColor(...MGRAY)
+      doc.text('Leg #', labelCol, y)
+      doc.setFont('helvetica', 'normal')
+      doc.setFontSize(7.5)
+      doc.setTextColor(...DARK)
+      doc.text(ascii(trip.legLabel), valX, y, { maxWidth: textWLeft })
+      doc.setFont('helvetica', 'bold')
+      doc.setFontSize(7)
+      doc.setTextColor(...MGRAY)
+      doc.text('Tractor', splitX, y)
+      doc.setFont('helvetica', 'normal')
+      doc.setFontSize(7.5)
+      doc.setTextColor(...DARK)
+      doc.text(ascii(trip.tractorNumber), valRight, y, { maxWidth: textWRight })
+      y += lh + 1
+
+      doc.setFont('helvetica', 'bold')
+      doc.setFontSize(7)
+      doc.setTextColor(...MGRAY)
+      doc.text('OD line', labelCol, y)
+      doc.setFont('helvetica', 'normal')
+      doc.setFontSize(7.5)
+      doc.setTextColor(...DARK)
+      const odLines = doc.splitTextToSize(ascii(trip.od), IW - (valX - MX))
+      doc.text(odLines, valX, y)
+      y += Math.max(lh, odLines.length * lh * 0.88) + 0.4
+
+      doc.setFont('helvetica', 'bold')
+      doc.setFontSize(7)
+      doc.setTextColor(...MGRAY)
+      doc.text('Scheduled', labelCol, y)
+      doc.setFont('helvetica', 'normal')
+      doc.setFontSize(7.5)
+      doc.setTextColor(...DARK)
+      const noteLines = doc.splitTextToSize(ascii(trip.when), IW - (valX - MX))
+      doc.text(noteLines, valX, y)
+      y += Math.max(lh, noteLines.length * lh * 0.88)
+
+      y += 2.5
+      doc.setDrawColor(...RULE)
+      doc.setLineWidth(0.15)
+      doc.line(MX, y, W - MX, y)
+      return y + 3
     }
 
     for (const trip of proofTrips) {
       for (const shot of trip.screenshots) {
         doc.addPage()
-        pageFooter()
-        drawTripTitleBlock(MX + 6, trip, shot.label)
+        drawDispatchProofTitlePage(shot.label)
+        paintPdfFooter(doc, 'dark')
 
         doc.addPage()
-        pageFooter()
-
-        let yp = MX + 5
-        doc.setFont('helvetica', 'bold')
-        doc.setFontSize(7.5)
-        doc.setTextColor(...DARK)
-        doc.text(ascii(shot.label), MX, yp)
-        yp += 4
+        paintPdfFooter(doc, 'light')
+        const bandH = drawWeekTotalsLetterhead(doc, title, 'mainBand')
+        const yp = drawProofCaptureHeader(trip, shot.label, bandH + 4)
 
         try {
           const imgData = `data:image/jpeg;base64,${shot.jpeg}`
@@ -545,16 +763,24 @@ export function downloadHistoryWeekTotalsPdf(opts) {
     }
   }
 
-  function stampPageNumbers(doc) {
+  /**
+   * @param {import('jspdf').jsPDF} doc
+   * @param {number | null} appendixStartPage 1-based; odd offset from start = dispatch proof title (black) pages
+   */
+  function stampPageNumbers(doc, appendixStartPage) {
     const W = doc.internal.pageSize.getWidth()
     const H = doc.internal.pageSize.getHeight()
     const pages = doc.internal.getNumberOfPages()
     for (let i = 1; i <= pages; i++) {
       doc.setPage(i)
+      const darkTitle =
+        appendixStartPage != null &&
+        i >= appendixStartPage &&
+        (i - appendixStartPage) % 2 === 0
       doc.setFont('helvetica', 'normal')
       doc.setFontSize(6.5)
-      doc.setTextColor(...MGRAY)
-      doc.text(`Page ${i} of ${pages}`, W / 2, H - MB + 5.5, { align: 'center' })
+      doc.setTextColor(...(darkTitle ? LGRAY : MGRAY))
+      doc.text(`Page ${i} of ${pages}`, W / 2, H - MB + 9.5, { align: 'center' })
     }
   }
 
@@ -569,7 +795,7 @@ export function downloadHistoryWeekTotalsPdf(opts) {
   const doc = new jsPDF({ unit: 'mm', format: 'letter', orientation: 'portrait', compress: true })
   drawMain(doc, finalBody)
   if (proofTrips.length) drawAppendix(doc, proofTrips)
-  stampPageNumbers(doc)
+  stampPageNumbers(doc, proofTrips.length ? appendixStartPage : null)
 
   doc.save(`week-totals-${slug(opts.weekRangeLabel.replace(/\s+/g, '-'))}.pdf`)
 }

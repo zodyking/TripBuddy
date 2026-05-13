@@ -15,9 +15,6 @@ const CAMERA_BRIDGE_KEYS = Object.freeze({
   'Verrazzano-ToNY': 'Verrazzano-ToNY',
 })
 
-/** GWB upper deck only (matches TrafficCrossingsContent filters): live YouTube embed. */
-export const GWB_YOUTUBE_VIDEO_ID = '2K2tW3cRlWQ'
-
 /**
  * George Washington Bridge upper deck row for the active direction toggle.
  * To NY: routeId 211. To NJ: routeId 12.
@@ -134,20 +131,39 @@ export function findVerrazzanoCamera(direction, cameras) {
  * @param {unknown} row
  * @param {'ToNY' | 'ToNJ'} direction
  * @param {Array<{ bridge: string, videoUrl: string | null, imageUrl: string | null, status: string }>} cameras
+ * @param {{ gwbYoutubeVideoId?: string | null, gwbNoFeedMessage?: string }} [opts] Live video id from GET /api/bridges/gwb-youtube-live; placeholder copy when not live.
  * @returns {{
  *   youtubeVideoId: string | null,
  *   videoUrl: string | null,
  *   imageUrl: string | null,
  *   status: string,
+ *   noFeedMessage?: string,
  * } | null}
  */
-export function resolveBridgeCameraFeed(row, direction, cameras) {
+export function resolveBridgeCameraFeed(row, direction, cameras, opts) {
   if (isGwbUpperDeckRow(row, direction)) {
+    const id =
+      opts && typeof opts.gwbYoutubeVideoId === 'string'
+        ? opts.gwbYoutubeVideoId.trim()
+        : ''
+    if (id) {
+      return {
+        youtubeVideoId: id,
+        videoUrl: null,
+        imageUrl: null,
+        status: 'Live',
+      }
+    }
+    const msg =
+      opts && typeof opts.gwbNoFeedMessage === 'string' && opts.gwbNoFeedMessage.trim()
+        ? opts.gwbNoFeedMessage.trim()
+        : 'No live stream'
     return {
-      youtubeVideoId: GWB_YOUTUBE_VIDEO_ID,
+      youtubeVideoId: null,
       videoUrl: null,
       imageUrl: null,
-      status: 'Unknown',
+      status: 'NoFeed',
+      noFeedMessage: msg,
     }
   }
   const cam = findCameraForBridgeRow(row, cameras)

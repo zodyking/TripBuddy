@@ -146,6 +146,7 @@ import {
   startPanynjBridgePoll,
 } from './bridge-panynj.mjs'
 import { getVerrazzanoResponsePayload } from './bridge-verrazzano-traffic.mjs'
+import { getGwbYoutubeLivePayload } from './gwb-youtube-live.mjs'
 import { getHighwayTrafficPayload } from './highway-traffic.mjs'
 import { registerTrafficMonitoredRoutes } from './traffic-monitored-routes-routes.mjs'
 import {
@@ -409,6 +410,9 @@ app.get('/api/bridges/verrazzano', async (req) => {
     : ''
   return getVerrazzanoResponsePayload(ak)
 })
+
+/** GWB @gwblivetrafficcam — current live video id (requires YOUTUBE_DATA_API_KEY on server). */
+app.get('/api/bridges/gwb-youtube-live', async () => getGwbYoutubeLivePayload())
 
 app.get('/api/traffic/highways', async (req) => {
   const ak = req.credentialAccountKey

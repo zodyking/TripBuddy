@@ -1,6 +1,6 @@
 <script setup>
 import { ref, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
-import { getBridgesPanynj, getNy511Cameras, getVerrazzanoTraffic, getHighwayTraffic } from '../api.js'
+import { getBridgesPanynj, getNy511Cameras, getVerrazzanoTraffic, getHighwayTraffic, getGwbYoutubeLive } from '../api.js'
 import { getBridgeAnchorForRouteId } from '../bridges/bridgeRouteAnchors.js'
 import { findVerrazzanoCamera, resolveBridgeCameraFeed } from '../bridges/bridgeCameraMapping.js'
 import BridgesMap from '../components/BridgesMap.vue'
@@ -757,6 +757,47 @@ watch(viewMode, (mode) => {
   }
 })
 
+/** @type {import('vue').Ref<Record<string, unknown> | null>} */
+const gwbYoutubePayload = ref(null)
+
+const gwbYoutubeFeedOpts = computed(() => {
+  const p = gwbYoutubePayload.value
+  if (!p) {
+    return {
+      gwbYoutubeVideoId: null,
+      gwbNoFeedMessage: 'Loading GWB live stream…',
+    }
+  }
+  if (p.ok === true && p.live === true && typeof p.videoId === 'string' && p.videoId.trim()) {
+    return { gwbYoutubeVideoId: p.videoId.trim(), gwbNoFeedMessage: '' }
+  }
+  const r = typeof p.reason === 'string' ? p.reason : ''
+  let msg = 'GWB live stream unavailable'
+  if (r === 'missing_api_key') {
+    msg =
+      typeof p.hint === 'string' && p.hint.trim()
+        ? p.hint.trim()
+        : 'Set YOUTUBE_DATA_API_KEY on the TripBuddy API server for GWB live video.'
+  } else if (r === 'not_broadcasting') {
+    msg = 'No live GWB stream on YouTube right now.'
+  } else if (r === 'channel_not_found') {
+    msg = 'GWB YouTube channel was not found.'
+  } else if (r === 'youtube_error' || r === 'fetch_failed') {
+    const d = typeof p.detail === 'string' ? p.detail.trim() : ''
+    msg = d ? `GWB live: ${d.slice(0, 100)}` : 'Could not load GWB live stream.'
+  }
+  return { gwbYoutubeVideoId: null, gwbNoFeedMessage: msg }
+})
+
+async function loadGwbYoutube() {
+  try {
+    const res = await getGwbYoutubeLive()
+    gwbYoutubePayload.value = res && typeof res === 'object' ? /** @type {Record<string, unknown>} */ (res) : { ok: false, reason: 'bad_response' }
+  } catch {
+    gwbYoutubePayload.value = { ok: false, reason: 'fetch_failed', detail: 'Network error' }
+  }
+}
+
 async function load() {
   error.value = ''
   const gen = ++tick
@@ -1026,7 +1067,7 @@ function getBridgeCameraFeed(row) {
     const cam = findVerrazzanoCamera(direction.value, cameras.value)
     return cam ? { videoUrl: cam.videoUrl, imageUrl: cam.imageUrl, status: cam.status } : null
   }
-  return resolveBridgeCameraFeed(row, direction.value, cameras.value)
+  return resolveBridgeCameraFeed(row, direction.value, cameras.value, gwbYoutubeFeedOpts.value)
 }
 
 /**
@@ -1059,9 +1100,11 @@ onMounted(() => {
   void loadCameras()
   void loadVerrazzano()
   void loadHighways()
+  void loadGwbYoutube()
   intervalId = setInterval(() => {
     void load()
     void loadVerrazzano()
+    void loadGwbYoutube()
     if (viewMode.value === 'highways') {
       void loadHighways()
     }
@@ -1203,6 +1246,7 @@ onUnmounted(() => {
                     :video-url="getBridgeCameraFeed(row)?.youtubeVideoId ? null : (getBridgeCameraFeed(row)?.videoUrl ?? null)"
                     :image-url="getBridgeCameraFeed(row)?.youtubeVideoId ? null : (getBridgeCameraFeed(row)?.imageUrl ?? null)"
                     :status="getBridgeCameraFeed(row)?.status || 'Unknown'"
+                    :no-feed-message="getBridgeCameraFeed(row)?.noFeedMessage || 'No camera'"
                     :bridge-name="displayTitle(row)"
                     fill-column
                   />
