@@ -626,14 +626,23 @@ function pdfTrailerEquipmentLines(body) {
  * (number, size, seal, weight only — no load/status/destination).
  * Works with raw trip payloads and with `buildHistoryTripDetailsFromBody` snapshots.
  * @param {unknown} body `tripDetails` or Linehaul trip body
+ * @param {{ pickupAddress?: string, deliveryAddress?: string }} [dirOpts] Directory pickup/delivery (origin/dest) addresses
  * @returns {string} WinAnsi-safe text; empty when no equipment rows
  */
-export function formatTripEquipmentPdfBlock(body) {
+export function formatTripEquipmentPdfBlock(body, dirOpts) {
   /** @type {string[]} */
   const lines = []
+  if (dirOpts && typeof dirOpts === 'object') {
+    const pick = String(dirOpts.pickupAddress ?? '').trim()
+    const drop = String(dirOpts.deliveryAddress ?? '').trim()
+    lines.push(
+      pdfEquipmentAscii(`Pickup (origin): ${pick || '—'}`),
+      pdfEquipmentAscii(`Delivery (destination): ${drop || '—'}`),
+    )
+  }
   const dolly = pdfDollyEquipmentLine(body)
-  if (dolly) lines.push(dolly)
-  lines.push(...pdfTrailerEquipmentLines(body))
+  if (dolly) lines.push(pdfEquipmentAscii(dolly))
+  lines.push(...pdfTrailerEquipmentLines(body).map((ln) => pdfEquipmentAscii(ln)))
   if (!lines.length) return ''
-  return lines.map((ln) => pdfEquipmentAscii(ln)).join('\n')
+  return lines.join('\n')
 }

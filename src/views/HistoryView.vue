@@ -8,6 +8,7 @@ import {
   appendTripHistoryManual,
   deleteTripHistoryEntry,
   fetchDispatchProof,
+  fetchDirectory,
 } from '../api.js'
 import {
   tripPhase,
@@ -19,6 +20,10 @@ import {
   hiddenDailyTripLegSequences,
 } from '../stores/linehaulSnapshotStore.js'
 import { downloadHistoryWeekTotalsPdf } from '../utils/historyWeekTotalsPdf.js'
+import {
+  buildDirectoryLocationMap,
+  directoryLookup,
+} from '../utils/directoryLocationLookup.js'
 import {
   monthGridForCalendarMonth,
   workWeekGroupMeta,
@@ -1167,30 +1172,51 @@ async function onDownloadWeekTotalsPdf(wg) {
   if (pdfWeekBusyKey.value === key) return
   pdfWeekBusyKey.value = key
   try {
+    /** @type {Map<string, { locationName: string, address: string }>} */
+    let dirMap = new Map()
+    try {
+      const dr = await fetchDirectory()
+      if (dr?.ok && Array.isArray(dr.locations)) dirMap = buildDirectoryLocationMap(dr.locations)
+    } catch {
+      /* directory optional for PDF */
+    }
+
     const allRows = []
     const days = []
     for (const dg of wg.days) {
       const dk = dg.shiftDayKey ? String(dg.shiftDayKey) : 'unk'
       const est = dayPayEstimateFor(key, dk)
-      const mappedRows = est.rows.map((r) => ({
-        od: r.od,
-        when: r.when,
-        billableMi: r.billableMi,
-        rounded: r.rounded,
-        originId: r.originId,
-        destId: r.destId,
-        routeOd: r.routeOd,
-        weekday: r.weekday,
-        dispatchDate: r.dispatchDate,
-        dispatchTime: r.dispatchTime,
-        legLabel: r.legLabel,
-        tractorNumber: r.tractorNumber,
-        equipmentBlock: r.equipmentPdfBlock,
-        dailyTripLegSequence: r.dailyTripLegSequence || '',
-        proofScreenshots: /** @type {{ label: string, jpeg: string, ts: number }[] | undefined} */ (
-          undefined
-        ),
-      }))
+      const sorted = [...dg.items].sort((a, b) => b.displayDate - a.displayDate)
+      const mappedRows = est.rows.map((r, i) => {
+        const e = sorted[i]
+        const td = e?.tripDetails && typeof e.tripDetails === 'object' ? e.tripDetails : {}
+        const oDir = directoryLookup(dirMap, r.originId)
+        const dDir = directoryLookup(dirMap, r.destId)
+        return {
+          od: r.od,
+          when: r.when,
+          billableMi: r.billableMi,
+          rounded: r.rounded,
+          originId: r.originId,
+          destId: r.destId,
+          originLocationName: oDir?.locationName ?? '',
+          destLocationName: dDir?.locationName ?? '',
+          routeOd: r.routeOd,
+          weekday: r.weekday,
+          dispatchDate: r.dispatchDate,
+          dispatchTime: r.dispatchTime,
+          legLabel: r.legLabel,
+          tractorNumber: r.tractorNumber,
+          equipmentBlock: formatTripEquipmentPdfBlock(td, {
+            pickupAddress: oDir?.address ?? '',
+            deliveryAddress: dDir?.address ?? '',
+          }),
+          dailyTripLegSequence: r.dailyTripLegSequence || '',
+          proofScreenshots: /** @type {{ label: string, jpeg: string, ts: number }[] | undefined} */ (
+            undefined
+          ),
+        }
+      })
       days.push({ dayLabel: dg.dayLabel, sumBillable: est.sumBillable, rows: mappedRows })
       allRows.push(...mappedRows)
     }

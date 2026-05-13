@@ -22,6 +22,7 @@ import {
   postCancelRetry,
   fetchFedexLinehaulLocation,
   saveLocationToDirectory,
+  fetchDirectory,
   getDollyRegistry,
   putDollyNumber,
   patchDollyRating,
@@ -69,6 +70,7 @@ import { parseTripReadyBoolean } from '../utils/tripReadyParse.js'
 import {
   extractOriginDest,
   extractTripDispatchInstructions,
+  extractTripOrgIds,
   hasTripOriginAndDestination,
   buildEnhancedTrailerCards,
   buildDollySection,
@@ -78,6 +80,10 @@ import {
   formatLinehaulLocationForDisplay,
   extractLocationForDirectory,
 } from '../utils/linehaulLocationDisplay.js'
+import {
+  buildDirectoryLocationMap,
+  directoryLookup,
+} from '../utils/directoryLocationLookup.js'
 import TrailerLocationMap from '../components/TrailerLocationMap.vue'
 import { copyTextToClipboard } from '../utils/copyToClipboard.js'
 import { vehicleIdForUserMapMarker } from '../utils/mapVehicleLabel.js'
@@ -285,6 +291,43 @@ const tripOriginDest = computed(() => {
   return extractOriginDest(linehaulTripsBody.value)
 })
 const prePlanOriginDest = computed(() => extractOriginDest(prePlanTripSnapshot.value))
+
+/** Saved Directory rows for trip pickup/delivery addresses. */
+const directoryLocationsForTrip = ref(
+  /** @type {Array<{ locationId: string, locationName: string, address: string }>} */ ([]),
+)
+
+const directoryLocationMapForTrip = computed(() =>
+  buildDirectoryLocationMap(directoryLocationsForTrip.value),
+)
+
+/** Pickup / delivery addresses from Directory (origin / destination location ids). */
+const tripDirectoryStops = computed(() => {
+  const b = tripDetailsBodyForSlide.value
+  if (!b || typeof b !== 'object') {
+    return { pickup: '', delivery: '', pickupName: '', deliveryName: '' }
+  }
+  const { originId, destinationId } = extractTripOrgIds(b)
+  const map = directoryLocationMapForTrip.value
+  const pick = originId ? directoryLookup(map, originId) : null
+  const drop = destinationId ? directoryLookup(map, destinationId) : null
+  return {
+    pickup: pick?.address?.trim() || '',
+    delivery: drop?.address?.trim() || '',
+    pickupName: pick?.locationName?.trim() || '',
+    deliveryName: drop?.locationName?.trim() || '',
+  }
+})
+
+async function loadDirectoryForTripPanel() {
+  try {
+    const r = await fetchDirectory()
+    if (r?.ok && Array.isArray(r.locations)) directoryLocationsForTrip.value = r.locations
+    else directoryLocationsForTrip.value = []
+  } catch {
+    directoryLocationsForTrip.value = []
+  }
+}
 
 const dispatchPanelRef = ref(/** @type {HTMLElement | null} */ (null))
 const tripDetailsPanelRef = ref(/** @type {HTMLElement | null} */ (null))
@@ -1847,6 +1890,7 @@ onMounted(async () => {
   void setupLinehaulPolling()
   void loadDollyRegistry()
   void loadTrailerNumbers()
+  void loadDirectoryForTripPanel()
   syncTripVoiceUnlockHint()
 })
 
@@ -1855,6 +1899,7 @@ onActivated(() => {
   void refreshLinehaulCredMeta()
   void loadDollyRegistry()
   void loadTrailerNumbers()
+  void loadDirectoryForTripPanel()
   void loadQuickActions()
   void setupLinehaulPolling()
   syncTripVoiceUnlockHint()
@@ -2551,6 +2596,41 @@ onUnmounted(() => {
               <span class="dispatch-od-val dispatch-od-val--text">{{ prePlanOriginDest.destination }}</span>
             </div>
           </div>
+        </div>
+
+        <div class="trip-directory-stops" aria-label="Directory pickup and delivery">
+          <h3 class="trip-section-label">Directory</h3>
+          <p v-if="tripDirectoryStops.pickupName || tripDirectoryStops.deliveryName" class="trip-directory-names">
+            <span v-if="tripDirectoryStops.pickupName">{{ tripDirectoryStops.pickupName }}</span>
+            <span v-if="tripDirectoryStops.pickupName && tripDirectoryStops.deliveryName"> → </span>
+            <span v-if="tripDirectoryStops.deliveryName">{{ tripDirectoryStops.deliveryName }}</span>
+          </p>
+          <dl class="trip-details-dl">
+            <dt>Pickup (origin)</dt>
+            <dd>
+              <button
+                type="button"
+                class="copyable-dd tap"
+                :disabled="!tripDirectoryStops.pickup"
+                :title="tripDirectoryStops.pickup ? 'Tap to copy address' : ''"
+                @click="tripDirectoryStops.pickup && copyTripDetailValue(tripDirectoryStops.pickup, 'Pickup address')"
+              >
+                {{ tripDirectoryStops.pickup || '—' }}
+              </button>
+            </dd>
+            <dt>Delivery (destination)</dt>
+            <dd>
+              <button
+                type="button"
+                class="copyable-dd tap"
+                :disabled="!tripDirectoryStops.delivery"
+                :title="tripDirectoryStops.delivery ? 'Tap to copy address' : ''"
+                @click="tripDirectoryStops.delivery && copyTripDetailValue(tripDirectoryStops.delivery, 'Delivery address')"
+              >
+                {{ tripDirectoryStops.delivery || '—' }}
+              </button>
+            </dd>
+          </dl>
         </div>
       </div>
 
@@ -3767,6 +3847,15 @@ button.trailer-nbr.copyable-inline {
   flex-direction: column;
   gap: 0.5rem;
   margin-bottom: 0.75rem;
+}
+.trip-directory-stops {
+  padding-top: 0.25rem;
+}
+.trip-directory-names {
+  margin: 0 0 0.45rem;
+  font-size: 0.78rem;
+  color: var(--text, #e8e8ee);
+  line-height: 1.35;
 }
 .trip-instructions-section {
   margin-bottom: 0.75rem;

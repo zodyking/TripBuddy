@@ -58,6 +58,8 @@ function proofDedupeKey(seq, o, dest, dispatchDate, leg) {
  *     rounded: boolean,
  *     originId: string,
  *     destId: string,
+ *     originLocationName?: string,
+ *     destLocationName?: string,
  *     routeOd?: string,
  *     weekday: string,
  *     dispatchDate: string,
@@ -103,7 +105,7 @@ const WHITE = [255, 255, 255]
  * Draw origin → dest inside table cell (Helvetica often omits Unicode → in embedded fonts).
  * @param {import('jspdf').jsPDF} doc
  * @param {{ x: number, y: number, width: number, height: number }} cell
- * @param {{ origin: string, dest: string, routeOd?: string }} parts
+ * @param {{ origin: string, dest: string, routeOd?: string, originName?: string, destName?: string }} parts
  */
 function drawRouteCellWithArrow(doc, cell, parts) {
   const padL = 1.2
@@ -115,6 +117,42 @@ function drawRouteCellWithArrow(doc, cell, parts) {
   const innerH = cell.height - padT - 0.55
   const midY = yTop + innerH / 2
   const fs = 7
+  const cellRight = cell.x + cell.width - padR
+
+  const nameO = String(parts.originName ?? '').trim()
+  const nameD = String(parts.destName ?? '').trim()
+  const hasNames = Boolean(nameO || nameD)
+
+  /**
+   * @param {number} xAfterIds right edge of printed id/dest segment
+   * @param {number} [secondLineY]
+   */
+  function drawNameParenthetical(xAfterIds, secondLineY) {
+    if (!hasNames) return
+    const na = ascii(nameO || '—')
+    const nb = ascii(nameD || '—')
+    const suf = ` (${na} -> ${nb})`
+    const nfs = 5.75
+    doc.setFont('helvetica', 'normal')
+    doc.setFontSize(nfs)
+    doc.setTextColor(...DGRAY)
+    const rem = cellRight - xAfterIds - 0.5
+    if (secondLineY != null || rem < 8) {
+      const lines = doc.splitTextToSize(suf, innerW)
+      const y0 = secondLineY ?? midY + fs * 0.72
+      doc.text(lines, x, y0)
+    } else {
+      const sufW = doc.getTextDimensions(suf, { fontSize: nfs }).w
+      if (sufW <= rem) doc.text(suf, xAfterIds + 0.35, midY, { baseline: 'middle' })
+      else {
+        const lines = doc.splitTextToSize(suf, innerW)
+        doc.text(lines, x, midY + fs * 0.72)
+      }
+    }
+    doc.setFont('helvetica', 'bold')
+    doc.setFontSize(fs)
+    doc.setTextColor(...DARK)
+  }
 
   doc.setFont('helvetica', 'bold')
   doc.setFontSize(fs)
@@ -142,6 +180,7 @@ function drawRouteCellWithArrow(doc, cell, parts) {
         doc.line(ax + arrowStem, midY, ax + arrowStem - arrowHead * 0.55, midY - arrowHead * 0.45)
         doc.line(ax + arrowStem, midY, ax + arrowStem - arrowHead * 0.55, midY + arrowHead * 0.45)
         doc.text(d, ax + arrowStem + gap, midY, { baseline: 'middle' })
+        drawNameParenthetical(ax + arrowStem + gap + wD)
         return
       }
     }
@@ -150,6 +189,7 @@ function drawRouteCellWithArrow(doc, cell, parts) {
       baseline: 'middle',
       maxWidth: innerW,
     })
+    if (hasNames) drawNameParenthetical(x + innerW, yTop + innerH - 2)
     return
   }
 
@@ -171,47 +211,20 @@ function drawRouteCellWithArrow(doc, cell, parts) {
     doc.line(ax + arrowStem, midY, ax + arrowStem - arrowHead * 0.55, midY - arrowHead * 0.45)
     doc.line(ax + arrowStem, midY, ax + arrowStem - arrowHead * 0.55, midY + arrowHead * 0.45)
     doc.text(d, ax + arrowStem + gap, midY, { baseline: 'middle' })
+    drawNameParenthetical(ax + arrowStem + gap + wD)
   } else {
     const lines = doc.splitTextToSize(`${o} → ${d}`, innerW)
     doc.text(lines, x, yTop + innerH / 2 - ((lines.length - 1) * fs * 0.35), {
       baseline: 'middle',
       maxWidth: innerW,
     })
+    if (hasNames) drawNameParenthetical(x + innerW, yTop + innerH - 2)
   }
-}
-
-/**
- * Horizontal origin → dest for appendix headers (vector arrow).
- * @param {import('jspdf').jsPDF} doc
- * @param {number} x
- * @param {number} y
- * @param {string} originId
- * @param {string} destId
- */
-function drawProofInlineRoute(doc, x, y, originId, destId) {
-  const fs = 8
-  const O = asciiRoute(String(originId ?? '-').trim() || '-')
-  const D = asciiRoute(String(destId ?? '-').trim() || '-')
-  doc.setFont('helvetica', 'bold')
-  doc.setFontSize(fs)
-  doc.setTextColor(...DARK)
-  doc.text(O, x, y, { baseline: 'middle' })
-  const wO = doc.getTextDimensions(O, { fontSize: fs }).w
-  const gap = 0.75
-  const stem = 2.1
-  const head = 0.78
-  const ax = x + wO + gap
-  doc.setDrawColor(...DARK)
-  doc.setLineWidth(0.2)
-  doc.line(ax, y, ax + stem, y)
-  doc.line(ax + stem, y, ax + stem - head * 0.52, y - head * 0.42)
-  doc.line(ax + stem, y, ax + stem - head * 0.52, y + head * 0.42)
-  doc.text(D, ax + stem + gap, y, { baseline: 'middle' })
 }
 
 const COLS = 8
 
-/** @typedef {{ key: string, originId: string, destId: string, dispatchDate: string, dispatchTime: string, legLabel: string, tractorNumber: string, when: string, od: string, screenshots: { label: string, jpeg: string }[] }} ProofTripAppendix */
+/** @typedef {{ key: string, originId: string, destId: string, dispatchDate: string, dispatchTime: string, legLabel: string, dailyTripLegSequence?: string, tractorNumber: string, when: string, od: string, screenshots: { label: string, jpeg: string }[] }} ProofTripAppendix */
 
 /**
  * @param {WeekTotalsPdfOpts} opts
@@ -269,6 +282,7 @@ function buildTableBody(opts, proofRangeByKey) {
           dispatchDate: dispatchDate || '-',
           dispatchTime: String(r.dispatchTime ?? '-').trim() || '-',
           legLabel: leg || '-',
+          dailyTripLegSequence: String(r.dailyTripLegSequence ?? '').trim(),
           tractorNumber: String(r.tractorNumber ?? '-').trim() || '-',
           when: String(r.when ?? '-').trim() || '-',
           od: String(r.od ?? '-').trim() || '-',
@@ -285,6 +299,8 @@ function buildTableBody(opts, proofRangeByKey) {
             origin: o,
             dest,
             routeOd: typeof r.routeOd === 'string' ? r.routeOd.trim() : '',
+            originName: typeof r.originLocationName === 'string' ? r.originLocationName.trim() : '',
+            destName: typeof r.destLocationName === 'string' ? r.destLocationName.trim() : '',
           },
         },
         ascii(r.weekday || '-'),
@@ -300,7 +316,8 @@ function buildTableBody(opts, proofRangeByKey) {
       let proofLine = ''
       if (hasProof) {
         const span = proofRangeByKey?.get(pk) ?? '0-0'
-        proofLine = `Proof of Dispatch: ${span.replace('-', ' - ')}`
+        const [from, to] = span.split('-').map((s) => String(s ?? '').trim() || '0')
+        proofLine = `Proof of Dispatch: pg${from} - pg${to}`
       }
       const subContent = [eqLine, proofLine].filter(Boolean).join('\n')
       if (subContent) {
@@ -592,7 +609,16 @@ export function downloadHistoryWeekTotalsPdf(opts) {
       didParseCell(data) {
         const raw = data.cell.raw
         if (raw && typeof raw === 'object' && '_routeDraw' in raw) {
-          data.cell.styles.minCellHeight = 4.8
+          const rd = raw._routeDraw
+          if (
+            rd &&
+            typeof rd === 'object' &&
+            (String(rd.originName ?? '').trim() || String(rd.destName ?? '').trim())
+          ) {
+            data.cell.styles.minCellHeight = Math.max(7.2, data.cell.styles.minCellHeight ?? 0)
+          } else {
+            data.cell.styles.minCellHeight = 4.8
+          }
         }
         if (raw && typeof raw === 'object' && '_equipSpacer' in raw) {
           data.cell.styles.fillColor = BG
@@ -638,163 +664,88 @@ export function downloadHistoryWeekTotalsPdf(opts) {
     const H = doc.internal.pageSize.getHeight()
     const IW = W - MX * 2
 
-    /** One full-bleed black slide per trip leg: dispatch title + leg/date/route (no weekly table letterhead). */
+    /** One full-bleed black slide per trip leg: title + single wrapped detail line (no duplicate leg/date/OD). */
     function drawDispatchProofTitlePage(trip) {
       doc.setFillColor(...BLACK)
       doc.rect(0, 0, W, H, 'F')
       const cx = W / 2
-      const maxW = IW * 0.9
+      const maxW = IW * 0.92
+      const n = trip.screenshots.length
 
       doc.setFont('helvetica', 'bold')
       doc.setFontSize(22)
       doc.setTextColor(...WHITE)
-      doc.text('DISPATCH PROOF', cx, H * 0.22, { align: 'center', maxWidth: maxW })
+      const titleY = H * 0.32
+      doc.text('DISPATCH PROOF', cx, titleY, { align: 'center', maxWidth: maxW })
 
-      let y = H * 0.22 + 9
-      const firstLabel = trip.screenshots[0]?.label
-      if (firstLabel) {
-        doc.setFont('helvetica', 'normal')
-        doc.setFontSize(10)
-        doc.setTextColor(...LGRAY)
-        const lab = doc.splitTextToSize(ascii(firstLabel), maxW)
-        doc.text(lab, cx, y, { align: 'center', maxWidth: maxW })
-        y += lab.length * 3.8 + 3
-      } else {
-        y += 2
-      }
+      const firstLabel = String(trip.screenshots[0]?.label ?? '').trim()
+      const leg = `Leg #${ascii(trip.legLabel)}`
+      const dispatch = `${ascii(trip.dispatchDate)} ${ascii(trip.dispatchTime)}`.replace(/\s+/g, ' ').trim()
+      const route = `${asciiRoute(trip.originId)} -> ${asciiRoute(trip.destId)}`
+      const tractor = `Tractor ${ascii(trip.tractorNumber)}`
+      const images = `${n} attached image${n === 1 ? '' : 's'}`
 
-      doc.setFont('helvetica', 'normal')
-      doc.setFontSize(8.5)
-      doc.setTextColor(...LGRAY)
-      const n = trip.screenshots.length
-      doc.text(`${n} attached ${n === 1 ? 'image' : 'images'}`, cx, y, { align: 'center' })
-      y += 7
-
-      doc.setFont('helvetica', 'bold')
-      doc.setFontSize(9)
-      doc.setTextColor(...WHITE)
-      doc.text(`Leg #  ${ascii(trip.legLabel)}`, cx, y, { align: 'center', maxWidth: maxW })
-      y += 5
-      doc.setFont('helvetica', 'normal')
-      doc.setFontSize(8.5)
-      doc.setTextColor(...LGRAY)
-      const dt = `${ascii(trip.dispatchDate)}   ${ascii(trip.dispatchTime)}`
-      doc.text(dt, cx, y, { align: 'center', maxWidth: maxW })
-      y += 5.5
-
-      doc.setFont('helvetica', 'bold')
-      doc.setFontSize(9)
-      doc.setTextColor(...WHITE)
-      const routeTxt = `${asciiRoute(trip.originId)} -> ${asciiRoute(trip.destId)}`
-      const routeLines = doc.splitTextToSize(routeTxt, maxW)
-      doc.text(routeLines, cx, y, { align: 'center', maxWidth: maxW })
-      y += routeLines.length * 4.6 + 2
+      /** @type {string[]} */
+      const segs = []
+      if (firstLabel) segs.push(ascii(firstLabel))
+      segs.push(leg, dispatch, route, tractor, images)
+      const detailLine = segs.join(' · ')
 
       doc.setFont('helvetica', 'normal')
-      doc.setFontSize(8)
+      doc.setFontSize(9.5)
       doc.setTextColor(...LGRAY)
-      doc.text(`Tractor  ${ascii(trip.tractorNumber)}`, cx, y, { align: 'center', maxWidth: maxW })
-      y += 5
-
-      const odLines = doc.splitTextToSize(`OD  ${ascii(trip.od)}`, maxW)
-      doc.text(odLines, cx, y, { align: 'center', maxWidth: maxW })
-      y += odLines.length * 4.2 + 1
-
-      const noteLines = doc.splitTextToSize(ascii(trip.when), maxW)
-      doc.setFontSize(7.5)
-      doc.text(noteLines, cx, y, { align: 'center', maxWidth: maxW })
+      const lines = doc.splitTextToSize(detailLine, maxW)
+      doc.text(lines, cx, titleY + 11, { align: 'center', maxWidth: maxW })
     }
 
     /**
-     * Compact trip metadata header for screenshot pages.
+     * Short black strip above each proof image: leg id(s) prominently; optional capture label below.
      * @param {ProofTripAppendix} trip
      * @param {string} shotLabel
      * @param {number} contentTopY
      * @returns {number} y to start image
      */
     function drawProofCaptureHeader(trip, shotLabel, contentTopY) {
-      const labelCol = MX
-      const valX = MX + 28
-      const splitX = MX + IW * 0.5
-      const valRight = splitX + 24
-      const textWRight = W - MX - valRight
-      const textWLeft = splitX - valX - 3
-      let y = contentTopY
+      const bandTop = contentTopY
+      const bandH = 8.2
+      doc.setFillColor(...BLACK)
+      doc.rect(MX, bandTop, IW, bandH, 'F')
+
+      const s1 = ascii(String(trip.legLabel ?? '-').trim() || '-')
+      const s2 = ascii(String(trip.dailyTripLegSequence ?? '').trim())
+      let legPair
+      if (s2 && s1 !== '-' && s2 !== s1) {
+        legPair = `${s1}  ${s2}`
+      } else if (s1 !== '-') {
+        legPair = `${s1}  ${s1}`
+      } else if (s2) {
+        legPair = `${s2}  ${s2}`
+      } else {
+        legPair = '-'
+      }
 
       doc.setFont('helvetica', 'bold')
-      doc.setFontSize(9)
-      doc.setTextColor(...BLACK)
-      doc.text(ascii(shotLabel), labelCol, y)
-      y += 5.2
+      doc.setFontSize(12)
+      doc.setTextColor(...WHITE)
+      doc.text(legPair, MX + IW / 2, bandTop + bandH / 2 + 1, {
+        align: 'center',
+        baseline: 'middle',
+        maxWidth: IW - 4,
+      })
 
-      doc.setDrawColor(...RULE)
-      doc.setLineWidth(0.22)
-      doc.line(MX, y, W - MX, y)
-      y += 4
-
-      const lh = 4.6
-
-      doc.setFont('helvetica', 'bold')
-      doc.setFontSize(7)
-      doc.setTextColor(...MGRAY)
-      doc.text('Route', labelCol, y)
-      drawProofInlineRoute(doc, valX, y, trip.originId, trip.destId)
-      doc.setFont('helvetica', 'bold')
-      doc.setTextColor(...MGRAY)
-      doc.text('Dispatch', splitX, y)
-      doc.setFont('helvetica', 'normal')
-      doc.setFontSize(7.5)
-      doc.setTextColor(...DARK)
-      const disp = `${ascii(trip.dispatchDate)}   ${ascii(trip.dispatchTime)}`
-      const dispLines = doc.splitTextToSize(disp, Math.max(28, textWRight))
-      doc.text(dispLines, valRight, y)
-      y += Math.max(lh, dispLines.length * lh * 0.88) + 0.6
-
-      doc.setFont('helvetica', 'bold')
-      doc.setFontSize(7)
-      doc.setTextColor(...MGRAY)
-      doc.text('Leg #', labelCol, y)
-      doc.setFont('helvetica', 'normal')
-      doc.setFontSize(7.5)
-      doc.setTextColor(...DARK)
-      doc.text(ascii(trip.legLabel), valX, y, { maxWidth: textWLeft })
-      doc.setFont('helvetica', 'bold')
-      doc.setFontSize(7)
-      doc.setTextColor(...MGRAY)
-      doc.text('Tractor', splitX, y)
-      doc.setFont('helvetica', 'normal')
-      doc.setFontSize(7.5)
-      doc.setTextColor(...DARK)
-      doc.text(ascii(trip.tractorNumber), valRight, y, { maxWidth: textWRight })
-      y += lh + 1
-
-      doc.setFont('helvetica', 'bold')
-      doc.setFontSize(7)
-      doc.setTextColor(...MGRAY)
-      doc.text('OD line', labelCol, y)
-      doc.setFont('helvetica', 'normal')
-      doc.setFontSize(7.5)
-      doc.setTextColor(...DARK)
-      const odLines = doc.splitTextToSize(ascii(trip.od), IW - (valX - MX))
-      doc.text(odLines, valX, y)
-      y += Math.max(lh, odLines.length * lh * 0.88) + 0.4
-
-      doc.setFont('helvetica', 'bold')
-      doc.setFontSize(7)
-      doc.setTextColor(...MGRAY)
-      doc.text('Scheduled', labelCol, y)
-      doc.setFont('helvetica', 'normal')
-      doc.setFontSize(7.5)
-      doc.setTextColor(...DARK)
-      const noteLines = doc.splitTextToSize(ascii(trip.when), IW - (valX - MX))
-      doc.text(noteLines, valX, y)
-      y += Math.max(lh, noteLines.length * lh * 0.88)
-
-      y += 2.5
-      doc.setDrawColor(...RULE)
-      doc.setLineWidth(0.15)
-      doc.line(MX, y, W - MX, y)
-      return y + 3
+      let y = bandTop + bandH + 2.2
+      const cap = ascii(String(shotLabel || '').trim())
+      if (cap) {
+        doc.setFont('helvetica', 'normal')
+        doc.setFontSize(7)
+        doc.setTextColor(...MGRAY)
+        const capLines = doc.splitTextToSize(cap, IW)
+        doc.text(capLines, MX + IW / 2, y, { align: 'center', maxWidth: IW })
+        y += capLines.length * 3.1 + 1.2
+      } else {
+        y += 1
+      }
+      return y
     }
 
     for (const trip of proofTrips) {
