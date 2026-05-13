@@ -1221,6 +1221,10 @@ async function onDownloadWeekTotalsPdf(wg) {
         rows: [],
       }
     downloadHistoryWeekTotalsPdf({
+      documentTitle:
+        historyWeekViewMode.value === 'paySchedule'
+          ? 'FedEx pay schedule mileage report'
+          : 'Weekly Mileage Report',
       driverBlock: pdfDriverInfoBlock.value,
       truckBlock: pdfTruckInfoBlock.value,
       weekRangeLabel: wg.groupLabel,

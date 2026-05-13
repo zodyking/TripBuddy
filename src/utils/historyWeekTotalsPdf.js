@@ -215,7 +215,7 @@ const COLS = 8
 
 /**
  * @param {WeekTotalsPdfOpts} opts
- * @param {Map<string, string> | null} proofRangeByKey inclusive page span "9-16" (appendix; two pages per capture)
+ * @param {Map<string, string> | null} proofRangeByKey appendix page span "9-16" per trip (one title + N image pages)
  * @returns {{ body: unknown[][], proofTrips: ProofTripAppendix[] }}
  */
 function buildTableBody(opts, proofRangeByKey) {
@@ -333,11 +333,27 @@ function computeProofPageRanges(proofTrips, appendixStartPage) {
   let p = appendixStartPage
   for (const trip of proofTrips) {
     const blockStart = p
-    p += trip.screenshots.length * 2
+    p += 1 + trip.screenshots.length
     const blockEnd = p - 1
     map.set(trip.key, `${blockStart}-${blockEnd}`)
   }
   return map
+}
+
+/**
+ * 1-based page indices of full-black dispatch proof **section title** slides (one per trip leg block).
+ * @param {number} appendixStartPage
+ * @param {{ screenshots: { length: number }[] }[]} proofTrips
+ */
+function appendixDispatchDarkTitlePageSet(appendixStartPage, proofTrips) {
+  /** @type {Set<number>} */
+  const s = new Set()
+  let p = appendixStartPage
+  for (const trip of proofTrips) {
+    s.add(p)
+    p += 1 + trip.screenshots.length
+  }
+  return s
 }
 
 /** @param {WeekTotalsPdfOpts} opts */
@@ -402,13 +418,12 @@ export function downloadHistoryWeekTotalsPdf(opts) {
   }
 
   /**
-   * Same letterhead as page 1 of the week report: title, week range, pay/calendar + grouping, driver, truck.
+   * Black band letterhead for **mileage table pages only**: title, week range, pay/calendar + grouping, driver, truck.
    * @param {import('jspdf').jsPDF} doc
    * @param {string} titleText
-   * @param {'mainBand' | 'darkPageTop'} kind mainBand fills black bar; darkPageTop only text (full page already black).
    * @returns {number} height (mm) of the letterhead block
    */
-  function drawWeekTotalsLetterhead(doc, titleText, kind) {
+  function drawWeekTotalsLetterhead(doc, titleText) {
     const W = doc.internal.pageSize.getWidth()
     const IW = W - MX * 2
     const metaParts = [opts.calendarContext?.trim(), `Grouping: ${opts.groupingModeLabel}`]
@@ -431,10 +446,8 @@ export function downloadHistoryWeekTotalsPdf(opts) {
     const blockY0 = weekY + 5.2
     const headerH = Math.max(34, blockY0 + dShow.length * lineGap + tShow.length * lineGap + 4)
 
-    if (kind === 'mainBand') {
-      doc.setFillColor(...BLACK)
-      doc.rect(0, 0, W, headerH, 'F')
-    }
+    doc.setFillColor(...BLACK)
+    doc.rect(0, 0, W, headerH, 'F')
 
     doc.setFont('helvetica', 'bold')
     doc.setFontSize(15)
@@ -612,7 +625,7 @@ export function downloadHistoryWeekTotalsPdf(opts) {
    * @param {unknown[][]} body
    */
   function drawMain(doc, body) {
-    const headerH = drawWeekTotalsLetterhead(doc, title, 'mainBand')
+    const headerH = drawWeekTotalsLetterhead(doc, title)
     runAutoTable(doc, body, { startY: headerH + 4 })
   }
 
@@ -625,24 +638,71 @@ export function downloadHistoryWeekTotalsPdf(opts) {
     const H = doc.internal.pageSize.getHeight()
     const IW = W - MX * 2
 
-    /** Full-bleed black slide: same week/pay/driver letterhead as report, then centered dispatch title. */
-    function drawDispatchProofTitlePage(captureTitle) {
+    /** One full-bleed black slide per trip leg: dispatch title + leg/date/route (no weekly table letterhead). */
+    function drawDispatchProofTitlePage(trip) {
       doc.setFillColor(...BLACK)
       doc.rect(0, 0, W, H, 'F')
-      const hh = drawWeekTotalsLetterhead(doc, title, 'darkPageTop')
       const cx = W / 2
-      const mainTitle = 'DISPATCH PROOF'
+      const maxW = IW * 0.9
+
       doc.setFont('helvetica', 'bold')
-      doc.setFontSize(26)
+      doc.setFontSize(22)
       doc.setTextColor(...WHITE)
-      const centerY = Math.max(hh + 16, H * 0.36)
-      doc.text(mainTitle, cx, centerY, { align: 'center', maxWidth: IW })
+      doc.text('DISPATCH PROOF', cx, H * 0.22, { align: 'center', maxWidth: maxW })
+
+      let y = H * 0.22 + 9
+      const firstLabel = trip.screenshots[0]?.label
+      if (firstLabel) {
+        doc.setFont('helvetica', 'normal')
+        doc.setFontSize(10)
+        doc.setTextColor(...LGRAY)
+        const lab = doc.splitTextToSize(ascii(firstLabel), maxW)
+        doc.text(lab, cx, y, { align: 'center', maxWidth: maxW })
+        y += lab.length * 3.8 + 3
+      } else {
+        y += 2
+      }
+
       doc.setFont('helvetica', 'normal')
-      doc.setFontSize(12)
+      doc.setFontSize(8.5)
       doc.setTextColor(...LGRAY)
-      const sub = doc.splitTextToSize(ascii(captureTitle), IW * 0.88)
-      const subY = centerY + 12
-      doc.text(sub, cx, subY, { align: 'center', maxWidth: IW * 0.88 })
+      const n = trip.screenshots.length
+      doc.text(`${n} attached ${n === 1 ? 'image' : 'images'}`, cx, y, { align: 'center' })
+      y += 7
+
+      doc.setFont('helvetica', 'bold')
+      doc.setFontSize(9)
+      doc.setTextColor(...WHITE)
+      doc.text(`Leg #  ${ascii(trip.legLabel)}`, cx, y, { align: 'center', maxWidth: maxW })
+      y += 5
+      doc.setFont('helvetica', 'normal')
+      doc.setFontSize(8.5)
+      doc.setTextColor(...LGRAY)
+      const dt = `${ascii(trip.dispatchDate)}   ${ascii(trip.dispatchTime)}`
+      doc.text(dt, cx, y, { align: 'center', maxWidth: maxW })
+      y += 5.5
+
+      doc.setFont('helvetica', 'bold')
+      doc.setFontSize(9)
+      doc.setTextColor(...WHITE)
+      const routeTxt = `${asciiRoute(trip.originId)} -> ${asciiRoute(trip.destId)}`
+      const routeLines = doc.splitTextToSize(routeTxt, maxW)
+      doc.text(routeLines, cx, y, { align: 'center', maxWidth: maxW })
+      y += routeLines.length * 4.6 + 2
+
+      doc.setFont('helvetica', 'normal')
+      doc.setFontSize(8)
+      doc.setTextColor(...LGRAY)
+      doc.text(`Tractor  ${ascii(trip.tractorNumber)}`, cx, y, { align: 'center', maxWidth: maxW })
+      y += 5
+
+      const odLines = doc.splitTextToSize(`OD  ${ascii(trip.od)}`, maxW)
+      doc.text(odLines, cx, y, { align: 'center', maxWidth: maxW })
+      y += odLines.length * 4.2 + 1
+
+      const noteLines = doc.splitTextToSize(ascii(trip.when), maxW)
+      doc.setFontSize(7.5)
+      doc.text(noteLines, cx, y, { align: 'center', maxWidth: maxW })
     }
 
     /**
@@ -738,15 +798,14 @@ export function downloadHistoryWeekTotalsPdf(opts) {
     }
 
     for (const trip of proofTrips) {
+      doc.addPage()
+      drawDispatchProofTitlePage(trip)
+      paintPdfFooter(doc, 'dark')
+
       for (const shot of trip.screenshots) {
         doc.addPage()
-        drawDispatchProofTitlePage(shot.label)
-        paintPdfFooter(doc, 'dark')
-
-        doc.addPage()
         paintPdfFooter(doc, 'light')
-        const bandH = drawWeekTotalsLetterhead(doc, title, 'mainBand')
-        const yp = drawProofCaptureHeader(trip, shot.label, bandH + 4)
+        const yp = drawProofCaptureHeader(trip, shot.label, MX + 4)
 
         try {
           const imgData = `data:image/jpeg;base64,${shot.jpeg}`
@@ -765,18 +824,15 @@ export function downloadHistoryWeekTotalsPdf(opts) {
 
   /**
    * @param {import('jspdf').jsPDF} doc
-   * @param {number | null} appendixStartPage 1-based; odd offset from start = dispatch proof title (black) pages
+   * @param {Set<number> | null} appendixDarkTitlePages 1-based page numbers with full-black dispatch section title
    */
-  function stampPageNumbers(doc, appendixStartPage) {
+  function stampPageNumbers(doc, appendixDarkTitlePages) {
     const W = doc.internal.pageSize.getWidth()
     const H = doc.internal.pageSize.getHeight()
     const pages = doc.internal.getNumberOfPages()
     for (let i = 1; i <= pages; i++) {
       doc.setPage(i)
-      const darkTitle =
-        appendixStartPage != null &&
-        i >= appendixStartPage &&
-        (i - appendixStartPage) % 2 === 0
+      const darkTitle = appendixDarkTitlePages != null && appendixDarkTitlePages.has(i)
       doc.setFont('helvetica', 'normal')
       doc.setFontSize(6.5)
       doc.setTextColor(...(darkTitle ? LGRAY : MGRAY))
@@ -795,7 +851,9 @@ export function downloadHistoryWeekTotalsPdf(opts) {
   const doc = new jsPDF({ unit: 'mm', format: 'letter', orientation: 'portrait', compress: true })
   drawMain(doc, finalBody)
   if (proofTrips.length) drawAppendix(doc, proofTrips)
-  stampPageNumbers(doc, proofTrips.length ? appendixStartPage : null)
+  const appendixDarkTitles =
+    proofTrips.length > 0 ? appendixDispatchDarkTitlePageSet(appendixStartPage, proofTrips) : null
+  stampPageNumbers(doc, appendixDarkTitles)
 
   doc.save(`week-totals-${slug(opts.weekRangeLabel.replace(/\s+/g, '-'))}.pdf`)
 }
