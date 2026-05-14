@@ -984,6 +984,41 @@ function runDirectoryVcardDownload() {
   })
 }
 
+/** Same vCard body shape as bulk export; one row in the array. */
+function locationHasSingleVcardExport(loc) {
+  return vcardExportHasRenderableItems([loc])
+}
+
+function sanitizeVcardDownloadFilenameSegment(raw) {
+  const s = String(raw ?? '')
+    .trim()
+    .replace(/[^\w.-]+/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-+|-+$/g, '')
+  return s.slice(0, 80) || 'location'
+}
+
+function downloadSingleLocationVcard(loc) {
+  if (typeof window === 'undefined' || !loc) return
+  const one = [loc]
+  if (!vcardExportHasRenderableItems(one)) return
+  const { body, itemCount } = buildDirectoryVcardString(one, {
+    photoB64: vcardFedexLogoB64.value,
+  })
+  if (itemCount <= 0) return
+  nextTick(() => {
+    const idPart = sanitizeVcardDownloadFilenameSegment(loc.locationId)
+    const blob = new Blob([body], { type: 'text/vcard;charset=utf-8' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `FedEx-directory-contact-${idPart}.vcf`
+    a.rel = 'noopener'
+    a.click()
+    URL.revokeObjectURL(url)
+  })
+}
+
 /**
  * Landscape + minimum width: map fixed left, list scrolls right (max map area).
  * Portrait / narrow: stacked column with normal page scroll.
@@ -1738,6 +1773,20 @@ onUnmounted(() => {
               </svg>
               Call
             </a>
+            <button
+              v-if="locationHasSingleVcardExport(loc)"
+              type="button"
+              class="action-btn tap"
+              title="Download this location as a .vcf (same format as Export contacts)"
+              @click="downloadSingleLocationVcard(loc)"
+            >
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                <polyline points="7 10 12 15 17 10" />
+                <line x1="12" x2="12" y1="15" y2="3" />
+              </svg>
+              Download contact
+            </button>
           </div>
         </div>
       </li>
@@ -3240,6 +3289,7 @@ button.phone-copy:hover {
   align-items: center;
   gap: 0.35rem;
   padding: 0.42rem 0.65rem;
+  font: inherit;
   font-size: var(--text-xs, 0.6875rem);
   font-weight: var(--weight-semibold, 600);
   color: var(--color-text-primary, #f4f4f8);
