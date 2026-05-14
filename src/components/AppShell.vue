@@ -639,7 +639,7 @@ onUnmounted(() => {
 .app-main.app-main--traffic > * {
   display: flex;
   flex-direction: column;
-  flex: 1 0 auto;
+  flex: 1 1 0;
   width: 100%;
   min-width: 0;
   min-height: 0;

@@ -1131,7 +1131,7 @@ onUnmounted(() => {
           :pins="mapPins"
           :travel-direction="direction"
           :highlight-id="highlightId"
-          :fill-height="isLandscapeSplit"
+          :fill-height="true"
           :vehicle-id="mapVehicleId"
           :highway-polylines="highwayPolylinesForMap"
           @select="onMapSelect"
@@ -1539,7 +1539,6 @@ onUnmounted(() => {
   --b-spark: #a78bfa;
   --b-pick: rgba(52, 211, 153, 0.5);
   box-sizing: border-box;
-  padding-bottom: calc(var(--nav-height, 4rem) + env(safe-area-inset-bottom, 0));
 }
 
 .bridges-page:not(.is-split) {
@@ -1557,7 +1556,6 @@ onUnmounted(() => {
   padding-left: 0;
   padding-right: 0;
   padding-top: 0;
-  padding-bottom: calc(var(--nav-height, 4rem) + env(safe-area-inset-bottom, 0));
 }
 
 .bridges-map-column {
@@ -1574,10 +1572,16 @@ onUnmounted(() => {
 }
 
 .bridges-map-shell {
-  min-height: min(42vh, 19rem);
   display: flex;
   flex-direction: column;
   flex: 0 0 auto;
+  min-height: min(42vh, 19rem);
+  height: clamp(19rem, min(52vh, 100dvh - 14rem), 32rem);
+}
+
+.bridges-page.is-split .bridges-map-shell {
+  height: auto;
+  min-height: min(42vh, 19rem);
 }
 
 .bridges-map-shell.is-tall {
@@ -1587,6 +1591,7 @@ onUnmounted(() => {
 }
 
 .bridges-map-placeholder {
+  flex: 1 1 0;
   min-height: min(42vh, 19rem);
   display: flex;
   align-items: center;
@@ -1607,7 +1612,7 @@ onUnmounted(() => {
 }
 
 .bridges-list-inner {
-  padding: 0.65rem min(1.25rem, 3.5vw) 0.85rem;
+  padding: 0.65rem min(1.25rem, 3.5vw) calc(0.85rem + env(safe-area-inset-bottom, 0px));
   flex: 1 1 0;
   min-height: 0;
   overflow-y: auto;
@@ -1619,6 +1624,7 @@ onUnmounted(() => {
   padding-top: 0.65rem;
   padding-left: var(--space-3, 0.75rem);
   padding-right: max(env(safe-area-inset-right, 0px), var(--space-3, 0.75rem));
+  padding-bottom: calc(0.85rem + env(safe-area-inset-bottom, 0px));
 }
 
 .bridges-bar {
