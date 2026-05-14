@@ -244,8 +244,6 @@ const showMapGeocodeProgress = computed(
     locationsAfterTypeFilter.value.length > 0,
 )
 
-const showDirectoryGeocodeBanner = computed(() => showMapGeocodeProgress.value)
-
 function prefersReducedMotion() {
   if (typeof window === 'undefined') return false
   return window.matchMedia('(prefers-reduced-motion: reduce)').matches
@@ -839,44 +837,7 @@ onUnmounted(() => {
       </div>
 
       <div
-        v-if="showMapGeocodeProgress && !isLandscapeSplit"
-        class="map-no-coords-notice map-geocode-progress"
-        role="status"
-        aria-live="polite"
-      >
-        <div class="spinner map-geocode-spinner" aria-hidden="true" />
-        <div class="map-geocode-progress-body">
-          <p class="map-geocode-progress-title">
-            <strong>Saving map coordinates on the server</strong>
-          </p>
-          <p v-if="geocodeInitialMissing > 0" class="map-geocode-progress-count">
-            {{ geocodeMappedCount }} of {{ geocodeInitialMissing }} addresses with coordinates so far
-            <span v-if="serverGeocodeRemaining > 0" class="map-geocode-remain"
-              >({{ serverGeocodeRemaining }} left)</span
-            >
-          </p>
-          <p v-else class="map-geocode-progress-count">Resolving addresses on the server…</p>
-          <div
-            v-if="geocodeInitialMissing > 0"
-            class="dir-geocode-meter"
-            role="progressbar"
-            :aria-valuenow="geocodeProgressPct"
-            aria-valuemin="0"
-            aria-valuemax="100"
-            :aria-label="`Geocoding progress ${geocodeProgressPct} percent`"
-          >
-            <div class="dir-geocode-meter-fill" :style="{ width: `${geocodeProgressPct}%` }" />
-          </div>
-          <p v-if="serverGeocodeLastProcessed > 0" class="map-geocode-progress-batch">
-            This batch: {{ serverGeocodeLastUpdated }} saved · {{ serverGeocodeLastProcessed }} looked up
-          </p>
-          <p v-if="serverGeocodeLastError" class="map-geocode-progress-warn">{{ serverGeocodeLastError }}</p>
-          <p class="map-geocode-progress-hint">{{ geocodeEtaHint }}</p>
-        </div>
-      </div>
-
-      <div
-        v-else-if="showMapNoCoordsNotice && !isLandscapeSplit"
+        v-if="showMapNoCoordsNotice && !isLandscapeSplit"
         class="map-no-coords-notice"
         role="status"
       >
@@ -960,22 +921,39 @@ onUnmounted(() => {
             </div>
           </div>
           <div
-            v-if="showDirectoryGeocodeBanner"
-            class="directory-geocode-banner"
+            v-if="showMapGeocodeProgress"
+            class="directory-geocode-status map-geocode-progress"
             role="status"
             aria-live="polite"
           >
-            <span class="directory-geocode-banner-dot" aria-hidden="true" />
-            <div class="directory-geocode-banner-body">
-              <p v-if="geocodeInitialMissing > 0" class="directory-geocode-banner-line directory-geocode-banner-line--primary">
-                Geocoding: {{ geocodeMappedCount }} / {{ geocodeInitialMissing }} saved
+            <div class="spinner map-geocode-spinner" aria-hidden="true" />
+            <div class="map-geocode-progress-body">
+              <p class="map-geocode-progress-title">
+                <strong>Saving map coordinates on the server</strong>
               </p>
-              <p v-if="geocodeInitialMissing > 0" class="directory-geocode-banner-line directory-geocode-banner-line--secondary">
-                {{ serverGeocodeRemaining }} still in queue — the server uses OpenStreetMap Nominatim Search only, with at least five seconds between requests.
+              <p v-if="geocodeInitialMissing > 0" class="map-geocode-progress-count">
+                {{ geocodeMappedCount }} of {{ geocodeInitialMissing }} addresses with coordinates so far
+                <span v-if="serverGeocodeRemaining > 0" class="map-geocode-remain"
+                  >({{ serverGeocodeRemaining }} left)</span
+                >
               </p>
-              <p v-else class="directory-geocode-banner-line directory-geocode-banner-line--primary">
-                Resolving addresses on the server…
+              <p v-else class="map-geocode-progress-count">Resolving addresses on the server…</p>
+              <div
+                v-if="geocodeInitialMissing > 0"
+                class="dir-geocode-meter"
+                role="progressbar"
+                :aria-valuenow="geocodeProgressPct"
+                aria-valuemin="0"
+                aria-valuemax="100"
+                :aria-label="`Geocoding progress ${geocodeProgressPct} percent`"
+              >
+                <div class="dir-geocode-meter-fill" :style="{ width: `${geocodeProgressPct}%` }" />
+              </div>
+              <p v-if="serverGeocodeLastProcessed > 0" class="map-geocode-progress-batch">
+                This batch: {{ serverGeocodeLastUpdated }} saved · {{ serverGeocodeLastProcessed }} looked up
               </p>
+              <p v-if="serverGeocodeLastError" class="map-geocode-progress-warn">{{ serverGeocodeLastError }}</p>
+              <p class="map-geocode-progress-hint">{{ geocodeEtaHint }}</p>
             </div>
           </div>
         </header>
@@ -1720,72 +1698,18 @@ onUnmounted(() => {
   letter-spacing: var(--tracking-wide, 0.025em);
 }
 
-.directory-geocode-banner {
+/* Geocode progress lives only in the list header (not duplicated under the map). */
+.directory-geocode-status.map-geocode-progress {
   display: flex;
   align-items: flex-start;
-  gap: var(--space-2, 0.5rem);
+  gap: var(--space-3, 0.75rem);
   width: 100%;
   box-sizing: border-box;
-  margin: 0;
+  margin: 0 0 var(--space-3, 0.75rem);
   padding: var(--space-3, 0.75rem) var(--space-4, 1rem);
   border-radius: var(--radius-lg, 0.75rem);
-  background: rgba(123, 77, 181, 0.12);
-  border: 1px solid rgba(123, 77, 181, 0.35);
-}
-
-.directory-geocode-banner-body {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 0.2rem;
-}
-
-.directory-geocode-banner-line {
-  margin: 0;
-  line-height: var(--leading-snug, 1.375);
-  white-space: normal;
-  overflow-wrap: anywhere;
-  word-break: break-word;
-}
-
-.directory-geocode-banner-line--primary {
-  font-size: var(--text-sm, 0.8125rem);
-  font-weight: var(--weight-semibold, 600);
-  color: var(--color-text-primary, #f4f4f8);
-}
-
-.directory-geocode-banner-line--secondary {
-  font-size: var(--text-xs, 0.6875rem);
-  font-weight: var(--weight-medium, 500);
-  color: var(--color-text-secondary, #a0a0b0);
-}
-
-.directory-geocode-banner-dot {
-  width: 0.5rem;
-  height: 0.5rem;
-  border-radius: 50%;
-  background: var(--color-accent-purple, #7b4db5);
-  flex-shrink: 0;
-  animation: dir-geocode-pulse 1.2s ease-in-out infinite;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .directory-geocode-banner-dot {
-    animation: none;
-  }
-}
-
-@keyframes dir-geocode-pulse {
-  0%,
-  100% {
-    opacity: 0.45;
-    transform: scale(1);
-  }
-  50% {
-    opacity: 1;
-    transform: scale(1.15);
-  }
+  background: rgba(123, 77, 181, 0.1);
+  border: 1px solid rgba(123, 77, 181, 0.28);
 }
 
 .directory-view.is-split .directory-title {
