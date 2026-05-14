@@ -3,6 +3,12 @@ import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue'
 import { fetchDirectory, patchDirectoryEntry, saveLocationToDirectory, fetchDirectoryGeocodeStatus, postDirectoryGeocodeOne } from '../api.js'
 import DirectoryMap from '../components/DirectoryMap.vue'
 import { useMapVehicleId } from '../composables/useMapVehicleId.js'
+import {
+  DIRECTORY_STATION_TYPES,
+  DIRECTORY_LOCATION_TYPE_OTHER,
+  filterKeyForLocationType,
+  compareDirectoryTypeFilterKeys,
+} from '../utils/directoryLocationTypes.js'
 
 /** @type {import('vue').Ref<Array<{
  *   locationId: string,
@@ -21,6 +27,13 @@ const locations = ref([])
 const loading = ref(false)
 const error = ref('')
 const searchQuery = ref('')
+
+/** Station types shown on map + list (multi-select). Default matches common dispatch use. */
+const DEFAULT_LOCATION_TYPE_FILTER = Object.freeze(['Hub', 'Station'])
+const directoryTypeFilterOptions = [...DIRECTORY_STATION_TYPES, DIRECTORY_LOCATION_TYPE_OTHER]
+/** @type {import('vue').Ref<string[]>} */
+const selectedLocationTypes = ref([...DEFAULT_LOCATION_TYPE_FILTER])
+
 const expandedId = ref('')
 /** Brief “Copied” feedback after copying phone (location id). */
 const phoneCopiedForId = ref('')
@@ -105,12 +118,56 @@ function compareLocationIdNumeric(a, b) {
   return sa.localeCompare(sb, undefined, { numeric: true, sensitivity: 'base' })
 }
 
+function toggleLocationTypeFilter(t) {
+  const cur = [...selectedLocationTypes.value]
+  const i = cur.indexOf(t)
+  if (i >= 0) {
+    if (cur.length <= 1) return
+    cur.splice(i, 1)
+  } else {
+    cur.push(t)
+  }
+  cur.sort(compareDirectoryTypeFilterKeys)
+  selectedLocationTypes.value = cur
+}
+
+function resetLocationTypeFilter() {
+  selectedLocationTypes.value = [...DEFAULT_LOCATION_TYPE_FILTER]
+}
+
+/**
+ * @param {{ locationType?: string }} loc
+ */
+function locationTypeBadgeText(loc) {
+  const key = filterKeyForLocationType(loc.locationType)
+  if (key === DIRECTORY_LOCATION_TYPE_OTHER) {
+    const raw = String(loc.locationType ?? '').trim()
+    if (!raw) return ''
+    return raw.length > 22 ? `${raw.slice(0, 20)}…` : raw
+  }
+  return key
+}
+
+/**
+ * @param {{ locationType?: string }} loc
+ */
+function locationTypeBadgeClass(loc) {
+  return filterKeyForLocationType(loc.locationType) === 'Hub'
+    ? 'location-type-badge--hub'
+    : 'location-type-badge--muted'
+}
+
+const locationsAfterTypeFilter = computed(() => {
+  const sel = selectedLocationTypes.value
+  return locations.value.filter((loc) => sel.includes(filterKeyForLocationType(loc.locationType)))
+})
+
 const filteredLocations = computed(() => {
   const q = searchQuery.value.trim().toLowerCase()
   const base =
     !q
-      ? [...locations.value]
-      : locations.value.filter(
+      ? [...locationsAfterTypeFilter.value]
+      : locationsAfterTypeFilter.value.filter(
           (loc) =>
             loc.locationName.toLowerCase().includes(q) ||
             loc.abbreviation.toLowerCase().includes(q) ||
@@ -162,7 +219,7 @@ const showMapNoCoordsNotice = computed(
   () =>
     !loading.value &&
     !serverGeocodeInBatch.value &&
-    filteredLocations.value.length > 0 &&
+    locationsAfterTypeFilter.value.length > 0 &&
     mapPins.value.length === 0,
 )
 
@@ -172,7 +229,7 @@ const showMapGeocodeProgress = computed(
     serverGeocodeInBatch.value &&
     !geocodeServerQueueComplete.value &&
     needsAddressGeocode.value &&
-    filteredLocations.value.length > 0,
+    locationsAfterTypeFilter.value.length > 0,
 )
 
 const showDirectoryGeocodeBanner = computed(() => showMapGeocodeProgress.value)
@@ -944,6 +1001,37 @@ onUnmounted(() => {
       </button>
     </div>
 
+    <div
+      v-if="locations.length"
+      class="directory-type-filter"
+      role="group"
+      aria-label="Filter directory and map by station type"
+    >
+      <div class="directory-type-filter-head">
+        <span class="directory-type-filter-label">Station type</span>
+        <button
+          type="button"
+          class="directory-type-filter-reset tap"
+          @click="resetLocationTypeFilter"
+        >
+          Hub + Station
+        </button>
+      </div>
+      <div class="directory-type-filter-chips">
+        <button
+          v-for="t in directoryTypeFilterOptions"
+          :key="t"
+          type="button"
+          class="directory-type-chip tap"
+          :class="{ 'is-active': selectedLocationTypes.includes(t) }"
+          :aria-pressed="selectedLocationTypes.includes(t)"
+          @click="toggleLocationTypeFilter(t)"
+        >
+          {{ t }}
+        </button>
+      </div>
+    </div>
+
     <div v-if="error" class="error-banner">
       <span class="error-icon">!</span>
       <span>{{ error }}</span>
@@ -972,6 +1060,23 @@ onUnmounted(() => {
       </p>
     </div>
 
+    <div v-else-if="!locationsAfterTypeFilter.length" class="empty-state">
+      <svg
+        class="empty-icon"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="1.5"
+      >
+        <circle cx="11" cy="11" r="8" />
+        <line x1="21" y1="21" x2="16.65" y2="16.65" />
+      </svg>
+      <p class="empty-title">No locations for this filter</p>
+      <p class="empty-desc">
+        Turn on more station types above, or reset to Hub + Station.
+      </p>
+    </div>
+
     <div v-else-if="!filteredLocations.length" class="empty-state">
       <svg
         class="empty-icon"
@@ -984,7 +1089,7 @@ onUnmounted(() => {
         <line x1="21" y1="21" x2="16.65" y2="16.65" />
       </svg>
       <p class="empty-title">No results</p>
-      <p class="empty-desc">Try a different search term.</p>
+      <p class="empty-desc">Try a different search term or clear the search box.</p>
     </div>
 
     <ul v-else class="location-list">
@@ -995,7 +1100,7 @@ onUnmounted(() => {
         class="location-card"
         :class="{
           'is-expanded': expandedId === loc.locationId,
-          'is-hub': (loc.locationType || '').toUpperCase() === 'HUB',
+          'is-hub': filterKeyForLocationType(loc.locationType) === 'Hub',
         }"
       >
         <button
@@ -1010,7 +1115,11 @@ onUnmounted(() => {
               <div class="location-title-row">
                 <span class="location-name">{{ cardLocationTitle(loc) }}</span>
                 <span v-if="loc.abbreviation" class="location-abbr">{{ loc.abbreviation }}</span>
-                <span v-if="(loc.locationType || '').toUpperCase() === 'HUB'" class="location-hub-badge">HUB</span>
+                <span
+                  v-if="locationTypeBadgeText(loc)"
+                  class="location-type-badge"
+                  :class="locationTypeBadgeClass(loc)"
+                >{{ locationTypeBadgeText(loc) }}</span>
               </div>
               <p v-if="loc.address" class="location-address location-address--header">{{ loc.address }}</p>
             </div>
@@ -1045,6 +1154,10 @@ onUnmounted(() => {
             <div class="detail-row">
               <dt>Location name</dt>
               <dd>{{ loc.locationName?.trim() || '—' }}</dd>
+            </div>
+            <div class="detail-row">
+              <dt>Station type</dt>
+              <dd>{{ loc.locationType?.trim() || '—' }}</dd>
             </div>
             <div class="detail-row">
               <dt>Address</dt>
@@ -1185,6 +1298,14 @@ onUnmounted(() => {
 
     <p v-if="filteredLocations.length" class="location-count">
       {{ filteredLocations.length }} location{{ filteredLocations.length === 1 ? '' : 's' }}
+      <span
+        v-if="locationsAfterTypeFilter.length < locations.length || filteredLocations.length < locationsAfterTypeFilter.length"
+        class="location-count-hint"
+      >
+        ({{ locations.length }} total in directory<template v-if="locationsAfterTypeFilter.length < locations.length"
+          >; {{ locationsAfterTypeFilter.length }} match type filter</template
+        >)
+      </span>
     </p>
       </div>
     </div>
@@ -1836,6 +1957,75 @@ onUnmounted(() => {
   height: 1rem;
 }
 
+.directory-type-filter {
+  margin-bottom: var(--space-4, 1rem);
+  padding: var(--space-3, 0.75rem) var(--space-3, 0.75rem);
+  border-radius: var(--radius-lg, 0.75rem);
+  background: rgba(123, 77, 181, 0.08);
+  border: 1px solid rgba(123, 77, 181, 0.28);
+}
+
+.directory-type-filter-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2, 0.5rem);
+  margin-bottom: var(--space-2, 0.5rem);
+}
+
+.directory-type-filter-label {
+  font-size: var(--text-xs, 0.6875rem);
+  font-weight: var(--weight-semibold, 600);
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--color-text-secondary, #a0a0b0);
+}
+
+.directory-type-filter-reset {
+  flex-shrink: 0;
+  padding: 0.2rem 0.5rem;
+  font-size: var(--text-xs, 0.6875rem);
+  font-weight: var(--weight-medium, 500);
+  color: var(--color-accent-purple-light, #c4b5fd);
+  background: rgba(123, 77, 181, 0.2);
+  border: 1px solid rgba(123, 77, 181, 0.45);
+  border-radius: var(--radius-md, 0.5rem);
+  cursor: pointer;
+}
+
+.directory-type-filter-reset:hover {
+  background: rgba(123, 77, 181, 0.3);
+}
+
+.directory-type-filter-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.375rem;
+}
+
+.directory-type-chip {
+  padding: 0.35rem 0.55rem;
+  font-size: var(--text-xs, 0.6875rem);
+  font-weight: var(--weight-medium, 500);
+  color: var(--color-text-secondary, #a0a0b0);
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--color-border, rgba(255, 255, 255, 0.1));
+  border-radius: var(--radius-full, 9999px);
+  cursor: pointer;
+  transition: var(--transition-colors, color 0.15s ease, background 0.15s ease, border-color 0.15s ease);
+}
+
+.directory-type-chip:hover {
+  border-color: rgba(123, 77, 181, 0.45);
+  color: var(--color-text-primary, #f4f4f8);
+}
+
+.directory-type-chip.is-active {
+  color: var(--color-text-primary, #f4f4f8);
+  background: rgba(123, 77, 181, 0.35);
+  border-color: rgba(123, 77, 181, 0.65);
+}
+
 .error-banner {
   display: flex;
   align-items: center;
@@ -2379,6 +2569,15 @@ button.phone-copy:hover {
   color: var(--color-text-tertiary, #6e6e7e);
 }
 
+.location-count-hint {
+  display: block;
+  margin-top: 0.25rem;
+  font-size: var(--text-xs, 0.6875rem);
+  font-weight: var(--weight-normal, 400);
+  color: var(--color-text-tertiary, #6e6e7e);
+  line-height: 1.4;
+}
+
 /* vCard dropdown */
 .vcard-dropdown-wrap {
   position: relative;
@@ -2440,18 +2639,33 @@ button.phone-copy:hover {
   color: white;
 }
 
-.location-hub-badge {
+.location-type-badge {
   display: inline-flex;
   align-items: center;
-  padding: 0.125rem 0.375rem;
+  max-width: 11rem;
+  padding: 0.125rem 0.4rem;
   margin-left: 0.375rem;
   font-size: 0.5625rem;
-  font-weight: var(--weight-bold, 700);
-  letter-spacing: 0.05em;
+  font-weight: var(--weight-semibold, 600);
+  letter-spacing: 0.03em;
+  line-height: 1.2;
+  border-radius: var(--radius-sm, 0.25rem);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.location-type-badge--hub {
   text-transform: uppercase;
   color: white;
   background: linear-gradient(135deg, var(--color-accent-purple, #7b4db5), var(--color-accent-orange, #ff6b1a));
-  border-radius: var(--radius-sm, 0.25rem);
+}
+
+.location-type-badge--muted {
+  text-transform: none;
+  color: var(--color-text-secondary, #a0a0b0);
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid var(--color-border, rgba(255, 255, 255, 0.1));
 }
 
 @media (max-width: 374px) {

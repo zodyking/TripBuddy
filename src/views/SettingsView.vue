@@ -28,6 +28,12 @@ import {
   bulkImportDirectory,
 } from '../api.js'
 import {
+  DIRECTORY_STATION_TYPES,
+  DIRECTORY_LOCATION_TYPE_OTHER,
+  countByDirectoryLocationType,
+  normalizeLocationTypeForStorage,
+} from '../utils/directoryLocationTypes.js'
+import {
   refreshLinehaulApis,
   computeLinehaulReferenceId,
   linehaulDriverIdFromCredMeta,
@@ -920,11 +926,8 @@ const csvImportFile = ref(null)
 const csvImportBusy = ref(false)
 const csvImportMsg = ref('')
 const csvImportError = ref('')
-/** @type {import('vue').Ref<{ total: number, filtered: number, preview: Array<{ locationId: string, locationName: string }> } | null>} */
+/** @type {import('vue').Ref<{ total: number, importable: number, preview: Array<{ locationId: string, locationName: string }> } | null>} */
 const csvImportPreview = ref(null)
-
-/** Statuses to exclude from import */
-const EXCLUDED_STATUSES = ['HUB LOCAL', 'NFS']
 
 async function loadDirectoryStats() {
   directoryLoading.value = true
@@ -942,11 +945,22 @@ async function loadDirectoryStats() {
 
 const directoryStats = computed(() => {
   const locs = directoryLocations.value
+  const byType = countByDirectoryLocationType(locs)
   return {
     total: locs.length,
     withPhone: locs.filter((l) => l.phone && l.phone.trim()).length,
     withCoords: locs.filter((l) => l.latitude != null && l.longitude != null).length,
+    byType,
   }
+})
+
+/** Station-type rows for the statistics grid (canonical types, then Other). */
+const directoryTypeStatRows = computed(() => {
+  const by = directoryStats.value.byType ?? {}
+  return [...DIRECTORY_STATION_TYPES, DIRECTORY_LOCATION_TYPE_OTHER].map((label) => ({
+    label,
+    count: typeof by[label] === 'number' ? by[label] : 0,
+  }))
 })
 
 /**
@@ -986,14 +1000,11 @@ function onCsvFileSelected(event) {
       const text = e.target?.result
       if (typeof text !== 'string') throw new Error('Failed to read file')
       const rows = parseCsv(text)
-      const filtered = rows.filter((r) => {
-        const status = (r.Status || '').trim().toUpperCase()
-        return !EXCLUDED_STATUSES.includes(status)
-      })
+      const importable = rows.filter((r) => String(r['Station Number'] ?? '').trim())
       csvImportPreview.value = {
         total: rows.length,
-        filtered: filtered.length,
-        preview: filtered.slice(0, 5).map((r) => ({
+        importable: importable.length,
+        preview: importable.slice(0, 5).map((r) => ({
           locationId: r['Station Number'] || '',
           locationName: r['Station Name'] || '',
         })),
@@ -1018,11 +1029,8 @@ async function importCsvToDirectory() {
   try {
     const text = await csvImportFile.value.text()
     const rows = parseCsv(text)
-    const filtered = rows.filter((r) => {
-      const status = (r.Status || '').trim().toUpperCase()
-      return !EXCLUDED_STATUSES.includes(status)
-    })
-    const entries = filtered.map((r) => {
+    const importable = rows.filter((r) => String(r['Station Number'] ?? '').trim())
+    const entries = importable.map((r) => {
       const addr1 = (r['Address 1'] || '').trim()
       const addr2 = (r['Address 2'] || '').trim()
       const city = (r.City || '').trim()
@@ -1038,12 +1046,12 @@ async function importCsvToDirectory() {
         latitude: null,
         longitude: null,
         timeZone: '',
-        locationType: (r.Status || '').trim().toUpperCase(),
+        locationType: normalizeLocationTypeForStorage(r.Status || ''),
         district: (r.District || '').trim().toUpperCase(),
       }
     }).filter((e) => e.locationId)
     if (entries.length === 0) {
-      csvImportError.value = 'No valid entries to import after filtering'
+      csvImportError.value = 'No valid entries to import (each row needs a Station Number)'
       return
     }
     const res = await bulkImportDirectory(entries)
@@ -1960,25 +1968,36 @@ onUnmounted(() => {
         <p v-if="directoryLoading" class="directory-loading">Loading...</p>
         <p v-else-if="directoryError" class="directory-error">{{ directoryError }}</p>
         <div v-else class="directory-stats">
-          <div class="stat-card">
-            <span class="stat-value">{{ directoryStats.total }}</span>
-            <span class="stat-label">Total locations</span>
+          <div class="directory-stats-primary">
+            <div class="stat-card">
+              <span class="stat-value">{{ directoryStats.total }}</span>
+              <span class="stat-label">Total locations</span>
+            </div>
+            <div class="stat-card">
+              <span class="stat-value">{{ directoryStats.withPhone }}</span>
+              <span class="stat-label">With phone numbers</span>
+            </div>
+            <div class="stat-card">
+              <span class="stat-value">{{ directoryStats.withCoords }}</span>
+              <span class="stat-label">With coordinates</span>
+            </div>
           </div>
-          <div class="stat-card">
-            <span class="stat-value">{{ directoryStats.withPhone }}</span>
-            <span class="stat-label">With phone numbers</span>
-          </div>
-          <div class="stat-card">
-            <span class="stat-value">{{ directoryStats.withCoords }}</span>
-            <span class="stat-label">With coordinates</span>
-          </div>
+          <p class="directory-type-stats-heading">By station type</p>
+          <ul class="directory-type-stats-grid" aria-label="Location counts by station type">
+            <li v-for="row in directoryTypeStatRows" :key="row.label" class="directory-type-stat">
+              <span class="directory-type-stat-count">{{ row.count }}</span>
+              <span class="directory-type-stat-label">{{ row.label }}</span>
+            </li>
+          </ul>
         </div>
         <button type="button" class="btn ghost tap" @click="loadDirectoryStats">Refresh stats</button>
       </SettingsSection>
 
       <SettingsSection title="Import Locations (CSV)">
         <p class="directory-hint">
-          Import FedEx Ground facility data from a CSV file. Entries with status <strong>HUB LOCAL</strong> or <strong>NFS</strong> will be excluded.
+          Import FedEx Ground facility data from a CSV file. <strong>All</strong> rows with a station
+          number are imported; every station type in the file (Annex, Hub, Hub Local, NFS, Smartpost Hub,
+          Station, Sub Station, etc.) is kept.
         </p>
 
         <div class="csv-import-area">
@@ -1996,7 +2015,10 @@ onUnmounted(() => {
 
           <div v-if="csvImportPreview" class="csv-preview">
             <p class="csv-preview-summary">
-              <strong>{{ csvImportPreview.filtered }}</strong> of {{ csvImportPreview.total }} rows will be imported (after filtering)
+              <strong>{{ csvImportPreview.importable }}</strong> of {{ csvImportPreview.total }} data rows will be imported
+              <span v-if="csvImportPreview.importable < csvImportPreview.total" class="csv-preview-skip-note">
+                (rows without a Station Number are skipped)
+              </span>
             </p>
             <p v-if="csvImportPreview.preview.length" class="csv-preview-label">Preview (first 5):</p>
             <ul v-if="csvImportPreview.preview.length" class="csv-preview-list">
@@ -2013,7 +2035,7 @@ onUnmounted(() => {
             <button
               type="button"
               class="btn primary tap"
-              :disabled="csvImportBusy || !csvImportPreview?.filtered"
+              :disabled="csvImportBusy || !csvImportPreview?.importable"
               @click="importCsvToDirectory"
             >
               {{ csvImportBusy ? 'Importing...' : 'Import to directory' }}
@@ -2826,10 +2848,70 @@ code {
 }
 
 .directory-stats {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4, 1rem);
+  margin-bottom: var(--space-4, 1rem);
+}
+
+.directory-stats-primary {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
   gap: var(--space-3, 0.75rem);
-  margin-bottom: var(--space-4, 1rem);
+}
+
+.directory-type-stats-heading {
+  margin: 0;
+  font-size: var(--text-xs, 0.6875rem);
+  font-weight: var(--weight-semibold, 600);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--color-text-tertiary, #6e6e7e);
+}
+
+.directory-type-stats-grid {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(7.5rem, 1fr));
+  gap: var(--space-2, 0.5rem);
+}
+
+.directory-type-stat {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.15rem;
+  padding: var(--space-2, 0.5rem) var(--space-2, 0.5rem);
+  background: var(--color-glass-subtle, rgba(255, 255, 255, 0.03));
+  border: 1px solid var(--color-border, rgba(255, 255, 255, 0.08));
+  border-radius: var(--radius-md, 0.5rem);
+  min-height: 3.25rem;
+}
+
+.directory-type-stat-count {
+  font-size: var(--text-lg, 1.125rem);
+  font-weight: var(--weight-bold, 700);
+  color: var(--color-accent-purple, #7b4db5);
+  line-height: 1.1;
+}
+
+.directory-type-stat-label {
+  font-size: 0.65rem;
+  font-weight: var(--weight-medium, 500);
+  color: var(--color-text-secondary, #a8a8b8);
+  text-align: center;
+  line-height: 1.25;
+}
+
+.csv-preview-skip-note {
+  display: block;
+  margin-top: 0.25rem;
+  font-size: var(--text-xs, 0.6875rem);
+  color: var(--color-text-tertiary, #6e6e7e);
+  font-weight: var(--weight-normal, 400);
 }
 
 .stat-card {
