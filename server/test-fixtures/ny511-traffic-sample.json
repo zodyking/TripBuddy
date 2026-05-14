@@ -1,60 +1,59 @@
 {
   "getevents": [
     {
+      "ID": "evt-transit-1",
+      "EventType": "transitOperations",
+      "EventSubType": "Detour",
+      "Description": "B43 bus rerouted on Graham Ave",
+      "RoadwayName": "Graham Avenue",
+      "Latitude": 40.7,
+      "Longitude": -73.94,
+      "StartDate": "01/05/2026 00:00:00",
+      "PlannedEndDate": "31/12/2026 23:59:00"
+    },
+    {
       "ID": "evt-nyc-1",
-      "RegionName": "New York City Area",
-      "CountyName": "Kings",
-      "Severity": "Moderate",
+      "EventType": "roadwork",
+      "EventSubType": "Paving",
+      "Description": "Overnight paving",
       "RoadwayName": "I-278 West",
-      "DirectionOfTravel": "Westbound",
-      "Description": "Disabled vehicle - Right lane blocked near Exit 25",
-      "Location": "I-278 at Atlantic Avenue",
-      "EventType": "accidentsAndIncidents",
-      "EventSubType": "Disabled Vehicle",
       "Latitude": 40.692,
       "Longitude": -73.981,
-      "StartDate": "14/05/2026 12:00:00",
-      "PlannedEndDate": "14/05/2026 18:00:00"
+      "StartDate": "14/05/2026 06:00:00",
+      "PlannedEndDate": "15/05/2026 06:00:00"
     },
     {
-      "ID": "evt-out-1",
-      "RegionName": "Central Syracuse Utica Area",
-      "CountyName": "Onondaga",
-      "Severity": "Low",
-      "RoadwayName": "I-81 North",
-      "DirectionOfTravel": "Northbound",
-      "Description": "Roadwork - Expect delays",
-      "Location": "I-81 near Syracuse",
+      "ID": "evt-old",
       "EventType": "roadwork",
-      "EventSubType": "Paving",
-      "Latitude": 43.05,
-      "Longitude": -76.15,
-      "StartDate": "10/05/2026 08:00:00",
-      "PlannedEndDate": "20/05/2026 17:00:00"
-    },
-    {
-      "ID": "evt-nyc-2",
-      "RegionName": "Long Island Area",
-      "CountyName": "Queens",
-      "Severity": "Minor",
+      "EventSubType": "Old job",
       "RoadwayName": "I-495 East",
-      "DirectionOfTravel": "Eastbound",
-      "Description": "Overnight paving operation",
-      "Location": "LIE between Exit 19 and Exit 22",
-      "EventType": "roadwork",
-      "EventSubType": "Paving",
       "Latitude": 40.752,
       "Longitude": -73.893,
-      "StartDate": "14/05/2026 22:00:00",
-      "PlannedEndDate": "15/05/2026 05:00:00"
+      "StartDate": "01/01/2020 00:00:00",
+      "PlannedEndDate": "02/01/2020 12:00:00"
+    },
+    {
+      "ID": "evt-future",
+      "EventType": "roadwork",
+      "EventSubType": "Future",
+      "RoadwayName": "I-678 North",
+      "Latitude": 40.75,
+      "Longitude": -73.82,
+      "StartDate": "20/08/2026 00:00:00",
+      "PlannedEndDate": "21/08/2026 23:59:00"
     }
   ],
   "getalerts": [
     {
-      "Id": "alert-1",
-      "Message": "Heavy traffic on George Washington Bridge - expect 30+ minute delays",
-      "Notes": "Use alternate routes if possible",
-      "AreaNames": ["New York City Area", "New Jersey Statewide"]
+      "Id": "alert-gwb",
+      "Message": "Heavy delays George Washington Bridge upper level — consider alternate",
+      "Notes": "",
+      "AreaNames": ["New York City Area"]
+    },
+    {
+      "Id": "alert-upstate",
+      "Message": "Winter advisory I-90 near Buffalo",
+      "AreaNames": ["Niagara Buffalo Area"]
     }
   ]
 }

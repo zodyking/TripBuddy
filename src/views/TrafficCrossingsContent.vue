@@ -66,6 +66,17 @@ function fmtTime(ts) {
 }
 
 /**
+ * @param {unknown} text
+ * @param {number} max
+ */
+function ny511Snippet(text, max = 200) {
+  const s = typeof text === 'string' ? text.trim() : ''
+  if (!s) return ''
+  if (s.length <= max) return s
+  return `${s.slice(0, max - 1)}…`
+}
+
+/**
  * PANYNJ JSON usually uses "ToNY" / "ToNJ" but normalize in case of spacing/casing drift.
  * @param {unknown} v
  * @returns {'ToNY' | 'ToNJ' | ''}
@@ -859,7 +870,8 @@ async function loadNy511Traffic() {
       ny511Payload.value = {
         ok: false,
         items: [],
-        error: typeof p.code === 'string' ? p.code : 'error',
+        alerts: [],
+        code: typeof p.code === 'string' ? p.code : undefined,
         fetchedAt: Date.now(),
       }
       ny511Error.value = typeof p.error === 'string' ? p.error : r.statusText || 'Request failed'
@@ -868,20 +880,29 @@ async function loadNy511Traffic() {
     ny511Payload.value = p
   } catch (e) {
     ny511Error.value = e instanceof Error ? e.message : 'Failed to load NY511 traffic'
-    ny511Payload.value = { ok: false, items: [], fetchedAt: Date.now() }
+    ny511Payload.value = { ok: false, items: [], alerts: [], fetchedAt: Date.now() }
   } finally {
     ny511Loading.value = false
   }
 }
 
-const ny511Items = computed(() => {
+const ny511RoadItems = computed(() => {
   const items = ny511Payload.value?.items
   return Array.isArray(items) ? items : []
 })
 
+const ny511AlertItems = computed(() => {
+  const a = ny511Payload.value?.alerts
+  return Array.isArray(a) ? a : []
+})
+
+const ny511HasAnyListings = computed(
+  () => ny511RoadItems.value.length + ny511AlertItems.value.length > 0,
+)
+
 const ny511MarkersForMap = computed(() => {
   if (viewMode.value !== 'ny511') return []
-  return ny511Items.value
+  return ny511RoadItems.value
     .filter(
       (it) =>
         it &&
@@ -895,7 +916,10 @@ const ny511MarkersForMap = computed(() => {
       lng: /** @type {any} */ (it).lng,
       title: String(/** @type {any} */ (it).title || ''),
       kind: String(/** @type {any} */ (it).kind || ''),
+      kindLabel: String(/** @type {any} */ (it).kind || ''),
+      eventTypeKey: String(/** @type {any} */ (it).eventTypeKey || ''),
       severity: String(/** @type {any} */ (it).severity || ''),
+      roads: Array.isArray(/** @type {any} */ (it).roads) ? /** @type {any} */ (it).roads : [],
     }))
 })
 
@@ -1001,7 +1025,7 @@ onUnmounted(() => {
             </p>
             <p v-else class="bridges-pill">
               <span v-if="viewMode === 'crossings'">Fastest first</span>
-              <span v-else>511NY · NYC truck routes</span>
+              <span v-else>511NY · major truck routes · US Eastern · active now</span>
               <span v-if="viewMode === 'crossings' && payload?.fetchedAt" class="bridges-time"
               >· {{ fmtTime(payload.fetchedAt) }}</span>
               <span v-if="viewMode === 'ny511' && ny511Payload?.fetchedAt" class="bridges-time"
@@ -1229,61 +1253,92 @@ onUnmounted(() => {
           <p v-else-if="!rankedRows.length" class="bridges-no-crossings">No bridge data for this direction</p>
         </div>
 
-        <!-- NY511: incidents, construction, events (NYC truck filter) -->
+        <!-- NY511: alerts (511 getalerts) vs road events (getevents, truck-filtered) -->
         <div
           v-else-if="viewMode === 'ny511'"
-          class="bridges-content-panel"
+          class="bridges-content-panel bridges-content-panel--ny511"
           aria-label="NY511 traffic list"
         >
-          <h2 v-if="ny511Items.length" class="bridges-trips-h2">Active alerts &amp; work zones</h2>
-          <ul v-if="ny511Items.length" class="bridge-grid" aria-label="NY511 items, NYC truck routes">
-            <li
-              v-for="(it, idx) in ny511Items"
-              :key="`${String(it.id || 'item')}-${idx}`"
-              class="bridge-tile bridge-tile--ny511"
-            >
-              <div class="bridge-tile-inner">
-                <div class="bridge-data-col">
-                  <div class="bridge-card-head">
-                    <div class="bridge-card-id">
-                      <span class="bridge-rank" aria-hidden="true">{{ idx + 1 }}</span>
-                      <div class="ny511-title-wrap">
-                        <span class="ny511-kind-badge" :title="String(it.sourceFeed || '')">{{ it.kind }}</span>
-                        <h2 class="bridge-title">{{ it.title }}</h2>
+          <section v-if="ny511AlertItems.length" class="ny511-section" aria-labelledby="ny511-alerts-h">
+            <h2 id="ny511-alerts-h" class="ny511-section-h2">Traffic alerts</h2>
+            <p class="ny511-section-sub">511NY-wide messages for NYC metro &amp; monitored crossings</p>
+            <ul class="ny511-alert-list" aria-label="511NY traffic alerts">
+              <li
+                v-for="(it, idx) in ny511AlertItems"
+                :key="`alert-${String(it.id || idx)}`"
+                class="ny511-alert-card"
+              >
+                <span class="ny511-kind-badge ny511-kind-badge--alert">Alert</span>
+                <p class="ny511-alert-title">{{ it.title }}</p>
+                <p v-if="it.description && it.description !== it.title" class="ny511-alert-desc">
+                  {{ ny511Snippet(it.description, 240) }}
+                </p>
+                <p v-if="it.roads && it.roads.length" class="ny511-alert-areas">
+                  {{ it.roads.join(' · ') }}
+                </p>
+              </li>
+            </ul>
+          </section>
+
+          <section
+            v-if="ny511RoadItems.length"
+            class="ny511-section"
+            :class="{ 'ny511-section--spaced': ny511AlertItems.length }"
+            aria-labelledby="ny511-roads-h"
+          >
+            <h2 id="ny511-roads-h" class="ny511-section-h2">Incidents &amp; work zones</h2>
+            <p class="ny511-section-sub">Major highways &amp; crossings only · excludes transit detours</p>
+            <ul class="bridge-grid ny511-road-list" aria-label="511NY road events">
+              <li
+                v-for="(it, idx) in ny511RoadItems"
+                :key="`${String(it.id || 'item')}-${idx}`"
+                class="bridge-tile bridge-tile--ny511"
+              >
+                <div class="bridge-tile-inner">
+                  <div class="bridge-data-col">
+                    <div class="bridge-card-head">
+                      <div class="bridge-card-id">
+                        <span class="bridge-rank" aria-hidden="true">{{ idx + 1 }}</span>
+                        <div class="ny511-title-wrap">
+                          <span class="ny511-kind-badge" :title="String(it.eventTypeKey || '')">{{ it.kind }}</span>
+                          <h2 class="bridge-title">{{ it.title }}</h2>
+                        </div>
                       </div>
                     </div>
-                  </div>
-                  <p v-if="it.description" class="ny511-desc">{{ it.description }}</p>
-                  <div class="ny511-meta">
-                    <span v-if="it.roads && it.roads.length" class="ny511-roads">{{ it.roads.join(' · ') }}</span>
-                    <span v-if="it.startsAt || it.endsAt" class="ny511-times">
-                      {{ it.startsAt || '—' }} → {{ it.endsAt || '—' }}
-                    </span>
-                    <span v-if="it.severity" class="ny511-severity">{{ it.severity }}</span>
+                    <p v-if="it.description" class="ny511-desc">{{ ny511Snippet(it.description, 280) }}</p>
+                    <div class="ny511-meta">
+                      <span v-if="it.roads && it.roads.length" class="ny511-roads">{{ it.roads.join(' · ') }}</span>
+                      <span v-if="it.region || it.county" class="ny511-region">
+                        {{ [it.region, it.county].filter(Boolean).join(' · ') }}
+                      </span>
+                      <span v-if="it.startsAt || it.endsAt" class="ny511-times">
+                        {{ it.startsAt || '—' }} → {{ it.endsAt || '—' }}
+                      </span>
+                      <span v-if="it.severity" class="ny511-severity">{{ it.severity }}</span>
+                    </div>
                   </div>
                 </div>
-              </div>
-            </li>
-          </ul>
+              </li>
+            </ul>
+          </section>
+
           <p
-            v-else-if="!ny511Loading && ny511Payload && ny511Payload.error === 'NO_API_KEY'"
+            v-if="!ny511Loading && ny511Payload?.code === 'NO_API_KEY'"
             class="bridges-no-crossings"
           >
-            Add your 511NY API key in Settings (same key as bridge cameras) to load events, construction, and incidents.
+            Add your 511NY API key in Settings (same key as bridge cameras) to load events and alerts.
           </p>
-          <p v-else-if="!ny511Loading && ny511Payload?.ok" class="bridges-no-crossings">
-            No active items for monitored NYC truck routes and crossings.
-            <template v-if="ny511Payload?._stats">
-              <br /><small class="ny511-debug">
-                Debug: {{ ny511Payload._stats.totalFetched }} fetched → {{ ny511Payload._stats.afterFilter }} after filter
-                <template v-if="ny511Payload._sampleUnfiltered?.length">
-                  <br />Sample: {{ JSON.stringify(ny511Payload._sampleUnfiltered[0]?.title || ny511Payload._sampleUnfiltered[0]) }}
-                </template>
-              </small>
-            </template>
+          <p
+            v-else-if="!ny511Loading && ny511Payload?.ok && !ny511HasAnyListings"
+            class="bridges-no-crossings"
+          >
+            No current incidents, work zones, or metro alerts for monitored NYC truck routes and crossings.
           </p>
-          <p v-else-if="!ny511Loading" class="bridges-no-crossings">
-            {{ ny511Error || 'Could not load NY511 data.' }}
+          <p
+            v-else-if="!ny511Loading && ny511Error && ny511Payload?.code !== 'NO_API_KEY'"
+            class="bridges-no-crossings"
+          >
+            {{ ny511Error }}
           </p>
         </div>
       </div>
@@ -1977,6 +2032,93 @@ onUnmounted(() => {
   font-family: var(--font-sans, system-ui, sans-serif);
 }
 
+.bridges-content-panel--ny511 {
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+}
+
+.ny511-section {
+  margin: 0;
+}
+
+.ny511-section--spaced {
+  padding-top: 0.35rem;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.ny511-section-h2 {
+  margin: 0 0 0.15rem 0.15rem;
+  font-size: 0.65rem;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: #9a9aac;
+}
+
+.ny511-section-sub {
+  margin: 0 0 0.45rem 0.15rem;
+  font-size: 0.62rem;
+  line-height: 1.35;
+  color: #6b6b7a;
+  max-width: 40rem;
+}
+
+.ny511-alert-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.ny511-alert-card {
+  border-radius: 12px;
+  padding: 0.45rem 0.55rem 0.5rem;
+  background: rgba(0, 0, 0, 0.35);
+  border: 1px solid rgba(167, 139, 250, 0.2);
+}
+
+.ny511-kind-badge--alert {
+  background: rgba(56, 189, 248, 0.14);
+  color: #bae6fd;
+  border-color: rgba(56, 189, 248, 0.35);
+}
+
+.ny511-alert-title {
+  margin: 0.35rem 0 0;
+  font-size: 0.78rem;
+  font-weight: 650;
+  line-height: 1.35;
+  color: #ececf8;
+}
+
+.ny511-alert-desc {
+  margin: 0.35rem 0 0;
+  font-size: 0.68rem;
+  line-height: 1.45;
+  color: #9a9ab0;
+}
+
+.ny511-alert-areas {
+  margin: 0.35rem 0 0;
+  font-size: 0.58rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: #6e6e80;
+}
+
+.ny511-road-list {
+  margin-top: 0.15rem;
+}
+
+.ny511-region {
+  font-size: 0.58rem;
+  color: #7a7a8c;
+}
+
 .ny511-title-wrap {
   display: flex;
   flex-direction: column;
@@ -2020,13 +2162,6 @@ onUnmounted(() => {
 
 .bridge-tile--ny511 {
   border-color: rgba(167, 139, 250, 0.12);
-}
-
-.ny511-debug {
-  color: #6a6a78;
-  font-size: 0.62rem;
-  line-height: 1.5;
-  word-break: break-word;
 }
 
 .bridge-chart-empty {

@@ -558,6 +558,18 @@ function ny511SeverityColor(sev) {
   return '#a78bfa'
 }
 
+/**
+ * @param {{ eventTypeKey?: string, severity?: string }} m
+ */
+function ny511MarkerFill(m) {
+  const k = String(m.eventTypeKey || '').toLowerCase()
+  if (k === 'accidentsandincidents') return '#f87171'
+  if (k === 'roadwork') return '#fb923c'
+  if (k === 'closures') return '#fcd34d'
+  if (k === 'winterdrivingindex') return '#22d3ee'
+  return ny511SeverityColor(m.severity)
+}
+
 function syncNy511Markers() {
   if (!map || !ny511Layer) return
 
@@ -576,28 +588,41 @@ function syncNy511Markers() {
     const ln = Number(m.lng)
     if (!Number.isFinite(la) || !Number.isFinite(ln)) continue
 
-    const color = ny511SeverityColor(m.severity)
+    const color = ny511MarkerFill(m)
     const title = esc(String(m.title || id))
-    const kind = esc(String(m.kind || ''))
+    const kind = esc(String(m.kindLabel || m.kind || ''))
     const sev = esc(String(m.severity || ''))
-    const popupHtml = `<div class="ny511-leaflet-popup"><strong>${title}</strong><div>${kind}${sev ? ` · ${sev}` : ''}</div></div>`
+    const road0 = Array.isArray(m.roads) && m.roads[0] != null ? esc(String(m.roads[0])) : ''
+    const meta = [kind, sev].filter(Boolean).join(' · ')
+    const roadLine = road0
+      ? `<div class="ny511-leaflet-popup__road">${road0}</div>`
+      : ''
+    const popupHtml =
+      `<div class="ny511-leaflet-popup">` +
+      `<div class="ny511-leaflet-popup__meta">${esc(meta || '511NY')}</div>` +
+      `<div class="ny511-leaflet-popup__title">${title}</div>` +
+      roadLine +
+      `</div>`
+    const popOpts = { className: 'ny511-map-popup', maxWidth: 280, closeButton: true }
 
     const existing = ny511MarkersById.get(id)
     if (existing) {
       existing.setLatLng([la, ln])
-      existing.setStyle({ color: '#0f0f14', fillColor: color })
+      existing.setStyle({ color: '#0f0f14', weight: 2.5, fillColor: color, fillOpacity: 0.92 })
       const pop = existing.getPopup()
-      if (pop) pop.setContent(popupHtml)
-      else existing.bindPopup(popupHtml)
+      if (pop) {
+        pop.setContent(popupHtml)
+        pop.update()
+      } else existing.bindPopup(popupHtml, popOpts)
     } else {
       const cm = L.circleMarker([la, ln], {
-        radius: 8,
-        color: '#0f0f14',
-        weight: 2,
+        radius: 9,
+        color: '#1a1520',
+        weight: 2.5,
         fillColor: color,
-        fillOpacity: 0.88,
+        fillOpacity: 0.92,
       })
-      cm.bindPopup(popupHtml)
+      cm.bindPopup(popupHtml, popOpts)
       cm.addTo(ny511Layer)
       ny511MarkersById.set(id, cm)
     }
@@ -1119,29 +1144,59 @@ watch(compassModeActive, (active) => {
 }
 
 :deep(.ny511-leaflet-popup) {
-  font-size: 0.7rem;
-  color: #e8e2ff;
-  max-width: 14rem;
-  line-height: 1.35;
+  text-align: left;
 }
-:deep(.ny511-leaflet-popup strong) {
-  display: block;
-  margin-bottom: 0.2rem;
-  font-size: 0.75rem;
+:deep(.ny511-leaflet-popup__meta) {
+  font-size: 0.58rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #c4b5fd;
+  margin-bottom: 0.35rem;
+}
+:deep(.ny511-leaflet-popup__title) {
+  font-size: 0.78rem;
+  font-weight: 650;
+  line-height: 1.35;
+  color: #f4f4fb;
+  margin: 0;
+}
+:deep(.ny511-leaflet-popup__road) {
+  margin-top: 0.35rem;
+  font-size: 0.65rem;
+  color: #a8a8bc;
+  line-height: 1.35;
 }
 </style>
 
 <style>
-/* Leaflet popups are mounted inside the map container; unscoped so rules apply reliably */
-.leaflet-container .ny511-leaflet-popup {
-  font-size: 0.7rem;
-  color: #e8e2ff;
-  max-width: 14rem;
-  line-height: 1.35;
+/* NY511: Leaflet mounts popups on the map container — unscoped + wrapper class for contrast */
+.leaflet-container .leaflet-popup-content-wrapper.ny511-map-popup {
+  background: #16161f;
+  color: #ececf4;
+  border-radius: 12px;
+  border: 1px solid rgba(167, 139, 250, 0.45);
+  box-shadow: 0 10px 32px rgba(0, 0, 0, 0.55);
+  padding: 0;
 }
-.leaflet-container .ny511-leaflet-popup strong {
-  display: block;
-  margin-bottom: 0.2rem;
-  font-size: 0.75rem;
+.leaflet-container .leaflet-popup-content-wrapper.ny511-map-popup .leaflet-popup-content {
+  margin: 10px 12px 12px;
+  min-width: 0;
+  max-width: 16rem;
+}
+.leaflet-container .leaflet-popup-tip.ny511-map-popup {
+  background: #16161f;
+  border: 1px solid rgba(167, 139, 250, 0.45);
+  box-shadow: none;
+}
+.leaflet-container .leaflet-popup-content-wrapper.ny511-map-popup .leaflet-popup-close-button {
+  color: #d4d4e8;
+  font-weight: 700;
+  width: 1.5rem;
+  height: 1.5rem;
+  padding: 0.35rem 0.35rem 0 0;
+}
+.leaflet-container .leaflet-popup-content-wrapper.ny511-map-popup .leaflet-popup-close-button:hover {
+  color: #fff;
 }
 </style>

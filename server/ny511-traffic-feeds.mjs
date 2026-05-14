@@ -1,16 +1,13 @@
 /**
  * NY511 (511NY.org) traffic feeds for NYC-region truck-relevant corridors.
  *
- * Upstream: `https://511ny.org/api/v2/get/{resource}?key=...&format=json`
- * — same family as bridge cameras in `server/index.mjs`.
+ * Upstream: `https://511ny.org/api/getevents|getalerts?key=...&format=json`
+ * @see https://511ny.org/developers/help/api/get-api-getevents_key_format
  *
- * Observed without a key: XML `<Error><Message>Invalid Key</Message></Error>`.
- * With a valid developer key, responses are JSON; shape varies by feed — this module
- * uses defensive extraction (known wrapper keys + first-level object arrays) and
- * PascalCase / camelCase field aliases (consistent with cameras: `Id`, `Location`, …).
- *
- * Feeds merged: `events`, `construction`, `incidents`, `roadconditions` (alerts omitted
- * to reduce overlap with events; add if needed).
+ * Response payload splits **alerts** (getalerts) vs **items** (getevents: incidents,
+ * roadwork, closures, winter index) so the client can show two sections. Transit /
+ * parade / general-info noise is dropped; date windows use 511NY `dd/MM/yyyy HH:mm:ss`
+ * interpreted as US Eastern (approximate DST).
  */
 
 import { createHash } from 'node:crypto'
@@ -82,6 +79,56 @@ export const NYC_TRUCK_ROUTE_TOKENS = [
   'QUEENS MIDTOWN',
   'MIDTOWN TUNNEL',
   'MEADOWLANDS',
+]
+
+/** Event types we show on the truck road list (511NY EventType). */
+const ALLOWED_TRUCK_EVENT_TYPES = new Set([
+  'accidentsandincidents',
+  'roadwork',
+  'closures',
+  'winterdrivingindex',
+])
+
+/** Dropped entirely (transit detours, parades, generic info). */
+const EXCLUDED_TRUCK_EVENT_TYPES = new Set([
+  'transitmode',
+  'transitoperations',
+  'specialevents',
+  'generalinfo',
+])
+
+/** Transit / bus / parade noise — dropped even if EventType is mis-tagged. */
+const TRANSIT_NOISE_SUBSTRINGS = [
+  'NJ TRANSIT',
+  'MTA BUS',
+  ' BUS ',
+  'BUS ROUTE',
+  'BUS DETOUR',
+  'SUBWAY',
+  'LIGHT RAIL',
+  'TRANSITOPERATIONS',
+  'TRANSIT MODE',
+  'PARADE',
+  'SPECIAL EVENT',
+]
+
+/** Alerts: NYC metro hint when route tokens are missing. */
+const NYC_ALERT_AREA_SUBSTRINGS = [
+  'NEW YORK CITY',
+  'LONG ISLAND',
+  'NY/NJ',
+  'NEW YORK / NJ',
+  'NEW JERSEY',
+  'HUDSON VALLEY',
+  'WESTCHESTER',
+  'ROCKLAND',
+  'NASSAU',
+  'SUFFOLK',
+  'QUEENS',
+  'BROOKLYN',
+  'BRONX',
+  'MANHATTAN',
+  'STATEN ISLAND',
 ]
 
 /**
@@ -180,35 +227,155 @@ function pickNum(r, names) {
 }
 
 /**
+ * Parse 511NY `dd/MM/yyyy HH:mm:ss` as US Eastern wall clock (UTC via approximate DST).
+ * @param {string} s
+ * @returns {number | null} epoch ms
+ */
+export function parseNy511DateMs(s) {
+  const t = str(s)
+  if (!t) return null
+  const m = /^(\d{1,2})\/(\d{1,2})\/(\d{4})\s+(\d{1,2}):(\d{1,2}):(\d{1,2})$/.exec(t)
+  if (!m) {
+    const x = Date.parse(t)
+    return Number.isFinite(x) ? x : null
+  }
+  const d = Number(m[1])
+  const mo = Number(m[2])
+  const y = Number(m[3])
+  const hh = Number(m[4])
+  const mi = Number(m[5])
+  const ss = Number(m[6])
+  /** Rough US Eastern DST (good enough for “still active?” windows). */
+  const leanDst = mo >= 4 && mo <= 10 || (mo === 3 && d >= 8) || (mo === 11 && d <= 7)
+  const offsetH = leanDst ? 4 : 5
+  return Date.UTC(y, mo - 1, d, hh + offsetH, mi, ss)
+}
+
+/**
+ * @param {string} eventTypeKey
+ */
+export function humanize511KindLabel(eventTypeKey) {
+  const k = String(eventTypeKey || 'event').toLowerCase().replace(/\s+/g, '')
+  const map = {
+    alert: 'Alert',
+    accidentsandincidents: 'Incident',
+    roadwork: 'Roadwork',
+    closures: 'Closure',
+    winterdrivingindex: 'Winter',
+  }
+  return map[k] || (k ? k.replace(/([a-z])([A-Z])/g, '$1 $2') : 'Event')
+}
+
+/**
+ * @param {string} blob
+ */
+export function passesTransitNoiseBlob(blob) {
+  const b = (blob || '').toUpperCase()
+  return TRANSIT_NOISE_SUBSTRINGS.some((s) => b.includes(s.toUpperCase()))
+}
+
+/**
+ * @param {string} blob
+ */
+export function passesMetroAlertRelevance(blob) {
+  const b = (blob || '').toUpperCase()
+  if (NYC_TRUCK_ROUTE_TOKENS.some((t) => b.includes(t.toUpperCase()))) return true
+  if (NYC_ALERT_AREA_SUBSTRINGS.some((s) => b.includes(s))) return true
+  return false
+}
+
+/**
+ * @param {{ eventTypeKey?: string, sourceFeed?: string, _blob?: string }} item
+ */
+export function passesAllowedTruckEventType(item) {
+  if (item.sourceFeed === 'getalerts') return true
+  if (passesTransitNoiseBlob(item._blob || '')) return false
+  const k = String(item.eventTypeKey || '')
+    .toLowerCase()
+    .replace(/\s+/g, '')
+  if (EXCLUDED_TRUCK_EVENT_TYPES.has(k)) return false
+  if (!k || k === 'unknown') return true
+  return ALLOWED_TRUCK_EVENT_TYPES.has(k)
+}
+
+/**
+ * @param {{ startsAt?: string, endsAt?: string }} item
+ * @param {number} [nowMs]
+ */
+export function isNy511ItemActiveInTimeWindow(item, nowMs = Date.now()) {
+  const endMs = item.endsAt ? parseNy511DateMs(String(item.endsAt)) : null
+  const startMs = item.startsAt ? parseNy511DateMs(String(item.startsAt)) : null
+  const hour = 60 * 60 * 1000
+  if (endMs != null && endMs < nowMs - hour) return false
+  if (startMs != null && startMs > nowMs + 48 * hour) return false
+  return true
+}
+
+/**
+ * @param {Record<string, unknown>} r
+ */
+function pickAreaNames(r) {
+  const a = r.AreaNames ?? r.areaNames
+  if (!Array.isArray(a)) return []
+  return a.map((x) => str(x)).filter(Boolean)
+}
+
+/**
  * Normalize a row from 511NY API to our internal item format.
  * @see https://511ny.org/developers/help/api/get-api-getevents_key_format
  * @see https://511ny.org/developers/help/api/get-api-getalerts_key_format
  * @param {unknown} raw
  * @param {string} sourceFeed
- * @param {string} defaultKind
+ * @param {string} _defaultKind
  */
-export function normalize511RowToItem(raw, sourceFeed, defaultKind) {
+export function normalize511RowToItem(raw, sourceFeed, _defaultKind) {
+  void _defaultKind
   if (raw == null || typeof raw !== 'object') return null
   const r = /** @type {Record<string, unknown>} */ (raw)
 
-  const id =
-    pickStr(r, ['ID', 'Id', 'id', 'EventId', 'eventId']) || ''
+  if (sourceFeed === 'getalerts') {
+    const id = pickStr(r, ['Id', 'ID', 'id']) || ''
+    const msg = pickStr(r, ['Message'])
+    const notes = pickStr(r, ['Notes'])
+    const description = [msg, notes].filter(Boolean).join(' — ') || undefined
+    const areas = pickAreaNames(r)
+    const displayTitle =
+      msg.length > 88 ? `${msg.slice(0, 87)}…` : msg || 'Traffic alert'
+    const blob = [displayTitle, description, ...areas].join(' ').toUpperCase()
+    return {
+      id: id || '',
+      sourceFeed,
+      eventTypeKey: 'alert',
+      kind: humanize511KindLabel('alert'),
+      severity: undefined,
+      title: displayTitle,
+      description: description || undefined,
+      roads: areas.length ? areas : [],
+      region: undefined,
+      county: undefined,
+      lat: undefined,
+      lng: undefined,
+      startsAt: undefined,
+      endsAt: undefined,
+      _blob: blob,
+    }
+  }
+
+  const id = pickStr(r, ['ID', 'Id', 'id', 'EventId', 'eventId']) || ''
 
   const eventType = pickStr(r, ['EventType', 'eventType'])
   const eventSubType = pickStr(r, ['EventSubType', 'eventSubType'])
 
   const description = pickStr(r, [
     'Description',
-    'Message',
-    'Notes',
     'FullDescription',
     'description',
   ])
 
   const roadway = pickStr(r, [
     'RoadwayName',
-    'Location',
     'PrimaryLocation',
+    'Location',
     'roadwayName',
     'location',
   ])
@@ -217,22 +384,40 @@ export function normalize511RowToItem(raw, sourceFeed, defaultKind) {
   const county = pickStr(r, ['CountyName', 'County', 'county'])
   const severity = pickStr(r, ['Severity', 'severity', 'Impact', 'impact'])
 
-  let lat = pickNum(r, ['Latitude', 'Lat', 'lat'])
-  let lng = pickNum(r, ['Longitude', 'Lng', 'lng', 'lon'])
+  const lat = pickNum(r, ['Latitude', 'Lat', 'lat'])
+  const lng = pickNum(r, ['Longitude', 'Lng', 'lng', 'lon'])
 
   const startsAt = pickStr(r, ['StartDate', 'Reported', 'startDate'])
   const endsAt = pickStr(r, ['PlannedEndDate', 'EndDate', 'endDate'])
 
-  const kind = eventType || eventSubType || String(defaultKind || 'event').toLowerCase()
+  const eventTypeKey = eventType
+    ? eventType.toLowerCase().replace(/\s+/g, '')
+    : 'unknown'
 
-  const displayTitle = eventSubType || eventType || roadway || description?.slice(0, 60) || `${kind} (511NY)`
+  const headlineParts = [roadway, eventSubType].filter(Boolean)
+  const displayTitle =
+    headlineParts.length >= 2
+      ? `${roadway} · ${eventSubType}`
+      : roadway || eventSubType || eventType || (description ? description.slice(0, 88) : '') || '511NY event'
 
-  const blob = [displayTitle, description, roadway, region, county, eventType, eventSubType, sourceFeed].join(' ').toUpperCase()
+  const blob = [
+    displayTitle,
+    description,
+    roadway,
+    region,
+    county,
+    eventType,
+    eventSubType,
+    sourceFeed,
+  ]
+    .join(' ')
+    .toUpperCase()
 
   return {
     id: id || '',
     sourceFeed,
-    kind,
+    eventTypeKey,
+    kind: humanize511KindLabel(eventTypeKey),
     severity: severity || undefined,
     title: displayTitle,
     description: description || undefined,
@@ -281,11 +466,12 @@ export function dedupeNy511Items(items) {
   /** @type {typeof items} */
   const out = []
   for (const it of items) {
+    const src = String(/** @type {any} */ (it).sourceFeed || '')
     const key =
       it.id && String(it.id).trim() !== ''
-        ? String(it.id).trim()
+        ? `${src}:${String(it.id).trim()}`
         : createHash('sha256')
-            .update(`${it.kind}|${it.title}|${it.startsAt || ''}`)
+            .update(`${src}|${it.kind}|${it.title}|${it.startsAt || ''}`)
             .digest('hex')
             .slice(0, 24)
     if (seen.has(key)) continue
@@ -349,12 +535,11 @@ const trafficCacheByAccount = new Map()
 /**
  * @param {string} accountKey
  * @param {string} apiKey
- * @returns {Promise<{ ok: boolean, items: object[], fetchedAt: number, feedErrors?: Record<string, string>, error?: string }>}
  */
 export async function buildNy511TruckNycBundle(accountKey, apiKey) {
   const key = String(apiKey || '').trim()
   if (!key) {
-    return { ok: false, items: [], fetchedAt: Date.now(), error: 'NO_API_KEY' }
+    return { ok: false, items: [], alerts: [], fetchedAt: Date.now(), error: 'NO_API_KEY' }
   }
   void accountKey
 
@@ -363,7 +548,10 @@ export async function buildNy511TruckNycBundle(accountKey, apiKey) {
   /** @type {Record<string, number>} */
   const feedCounts = {}
   /** @type {ReturnType<typeof normalize511RowToItem>[]} */
-  const merged = []
+  const rawEvents = []
+  /** @type {ReturnType<typeof normalize511RowToItem>[]} */
+  const rawAlerts = []
+  const now = Date.now()
 
   await Promise.all(
     FEEDS.map(async ([resource, kind]) => {
@@ -371,39 +559,52 @@ export async function buildNy511TruckNycBundle(accountKey, apiKey) {
         const data = await fetch511Json(key, resource)
         const rows = rowsFrom511Response(data, resource, kind)
         feedCounts[resource] = rows.length
-        merged.push(...rows)
+        if (resource === 'getalerts') rawAlerts.push(...rows)
+        else rawEvents.push(...rows)
       } catch (e) {
         feedErrors[resource] = e instanceof Error ? e.message : String(e)
       }
     }),
   )
 
-  const filtered = merged.filter((x) => x && passesNycTruckFilter(/** @type {any} */ (x)))
-  const deduped = dedupeNy511Items(filtered)
-
-  deduped.sort((a, b) => {
-    const ta = String(a.title || '')
-    const tb = String(b.title || '')
-    return ta.localeCompare(tb)
+  const eventFiltered = rawEvents.filter((x) => {
+    if (!x) return false
+    if (!passesAllowedTruckEventType(/** @type {any} */ (x))) return false
+    if (!passesNycTruckFilter(/** @type {any} */ (x))) return false
+    if (!isNy511ItemActiveInTimeWindow(/** @type {any} */ (x), now)) return false
+    return true
   })
 
-  const sampleUnfiltered = merged.slice(0, 5).map((it) => {
-    const { _blob, ...rest } = /** @type {any} */ (it)
-    return rest
+  const alertFiltered = rawAlerts.filter((x) => {
+    if (!x) return false
+    if (passesTransitNoiseBlob(x._blob || '')) return false
+    if (!passesMetroAlertRelevance(x._blob || '')) return false
+    if (!isNy511ItemActiveInTimeWindow(/** @type {any} */ (x), now)) return false
+    return true
   })
+
+  const items = dedupeNy511Items(eventFiltered)
+  const alerts = dedupeNy511Items(alertFiltered)
+
+  const sortByTitle = (a, b) => String(a.title || '').localeCompare(String(b.title || ''))
+  items.sort(sortByTitle)
+  alerts.sort(sortByTitle)
 
   return {
     ok: true,
-    items: deduped,
+    items,
+    alerts,
     fetchedAt: Date.now(),
     feedErrors: Object.keys(feedErrors).length ? feedErrors : undefined,
     _stats: {
-      totalFetched: merged.length,
-      afterFilter: filtered.length,
-      afterDedupe: deduped.length,
+      totalFetchedEvents: rawEvents.length,
+      totalFetchedAlerts: rawAlerts.length,
+      afterFilterEvents: eventFiltered.length,
+      afterFilterAlerts: alertFiltered.length,
+      itemsOut: items.length,
+      alertsOut: alerts.length,
       feedCounts,
     },
-    _sampleUnfiltered: sampleUnfiltered.length ? sampleUnfiltered : undefined,
   }
 }
 
@@ -416,7 +617,7 @@ export async function getNy511TruckNycPayload(accountKey, apiKey, opts = {}) {
   const ak = String(accountKey || '').trim()
   const key = String(apiKey || '').trim()
   if (!key) {
-    return { ok: false, items: [], fetchedAt: Date.now(), error: 'NO_API_KEY' }
+    return { ok: false, items: [], alerts: [], fetchedAt: Date.now(), error: 'NO_API_KEY' }
   }
   const now = Date.now()
   if (!opts.bypassCache && ak) {
@@ -432,12 +633,18 @@ export async function getNy511TruckNycPayload(accountKey, apiKey, opts = {}) {
       ? {
           ok: true,
           items: bundle.items,
+          alerts: bundle.alerts,
           fetchedAt: bundle.fetchedAt,
           feedErrors: bundle.feedErrors,
           _stats: bundle._stats,
-          _sampleUnfiltered: bundle._sampleUnfiltered,
         }
-      : { ok: false, items: [], fetchedAt: bundle.fetchedAt, error: bundle.error || 'fetch_failed' }
+      : {
+          ok: false,
+          items: [],
+          alerts: [],
+          fetchedAt: bundle.fetchedAt,
+          error: bundle.error || 'fetch_failed',
+        }
 
   if (ak && payload.ok) {
     trafficCacheByAccount.set(ak, { payload: { ...payload, cached: false }, fetchedAt: now })
