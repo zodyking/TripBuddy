@@ -110,7 +110,8 @@ function coordsFromSeedData(data) {
 }
 
 /**
- * Insert missing directory rows and fill latitude/longitude when the existing row has no valid coordinates.
+ * Insert missing directory rows, fill coordinates when missing, and repair locationType
+ * from seed when the stored value maps to Other but the seed has a known Hub/Station/etc.
  * Does not overwrite coordinates that are already set.
  * @param {Array<Omit<LocationEntry, 'lastUpdated'>>} entries
  * @returns {Promise<{ inserted: number, coordsFilled: number, typesRepaired: number, unchanged: number }>}
