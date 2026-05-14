@@ -22,7 +22,6 @@ import {
   postCancelRetry,
   fetchFedexLinehaulLocation,
   saveLocationToDirectory,
-  fetchDirectory,
   getDollyRegistry,
   putDollyNumber,
   patchDollyRating,
@@ -71,8 +70,6 @@ import { parseTripReadyBoolean } from '../utils/tripReadyParse.js'
 import {
   extractOriginDest,
   extractTripDispatchInstructions,
-  extractTripOrgIds,
-  hasTripOriginAndDestination,
   buildEnhancedTrailerCards,
   buildDollySection,
   buildInspectAutomationTripData,
@@ -81,10 +78,6 @@ import {
   formatLinehaulLocationForDisplay,
   extractLocationForDirectory,
 } from '../utils/linehaulLocationDisplay.js'
-import {
-  buildDirectoryLocationMap,
-  directoryLookup,
-} from '../utils/directoryLocationLookup.js'
 import TrailerLocationMap from '../components/TrailerLocationMap.vue'
 import { copyTextToClipboard } from '../utils/copyToClipboard.js'
 import { vehicleIdForUserMapMarker } from '../utils/mapVehicleLabel.js'
@@ -147,6 +140,12 @@ const destLocationLoading = ref(false)
 const destLocationError = ref('')
 /** @type {import('vue').Ref<unknown>} */
 const destLocationBody = ref(null)
+
+const originLocationModalOpen = ref(false)
+const originLocationLoading = ref(false)
+const originLocationError = ref('')
+/** @type {import('vue').Ref<unknown>} */
+const originLocationBody = ref(null)
 
 const trailerGpsModalOpen = ref(false)
 /** @type {import('vue').Ref<{
@@ -288,41 +287,6 @@ const tripOriginDest = computed(() => {
   return extractOriginDest(linehaulTripsBody.value)
 })
 const prePlanOriginDest = computed(() => extractOriginDest(prePlanTripSnapshot.value))
-
-/** Saved Directory rows for trip pickup/delivery addresses. */
-const directoryLocationsForTrip = ref(
-  /** @type {Array<{ locationId: string, locationName: string, address: string }>} */ ([]),
-)
-
-const directoryLocationMapForTrip = computed(() =>
-  buildDirectoryLocationMap(directoryLocationsForTrip.value),
-)
-
-/** Pickup / delivery addresses from Directory (origin / destination location ids). */
-const tripDirectoryStops = computed(() => {
-  const b = tripDetailsBodyForSlide.value
-  if (!b || typeof b !== 'object') {
-    return { pickup: '', delivery: '' }
-  }
-  const { originId, destinationId } = extractTripOrgIds(b)
-  const map = directoryLocationMapForTrip.value
-  const pick = originId ? directoryLookup(map, originId) : null
-  const drop = destinationId ? directoryLookup(map, destinationId) : null
-  return {
-    pickup: pick?.address?.trim() || '',
-    delivery: drop?.address?.trim() || '',
-  }
-})
-
-async function loadDirectoryForTripPanel() {
-  try {
-    const r = await fetchDirectory()
-    if (r?.ok && Array.isArray(r.locations)) directoryLocationsForTrip.value = r.locations
-    else directoryLocationsForTrip.value = []
-  } catch {
-    directoryLocationsForTrip.value = []
-  }
-}
 
 const dispatchPanelRef = ref(/** @type {HTMLElement | null} */ (null))
 const tripDetailsPanelRef = ref(/** @type {HTMLElement | null} */ (null))
@@ -829,19 +793,34 @@ function linehaulBodyLocationId(body) {
 }
 
 /**
+ * Cached Linehaul location JSON from destination / origin modals (trailer map hydration).
+ * @param {string} idStr
+ */
+function linehaulCachedBodyForId(idStr) {
+  const want = String(idStr ?? '').trim()
+  if (!want) return null
+  for (const body of [destLocationBody.value, originLocationBody.value]) {
+    if (
+      body &&
+      typeof body === 'object' &&
+      !Array.isArray(body) &&
+      linehaulBodyLocationId(body) === want
+    ) {
+      return body
+    }
+  }
+  return null
+}
+
+/**
  * One terminal row for the trailer GPS map (origin or destination).
- * Uses cached Linehaul location body when `destLocationBody` matches this id.
+ * Uses cached Linehaul location body when a location modal left a matching body in memory.
  */
 function trailerGpsTerminalSlotSkeleton(locationId, tripLabel) {
   const id = String(locationId ?? '').trim()
   if (!id) return null
-  const cached = destLocationBody.value
-  if (
-    cached &&
-    typeof cached === 'object' &&
-    !Array.isArray(cached) &&
-    linehaulBodyLocationId(cached) === id
-  ) {
+  const cached = linehaulCachedBodyForId(id)
+  if (cached) {
     const fmt = formatLinehaulLocationForDisplay(cached)
     const locRow = fmt.rows.find((x) => x.label === 'Location')
     const phoneR = fmt.rows.find((x) => x.label === 'Phone')
@@ -911,14 +890,8 @@ async function hydrateTrailerGpsTerminalPair() {
     const slot0 = trailerGpsData.value?.terminalPair?.[slotKey]
     if (!slot0 || slot0.loading !== true || String(slot0.locationId) !== idStr) return
 
-    const cached = destLocationBody.value
-    let body =
-      cached &&
-      typeof cached === 'object' &&
-      !Array.isArray(cached) &&
-      linehaulBodyLocationId(cached) === idStr
-        ? cached
-        : null
+    const cached = linehaulCachedBodyForId(idStr)
+    let body = cached
     if (!body) {
       const r = await fetchFedexLinehaulLocation({
         locationId: idStr,
@@ -992,6 +965,10 @@ const linehaulOriginIdForApi = computed(() => {
 
 const destLocationFormatted = computed(() =>
   formatLinehaulLocationForDisplay(destLocationBody.value),
+)
+
+const originLocationFormatted = computed(() =>
+  formatLinehaulLocationForDisplay(originLocationBody.value),
 )
 
 const showSealOrTripPanel = computed(
@@ -1572,7 +1549,7 @@ let destDirectoryAutoSaveGen = 0
  * Upsert directory entry from Linehaul location API body (same as modal).
  * @param {unknown} body
  */
-async function persistDestLocationToDirectoryFromBody(body) {
+async function persistFetchedLocationToDirectory(body) {
   const dirEntry = extractLocationForDirectory(body)
   if (dirEntry?.locationId) {
     await saveLocationToDirectory(dirEntry)
@@ -1597,7 +1574,7 @@ async function fetchAndPersistTripDestinationToDirectory() {
   if (myGen !== destDirectoryAutoSaveGen) return
   if (!r.ok) return
   try {
-    await persistDestLocationToDirectoryFromBody(r.body)
+    await persistFetchedLocationToDirectory(r.body)
     if (myGen !== destDirectoryAutoSaveGen) return
     lastAutoSavedDestKey = key
   } catch {
@@ -1619,6 +1596,50 @@ watch(
   { immediate: true },
 )
 
+/** Dedupe directory writes for the same trip origin + destination pair. */
+let lastAutoSavedOriginKey = ''
+let originDirectoryAutoSaveGen = 0
+
+/**
+ * When trip data includes an origin location id, fetch full location from the API
+ * and save to the directory without requiring the user to open the modal.
+ */
+async function fetchAndPersistTripOriginToDirectory() {
+  const id = tripOriginLocationId.value
+  if (!id) return
+  const dest = tripDestLocationId.value || ''
+  const key = `${id}|${dest}`
+  if (key === lastAutoSavedOriginKey) return
+  const myGen = ++originDirectoryAutoSaveGen
+  const r = await fetchFedexLinehaulLocation({
+    locationId: id,
+    originId: dest || undefined,
+  })
+  if (myGen !== originDirectoryAutoSaveGen) return
+  if (!r.ok) return
+  try {
+    await persistFetchedLocationToDirectory(r.body)
+    if (myGen !== originDirectoryAutoSaveGen) return
+    lastAutoSavedOriginKey = key
+  } catch {
+    /* ignore persist errors */
+  }
+}
+
+watch(
+  [tripOriginLocationId, tripDestLocationId],
+  () => {
+    const id = tripOriginLocationId.value
+    if (!id) {
+      lastAutoSavedOriginKey = ''
+      originDirectoryAutoSaveGen += 1
+      return
+    }
+    void fetchAndPersistTripOriginToDirectory()
+  },
+  { immediate: true },
+)
+
 async function openDestLocationModal() {
   if (!tripDestLocationId.value) return
   destLocationModalOpen.value = true
@@ -1636,11 +1657,35 @@ async function openDestLocationModal() {
     return
   }
   destLocationBody.value = r.body ?? null
-  void persistDestLocationToDirectoryFromBody(r.body).catch(() => {})
+  void persistFetchedLocationToDirectory(r.body).catch(() => {})
 }
 
 function closeDestLocationModal() {
   destLocationModalOpen.value = false
+}
+
+async function openOriginLocationModal() {
+  if (!tripOriginLocationId.value) return
+  originLocationModalOpen.value = true
+  originLocationLoading.value = true
+  originLocationError.value = ''
+  originLocationBody.value = null
+  const r = await fetchFedexLinehaulLocation({
+    locationId: tripOriginLocationId.value,
+    originId: tripDestLocationId.value || undefined,
+  })
+  originLocationLoading.value = false
+  if (!r.ok) {
+    originLocationError.value = r.error || `Request failed (${r.status})`
+    originLocationBody.value = r.body ?? null
+    return
+  }
+  originLocationBody.value = r.body ?? null
+  void persistFetchedLocationToDirectory(r.body).catch(() => {})
+}
+
+function closeOriginLocationModal() {
+  originLocationModalOpen.value = false
 }
 
 /**
@@ -1910,7 +1955,6 @@ onMounted(async () => {
   void setupLinehaulPolling()
   void loadDollyRegistry()
   void loadTrailerNumbers()
-  void loadDirectoryForTripPanel()
   syncTripVoiceUnlockHint()
 })
 
@@ -1919,7 +1963,6 @@ onActivated(() => {
   void refreshLinehaulCredMeta()
   void loadDollyRegistry()
   void loadTrailerNumbers()
-  void loadDirectoryForTripPanel()
   void loadQuickActions()
   void setupLinehaulPolling()
   syncTripVoiceUnlockHint()
@@ -2168,6 +2211,84 @@ onUnmounted(() => {
           </template>
           <div class="modal-actions dest-loc-actions">
             <button type="button" class="btn primary tap" @click="closeDestLocationModal">Close</button>
+          </div>
+        </div>
+      </div>
+    </Teleport>
+
+    <Teleport to="body">
+      <div
+        v-if="originLocationModalOpen"
+        class="portal-modal-backdrop"
+        :style="{ zIndex: PORTAL_Z_LOCATION_MODAL }"
+        role="presentation"
+        @click.self="closeOriginLocationModal"
+      >
+        <div
+          class="portal-modal dest-location-modal"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="origin-loc-title"
+          @click.stop
+        >
+          <div class="dest-loc-header">
+            <h3 id="origin-loc-title" class="dest-loc-title">Origin location</h3>
+            <button
+              type="button"
+              class="dest-loc-close tap"
+              aria-label="Close"
+              @click="closeOriginLocationModal"
+            >
+              ×
+            </button>
+          </div>
+          <p v-if="tripOriginLocationId" class="dest-loc-id">Trip origin · ID {{ tripOriginLocationId }}</p>
+          <div v-if="originLocationLoading" class="dest-loc-loading" aria-live="polite">Loading…</div>
+          <p v-else-if="originLocationError" class="err dest-loc-err">{{ originLocationError }}</p>
+          <template v-else>
+            <dl v-if="originLocationFormatted.rows.length" class="dest-loc-dl">
+              <template v-for="row in originLocationFormatted.rows" :key="row.label + row.value + (row.href || '')">
+                <dt>{{ row.label }}</dt>
+                <dd class="dest-loc-dd">
+                  <template v-if="row.href">
+                    <a
+                      :href="row.href"
+                      class="dest-loc-link"
+                      :target="row.href.startsWith('tel:') ? undefined : '_blank'"
+                      :rel="row.href.startsWith('http') ? 'noopener noreferrer' : undefined"
+                    >
+                      {{ row.value }}
+                    </a>
+                    <button
+                      type="button"
+                      class="dest-loc-copy-chip tap"
+                      @click.stop="copyTripDetailValue(row.value, row.label)"
+                    >
+                      Copy
+                    </button>
+                  </template>
+                  <button
+                    v-else
+                    type="button"
+                    class="dest-loc-val-copy tap"
+                    @click="copyTripDetailValue(row.value, row.label)"
+                  >
+                    {{ row.value }}
+                  </button>
+                </dd>
+              </template>
+            </dl>
+            <p v-else class="dest-loc-empty">No location fields could be parsed from the response.</p>
+            <details
+              v-if="originLocationFormatted.rawJson"
+              class="dest-loc-raw-details"
+            >
+              <summary class="dest-loc-raw-summary">Raw API response</summary>
+              <pre class="dest-loc-raw" aria-label="Raw API response">{{ originLocationFormatted.rawJson }}</pre>
+            </details>
+          </template>
+          <div class="modal-actions dest-loc-actions">
+            <button type="button" class="btn primary tap" @click="closeOriginLocationModal">Close</button>
           </div>
         </div>
       </div>
@@ -2549,7 +2670,16 @@ onUnmounted(() => {
               <div class="dispatch-od-row" aria-label="Trip origin and destination">
                 <div class="dispatch-od-pair dispatch-od-pair--origin">
                   <span class="dispatch-od-label">Origin</span>
-                  <span class="dispatch-od-val dispatch-od-val--text">{{ tripOriginDest.origin }}</span>
+                  <button
+                    v-if="tripOriginLocationId && !linehaulTripsError"
+                    type="button"
+                    class="dispatch-od-val dispatch-od-dest-open tap"
+                    title="View origin details"
+                    @click.stop="openOriginLocationModal"
+                  >
+                    {{ tripOriginDest.origin }}
+                  </button>
+                  <span v-else class="dispatch-od-val dispatch-od-val--text">{{ tripOriginDest.origin }}</span>
                 </div>
                 <span class="dispatch-od-arrow" aria-hidden="true">→</span>
                 <div class="dispatch-od-pair dispatch-od-pair--dest">
@@ -2581,33 +2711,6 @@ onUnmounted(() => {
                   <span class="dispatch-od-val dispatch-od-val--text">{{ prePlanOriginDest.destination }}</span>
                 </div>
               </div>
-            </div>
-          </div>
-
-          <div class="trip-address-column" aria-label="Pickup and delivery addresses">
-            <div class="trip-stop-block">
-              <span class="trip-stop-label">Pickup</span>
-              <button
-                type="button"
-                class="trip-stop-val copyable-dd tap"
-                :disabled="!tripDirectoryStops.pickup"
-                :title="tripDirectoryStops.pickup ? 'Tap to copy address' : ''"
-                @click="tripDirectoryStops.pickup && copyTripDetailValue(tripDirectoryStops.pickup, 'Pickup address')"
-              >
-                {{ tripDirectoryStops.pickup || '—' }}
-              </button>
-            </div>
-            <div class="trip-stop-block">
-              <span class="trip-stop-label">Delivery</span>
-              <button
-                type="button"
-                class="trip-stop-val copyable-dd tap"
-                :disabled="!tripDirectoryStops.delivery"
-                :title="tripDirectoryStops.delivery ? 'Tap to copy address' : ''"
-                @click="tripDirectoryStops.delivery && copyTripDetailValue(tripDirectoryStops.delivery, 'Delivery address')"
-              >
-                {{ tripDirectoryStops.delivery || '—' }}
-              </button>
             </div>
           </div>
         </div>
@@ -3780,43 +3883,6 @@ button.trailer-nbr.copyable-inline {
 }
 .trip-route-od-cell .dispatch-slide {
   height: 100%;
-}
-.trip-address-column {
-  flex: 0 1 13.5rem;
-  min-width: min(100%, 11rem);
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-  align-items: flex-end;
-  text-align: right;
-  padding: 0.55rem 0.65rem;
-  border-radius: 10px;
-  background: #22222c;
-  border: 1px solid #34343e;
-  box-sizing: border-box;
-}
-.trip-stop-block {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: 0.12rem;
-  width: 100%;
-  min-width: 0;
-}
-.trip-stop-label {
-  font-size: 0.68rem;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: var(--muted, #9898a8);
-}
-.trip-stop-val {
-  font-size: 0.8rem;
-  font-weight: 600;
-  line-height: 1.35;
-  word-break: break-word;
-  width: 100%;
-  text-align: right;
 }
 .trip-instructions-section {
   margin-bottom: 0.75rem;
