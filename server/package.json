@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "node --watch index.mjs",
     "start": "node index.mjs",
-    "postinstall": "playwright install chromium"
+    "postinstall": "playwright install chromium",
+    "test": "node --test ny511-traffic-feeds.test.mjs"
   },
   "dependencies": {
     "@fastify/cookie": "^11.0.2",

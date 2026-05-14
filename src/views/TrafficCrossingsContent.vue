@@ -1,6 +1,6 @@
 <script setup>
 import { ref, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
-import { getBridgesPanynj, getNy511Cameras, getVerrazzanoTraffic, getHighwayTraffic, getGwbYoutubeLive } from '../api.js'
+import { getBridgesPanynj, getNy511Cameras, getVerrazzanoTraffic, getGwbYoutubeLive, apiFetch } from '../api.js'
 import { getBridgeAnchorForRouteId } from '../bridges/bridgeRouteAnchors.js'
 import { findVerrazzanoCamera, resolveBridgeCameraFeed } from '../bridges/bridgeCameraMapping.js'
 import BridgesMap from '../components/BridgesMap.vue'
@@ -15,9 +15,8 @@ import { useMapVehicleId } from '../composables/useMapVehicleId.js'
 defineOptions({ name: 'TrafficCrossingsContent' })
 
 /**
- * Poll PANYNJ + HERE-backed traffic on the same cadence as server-side PANYNJ
- * refresh (5 min). HERE responses are cached ~6 min server-side so this does not
- * trigger a full multi-corridor HERE batch on every tick.
+ * Poll PANYNJ on the same cadence as server-side PANYNJ refresh (5 min).
+ * NY511 traffic feeds are cached server-side ~5 min.
  * @see server/bridge-panynj.mjs POLL_MS
  */
 const POLL_MS = 5 * 60 * 1000
@@ -26,7 +25,7 @@ const POLL_MS = 5 * 60 * 1000
 /** @type {import('vue').Ref<TravelDir>} */
 const direction = ref('ToNY')
 
-/** @typedef {'crossings' | 'highways'} ViewMode */
+/** @typedef {'crossings' | 'ny511'} ViewMode */
 /** @type {import('vue').Ref<ViewMode>} */
 const viewMode = ref('crossings')
 
@@ -46,9 +45,9 @@ const verrazzanoPayload = ref(null)
 const verrazzanoLoading = ref(false)
 
 /** @type {import('vue').Ref<any | null>} */
-const highwayPayload = ref(null)
-const highwayLoading = ref(false)
-const highwayError = ref('')
+const ny511Payload = ref(null)
+const ny511Loading = ref(false)
+const ny511Error = ref('')
 
 let tick = 0
 /** @type {ReturnType<typeof setInterval> | null} */
@@ -368,7 +367,7 @@ function bridgeChartStrokeColor(row) {
 }
 
 const MAX_CHART_POINTS = 96
-/** Cap time-axis labels — long Verrazzano / highway histories used 4h ticks across weeks and overlapped. */
+/** Cap time-axis labels — long Verrazzano histories used 4h ticks across weeks and overlapped. */
 const MAX_X_AXIS_TICKS = 6
 
 /**
@@ -752,8 +751,8 @@ watch(rankedRows, () => {
 })
 
 watch(viewMode, (mode) => {
-  if (mode === 'highways') {
-    void loadHighways()
+  if (mode === 'ny511') {
+    void loadNy511Traffic()
   }
 })
 
@@ -842,221 +841,65 @@ async function loadVerrazzano() {
   }
 }
 
-async function loadHighways() {
-  highwayError.value = ''
-  const first = !highwayPayload.value
-  if (first) highwayLoading.value = true
+async function loadNy511Traffic() {
+  ny511Error.value = ''
+  const first = !ny511Payload.value
+  if (first) ny511Loading.value = true
   try {
-    const p = await getHighwayTraffic()
-    highwayPayload.value = p
+    const r = await apiFetch('/api/511ny/traffic')
+    const text = await r.text()
+    /** @type {Record<string, unknown>} */
+    let p = {}
+    try {
+      p = text ? /** @type {Record<string, unknown>} */ (JSON.parse(text)) : {}
+    } catch {
+      p = { ok: false, error: 'Invalid JSON from server' }
+    }
+    if (!r.ok) {
+      ny511Payload.value = {
+        ok: false,
+        items: [],
+        error: typeof p.code === 'string' ? p.code : 'error',
+        fetchedAt: Date.now(),
+      }
+      ny511Error.value = typeof p.error === 'string' ? p.error : r.statusText || 'Request failed'
+      return
+    }
+    ny511Payload.value = p
   } catch (e) {
-    highwayError.value = e instanceof Error ? e.message : 'Failed to load highways'
+    ny511Error.value = e instanceof Error ? e.message : 'Failed to load NY511 traffic'
+    ny511Payload.value = { ok: false, items: [], fetchedAt: Date.now() }
   } finally {
-    highwayLoading.value = false
+    ny511Loading.value = false
   }
 }
 
-/**
- * Highway travel minutes helper.
- * @param {unknown} hw
- */
-function hwTravelMinutes(hw) {
-  if (hw == null || typeof hw !== 'object') return Number.POSITIVE_INFINITY
-  const live = /** @type {Record<string, unknown>} */(hw).live
-  if (!live || typeof live !== 'object') return Number.POSITIVE_INFINITY
-  const m = /** @type {Record<string, unknown>} */(live).routeTravelTime
-  if (typeof m === 'number' && Number.isFinite(m)) return m
-  return Number.POSITIVE_INFINITY
-}
-
-/**
- * @param {unknown} hw
- */
-function hwFiniteTravelMinutes(hw) {
-  const m = hwTravelMinutes(hw)
-  return Number.isFinite(m) && m !== Number.POSITIVE_INFINITY ? m : null
-}
-
-/**
- * @param {unknown} hw
- */
-function hwDelayTier(hw) {
-  const fm = hwFiniteTravelMinutes(hw)
-  return fm != null ? bridgeDelayTier(fm) : 'orange'
-}
-
-/**
- * @param {unknown} hw
- */
-function hwTrendInfo(hw) {
-  if (hw == null || typeof hw !== 'object') {
-    return { short: '·', cls: 't--unk', full: 'Not enough data yet' }
-  }
-  const t = /** @type {Record<string, unknown>} */(hw).trend
-  if (t === 'worse') {
-    return { short: '▲', cls: 't--worse', full: 'Slower than last check' }
-  }
-  if (t === 'better') {
-    return { short: '▼', cls: 't--better', full: 'Faster than last check' }
-  }
-  if (t === 'neutral') {
-    return { short: '—', cls: 't--neutral', full: 'About the same' }
-  }
-  return { short: '·', cls: 't--unk', full: 'Not enough data yet' }
-}
-
-/**
- * @param {unknown} hw
- */
-function hwSeriesForHighway(hw) {
-  if (hw == null || typeof hw !== 'object') return []
-  const s = /** @type {Record<string, unknown>} */(hw).series
-  return Array.isArray(s) ? s : []
-}
-
-/**
- * @param {unknown} hw
- */
-function hwChartStrokeColor(hw) {
-  const t = hwDelayTier(hw)
-  if (t === 'green') return '#4ade80'
-  if (t === 'red') return '#f87171'
-  return '#fb923c'
-}
-
-/**
- * @param {unknown} hw
- */
-function hwChartModel(hw) {
-  const vb = {
-    w: 268,
-    h: 52,
-    plotL: 14,
-    plotR: 266,
-    plotT: 7,
-    plotB: 34,
-  }
-  const pw = vb.plotR - vb.plotL
-  const ph = vb.plotB - vb.plotT
-  const strokeColor = hwChartStrokeColor(hw)
-
-  const raw = hwSeriesForHighway(hw)
-  let pts = downsampleSeries(raw, MAX_CHART_POINTS)
-    .slice()
-    .sort((a, b) => a.t - b.t)
-  if (pts.length === 1) {
-    const p0 = pts[0]
-    pts = [{ t: p0.t - 5 * 60 * 1000, m: p0.m, s: p0.s }, p0]
-  }
-  if (pts.length < 2) {
-    return { hasPath: false, strokeColor, vb }
-  }
-
-  const tMin = pts[0].t
-  const tMax = pts[pts.length - 1].t
-  const spanT = Math.max(tMax - tMin, 60_000)
-
-  const vals = pts.map((p) => p.m).filter((v) => Number.isFinite(v))
-  if (vals.length === 0) {
-    return { hasPath: false, strokeColor, vb }
-  }
-
-  let minM = Math.min(...vals)
-  let maxM = Math.max(...vals)
-  const pad = Math.max((maxM - minM) * 0.12, 0.85)
-  minM = Math.max(0, minM - pad)
-  maxM = maxM + pad
-  if (maxM - minM < 1.25) {
-    const c = (minM + maxM) / 2
-    minM = Math.max(0, c - 1)
-    maxM = c + 1
-  }
-  const spanM = Math.max(maxM - minM, 0.75)
-
-  const xOf = /** @param {number} t */ (t) => vb.plotL + pw * ((t - tMin) / spanT)
-  const yOf = /** @param {number} m */ (m) => vb.plotT + ph * (1 - (m - minM) / spanM)
-
-  const pathPts = pts.map((pt) => ({
-    x: xOf(pt.t),
-    y: yOf(Number.isFinite(pt.m) ? pt.m : minM),
-  }))
-
-  const dLine = pathPts
-    .map((p, i) => `${i === 0 ? 'M' : 'L'}${p.x.toFixed(2)},${p.y.toFixed(2)}`)
-    .join('')
-
-  const yBase = vb.plotB
-  const dArea =
-    `M${pathPts[0].x.toFixed(2)},${yBase.toFixed(2)}` +
-    pathPts.map((p) => `L${p.x.toFixed(2)},${p.y.toFixed(2)}`).join('') +
-    `L${pathPts[pathPts.length - 1].x.toFixed(2)},${yBase.toFixed(2)}Z`
-
-  const last = pathPts[pathPts.length - 1]
-
-  const fmtCrossMin = (v) => {
-    const r = Math.round(v)
-    if (Math.abs(v - r) < 0.08) return String(r)
-    return `${v.toFixed(1)}`.replace(/\.0$/, '')
-  }
-  const yLevels = [maxM, maxM - spanM / 3, maxM - (2 * spanM) / 3, minM]
-  /** @type {{ y: number, lab: string }[]} */
-  const yTicks = []
-  const seenYLab = new Set()
-  for (const v of yLevels) {
-    let lab = fmtCrossMin(v)
-    if (seenYLab.has(lab)) lab = `${v.toFixed(1)}`.replace(/\.0$/, '')
-    seenYLab.add(lab)
-    yTicks.push({ y: yOf(v), lab })
-  }
-
-  const xTickTs = buildSparseTimeTickTimestamps(tMin, tMax, MAX_X_AXIS_TICKS)
-  const fmtAxisT = makeAxisTimeFormatter(spanT)
-  /** @type {{ x: number, lab: string }[]} */
-  const xTicks = xTickTs.map((ts) => ({ x: xOf(ts), lab: fmtAxisT(ts) }))
-  if (xTicks.length === 0) {
-    xTicks.push({ x: xOf(tMin), lab: fmtAxisT(tMin) })
-    if (tMax !== tMin) xTicks.push({ x: xOf(tMax), lab: fmtAxisT(tMax) })
-  }
-
-  /** @type {{ x1: number, y1: number, x2: number, y2: number }[]} */
-  const hGrids = yTicks.map((tk) => ({
-    x1: vb.plotL,
-    y1: tk.y,
-    x2: vb.plotR,
-    y2: tk.y,
-  }))
-
-  return {
-    hasPath: true,
-    vb,
-    dLine,
-    dArea,
-    lastCx: last.x,
-    lastCy: last.y,
-    yTicks,
-    xTicks,
-    hGrids,
-    strokeColor,
-  }
-}
-
-const rankedHighways = computed(() => {
-  const highways = highwayPayload.value?.highways
-  if (!Array.isArray(highways)) return []
-  return [...highways].sort((a, b) => hwTravelMinutes(a) - hwTravelMinutes(b))
+const ny511Items = computed(() => {
+  const items = ny511Payload.value?.items
+  return Array.isArray(items) ? items : []
 })
 
-const highwayPolylinesForMap = computed(() => {
-  if (viewMode.value !== 'highways') return []
-  const highways = highwayPayload.value?.highways
-  if (!Array.isArray(highways)) return []
-  return highways.map((hw) => ({
-    id: hw.id,
-    shortName: hw.shortName || hw.name,
-    waypoints: Array.isArray(hw.waypoints) ? hw.waypoints : [],
-    delayTier: hwDelayTier(hw),
-  }))
+const ny511MarkersForMap = computed(() => {
+  if (viewMode.value !== 'ny511') return []
+  return ny511Items.value
+    .filter(
+      (it) =>
+        it &&
+        typeof it === 'object' &&
+        typeof /** @type {any} */ (it).lat === 'number' &&
+        typeof /** @type {any} */ (it).lng === 'number',
+    )
+    .map((it, i) => ({
+      id: String(/** @type {any} */ (it).id || `ny511-${i}`),
+      lat: /** @type {any} */ (it).lat,
+      lng: /** @type {any} */ (it).lng,
+      title: String(/** @type {any} */ (it).title || ''),
+      kind: String(/** @type {any} */ (it).kind || ''),
+      severity: String(/** @type {any} */ (it).severity || ''),
+    }))
 })
+
+const highwayPolylinesForMap = computed(() => [])
 
 /**
  * 511NY stream or GWB YouTube embed.
@@ -1086,7 +929,7 @@ function onDirToggleChange(e) {
 function onViewToggleChange(e) {
   const t = e.target
   if (t instanceof HTMLInputElement) {
-    viewMode.value = t.checked ? 'highways' : 'crossings'
+    viewMode.value = t.checked ? 'ny511' : 'crossings'
   }
 }
 
@@ -1099,14 +942,14 @@ onMounted(() => {
   void load()
   void loadCameras()
   void loadVerrazzano()
-  void loadHighways()
+  void loadNy511Traffic()
   void loadGwbYoutube()
   intervalId = setInterval(() => {
     void load()
     void loadVerrazzano()
     void loadGwbYoutube()
-    if (viewMode.value === 'highways') {
-      void loadHighways()
+    if (viewMode.value === 'ny511') {
+      void loadNy511Traffic()
     }
   }, POLL_MS)
 })
@@ -1134,6 +977,7 @@ onUnmounted(() => {
           :fill-height="true"
           :vehicle-id="mapVehicleId"
           :highway-polylines="highwayPolylinesForMap"
+          :ny511-markers="ny511MarkersForMap"
           @select="onMapSelect"
         />
         <div
@@ -1148,19 +992,20 @@ onUnmounted(() => {
       <div class="bridges-list-inner">
         <div class="bridges-bar">
           <div class="bridges-bar-top">
-            <h1 class="bridges-h1">{{ viewMode === 'crossings' ? 'Crossings' : 'Highways' }}</h1>
+            <h1 class="bridges-h1">{{ viewMode === 'crossings' ? 'Crossings' : 'NY511' }}</h1>
             <p v-if="viewMode === 'crossings' && payload?.fetchError" class="bridges-warn" role="status">
               Data may be stale · {{ payload.fetchError }}
             </p>
-            <p v-else-if="viewMode === 'highways' && highwayPayload?.error" class="bridges-warn" role="status">
-              {{ highwayPayload.error }}
+            <p v-else-if="viewMode === 'ny511' && ny511Payload?.feedErrors" class="bridges-warn" role="status">
+              Some 511NY feeds failed to load · data may be partial
             </p>
             <p v-else class="bridges-pill">
-              <span>Fastest first</span>
+              <span v-if="viewMode === 'crossings'">Fastest first</span>
+              <span v-else>511NY · NYC truck routes</span>
               <span v-if="viewMode === 'crossings' && payload?.fetchedAt" class="bridges-time"
               >· {{ fmtTime(payload.fetchedAt) }}</span>
-              <span v-if="viewMode === 'highways' && highwayPayload?.fetchedAt" class="bridges-time"
-              >· {{ fmtTime(highwayPayload.fetchedAt) }}</span>
+              <span v-if="viewMode === 'ny511' && ny511Payload?.fetchedAt" class="bridges-time"
+              >· {{ fmtTime(ny511Payload.fetchedAt) }}</span>
               <span v-if="viewMode === 'crossings'" class="bridges-note">· Tunnels off</span>
             </p>
           </div>
@@ -1193,24 +1038,24 @@ onUnmounted(() => {
                   <input
                     type="checkbox"
                     class="dir-toggle-input"
-                    :checked="viewMode === 'highways'"
-                    aria-label="Toggle view: Crossings or Highways"
+                    :checked="viewMode === 'ny511'"
+                    aria-label="Toggle view: Crossings or NY511"
                     @change="onViewToggleChange"
                   />
                   <span class="dir-toggle-track" aria-hidden="true">
                     <span class="dir-toggle-thumb" />
                   </span>
                 </label>
-                <span class="dir-toggle-lab" :class="{ 'is-on': viewMode === 'highways' }">Highways</span>
+                <span class="dir-toggle-lab" :class="{ 'is-on': viewMode === 'ny511' }">NY511</span>
               </div>
             </div>
           </div>
         </div>
 
         <p v-if="viewMode === 'crossings' && error" class="bridges-err">{{ error }}</p>
-        <p v-if="viewMode === 'highways' && highwayError" class="bridges-err">{{ highwayError }}</p>
+        <p v-if="viewMode === 'ny511' && ny511Error" class="bridges-err">{{ ny511Error }}</p>
         <div v-if="viewMode === 'crossings' && loading && !payload" class="bridges-skel" aria-busy="true">Loading…</div>
-        <div v-if="viewMode === 'highways' && highwayLoading && !highwayPayload" class="bridges-skel" aria-busy="true">Loading…</div>
+        <div v-if="viewMode === 'ny511' && ny511Loading && !ny511Payload" class="bridges-skel" aria-busy="true">Loading…</div>
 
         <!-- Crossings cards -->
         <div
@@ -1384,142 +1229,53 @@ onUnmounted(() => {
           <p v-else-if="!rankedRows.length" class="bridges-no-crossings">No bridge data for this direction</p>
         </div>
 
-        <!-- Highway cards -->
+        <!-- NY511: incidents, construction, events (NYC truck filter) -->
         <div
-          v-else-if="viewMode === 'highways'"
+          v-else-if="viewMode === 'ny511'"
           class="bridges-content-panel"
-          aria-label="Highway traffic list"
+          aria-label="NY511 traffic list"
         >
-          <h2 v-if="rankedHighways.length" class="bridges-trips-h2">Major Highways</h2>
-          <ul v-if="rankedHighways.length" class="bridge-grid" aria-label="Highways, fastest first">
+          <h2 v-if="ny511Items.length" class="bridges-trips-h2">Active alerts &amp; work zones</h2>
+          <ul v-if="ny511Items.length" class="bridge-grid" aria-label="NY511 items, NYC truck routes">
             <li
-              v-for="(hw, idx) in rankedHighways"
-              :key="hw.id"
-              class="bridge-tile"
-              :class="{
-                'bridge-tile--d-green': hwDelayTier(hw) === 'green',
-                'bridge-tile--d-orange': hwDelayTier(hw) === 'orange',
-                'bridge-tile--d-red': hwDelayTier(hw) === 'red',
-              }"
+              v-for="(it, idx) in ny511Items"
+              :key="`${String(it.id || 'item')}-${idx}`"
+              class="bridge-tile bridge-tile--ny511"
             >
               <div class="bridge-tile-inner">
                 <div class="bridge-data-col">
                   <div class="bridge-card-head">
                     <div class="bridge-card-id">
                       <span class="bridge-rank" aria-hidden="true">{{ idx + 1 }}</span>
-                      <div class="highway-title-wrap">
-                        <h2 class="bridge-title">{{ hw.name }}</h2>
-                        <span class="highway-route">{{ hw.route }}</span>
-                      </div>
-                    </div>
-                    <div
-                      class="bridge-trend ico"
-                      :class="[hwTrendInfo(hw).cls, `bridge-trend--delay-${hwDelayTier(hw)}`]"
-                      :title="hwTrendInfo(hw).full"
-                    >{{ hwTrendInfo(hw).short }}</div>
-                  </div>
-                  <div class="bridge-card-metrics">
-                    <div class="bridge-kpi bridge-kpi--cross">
-                      <span class="bridge-kpi-lab">Travel time</span>
-                      <div class="bridge-kpi-row">
-                        <span class="bridge-kpi-num">
-                          <template v-if="hw.live?.routeTravelTime != null">{{ hw.live.routeTravelTime }}</template>
-                          <template v-else>—</template>
-                        </span>
-                        <span class="bridge-kpi-unit">min</span>
-                      </div>
-                    </div>
-                    <div class="bridge-kpi-divider" aria-hidden="true" />
-                    <div class="bridge-kpi bridge-kpi--speed">
-                      <span class="bridge-kpi-lab">Avg speed</span>
-                      <div class="bridge-kpi-row bridge-kpi-row--speed">
-                        <template v-if="hw.live?.routeSpeed != null">
-                          <span class="bridge-kpi-num">{{ hw.live.routeSpeed }}</span>
-                          <span class="bridge-kpi-unit">mph</span>
-                        </template>
-                        <template v-else>
-                          <span class="bridge-kpi-num bridge-kpi-num--muted">—</span>
-                        </template>
+                      <div class="ny511-title-wrap">
+                        <span class="ny511-kind-badge" :title="String(it.sourceFeed || '')">{{ it.kind }}</span>
+                        <h2 class="bridge-title">{{ it.title }}</h2>
                       </div>
                     </div>
                   </div>
-                  <div v-if="hwChartModel(hw).hasPath" class="bridge-chart-shell">
-                    <div class="bridge-chart-head">
-                      <span class="bridge-chart-title">History</span>
-                      <span class="bridge-chart-sub">Minutes · local time</span>
-                    </div>
-                    <div class="bridge-chart-panel">
-                      <svg
-                        class="bridge-chart-svg"
-                        :viewBox="`0 0 ${hwChartModel(hw).vb.w} ${hwChartModel(hw).vb.h}`"
-                        preserveAspectRatio="xMidYMid meet"
-                        width="100%"
-                        :style="{ aspectRatio: `${hwChartModel(hw).vb.w} / ${hwChartModel(hw).vb.h}` }"
-                        role="img"
-                        :aria-label="`Travel time history for ${hw.name}`"
-                      >
-                        <defs>
-                          <linearGradient :id="`hcg-${hw.id}`" x1="0" y1="0" x2="0" y2="1">
-                            <stop offset="0%" :stop-color="hwChartModel(hw).strokeColor" stop-opacity="0.14" />
-                            <stop offset="100%" :stop-color="hwChartModel(hw).strokeColor" stop-opacity="0.02" />
-                          </linearGradient>
-                        </defs>
-                        <template v-if="hwChartModel(hw).hasPath">
-                          <text
-                            v-for="(yt, yi) in hwChartModel(hw).yTicks"
-                            :key="`yt-${yi}`"
-                            class="bridge-chart-axis-title"
-                            x="6"
-                            :y="yt.y + 3.5"
-                            text-anchor="start"
-                          >{{ yt.lab }}</text>
-                          <line
-                            v-for="(g, gi) in hwChartModel(hw).hGrids"
-                            :key="`hg-${gi}`"
-                            :x1="g.x1"
-                            :y1="g.y1"
-                            :x2="g.x2"
-                            :y2="g.y2"
-                            class="bridge-chart-grid"
-                          />
-                          <path :d="hwChartModel(hw).dArea" :fill="`url(#hcg-${hw.id})`" />
-                          <path
-                            :d="hwChartModel(hw).dLine"
-                            fill="none"
-                            :stroke="hwChartModel(hw).strokeColor"
-                            stroke-width="0.95"
-                            stroke-linecap="round"
-                            stroke-linejoin="round"
-                            opacity="0.82"
-                          />
-                          <circle
-                            :cx="hwChartModel(hw).lastCx"
-                            :cy="hwChartModel(hw).lastCy"
-                            r="1.35"
-                            :fill="hwChartModel(hw).strokeColor"
-                            stroke="#0f0f14"
-                            stroke-width="0.45"
-                            opacity="0.9"
-                          />
-                          <text
-                            v-for="(tk, ti) in hwChartModel(hw).xTicks"
-                            :key="`xt-${ti}`"
-                            class="bridge-chart-tick-x"
-                            :x="tk.x"
-                            :y="hwChartModel(hw).vb.h - 5"
-                            text-anchor="middle"
-                          >{{ tk.lab }}</text>
-                        </template>
-                      </svg>
-                    </div>
+                  <p v-if="it.description" class="ny511-desc">{{ it.description }}</p>
+                  <div class="ny511-meta">
+                    <span v-if="it.roads && it.roads.length" class="ny511-roads">{{ it.roads.join(' · ') }}</span>
+                    <span v-if="it.startsAt || it.endsAt" class="ny511-times">
+                      {{ it.startsAt || '—' }} → {{ it.endsAt || '—' }}
+                    </span>
+                    <span v-if="it.severity" class="ny511-severity">{{ it.severity }}</span>
                   </div>
-                  <div v-else class="bridge-chart-empty" role="status">Collecting history…</div>
                 </div>
               </div>
             </li>
           </ul>
-          <p v-else-if="!highwayLoading" class="bridges-no-crossings">
-            No highway traffic data. Configure a HERE or TomTom API key in Settings.
+          <p
+            v-else-if="!ny511Loading && ny511Payload && ny511Payload.error === 'NO_API_KEY'"
+            class="bridges-no-crossings"
+          >
+            Add your 511NY API key in Settings (same key as bridge cameras) to load events, construction, and incidents.
+          </p>
+          <p v-else-if="!ny511Loading && ny511Payload?.ok" class="bridges-no-crossings">
+            No active items for monitored NYC truck routes and crossings.
+          </p>
+          <p v-else-if="!ny511Loading" class="bridges-no-crossings">
+            {{ ny511Error || 'Could not load NY511 data.' }}
           </p>
         </div>
       </div>
@@ -2213,18 +1969,49 @@ onUnmounted(() => {
   font-family: var(--font-sans, system-ui, sans-serif);
 }
 
-.highway-title-wrap {
+.ny511-title-wrap {
   display: flex;
   flex-direction: column;
-  gap: 0.08rem;
+  gap: 0.2rem;
   min-width: 0;
 }
 
-.highway-route {
-  font-size: 0.55rem;
-  font-weight: 650;
+.ny511-kind-badge {
+  align-self: flex-start;
+  font-size: 0.52rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  padding: 0.12rem 0.35rem;
+  border-radius: 4px;
+  background: rgba(167, 139, 250, 0.2);
+  color: #ddd6fe;
+  border: 1px solid rgba(167, 139, 250, 0.35);
+}
+
+.ny511-desc {
+  margin: 0.35rem 0 0;
+  font-size: 0.72rem;
+  line-height: 1.4;
+  color: #b4b4c8;
+}
+
+.ny511-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  margin-top: 0.45rem;
+  font-size: 0.62rem;
   color: #8b8b9a;
-  letter-spacing: 0.02em;
+}
+
+.ny511-roads {
+  font-weight: 650;
+  color: #c4c4d8;
+}
+
+.bridge-tile--ny511 {
+  border-color: rgba(167, 139, 250, 0.12);
 }
 
 .bridge-chart-empty {

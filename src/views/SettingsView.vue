@@ -407,7 +407,7 @@ async function saveHereApiKey() {
   }
 }
 
-/** 511NY API key (Bridge cameras). Free developer account: 511ny.org/developers */
+/** 511NY API key (bridge cameras + Traffic NY511 feeds). Register: 511ny.org/my511/register */
 const ny511ApiDraft = ref('')
 const ny511ApiMsg = ref('')
 const ny511ApiBusy = ref(false)
@@ -1541,25 +1541,19 @@ onUnmounted(() => {
         </div>
       </SettingsSection>
 
-      <SettingsSection title="511NY Camera API (Bridge Crossings)" section-id="settings-ny511">
+      <SettingsSection title="511NY API (Cameras + NY511 traffic)" section-id="settings-ny511">
         <p class="cred-hint">
-          <strong>Traffic → Crossings</strong> shows live camera feeds from
-          <a
-            href="https://511ny.org/developers/"
-            target="_blank"
-            rel="noopener noreferrer"
-            class="ext-link"
-          >511NY</a>
-          for bridges including Bayonne, Goethals, Outerbridge, and Verrazzano-Narrows.
+          <strong>Traffic → Crossings</strong> uses this key for live bridge cameras (Bayonne, Goethals, Outerbridge, Verrazzano).
+          <strong>Traffic → NY511</strong> loads official 511NY events, construction, incidents, and road conditions filtered to NYC-region truck routes (same key; server caches ~5 minutes).
         </p>
         <p class="cred-hint">
-          To get your free key: Go to <a href="https://511ny.org/my511/register" target="_blank" rel="noopener noreferrer" class="ext-link">511ny.org/my511/register</a>
-          → create an account → go to <strong>Manage Account</strong> → check "Would you like to sign up for the Developer API?" → wait for approval email with your key.
+          To get your free key: <a href="https://511ny.org/my511/register" target="_blank" rel="noopener noreferrer" class="ext-link">511ny.org/my511/register</a>
+          → create an account → <strong>Manage Account</strong> → enable the Developer API → use the key from your approval email.
         </p>
         <p class="cred-hint">
-          <strong>Rate limit:</strong> 10 calls per 60 seconds. Camera data is cached server-side for 5 minutes.
+          <strong>Rate limit:</strong> respect 511NY limits; this app batches feeds and caches responses server-side.
         </p>
-        <label class="lbl" for="ny511-api-key">511NY API key (for Bridge Cameras)</label>
+        <label class="lbl" for="ny511-api-key">511NY API key</label>
         <input
           id="ny511-api-key"
           v-model="ny511ApiDraft"

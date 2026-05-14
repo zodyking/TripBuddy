@@ -232,7 +232,7 @@ let lastError = /** @type {string | null} */ (null)
 /** Coalesce concurrent GETs (multiple tabs) into one HERE refresh. */
 let verrazzanoRefreshInFlight = /** @type {Promise<void> | null} */ (null)
 
-/** Match highway traffic cadence; see server/highway-traffic.mjs CACHE_TTL_MS */
+/** Match PANYNJ / corridor traffic cadence; see server/bridge-panynj.mjs POLL_MS */
 const CACHE_TTL_MS = 50 * 60 * 1000
 
 /**

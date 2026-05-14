@@ -1,0 +1,33 @@
+{
+  "events": [
+    {
+      "Id": "evt-nyc-1",
+      "Headline": "Disabled vehicle on I-278",
+      "Description": "Right lane blocked",
+      "Latitude": 40.692,
+      "Longitude": -73.981,
+      "RoadwayName": "I-278 West",
+      "Severity": "Moderate",
+      "StartDate": "2026-05-14T12:00:00",
+      "EndDate": "2026-05-14T18:00:00"
+    },
+    {
+      "Id": "evt-out-1",
+      "Headline": "Construction on I-55",
+      "Latitude": 41.878,
+      "Longitude": -87.629,
+      "RoadwayName": "I-55",
+      "Severity": "Low"
+    }
+  ],
+  "construction": [
+    {
+      "Id": "con-nyc-1",
+      "Title": "Overnight paving I-495",
+      "Latitude": 40.752,
+      "Longitude": -73.893,
+      "RoadwayName": "I-495 East",
+      "Severity": "Low"
+    }
+  ]
+}

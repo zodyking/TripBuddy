@@ -23,7 +23,7 @@ const BUCKET_LABELS = {
   tomtom: 'TomTom (routing / highway fallback)',
   fedex_linehaul: 'FedEx Linehaul',
   panynj: 'PANYNJ bridge crossing API',
-  ny511: '511NY cameras API',
+  ny511: '511NY API (cameras + NYC truck traffic feeds)',
 }
 
 /** Built-in defaults per calendar day (UTC) and per rolling minute. */

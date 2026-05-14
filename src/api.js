@@ -170,9 +170,9 @@ export async function getGwbYoutubeLive() {
   return handleJson(r)
 }
 
-/** Highway traffic data (HERE/TomTom) + stored series for trend charts. */
-export async function getHighwayTraffic() {
-  const r = await apiFetch('/api/traffic/highways')
+/** 511NY: NYC-region truck-relevant traffic items (events, construction, incidents, road conditions). */
+export async function getNy511Traffic() {
+  const r = await apiFetch('/api/511ny/traffic')
   return handleJson(r)
 }
 

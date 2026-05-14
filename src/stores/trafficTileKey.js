@@ -2,10 +2,10 @@
  * Traffic API keys: primary source is the signed-in user profile (PostgreSQL via API).
  * localStorage mirrors the last known key for faster paint and offline-ish reuse.
  * 
- * Supports TomTom (legacy, for tiles), HERE (route monitoring), and 511NY (cameras).
+ * Supports TomTom (legacy, for tiles), HERE (route monitoring), and 511NY (cameras + NYC traffic feeds).
  * https://developer.tomtom.com/
  * https://platform.here.com/
- * https://511ny.org/developers/
+ * Register for 511NY API: https://511ny.org/my511/register
  */
 import { ref, computed } from 'vue'
 
@@ -17,7 +17,7 @@ const tomtomOverride = ref('')
 const LS_HERE = 'fedextool_here_api_key'
 const hereOverride = ref('')
 
-// 511NY key (new - used for bridge cameras)
+// 511NY key (bridge cameras + Traffic NY511 tab: events, construction, incidents)
 const LS_NY511 = 'fedextool_ny511_api_key'
 const ny511Override = ref('')
 
@@ -141,7 +141,7 @@ export function getHereKeyEffective() {
 
 export const hereKeyEffective = computed(() => hereOverride.value)
 
-// 511NY exports (for bridge cameras)
+// 511NY exports (cameras + NY511 traffic tab)
 export const ny511ApiKeyOverride = ny511Override
 
 /**

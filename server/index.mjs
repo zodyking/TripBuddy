@@ -165,7 +165,7 @@ import {
 } from './bridge-panynj.mjs'
 import { getVerrazzanoResponsePayload } from './bridge-verrazzano-traffic.mjs'
 import { getGwbYoutubeLivePayload } from './gwb-youtube-live.mjs'
-import { getHighwayTrafficPayload } from './highway-traffic.mjs'
+import { getNy511TruckNycPayload } from './ny511-traffic-feeds.mjs'
 import { registerTrafficMonitoredRoutes } from './traffic-monitored-routes-routes.mjs'
 import {
   getApiQuotaSnapshot,
@@ -443,11 +443,49 @@ app.get('/api/bridges/verrazzano', async (req) => {
 /** GWB @gwblivetrafficcam — current live video id (requires YOUTUBE_DATA_API_KEY on server). */
 app.get('/api/bridges/gwb-youtube-live', async () => getGwbYoutubeLivePayload())
 
-app.get('/api/traffic/highways', async (req) => {
-  const ak = req.credentialAccountKey
-    ? String(req.credentialAccountKey)
-    : ''
-  return getHighwayTrafficPayload(ak)
+/** 511NY: NYC-region truck-relevant events, construction, incidents, road conditions (cached). */
+app.get('/api/511ny/traffic', async (req, reply) => {
+  try {
+    const ak = req.credentialAccountKey ? String(req.credentialAccountKey) : ''
+    let apiKey = ''
+    if (typeof ak === 'string' && ak.trim()) {
+      apiKey = (await getNy511ApiKeyForAccount(ak)) || ''
+    }
+    if (!apiKey) {
+      const qk = typeof req.query?.key === 'string' ? req.query.key.trim() : ''
+      if (qk) apiKey = qk.replace(/[^a-zA-Z0-9_-]/g, '')
+    }
+    if (!apiKey) {
+      return reply.code(400).send({
+        error: 'No 511NY API key configured. Add your key in Settings.',
+        code: 'NO_API_KEY',
+      })
+    }
+
+    if (typeof ak === 'string' && ak.trim()) {
+      try {
+        await assertApiAllowed(ak.trim(), 'ny511')
+      } catch (e) {
+        if (e instanceof ApiQuotaError) {
+          return reply.code(429).send({
+            error: e.message,
+            code: e.code,
+            bucket: e.bucket,
+          })
+        }
+        throw e
+      }
+    }
+
+    const payload = await getNy511TruckNycPayload(ak, apiKey)
+    if (typeof ak === 'string' && ak.trim() && payload.ok && !payload.cached) {
+      await recordApiCompletedCall(ak.trim(), 'ny511').catch(() => {})
+    }
+    return payload
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e)
+    return reply.code(500).send({ error: msg })
+  }
 })
 
 const NY511_CAMERA_CACHE_TTL_MS = 5 * 60 * 1000

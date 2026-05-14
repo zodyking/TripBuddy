@@ -35,6 +35,8 @@ const props = defineProps({
   vehicleId: { type: String, default: '' },
   /** Highway polylines to render on the map */
   highwayPolylines: { type: Array, default: () => [] },
+  /** NY511 incident/event markers (lat/lng) when Traffic tab is on NY511 */
+  ny511Markers: { type: Array, default: () => [] },
 })
 
 const emit = defineEmits(['select'])
@@ -80,6 +82,11 @@ let highwayLayer = null
 const highwaysById = new Map()
 /** @type {Map<string, L.Marker>} */
 const highwayLabelsById = new Map()
+
+/** @type {L.LayerGroup | null} */
+let ny511Layer = null
+/** @type {Map<string, L.CircleMarker>} */
+const ny511MarkersById = new Map()
 
 /** Sorted route id list — when this changes, we fit bounds to pins (e.g. To NY ↔ To NJ) */
 let lastStructureKey = ''
@@ -538,6 +545,65 @@ function syncHighwayPolylines() {
   }
 }
 
+/**
+ * @param {unknown} sev
+ */
+function ny511SeverityColor(sev) {
+  const s = String(sev || '').toLowerCase()
+  if (s.includes('severe') || s.includes('major') || s.includes('high') || s.includes('critical')) {
+    return '#f87171'
+  }
+  if (s.includes('moderate') || s.includes('medium')) return '#fb923c'
+  if (s.includes('low') || s.includes('minor') || s.includes('light')) return '#4ade80'
+  return '#a78bfa'
+}
+
+function syncNy511Markers() {
+  if (!map || !ny511Layer) return
+
+  const markers = props.ny511Markers || []
+  const wantIds = new Set(markers.map((m) => String(m.id)))
+
+  for (const [id, cm] of [...ny511MarkersById]) {
+    if (wantIds.has(id)) continue
+    ny511Layer.removeLayer(cm)
+    ny511MarkersById.delete(id)
+  }
+
+  for (const m of markers) {
+    const id = String(m.id)
+    const la = Number(m.lat)
+    const ln = Number(m.lng)
+    if (!Number.isFinite(la) || !Number.isFinite(ln)) continue
+
+    const color = ny511SeverityColor(m.severity)
+    const title = esc(String(m.title || id))
+    const kind = esc(String(m.kind || ''))
+    const sev = esc(String(m.severity || ''))
+    const popupHtml = `<div class="ny511-leaflet-popup"><strong>${title}</strong><div>${kind}${sev ? ` · ${sev}` : ''}</div></div>`
+
+    const existing = ny511MarkersById.get(id)
+    if (existing) {
+      existing.setLatLng([la, ln])
+      existing.setStyle({ color: '#0f0f14', fillColor: color })
+      const pop = existing.getPopup()
+      if (pop) pop.setContent(popupHtml)
+      else existing.bindPopup(popupHtml)
+    } else {
+      const cm = L.circleMarker([la, ln], {
+        radius: 8,
+        color: '#0f0f14',
+        weight: 2,
+        fillColor: color,
+        fillOpacity: 0.88,
+      })
+      cm.bindPopup(popupHtml)
+      cm.addTo(ny511Layer)
+      ny511MarkersById.set(id, cm)
+    }
+  }
+}
+
 function getTomtomKeyStr() {
   return String(tomtomKeyEffective.value || '').trim()
 }
@@ -587,11 +653,13 @@ function initMap() {
   streetLayer.addTo(map)
   applyTrafficToMap()
   highwayLayer = L.layerGroup().addTo(map)
+  ny511Layer = L.layerGroup().addTo(map)
   markerLayer = L.layerGroup().addTo(map)
   userLayer = L.layerGroup().addTo(map)
   lastStructureKey = ''
   syncMarkers()
   syncHighwayPolylines()
+  syncNy511Markers()
   nextTick(() => {
     map?.invalidateSize()
   })
@@ -605,6 +673,10 @@ function destroyMap() {
   if (highwayLayer) {
     highwayLayer.clearLayers()
   }
+  if (ny511Layer) {
+    ny511Layer.clearLayers()
+  }
+  ny511MarkersById.clear()
   markersById.clear()
   highwaysById.clear()
   highwayLabelsById.clear()
@@ -615,6 +687,7 @@ function destroyMap() {
   }
   markerLayer = null
   highwayLayer = null
+  ny511Layer = null
   userLayer = null
   streetLayer = null
   satelliteLayer = null
@@ -657,6 +730,14 @@ watch(
   () => props.highwayPolylines,
   () => {
     syncHighwayPolylines()
+  },
+  { deep: true },
+)
+
+watch(
+  () => props.ny511Markers,
+  () => {
+    syncNy511Markers()
   },
   { deep: true },
 )
@@ -1035,5 +1116,32 @@ watch(compassModeActive, (active) => {
   border: 1px solid;
   box-shadow: 0 2px 6px rgba(0, 0, 0, 0.4);
   pointer-events: none;
+}
+
+:deep(.ny511-leaflet-popup) {
+  font-size: 0.7rem;
+  color: #e8e2ff;
+  max-width: 14rem;
+  line-height: 1.35;
+}
+:deep(.ny511-leaflet-popup strong) {
+  display: block;
+  margin-bottom: 0.2rem;
+  font-size: 0.75rem;
+}
+</style>
+
+<style>
+/* Leaflet popups are mounted inside the map container; unscoped so rules apply reliably */
+.leaflet-container .ny511-leaflet-popup {
+  font-size: 0.7rem;
+  color: #e8e2ff;
+  max-width: 14rem;
+  line-height: 1.35;
+}
+.leaflet-container .ny511-leaflet-popup strong {
+  display: block;
+  margin-bottom: 0.2rem;
+  font-size: 0.75rem;
 }
 </style>
