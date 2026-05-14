@@ -586,26 +586,7 @@ onUnmounted(() => {
   min-height: 0;
 }
 
-/* Home quick action: live preview fills the scroll region (header ↔ bottom nav), no extra page scroll */
-.app-main.app-main--home:has(:deep(.main--automation-preview)) {
-  flex: 1 1 auto;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-  padding-bottom: var(--space-2, 0.5rem);
-}
-
-.app-main.app-main--home:has(:deep(.main--automation-preview)) > :deep(*) {
-  flex: 1 1 auto;
-  min-height: 0;
-  min-width: 0;
-  width: 100%;
-  box-sizing: border-box;
-}
-
-.app-scroll:has(:deep(.main--automation-preview)) {
-  overflow-y: hidden;
-}
+/* Home quick action layout when automation preview is open: see unscoped block below (Lightning CSS + :has(:deep)). */
 
 /* Directory: edge-to-edge horizontal, no centered column — inner view owns scroll regions */
 .app-main.app-main--directory {
@@ -835,5 +816,31 @@ onUnmounted(() => {
   .nav-item {
     transition: none;
   }
+}
+</style>
+
+<style>
+/*
+ * Unscoped on purpose: Lightning CSS minify rejects :has(:deep(...)) in Vue scoped output.
+ * Selectors stay under .app-shell so they only apply inside this layout.
+ */
+.app-shell .app-main.app-main--home:has(.main--automation-preview) {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  padding-bottom: var(--space-2, 0.5rem);
+}
+
+.app-shell .app-main.app-main--home:has(.main--automation-preview) > * {
+  flex: 1 1 auto;
+  min-height: 0;
+  min-width: 0;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.app-shell .app-scroll:has(.main--automation-preview) {
+  overflow-y: hidden;
 }
 </style>
