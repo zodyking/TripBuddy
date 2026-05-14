@@ -9,7 +9,7 @@ import fs from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { parseCsvRecords } from '../../src/utils/csvParse.js'
-import { normalizeLocationTypeForStorage } from '../../src/utils/directoryLocationTypes.js'
+import { normalizeLocationTypeForStorage } from '../directory-location-types.mjs'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const outPath = path.join(__dirname, '..', 'data', 'fedex-ground-directory-seed.json')

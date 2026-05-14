@@ -4,7 +4,7 @@ import {
   DIRECTORY_LOCATION_TYPE_OTHER,
   filterKeyForLocationType,
   normalizeLocationTypeForStorage,
-} from '../src/utils/directoryLocationTypes.js'
+} from './directory-location-types.mjs'
 
 const DIRECTORY_KV = G('directory:locations')
 
