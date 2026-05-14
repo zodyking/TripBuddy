@@ -854,6 +854,119 @@ export async function runInspectCheckoutAfterGate(page, opts) {
       }
     }
 
+    // --- Empty trailer numbers (must run before MT success toast handling) ---
+    // FedEx often keeps "Trailer 1 validated" visible while Trailer 2 appears; if we
+    // handled isMtTrailerSuccessScreen first, we'd spin instead of filling T2. Also
+    // validate one trailer per click when both fields are visible (sequential flow).
+    if (!(await isDollyEntryScreen(page))) {
+      const trailerRowsAll = await collectVisibleTrailerNumberInputs(page)
+      const vmtBtn0 = buttonLikeByVisibleText(page, RX.validateMtTrailer).first()
+      const vmtVisible0 = await vmtBtn0.isVisible().catch(() => false)
+      const altValidateBtn0 = buttonLikeByVisibleText(page, RX.validateTrailer).first()
+      const altValidateVisible0 = await altValidateBtn0.isVisible().catch(() => false)
+      const genericValidateBtn0 = buttonLikeByVisibleText(page, RX.validateGeneric).first()
+      const genericValidateVisible0 = await genericValidateBtn0.isVisible().catch(() => false)
+      const hasAnyValidateBtn0 =
+        vmtVisible0 || altValidateVisible0 || genericValidateVisible0
+
+      const emptyTrailerMode = trailerRowsAll.length >= 1 && hasAnyValidateBtn0
+      if (emptyTrailerMode) {
+        const sorted = [...trailerRowsAll].sort((a, b) => a.trailerIndex - b.trailerIndex)
+        let row = null
+        for (const r of sorted) {
+          aborted()
+          const cur = (await r.input.inputValue().catch(() => '')).trim()
+          if (!cur) {
+            row = r
+            break
+          }
+        }
+        if (!row) {
+          log('info', 'MT step: trailer fields already filled — clicking validate')
+          const clickedValidate = await clickTrailerValidateButton(page)
+          if (clickedValidate) {
+            lastProgress = Date.now()
+            await page.waitForTimeout(AFTER_CLICK_MS)
+          }
+          continue
+        }
+
+        const trailerIndex = row.trailerIndex
+        const preEntered = preEnteredTrailerNbrs.get(trailerIndex) || ''
+        let val = preEntered
+        if (val) {
+          log('info', `Using pre-entered trailer number for Trailer ${trailerIndex}: ${val}`)
+        } else {
+          log('info', `No pre-entered number for Trailer ${trailerIndex} — prompting`)
+          val = (
+            await waitForInspectField({
+              field: `trailer${trailerIndex}_number`,
+              message: buildPromptMessage('trailerNumber', trailerIndex),
+            })
+          ).trim()
+        }
+        if (!val) throw new Error(`Inspect: trailer number required for Trailer ${trailerIndex}`)
+        await row.input.fill(val)
+
+        const clickedValidate = await clickTrailerValidateButton(page)
+        if (clickedValidate) {
+          log(
+            'info',
+            `Clicked trailer validate for Trailer ${trailerIndex} (sequential empty-trailer step)`,
+          )
+          lastProgress = Date.now()
+          await page.waitForTimeout(AFTER_CLICK_MS)
+
+          if (await hasInvalidTrailerError(page)) {
+            log('warn', 'Invalid trailer number error detected — will retry with fresh input')
+            await page.waitForTimeout(500)
+            continue
+          }
+
+          const mtWaitStart = Date.now()
+          while (Date.now() - mtWaitStart < DOLLY_SUCCESS_WAIT_MS) {
+            aborted()
+            if (await isInspectionChecklistScreen(page)) {
+              log('info', 'Empty trailer validated — advanced to checklist')
+              await captureProof(page, 'Trailer Validated', proofScreenshots, log)
+              break
+            }
+            if (await isDispatchScreen(page)) {
+              log('info', 'Empty trailer validated — advanced to dispatch')
+              break
+            }
+            if (await isMtTrailerSuccessScreen(page)) {
+              log('info', 'Trailer validation success toast visible — waiting for transition')
+              await page.waitForTimeout(POLL_MS)
+              continue
+            }
+            if (await hasInvalidTrailerError(page)) {
+              log('warn', 'Invalid trailer error appeared — breaking to retry')
+              break
+            }
+            const stillHasInputs = (await collectVisibleTrailerNumberInputs(page)).length > 0
+            if (!stillHasInputs) {
+              log('info', 'No more trailer inputs visible — validation step likely complete')
+              break
+            }
+            await page.waitForTimeout(POLL_MS)
+          }
+          continue
+        }
+
+        const fallbackBtn = page
+          .getByRole('button', { name: /validate|submit|continue|next/i })
+          .first()
+        if (await fallbackBtn.isVisible().catch(() => false)) {
+          await fallbackBtn.click()
+          log('info', 'Clicked fallback validate/submit button (empty trailer)')
+          lastProgress = Date.now()
+          await page.waitForTimeout(AFTER_CLICK_MS)
+          continue
+        }
+      }
+    }
+
     // --- MT Trailer validation success (single empty trailer) → proceed to checklist ---
     if (await isMtTrailerSuccessScreen(page)) {
       await captureProof(page, 'MT Trailer Validated', proofScreenshots, log)
@@ -978,105 +1091,6 @@ export async function runInspectCheckoutAfterGate(page, opts) {
             }
             log('warn', 'Batch seal validation failed — falling through to per-field swap handling')
           }
-        }
-      }
-    }
-
-    // --- Batch or single empty-trailer numbers (one or more fields + validate button) ---
-    // Handles: (1) multiple empty trailers, (2) single empty trailer (no dolly needed).
-    if (!(await isDollyEntryScreen(page))) {
-      const trailerRows = await collectVisibleTrailerNumberInputs(page)
-      const vmtBtn = buttonLikeByVisibleText(page, RX.validateMtTrailer).first()
-      const vmtVisible = await vmtBtn.isVisible().catch(() => false)
-      // Also check for alternative validate button patterns
-      const altValidateBtn = buttonLikeByVisibleText(page, RX.validateTrailer).first()
-      const altValidateVisible = await altValidateBtn.isVisible().catch(() => false)
-      const genericValidateBtn = buttonLikeByVisibleText(page, RX.validateGeneric).first()
-      const genericValidateVisible = await genericValidateBtn.isVisible().catch(() => false)
-      const hasAnyValidateBtn = vmtVisible || altValidateVisible || genericValidateVisible
-
-      // Single or batch MT mode: we have trailer number input(s) and a validate button
-      const emptyTrailerMode = trailerRows.length >= 1 && hasAnyValidateBtn
-      if (emptyTrailerMode) {
-        log('info', `Detected ${trailerRows.length} empty trailer input(s) with validate button`)
-        for (const row of trailerRows) {
-          aborted()
-          const trailerIndex = row.trailerIndex
-          const preEntered = preEnteredTrailerNbrs.get(trailerIndex) || ''
-          let val = preEntered
-          if (val) {
-            log('info', `Using pre-entered trailer number for Trailer ${trailerIndex}: ${val}`)
-          } else {
-            log('info', `No pre-entered number for Trailer ${trailerIndex} — prompting`)
-            val = (
-              await waitForInspectField({
-                field: `trailer${trailerIndex}_number`,
-                message: buildPromptMessage('trailerNumber', trailerIndex),
-              })
-            ).trim()
-          }
-          if (!val) throw new Error(`Inspect: trailer number required for Trailer ${trailerIndex}`)
-          await row.input.fill(val)
-        }
-
-        // Try clicking validate button with multiple fallback patterns
-        const clickedValidate = await clickTrailerValidateButton(page)
-        if (clickedValidate) {
-          log('info', `Clicked trailer validate button (${trailerRows.length} trailer(s))`)
-          lastProgress = Date.now()
-          await page.waitForTimeout(AFTER_CLICK_MS)
-
-          // Check for invalid trailer error first
-          if (await hasInvalidTrailerError(page)) {
-            log('warn', 'Invalid trailer number error detected — will retry with fresh input')
-            await page.waitForTimeout(500)
-            continue
-          }
-
-          // Wait for MT Trailer validation success → checklist transition
-          const mtWaitStart = Date.now()
-          while (Date.now() - mtWaitStart < DOLLY_SUCCESS_WAIT_MS) {
-            aborted()
-            if (await isInspectionChecklistScreen(page)) {
-              log('info', 'Empty trailer validated — advanced to checklist')
-              await captureProof(page, 'Trailer Validated', proofScreenshots, log)
-              break
-            }
-            if (await isDispatchScreen(page)) {
-              log('info', 'Empty trailer validated — advanced to dispatch')
-              break
-            }
-            if (await isMtTrailerSuccessScreen(page)) {
-              log('info', 'Trailer validation success screen visible — waiting for transition')
-              await page.waitForTimeout(POLL_MS)
-              continue
-            }
-            // Check if we returned to an error state or need retry
-            if (await hasInvalidTrailerError(page)) {
-              log('warn', 'Invalid trailer error appeared — breaking to retry')
-              break
-            }
-            // Check if validate button and inputs are both gone (validation likely succeeded)
-            const stillHasInputs = (await collectVisibleTrailerNumberInputs(page)).length > 0
-            if (!stillHasInputs) {
-              log('info', 'No more trailer inputs visible — validation likely successful')
-              break
-            }
-            await page.waitForTimeout(POLL_MS)
-          }
-          continue
-        }
-
-        // Fallback: try generic button patterns
-        const fallbackBtn = page
-          .getByRole('button', { name: /validate|submit|continue|next/i })
-          .first()
-        if (await fallbackBtn.isVisible().catch(() => false)) {
-          await fallbackBtn.click()
-          log('info', 'Clicked fallback validate/submit button')
-          lastProgress = Date.now()
-          await page.waitForTimeout(AFTER_CLICK_MS)
-          continue
         }
       }
     }
