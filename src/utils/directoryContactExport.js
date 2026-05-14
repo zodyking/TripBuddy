@@ -185,9 +185,9 @@ export function compareExportLocations(a, b, key, dir, recentMs) {
     )
   }
   if (key === 'state') {
-    const as = String(ga._geo.stateLabel || ga._geo.stateCode ?? '')
+    const as = String((ga._geo.stateLabel || ga._geo.stateCode) ?? '')
       .trim()
-      .localeCompare(String(gb._geo.stateLabel || gb._geo.stateCode ?? '').trim(), undefined, {
+      .localeCompare(String((gb._geo.stateLabel || gb._geo.stateCode) ?? '').trim(), undefined, {
         sensitivity: 'base',
       })
     if (as !== 0) return as * mul

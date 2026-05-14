@@ -343,9 +343,9 @@ function directorySortCompare(a, b) {
     return compareLocationIdNumeric(a, b)
   }
   if (key === 'state') {
-    const as = String(a._geo.stateLabel || a._geo.stateCode ?? '')
+    const as = String((a._geo.stateLabel || a._geo.stateCode) ?? '')
       .trim()
-      .localeCompare(String(b._geo.stateLabel || b._geo.stateCode ?? '').trim(), undefined, {
+      .localeCompare(String((b._geo.stateLabel || b._geo.stateCode) ?? '').trim(), undefined, {
         sensitivity: 'base',
       })
     if (as !== 0) return as * dir
