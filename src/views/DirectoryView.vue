@@ -39,7 +39,8 @@ const loading = ref(false)
 const error = ref('')
 const searchQuery = ref('')
 
-/** Station types shown on map + list (multi-select). Default matches common dispatch use. */
+/** Station types shown on map + list. `ALL` = no type filter (every type). */
+const LOCATION_TYPE_FILTER_ALL = 'ALL'
 const DEFAULT_LOCATION_TYPE_FILTER = Object.freeze(['Hub', 'Station'])
 const directoryTypeFilterOptions = [...DIRECTORY_STATION_TYPES, DIRECTORY_LOCATION_TYPE_OTHER]
 /** @type {import('vue').Ref<string[]>} */
@@ -145,13 +146,69 @@ function resetLocationTypeFilter() {
   selectedLocationTypes.value = [...DEFAULT_LOCATION_TYPE_FILTER]
 }
 
-/** Keep at least one type when using the multi-select. */
-function normalizeLocationTypesFromSelect() {
-  if (!selectedLocationTypes.value.length) {
-    selectedLocationTypes.value = [...DEFAULT_LOCATION_TYPE_FILTER]
+const locationTypeAllSelected = computed(() =>
+  selectedLocationTypes.value.includes(LOCATION_TYPE_FILTER_ALL),
+)
+
+/**
+ * @param {Event} ev
+ */
+function onLocationTypeAllChange(ev) {
+  const t = /** @type {HTMLInputElement | null} */ (ev.target)
+  if (!t) return
+  if (t.checked) {
+    selectedLocationTypes.value = [LOCATION_TYPE_FILTER_ALL]
     return
   }
-  selectedLocationTypes.value = [...selectedLocationTypes.value].sort(compareDirectoryTypeFilterKeys)
+  selectedLocationTypes.value = [...DEFAULT_LOCATION_TYPE_FILTER]
+}
+
+/**
+ * @param {Event} ev
+ * @param {string} typeKey
+ */
+function onLocationTypeChipChange(ev, typeKey) {
+  const t = /** @type {HTMLInputElement | null} */ (ev.target)
+  if (!t) return
+  let next = [...selectedLocationTypes.value].filter((x) => x !== LOCATION_TYPE_FILTER_ALL)
+  if (t.checked) {
+    if (!next.includes(typeKey)) next.push(typeKey)
+  } else {
+    next = next.filter((x) => x !== typeKey)
+  }
+  if (!next.length) {
+    selectedLocationTypes.value = [LOCATION_TYPE_FILTER_ALL]
+    return
+  }
+  selectedLocationTypes.value = [...next].sort(compareDirectoryTypeFilterKeys)
+}
+
+/**
+ * @param {Event} ev
+ */
+function onCountryAllChange(ev) {
+  const t = /** @type {HTMLInputElement | null} */ (ev.target)
+  if (!t) return
+  if (t.checked) {
+    selectedCountryCodes.value = []
+    return
+  }
+  const first = countryFacetList.value[0]?.code
+  if (first) selectedCountryCodes.value = [String(first).toUpperCase()]
+}
+
+/**
+ * @param {Event} ev
+ */
+function onStateAllChange(ev) {
+  const t = /** @type {HTMLInputElement | null} */ (ev.target)
+  if (!t) return
+  if (t.checked) {
+    selectedStateComposites.value = []
+    return
+  }
+  const first = stateFacetList.value[0]?.composite
+  if (first) selectedStateComposites.value = [first]
 }
 
 function normalizeCountrySelectionFromSelect() {
@@ -178,10 +235,14 @@ function toggleSortDir() {
 
 const directoryFiltersDirty = computed(() => {
   const def = [...DEFAULT_LOCATION_TYPE_FILTER]
-  const types = [...selectedLocationTypes.value].sort(compareDirectoryTypeFilterKeys)
+  const typesSansAll = [...selectedLocationTypes.value]
+    .filter((x) => x !== LOCATION_TYPE_FILTER_ALL)
+    .sort(compareDirectoryTypeFilterKeys)
   const defSorted = [...def].sort(compareDirectoryTypeFilterKeys)
   const typesNonDefault =
-    types.length !== defSorted.length || !types.every((t, i) => t === defSorted[i])
+    selectedLocationTypes.value.includes(LOCATION_TYPE_FILTER_ALL) ||
+    typesSansAll.length !== defSorted.length ||
+    !typesSansAll.every((t, i) => t === defSorted[i])
   return (
     typesNonDefault ||
     selectedCountryCodes.value.length > 0 ||
@@ -320,6 +381,7 @@ watch(selectedCountryCodes, (codes) => {
 /** Short summary of selected location types (hint under type legend). */
 const locationTypeFilterSummary = computed(() => {
   const sel = selectedLocationTypes.value
+  if (sel.includes(LOCATION_TYPE_FILTER_ALL)) return 'All types'
   const all = directoryTypeFilterOptions
   if (sel.length >= all.length) return 'All types'
   const def = [...DEFAULT_LOCATION_TYPE_FILTER]
@@ -360,6 +422,7 @@ const locationsWithRegion = computed(() => {
 
 const locationsAfterTypeFilter = computed(() => {
   const sel = selectedLocationTypes.value
+  if (sel.includes(LOCATION_TYPE_FILTER_ALL)) return locationsWithRegion.value
   return locationsWithRegion.value.filter((loc) => sel.includes(filterKeyForLocationType(loc.locationType)))
 })
 
@@ -423,17 +486,6 @@ const stateFacetList = computed(() => {
     a.label.localeCompare(b.label, undefined, { sensitivity: 'base' }),
   )
 })
-
-/** Listbox `size` rows — independent, capped for a balanced panel layout. */
-const directoryFilterTypeListboxSize = computed(() =>
-  Math.min(6, Math.max(3, directoryTypeChips.value.length)),
-)
-const directoryFilterCountryListboxSize = computed(() =>
-  Math.min(5, Math.max(2, countryFacetList.value.length)),
-)
-const directoryFilterStateListboxSize = computed(() =>
-  Math.min(8, Math.max(4, stateFacetList.value.length)),
-)
 
 /**
  * @param {{ locationId: string, locationName?: string, locationType?: string, _geo: { countryLabel?: string, stateLabel?: string, stateCode?: string, composite?: string } }} a
@@ -1427,8 +1479,8 @@ onUnmounted(() => {
           </div>
 
           <p id="directory-filters-panel-hint" class="directory-filters-desc directory-filters-desc--panel">
-            Each box is its own multi-select list. Empty country or region = <strong>all</strong>. Ctrl/⌘+click for
-            multiple. Keep at least one location type.
+            Tap any combination of options. <strong>All</strong> under location type includes every facility type.
+            <strong>All countries</strong> / <strong>All regions</strong> mean no filter in that column.
           </p>
 
           <div
@@ -1437,58 +1489,107 @@ onUnmounted(() => {
             aria-label="Location type, country, and region filters"
           >
             <div class="directory-filters-listbox-card">
-              <label for="directory-filter-loc-type" class="directory-filters-field-label">Location type</label>
+              <p class="directory-filters-field-label">Location type</p>
               <p class="directory-filters-field-hint">{{ locationTypeFilterSummary }}</p>
-              <select
-                id="directory-filter-loc-type"
-                v-model="selectedLocationTypes"
-                class="directory-filter-multiselect tap"
-                multiple
-                :size="directoryFilterTypeListboxSize"
+              <div
+                class="directory-filter-checklist tap"
+                role="group"
+                aria-label="Location types"
                 aria-describedby="directory-filters-panel-hint"
-                @change="normalizeLocationTypesFromSelect"
               >
-                <option v-for="t in directoryTypeChips" :key="t" :value="t">{{ t }}</option>
-              </select>
-              <button type="button" class="directory-filters-text-btn tap" @click="resetLocationTypeFilter">
-                Use Hub + Station only
-              </button>
+                <label class="directory-filter-check-row">
+                  <input
+                    type="checkbox"
+                    class="directory-filter-check-input"
+                    :checked="locationTypeAllSelected"
+                    @change="onLocationTypeAllChange"
+                  />
+                  <span>All</span>
+                </label>
+                <label
+                  v-for="t in directoryTypeChips"
+                  :key="t"
+                  class="directory-filter-check-row"
+                >
+                  <input
+                    type="checkbox"
+                    class="directory-filter-check-input"
+                    :checked="selectedLocationTypes.includes(t) && !locationTypeAllSelected"
+                    @change="onLocationTypeChipChange($event, t)"
+                  />
+                  <span>{{ t }}</span>
+                </label>
+              </div>
             </div>
 
             <div v-if="countryFacetList.length" class="directory-filters-listbox-card">
-              <label for="directory-filter-country" class="directory-filters-field-label">Country</label>
-              <p class="directory-filters-field-hint">None = all countries.</p>
-              <select
-                id="directory-filter-country"
-                v-model="selectedCountryCodes"
-                class="directory-filter-multiselect tap"
-                multiple
-                :size="directoryFilterCountryListboxSize"
+              <p class="directory-filters-field-label">Country</p>
+              <p class="directory-filters-field-hint">None selected = all countries.</p>
+              <div
+                class="directory-filter-checklist tap"
+                role="group"
+                aria-label="Countries"
                 aria-describedby="directory-filters-panel-hint"
-                @change="normalizeCountrySelectionFromSelect"
               >
-                <option v-for="row in countryFacetList" :key="row.code" :value="row.code">
-                  {{ row.label }} ({{ row.count }})
-                </option>
-              </select>
+                <label class="directory-filter-check-row">
+                  <input
+                    type="checkbox"
+                    class="directory-filter-check-input"
+                    :checked="selectedCountryCodes.length === 0"
+                    @change="onCountryAllChange"
+                  />
+                  <span>All countries</span>
+                </label>
+                <label
+                  v-for="row in countryFacetList"
+                  :key="row.code"
+                  class="directory-filter-check-row"
+                >
+                  <input
+                    v-model="selectedCountryCodes"
+                    type="checkbox"
+                    class="directory-filter-check-input"
+                    :value="row.code"
+                    @change="normalizeCountrySelectionFromSelect"
+                  />
+                  <span>{{ row.label }} ({{ row.count }})</span>
+                </label>
+              </div>
             </div>
 
             <div v-if="stateFacetList.length" class="directory-filters-listbox-card">
-              <label for="directory-filter-region" class="directory-filters-field-label">State / province</label>
-              <p class="directory-filters-field-hint">None = all regions in scope.</p>
-              <select
-                id="directory-filter-region"
-                v-model="selectedStateComposites"
-                class="directory-filter-multiselect tap"
-                multiple
-                :size="directoryFilterStateListboxSize"
+              <p class="directory-filters-field-label">State / province</p>
+              <p class="directory-filters-field-hint">None selected = all regions in scope.</p>
+              <div
+                class="directory-filter-checklist tap"
+                role="group"
+                aria-label="States and provinces"
                 aria-describedby="directory-filters-panel-hint"
-                @change="normalizeStateSelectionFromSelect"
               >
-                <option v-for="row in stateFacetList" :key="row.composite" :value="row.composite">
-                  {{ row.label }} ({{ row.count }})
-                </option>
-              </select>
+                <label class="directory-filter-check-row">
+                  <input
+                    type="checkbox"
+                    class="directory-filter-check-input"
+                    :checked="selectedStateComposites.length === 0"
+                    @change="onStateAllChange"
+                  />
+                  <span>All regions</span>
+                </label>
+                <label
+                  v-for="row in stateFacetList"
+                  :key="row.composite"
+                  class="directory-filter-check-row"
+                >
+                  <input
+                    v-model="selectedStateComposites"
+                    type="checkbox"
+                    class="directory-filter-check-input"
+                    :value="row.composite"
+                    @change="normalizeStateSelectionFromSelect"
+                  />
+                  <span>{{ row.label }} ({{ row.count }})</span>
+                </label>
+              </div>
             </div>
           </div>
         </div>
@@ -1536,8 +1637,8 @@ onUnmounted(() => {
       </svg>
       <p class="empty-title">No locations for these types</p>
       <p class="empty-desc">
-        Open <strong>Filters &amp; sort</strong> and select more <strong>location types</strong>, or use
-        <strong>Use Hub + Station only</strong> as a starting point.
+        Open <strong>Filters &amp; sort</strong> and choose more <strong>location types</strong>
+        (including <strong>All</strong>), or tap <strong>Clear filters</strong> to restore defaults.
       </p>
     </div>
 
@@ -2606,41 +2707,57 @@ onUnmounted(() => {
   color: var(--color-text-tertiary, #6e6e7c);
 }
 
-.directory-filter-multiselect {
+.directory-filter-checklist {
   width: 100%;
   flex: 1 1 auto;
   min-height: 5.5rem;
+  max-height: min(14rem, 42vh);
   margin: 0;
   padding: 0.35rem 0.45rem;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
   font-size: var(--text-xs, 0.8125rem);
   line-height: 1.35;
   color: var(--color-text-primary, #ececf4);
   background: rgba(12, 11, 16, 0.95);
   border: 1px solid var(--color-border, rgba(255, 255, 255, 0.12));
   border-radius: var(--radius-md, 0.5rem);
-  cursor: pointer;
   box-sizing: border-box;
 }
 
-.directory-filters-listbox-card .directory-filters-text-btn {
-  margin-top: 0.25rem;
-  align-self: flex-start;
-}
-
-.directory-filter-multiselect:focus {
+.directory-filter-checklist:focus-within {
   outline: 2px solid rgba(123, 77, 181, 0.55);
   outline-offset: 1px;
 }
 
-.directory-filter-multiselect option {
-  padding: 0.35rem 0.45rem;
-  color: #e8e8f0;
-  background: #16151c;
+.directory-filter-check-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.45rem;
+  margin: 0;
+  padding: 0.32rem 0.35rem;
+  border-radius: var(--radius-sm, 0.375rem);
+  cursor: pointer;
+  user-select: none;
 }
 
-.directory-filter-multiselect option:checked {
-  background: rgba(91, 33, 182, 0.5);
+.directory-filter-check-row:has(.directory-filter-check-input:checked) {
+  background: rgba(91, 33, 182, 0.42);
   color: #faf5ff;
+}
+
+.directory-filter-check-input {
+  flex-shrink: 0;
+  width: 1rem;
+  height: 1rem;
+  margin-top: 0.12rem;
+  accent-color: var(--color-accent-purple, #7b4db5);
+  cursor: pointer;
+}
+
+.directory-filter-check-row span {
+  flex: 1 1 auto;
+  min-width: 0;
 }
 
 .directory-filters--dropdown .directory-sort-control {
@@ -2755,23 +2872,6 @@ onUnmounted(() => {
 
 .directory-filters-clear:hover {
   background: rgba(123, 77, 181, 0.5);
-}
-
-.directory-filters-text-btn {
-  margin-top: var(--space-2, 0.5rem);
-  padding: 0;
-  font-size: var(--text-xs, 0.6875rem);
-  font-weight: var(--weight-medium, 500);
-  color: var(--color-accent-purple-light, #c4b5fd);
-  background: none;
-  border: none;
-  cursor: pointer;
-  text-decoration: underline;
-  text-underline-offset: 0.15em;
-}
-
-.directory-filters-text-btn:hover {
-  color: #e9d5ff;
 }
 
 .error-banner {
