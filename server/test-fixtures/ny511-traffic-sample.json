@@ -1,33 +1,60 @@
 {
-  "events": [
+  "getevents": [
     {
-      "Id": "evt-nyc-1",
-      "Headline": "Disabled vehicle on I-278",
-      "Description": "Right lane blocked",
+      "ID": "evt-nyc-1",
+      "RegionName": "New York City Area",
+      "CountyName": "Kings",
+      "Severity": "Moderate",
+      "RoadwayName": "I-278 West",
+      "DirectionOfTravel": "Westbound",
+      "Description": "Disabled vehicle - Right lane blocked near Exit 25",
+      "Location": "I-278 at Atlantic Avenue",
+      "EventType": "accidentsAndIncidents",
+      "EventSubType": "Disabled Vehicle",
       "Latitude": 40.692,
       "Longitude": -73.981,
-      "RoadwayName": "I-278 West",
-      "Severity": "Moderate",
-      "StartDate": "2026-05-14T12:00:00",
-      "EndDate": "2026-05-14T18:00:00"
+      "StartDate": "14/05/2026 12:00:00",
+      "PlannedEndDate": "14/05/2026 18:00:00"
     },
     {
-      "Id": "evt-out-1",
-      "Headline": "Construction on I-55",
-      "Latitude": 41.878,
-      "Longitude": -87.629,
-      "RoadwayName": "I-55",
-      "Severity": "Low"
-    }
-  ],
-  "construction": [
+      "ID": "evt-out-1",
+      "RegionName": "Central Syracuse Utica Area",
+      "CountyName": "Onondaga",
+      "Severity": "Low",
+      "RoadwayName": "I-81 North",
+      "DirectionOfTravel": "Northbound",
+      "Description": "Roadwork - Expect delays",
+      "Location": "I-81 near Syracuse",
+      "EventType": "roadwork",
+      "EventSubType": "Paving",
+      "Latitude": 43.05,
+      "Longitude": -76.15,
+      "StartDate": "10/05/2026 08:00:00",
+      "PlannedEndDate": "20/05/2026 17:00:00"
+    },
     {
-      "Id": "con-nyc-1",
-      "Title": "Overnight paving I-495",
+      "ID": "evt-nyc-2",
+      "RegionName": "Long Island Area",
+      "CountyName": "Queens",
+      "Severity": "Minor",
+      "RoadwayName": "I-495 East",
+      "DirectionOfTravel": "Eastbound",
+      "Description": "Overnight paving operation",
+      "Location": "LIE between Exit 19 and Exit 22",
+      "EventType": "roadwork",
+      "EventSubType": "Paving",
       "Latitude": 40.752,
       "Longitude": -73.893,
-      "RoadwayName": "I-495 East",
-      "Severity": "Low"
+      "StartDate": "14/05/2026 22:00:00",
+      "PlannedEndDate": "15/05/2026 05:00:00"
+    }
+  ],
+  "getalerts": [
+    {
+      "Id": "alert-1",
+      "Message": "Heavy traffic on George Washington Bridge - expect 30+ minute delays",
+      "Notes": "Use alternate routes if possible",
+      "AreaNames": ["New York City Area", "New Jersey Statewide"]
     }
   ]
 }

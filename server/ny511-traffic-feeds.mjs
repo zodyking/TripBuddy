@@ -84,11 +84,17 @@ export const NYC_TRUCK_ROUTE_TOKENS = [
   'MEADOWLANDS',
 ]
 
+/**
+ * 511NY official API endpoints (per https://511ny.org/developers/help/api).
+ * Format: [apiPath, kindLabel]
+ * - getevents: all event types (incidents, roadwork, closures, etc.)
+ * - getalerts: traffic alerts
+ * Note: "construction" / "incidents" / "roadconditions" are NOT separate endpoints;
+ * they are EventType values within getevents.
+ */
 const FEEDS = /** @type {const} */ ([
-  ['events', 'events'],
-  ['construction', 'construction'],
-  ['incidents', 'incidents'],
-  ['roadconditions', 'roadCondition'],
+  ['getevents', 'event'],
+  ['getalerts', 'alert'],
 ])
 
 /**
@@ -174,6 +180,9 @@ function pickNum(r, names) {
 }
 
 /**
+ * Normalize a row from 511NY API to our internal item format.
+ * @see https://511ny.org/developers/help/api/get-api-getevents_key_format
+ * @see https://511ny.org/developers/help/api/get-api-getalerts_key_format
  * @param {unknown} raw
  * @param {string} sourceFeed
  * @param {string} defaultKind
@@ -183,59 +192,42 @@ export function normalize511RowToItem(raw, sourceFeed, defaultKind) {
   const r = /** @type {Record<string, unknown>} */ (raw)
 
   const id =
-    pickStr(r, ['Id', 'ID', 'EventId', 'eventId', 'IncidentId', 'ConstructionId', 'id']) ||
-    ''
-  const title = pickStr(r, [
-    'Headline',
-    'Title',
-    'Subject',
-    'Name',
-    'EventType',
-    'headline',
-    'title',
-  ])
+    pickStr(r, ['ID', 'Id', 'id', 'EventId', 'eventId']) || ''
+
+  const eventType = pickStr(r, ['EventType', 'eventType'])
+  const eventSubType = pickStr(r, ['EventSubType', 'eventSubType'])
+
   const description = pickStr(r, [
     'Description',
+    'Message',
+    'Notes',
     'FullDescription',
-    'Comments',
-    'Details',
-    'Comment',
     'description',
   ])
+
   const roadway = pickStr(r, [
     'RoadwayName',
-    'Roadway',
-    'RoadName',
-    'PrimaryRoute',
-    'Route',
     'Location',
+    'PrimaryLocation',
     'roadwayName',
     'location',
   ])
-  const county = pickStr(r, ['County', 'county', 'Region', 'region'])
-  const severity = pickStr(r, ['Severity', 'severity', 'Impact', 'impact', 'Priority', 'priority'])
 
-  let lat = pickNum(r, ['Latitude', 'Lat', 'lat', 'Y', 'y'])
-  let lng = pickNum(r, ['Longitude', 'Lng', 'Lon', 'lng', 'lon', 'X', 'x'])
+  const region = pickStr(r, ['RegionName', 'Region', 'region'])
+  const county = pickStr(r, ['CountyName', 'County', 'county'])
+  const severity = pickStr(r, ['Severity', 'severity', 'Impact', 'impact'])
 
-  const geom = r.Geometry ?? r.geometry
-  if ((lat == null || lng == null) && geom && typeof geom === 'object') {
-    const g = /** @type {Record<string, unknown>} */ (geom)
-    const gla = pickNum(g, ['Latitude', 'Lat', 'lat'])
-    const gln = pickNum(g, ['Longitude', 'Lng', 'lng', 'lon'])
-    if (gla != null && gln != null) {
-      lat = gla
-      lng = gln
-    }
-  }
+  let lat = pickNum(r, ['Latitude', 'Lat', 'lat'])
+  let lng = pickNum(r, ['Longitude', 'Lng', 'lng', 'lon'])
 
-  const startsAt = pickStr(r, ['StartDate', 'startDate', 'ScheduledStart', 'OpenTime', 'FromDate'])
-  const endsAt = pickStr(r, ['EndDate', 'endDate', 'ScheduledEnd', 'CloseTime', 'ToDate'])
+  const startsAt = pickStr(r, ['StartDate', 'Reported', 'startDate'])
+  const endsAt = pickStr(r, ['PlannedEndDate', 'EndDate', 'endDate'])
 
-  const kind = String(defaultKind || 'event').toLowerCase()
+  const kind = eventType || eventSubType || String(defaultKind || 'event').toLowerCase()
 
-  const displayTitle = title || roadway || `${kind} (511NY)`
-  const blob = [displayTitle, description, roadway, county, sourceFeed].join(' ').toUpperCase()
+  const displayTitle = eventSubType || eventType || roadway || description?.slice(0, 60) || `${kind} (511NY)`
+
+  const blob = [displayTitle, description, roadway, region, county, eventType, eventSubType, sourceFeed].join(' ').toUpperCase()
 
   return {
     id: id || '',
@@ -245,6 +237,8 @@ export function normalize511RowToItem(raw, sourceFeed, defaultKind) {
     title: displayTitle,
     description: description || undefined,
     roads: roadway ? [roadway] : [],
+    region: region || undefined,
+    county: county || undefined,
     lat: lat != null ? lat : undefined,
     lng: lng != null ? lng : undefined,
     startsAt: startsAt || undefined,
@@ -303,11 +297,14 @@ export function dedupeNy511Items(items) {
 }
 
 /**
+ * Fetch from 511NY official API.
+ * Endpoint format: https://511ny.org/api/{apiPath}?key=...&format=json
+ * @see https://511ny.org/developers/help/api/get-api-getevents_key_format
  * @param {string} apiKey
- * @param {string} resource
+ * @param {string} apiPath e.g. "getevents", "getalerts"
  */
-async function fetch511Json(apiKey, resource) {
-  const url = `https://511ny.org/api/v2/get/${resource}?key=${encodeURIComponent(apiKey)}&format=json`
+async function fetch511Json(apiKey, apiPath) {
+  const url = `https://511ny.org/api/${apiPath}?key=${encodeURIComponent(apiKey)}&format=json`
   const res = await fetch(url, {
     headers: { Accept: 'application/json' },
     signal: AbortSignal.timeout(18_000),
@@ -315,16 +312,16 @@ async function fetch511Json(apiKey, resource) {
   const text = await res.text()
   const trimmed = text.trim()
   if (trimmed.startsWith('<')) {
-    throw new Error(`${resource}: non-JSON response (${trimmed.slice(0, 80)})`)
+    throw new Error(`${apiPath}: non-JSON response (${trimmed.slice(0, 80)})`)
   }
   let data
   try {
     data = JSON.parse(trimmed)
   } catch {
-    throw new Error(`${resource}: invalid JSON`)
+    throw new Error(`${apiPath}: invalid JSON`)
   }
   if (!res.ok) {
-    throw new Error(`${resource}: HTTP ${res.status}`)
+    throw new Error(`${apiPath}: HTTP ${res.status}`)
   }
   return data
 }
