@@ -140,21 +140,27 @@ function compareLocationIdNumeric(a, b) {
   return sa.localeCompare(sb, undefined, { numeric: true, sensitivity: 'base' })
 }
 
-function toggleLocationTypeFilter(t) {
-  const cur = [...selectedLocationTypes.value]
-  const i = cur.indexOf(t)
-  if (i >= 0) {
-    if (cur.length <= 1) return
-    cur.splice(i, 1)
-  } else {
-    cur.push(t)
-  }
-  cur.sort(compareDirectoryTypeFilterKeys)
-  selectedLocationTypes.value = cur
-}
-
 function resetLocationTypeFilter() {
   selectedLocationTypes.value = [...DEFAULT_LOCATION_TYPE_FILTER]
+}
+
+/** Keep at least one type when using the multi-select. */
+function normalizeLocationTypesFromSelect() {
+  if (!selectedLocationTypes.value.length) {
+    selectedLocationTypes.value = [...DEFAULT_LOCATION_TYPE_FILTER]
+    return
+  }
+  selectedLocationTypes.value = [...selectedLocationTypes.value].sort(compareDirectoryTypeFilterKeys)
+}
+
+function normalizeCountrySelectionFromSelect() {
+  selectedCountryCodes.value = [...selectedCountryCodes.value]
+    .map((c) => String(c).toUpperCase())
+    .sort()
+}
+
+function normalizeStateSelectionFromSelect() {
+  selectedStateComposites.value = [...selectedStateComposites.value].sort()
 }
 
 function resetAllDirectoryFilters() {
@@ -186,6 +192,35 @@ const directoryFiltersDirty = computed(() => {
 
 /** Filters panel closed by default — compact directory chrome. */
 const directoryFiltersPanelOpen = ref(false)
+const directoryFiltersShellRef = ref(/** @type {HTMLElement | null} */ (null))
+/** @type {((e: MouseEvent) => void) | null} */
+let directoryFiltersOutsideClick = null
+
+function removeDirectoryFiltersOutsideClick() {
+  if (directoryFiltersOutsideClick && typeof document !== 'undefined') {
+    document.removeEventListener('click', directoryFiltersOutsideClick, true)
+    directoryFiltersOutsideClick = null
+  }
+}
+
+watch(directoryFiltersPanelOpen, (open) => {
+  removeDirectoryFiltersOutsideClick()
+  if (!open || typeof document === 'undefined') return
+  void nextTick(() => {
+    requestAnimationFrame(() => {
+      directoryFiltersOutsideClick = (e) => {
+        const shell = directoryFiltersShellRef.value
+        const t = e.target
+        if (!(t instanceof Node) || !(shell instanceof Element)) return
+        if (!shell.contains(t)) {
+          directoryFiltersPanelOpen.value = false
+          removeDirectoryFiltersOutsideClick()
+        }
+      }
+      document.addEventListener('click', directoryFiltersOutsideClick, true)
+    })
+  })
+})
 
 /** Location type chips: hide “Other” when no rows use that bucket. */
 const directoryTypeChips = computed(() => {
@@ -388,31 +423,6 @@ const stateFacetList = computed(() => {
   )
 })
 
-function toggleCountryFilter(code) {
-  const c = String(code).toUpperCase()
-  const cur = [...selectedCountryCodes.value]
-  const i = cur.indexOf(c)
-  if (i >= 0) {
-    cur.splice(i, 1)
-  } else {
-    cur.push(c)
-  }
-  cur.sort()
-  selectedCountryCodes.value = cur
-}
-
-function toggleStateFilter(composite) {
-  const key = String(composite)
-  const cur = [...selectedStateComposites.value]
-  const i = cur.indexOf(key)
-  if (i >= 0) {
-    cur.splice(i, 1)
-  } else {
-    cur.push(key)
-  }
-  cur.sort()
-  selectedStateComposites.value = cur
-}
 
 /**
  * @param {{ locationId: string, locationName?: string, locationType?: string, _geo: { countryLabel?: string, stateLabel?: string, stateCode?: string, composite?: string } }} a
@@ -1041,6 +1051,7 @@ onUnmounted(() => {
     geocodeStatusPollTimer = null
   }
   tearDownDirectoryHeadingObserver()
+  removeDirectoryFiltersOutsideClick()
 })
 </script>
 
@@ -1292,150 +1303,145 @@ onUnmounted(() => {
 
     <section
       v-if="locations.length"
-      class="directory-filters"
+      class="directory-filters directory-filters--dropdown"
+      :class="{ 'is-open': directoryFiltersPanelOpen }"
       aria-label="Directory filters and sort"
     >
-      <button
-        id="directory-filters-trigger"
-        type="button"
-        class="directory-filters-trigger tap"
-        :aria-expanded="directoryFiltersPanelOpen"
-        aria-controls="directory-filters-panel"
-        @click="directoryFiltersPanelOpen = !directoryFiltersPanelOpen"
-      >
-        <span class="directory-filters-trigger-main">
-          <span class="directory-filters-trigger-title">Filters &amp; sort</span>
-          <span
-            v-if="directoryFiltersDirty"
-            class="directory-filters-dirty-dot"
-            aria-hidden="true"
-            title="Non-default filters"
-          />
-        </span>
-        <span class="directory-filters-trigger-summary">{{ directoryFiltersTriggerSummary }}</span>
-        <svg
-          class="directory-filters-trigger-chevron"
-          :class="{ 'is-open': directoryFiltersPanelOpen }"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          stroke-width="2"
-          aria-hidden="true"
+      <div ref="directoryFiltersShellRef" class="directory-filters-shell">
+        <button
+          id="directory-filters-trigger"
+          type="button"
+          class="directory-filters-trigger tap"
+          :aria-expanded="directoryFiltersPanelOpen"
+          aria-controls="directory-filters-panel"
+          @click="directoryFiltersPanelOpen = !directoryFiltersPanelOpen"
         >
-          <polyline points="6 9 12 15 18 9" />
-        </svg>
-      </button>
+          <span class="directory-filters-trigger-main">
+            <span class="directory-filters-trigger-title">Filters &amp; sort</span>
+            <span
+              v-if="directoryFiltersDirty"
+              class="directory-filters-dirty-dot"
+              aria-hidden="true"
+              title="Non-default filters"
+            />
+          </span>
+          <span class="directory-filters-trigger-summary">{{ directoryFiltersTriggerSummary }}</span>
+          <svg
+            class="directory-filters-trigger-chevron"
+            :class="{ 'is-open': directoryFiltersPanelOpen }"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            aria-hidden="true"
+          >
+            <polyline points="6 9 12 15 18 9" />
+          </svg>
+        </button>
 
-      <div
-        id="directory-filters-panel"
-        v-show="directoryFiltersPanelOpen"
-        class="directory-filters-panel"
-        role="region"
-        aria-labelledby="directory-filters-trigger"
-      >
-        <p class="directory-filters-desc directory-filters-desc--panel">
-          Types, country, and state/province combine. Empty country or region means
-          <strong>all</strong>. Sort applies to the list and map pins after search.
-        </p>
-        <div class="directory-filters-toolbar">
-          <div class="directory-sort-control">
-            <label for="directory-sort-key" class="directory-sort-label">Sort</label>
-            <select
-              id="directory-sort-key"
-              v-model="directorySortKey"
-              class="directory-sort-select tap"
-            >
-              <option value="id">Location ID</option>
-              <option value="name">Name</option>
-              <option value="state">State / province</option>
-              <option value="country">Country</option>
-              <option value="type">Location type</option>
-            </select>
+        <div
+          id="directory-filters-panel"
+          v-show="directoryFiltersPanelOpen"
+          class="directory-filters-panel"
+          role="region"
+          aria-labelledby="directory-filters-trigger"
+          @click.stop
+        >
+          <p class="directory-filters-desc directory-filters-desc--panel">
+            Use the lists below (multi-select). Empty country or region lists mean <strong>all</strong> in scope.
+            Sort applies after search.
+          </p>
+          <div class="directory-filters-toolbar">
+            <div class="directory-sort-control">
+              <label for="directory-sort-key" class="directory-sort-label">Sort</label>
+              <select
+                id="directory-sort-key"
+                v-model="directorySortKey"
+                class="directory-sort-select tap"
+              >
+                <option value="id">Location ID</option>
+                <option value="name">Name</option>
+                <option value="state">State / province</option>
+                <option value="country">Country</option>
+                <option value="type">Location type</option>
+              </select>
+              <button
+                type="button"
+                class="directory-sort-dir tap"
+                :title="directorySortDir === 'asc' ? 'Switch to descending' : 'Switch to ascending'"
+                :aria-label="directorySortDir === 'asc' ? 'Sort descending' : 'Sort ascending'"
+                @click="toggleSortDir"
+              >
+                {{ directorySortDir === 'asc' ? 'A → Z' : 'Z → A' }}
+              </button>
+            </div>
             <button
+              v-if="directoryFiltersDirty"
               type="button"
-              class="directory-sort-dir tap"
-              :title="directorySortDir === 'asc' ? 'Switch to descending' : 'Switch to ascending'"
-              :aria-label="directorySortDir === 'asc' ? 'Sort descending' : 'Sort ascending'"
-              @click="toggleSortDir"
+              class="directory-filters-clear tap"
+              @click="resetAllDirectoryFilters"
             >
-              {{ directorySortDir === 'asc' ? 'A → Z' : 'Z → A' }}
+              Clear filters
             </button>
           </div>
-          <button
-            v-if="directoryFiltersDirty"
-            type="button"
-            class="directory-filters-clear tap"
-            @click="resetAllDirectoryFilters"
-          >
-            Clear filters
-          </button>
-        </div>
 
-        <div class="directory-filters-grid directory-filters-grid--panel">
-          <fieldset class="directory-filters-fieldset">
-            <legend class="directory-filters-legend">Location type</legend>
-            <p class="directory-filters-hint">{{ locationTypeFilterSummary }}</p>
-            <div class="directory-filters-chip-row" role="group" aria-label="Location types">
-              <button
-                v-for="t in directoryTypeChips"
-                :key="t"
-                type="button"
-                class="directory-filter-chip tap"
-                :class="{ 'is-active': selectedLocationTypes.includes(t) }"
-                :aria-pressed="selectedLocationTypes.includes(t)"
-                @click="toggleLocationTypeFilter(t)"
+          <div class="directory-filters-select-stack">
+            <div class="directory-filters-select-field">
+              <label for="directory-filter-loc-type" class="directory-filters-field-label">Location type</label>
+              <p class="directory-filters-field-hint">{{ locationTypeFilterSummary }}</p>
+              <select
+                id="directory-filter-loc-type"
+                v-model="selectedLocationTypes"
+                class="directory-filter-multiselect tap"
+                multiple
+                :size="Math.min(8, Math.max(3, directoryTypeChips.length))"
+                aria-describedby="directory-filter-ms-help"
+                @change="normalizeLocationTypesFromSelect"
               >
-                {{ t }}
+                <option v-for="t in directoryTypeChips" :key="t" :value="t">{{ t }}</option>
+              </select>
+              <p id="directory-filter-ms-help" class="directory-filters-micro-hint">
+                Multi-select: Ctrl or ⌘ while tapping options (where supported). At least one type stays selected.
+              </p>
+              <button type="button" class="directory-filters-text-btn tap" @click="resetLocationTypeFilter">
+                Use Hub + Station only
               </button>
             </div>
-            <button type="button" class="directory-filters-text-btn tap" @click="resetLocationTypeFilter">
-              Use Hub + Station only
-            </button>
-          </fieldset>
 
-          <fieldset v-if="countryFacetList.length" class="directory-filters-fieldset">
-            <legend class="directory-filters-legend">Country</legend>
-            <p class="directory-filters-hint">
-              <template v-if="!selectedCountryCodes.length">Showing all countries for the types above.</template>
-              <template v-else>Filtering to {{ selectedCountryCodes.length }} selected.</template>
-            </p>
-            <div class="directory-filters-chip-row" role="group" aria-label="Countries">
-              <button
-                v-for="row in countryFacetList"
-                :key="row.code"
-                type="button"
-                class="directory-filter-chip directory-filter-chip--grow tap"
-                :class="{ 'is-active': selectedCountryCodes.includes(row.code) }"
-                :aria-pressed="selectedCountryCodes.includes(row.code)"
-                @click="toggleCountryFilter(row.code)"
+            <div v-if="countryFacetList.length" class="directory-filters-select-field">
+              <label for="directory-filter-country" class="directory-filters-field-label">Country</label>
+              <p class="directory-filters-field-hint">None selected = all countries for the current types.</p>
+              <select
+                id="directory-filter-country"
+                v-model="selectedCountryCodes"
+                class="directory-filter-multiselect tap"
+                multiple
+                :size="Math.min(6, Math.max(3, countryFacetList.length))"
+                @change="normalizeCountrySelectionFromSelect"
               >
-                <span class="directory-filter-chip-label">{{ row.label }}</span>
-                <span class="directory-filter-chip-count">{{ row.count }}</span>
-              </button>
+                <option v-for="row in countryFacetList" :key="row.code" :value="row.code">
+                  {{ row.label }} ({{ row.count }})
+                </option>
+              </select>
             </div>
-          </fieldset>
 
-          <fieldset v-if="stateFacetList.length" class="directory-filters-fieldset">
-            <legend class="directory-filters-legend">State / province</legend>
-            <p class="directory-filters-hint">
-              <template v-if="!selectedStateComposites.length">All regions for the current type and country scope.</template>
-              <template v-else>{{ selectedStateComposites.length }} region(s) selected.</template>
-            </p>
-            <div class="directory-filters-chip-scroll" role="group" aria-label="States and provinces">
-              <button
-                v-for="row in stateFacetList"
-                :key="row.composite"
-                type="button"
-                class="directory-filter-chip tap"
-                :class="{ 'is-active': selectedStateComposites.includes(row.composite) }"
-                :aria-pressed="selectedStateComposites.includes(row.composite)"
-                @click="toggleStateFilter(row.composite)"
+            <div v-if="stateFacetList.length" class="directory-filters-select-field">
+              <label for="directory-filter-region" class="directory-filters-field-label">State / province</label>
+              <p class="directory-filters-field-hint">None selected = all regions for the current type and country scope.</p>
+              <select
+                id="directory-filter-region"
+                v-model="selectedStateComposites"
+                class="directory-filter-multiselect tap"
+                multiple
+                :size="Math.min(10, Math.max(4, stateFacetList.length))"
+                @change="normalizeStateSelectionFromSelect"
               >
-                <span class="directory-filter-chip-label">{{ row.label }}</span>
-                <span class="directory-filter-chip-count">{{ row.count }}</span>
-              </button>
+                <option v-for="row in stateFacetList" :key="row.composite" :value="row.composite">
+                  {{ row.label }} ({{ row.count }})
+                </option>
+              </select>
             </div>
-          </fieldset>
+          </div>
         </div>
       </div>
     </section>
@@ -2349,44 +2355,56 @@ onUnmounted(() => {
   height: 1rem;
 }
 
-.directory-filters {
-  margin-bottom: var(--space-3, 0.75rem);
+.directory-filters.directory-filters--dropdown {
+  position: relative;
+  z-index: 24;
+  margin-bottom: var(--space-2, 0.5rem);
   padding: 0;
-  border-radius: var(--radius-lg, 0.75rem);
-  border: 1px solid var(--color-border, rgba(255, 255, 255, 0.1));
-  background: linear-gradient(
-    165deg,
-    rgba(255, 255, 255, 0.055) 0%,
-    rgba(255, 255, 255, 0.02) 48%,
-    rgba(123, 77, 181, 0.06) 100%
-  );
-  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.04) inset;
-  overflow: hidden;
+  border: none;
+  background: transparent;
+  box-shadow: none;
+  overflow: visible;
 }
 
-.directory-filters-trigger {
+.directory-filters-shell {
+  position: relative;
+}
+
+.directory-filters--dropdown .directory-filters-trigger {
   display: flex;
   align-items: center;
-  gap: var(--space-2, 0.5rem);
+  gap: var(--space-3, 0.75rem);
   width: 100%;
   margin: 0;
-  padding: var(--space-2, 0.5rem) var(--space-3, 0.75rem);
+  padding: 0.625rem 1rem;
+  min-height: 2.875rem;
   text-align: left;
   font: inherit;
   color: var(--color-text-primary, #f4f4f8);
-  background: transparent;
-  border: none;
+  border-radius: var(--radius-lg, 0.75rem);
+  border: 1px solid var(--color-border, rgba(255, 255, 255, 0.1));
+  background: rgba(22, 21, 28, 0.96);
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.06) inset,
+    0 4px 18px rgba(0, 0, 0, 0.22);
   cursor: pointer;
-  min-height: 2.75rem;
 }
 
-.directory-filters-trigger:hover {
-  background: rgba(255, 255, 255, 0.04);
+.directory-filters--dropdown.is-open .directory-filters-trigger {
+  border-bottom-left-radius: 0;
+  border-bottom-right-radius: 0;
+  border-bottom-color: rgba(255, 255, 255, 0.05);
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.04) inset;
 }
 
-.directory-filters-trigger:focus-visible {
+.directory-filters--dropdown .directory-filters-trigger:hover {
+  border-color: rgba(255, 255, 255, 0.14);
+  background: rgba(28, 26, 34, 0.98);
+}
+
+.directory-filters--dropdown .directory-filters-trigger:focus-visible {
   outline: 2px solid rgba(123, 77, 181, 0.55);
-  outline-offset: -2px;
+  outline-offset: 2px;
 }
 
 .directory-filters-trigger-main {
@@ -2397,9 +2415,10 @@ onUnmounted(() => {
 }
 
 .directory-filters-trigger-title {
-  font-size: var(--text-sm, 0.875rem);
-  font-weight: var(--weight-semibold, 600);
-  letter-spacing: 0.02em;
+  font-size: var(--text-sm, 0.8125rem);
+  font-weight: var(--weight-medium, 500);
+  letter-spacing: 0.03em;
+  color: rgba(245, 243, 255, 0.96);
 }
 
 .directory-filters-dirty-dot {
@@ -2413,8 +2432,8 @@ onUnmounted(() => {
 .directory-filters-trigger-summary {
   flex: 1 1 auto;
   min-width: 0;
-  font-size: var(--text-xs, 0.75rem);
-  line-height: 1.25;
+  font-size: var(--text-xs, 0.6875rem);
+  line-height: 1.3;
   color: var(--color-text-tertiary, #8b8b9a);
   white-space: nowrap;
   overflow: hidden;
@@ -2437,22 +2456,35 @@ onUnmounted(() => {
   .directory-filters-trigger-chevron {
     transition: none;
   }
+
+  .directory-filters--dropdown .directory-filters-panel {
+    backdrop-filter: none;
+  }
 }
 
-.directory-filters-panel {
-  border-top: 1px solid var(--color-border, rgba(255, 255, 255, 0.08));
-  padding: var(--space-3, 0.75rem);
-  max-height: min(70vh, 28rem);
+.directory-filters--dropdown .directory-filters-panel {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 100%;
+  margin-top: -1px;
+  padding: 0.75rem 1rem 1rem;
+  border: 1px solid var(--color-border, rgba(255, 255, 255, 0.1));
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 0 0 var(--radius-lg, 0.75rem) var(--radius-lg);
+  background: rgba(19, 18, 24, 0.98);
+  backdrop-filter: blur(14px);
+  box-shadow: 0 20px 48px rgba(0, 0, 0, 0.55);
+  max-height: min(72vh, 30rem);
   overflow-y: auto;
   scrollbar-gutter: stable;
 }
 
 .directory-filters-desc--panel {
-  margin: 0 0 var(--space-3, 0.75rem);
+  margin: 0 0 var(--space-2, 0.5rem);
   font-size: var(--text-xs, 0.6875rem);
-  line-height: 1.45;
+  line-height: 1.4;
   color: var(--color-text-tertiary, #8b8b9a);
-  max-width: 42rem;
 }
 
 .directory-filters-toolbar {
@@ -2464,12 +2496,86 @@ onUnmounted(() => {
   margin-bottom: var(--space-3, 0.75rem);
 }
 
-.directory-filters-grid--panel {
-  gap: var(--space-3, 0.75rem);
+.directory-filters-select-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
 }
 
-.directory-filters-panel .directory-filters-chip-scroll {
-  max-height: 7rem;
+.directory-filters-select-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  min-width: 0;
+}
+
+.directory-filters-field-label {
+  font-size: var(--text-xs, 0.6875rem);
+  font-weight: var(--weight-semibold, 600);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--color-text-secondary, #a6a6b4);
+}
+
+.directory-filters-field-hint {
+  margin: 0 0 0.15rem;
+  font-size: var(--text-xs, 0.625rem);
+  line-height: 1.35;
+  color: var(--color-text-tertiary, #7e7e8c);
+}
+
+.directory-filters-micro-hint {
+  margin: 0.2rem 0 0;
+  font-size: 0.625rem;
+  line-height: 1.35;
+  color: var(--color-text-tertiary, #6e6e7c);
+}
+
+.directory-filter-multiselect {
+  width: 100%;
+  margin: 0;
+  padding: 0.35rem 0.45rem;
+  font-size: var(--text-xs, 0.8125rem);
+  line-height: 1.35;
+  color: var(--color-text-primary, #ececf4);
+  background: rgba(12, 11, 16, 0.95);
+  border: 1px solid var(--color-border, rgba(255, 255, 255, 0.12));
+  border-radius: var(--radius-md, 0.5rem);
+  cursor: pointer;
+  box-sizing: border-box;
+}
+
+.directory-filter-multiselect:focus {
+  outline: 2px solid rgba(123, 77, 181, 0.55);
+  outline-offset: 1px;
+}
+
+.directory-filter-multiselect option {
+  padding: 0.35rem 0.45rem;
+  color: #e8e8f0;
+  background: #16151c;
+}
+
+.directory-filter-multiselect option:checked {
+  background: rgba(91, 33, 182, 0.5);
+  color: #faf5ff;
+}
+
+.directory-filters-select-field .directory-filters-text-btn {
+  margin-top: 0.35rem;
+  align-self: flex-start;
+}
+
+.directory-filters--dropdown .directory-sort-control {
+  padding: 0.3rem 0.55rem;
+  gap: 0.4rem;
+  background: rgba(0, 0, 0, 0.18);
+  border-color: rgba(255, 255, 255, 0.07);
+}
+
+.directory-filters--dropdown .directory-filters-clear {
+  padding: 0.35rem 0.75rem;
+  font-size: 0.6875rem;
 }
 
 .directory-back-top {
@@ -2572,130 +2678,6 @@ onUnmounted(() => {
 
 .directory-filters-clear:hover {
   background: rgba(123, 77, 181, 0.5);
-}
-
-.directory-filters-grid {
-  display: grid;
-  gap: var(--space-4, 1rem);
-}
-
-@media (min-width: 960px) {
-  .directory-filters-grid {
-    grid-template-columns: minmax(0, 1.15fr) minmax(0, 0.85fr) minmax(0, 1.2fr);
-    align-items: start;
-  }
-}
-
-.directory-filters-fieldset {
-  margin: 0;
-  padding: 0;
-  border: none;
-  min-width: 0;
-}
-
-.directory-filters-legend {
-  float: left;
-  width: 100%;
-  margin: 0 0 var(--space-2, 0.5rem);
-  padding: 0;
-  font-size: var(--text-xs, 0.6875rem);
-  font-weight: var(--weight-semibold, 600);
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--color-text-secondary, #a8a8b8);
-}
-
-.directory-filters-hint {
-  clear: both;
-  margin: 0 0 var(--space-2, 0.5rem);
-  font-size: var(--text-xs, 0.6875rem);
-  line-height: 1.4;
-  color: var(--color-text-tertiary, #7a7a8a);
-}
-
-.directory-filters-chip-row {
-  clear: both;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.4rem;
-}
-
-.directory-filters-chip-scroll {
-  clear: both;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.4rem;
-  max-height: 10.5rem;
-  overflow-y: auto;
-  padding: 2px;
-  margin: -2px;
-  scrollbar-gutter: stable;
-}
-
-.directory-filters-chip-scroll::-webkit-scrollbar {
-  width: 6px;
-}
-
-.directory-filters-chip-scroll::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.12);
-  border-radius: 999px;
-}
-
-.directory-filter-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.35rem;
-  padding: 0.4rem 0.65rem;
-  font-size: var(--text-xs, 0.75rem);
-  font-weight: var(--weight-medium, 500);
-  line-height: 1.2;
-  color: var(--color-text-secondary, #b4b4c4);
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid var(--color-border, rgba(255, 255, 255, 0.1));
-  border-radius: var(--radius-md, 0.5rem);
-  cursor: pointer;
-  transition:
-    color 0.15s ease,
-    background 0.15s ease,
-    border-color 0.15s ease,
-    box-shadow 0.15s ease;
-}
-
-.directory-filter-chip--grow {
-  flex: 1 1 auto;
-  justify-content: space-between;
-  min-width: min(100%, 8.5rem);
-}
-
-.directory-filter-chip:hover {
-  border-color: rgba(123, 77, 181, 0.4);
-  color: var(--color-text-primary, #f4f4f8);
-  background: rgba(255, 255, 255, 0.06);
-}
-
-.directory-filter-chip.is-active {
-  color: var(--color-text-primary, #fafafa);
-  background: linear-gradient(145deg, rgba(123, 77, 181, 0.42), rgba(91, 33, 182, 0.35));
-  border-color: rgba(167, 139, 250, 0.55);
-  box-shadow: 0 0 0 1px rgba(123, 77, 181, 0.25);
-}
-
-.directory-filter-chip-label {
-  text-align: left;
-}
-
-.directory-filter-chip-count {
-  font-size: 0.625rem;
-  font-weight: var(--weight-semibold, 600);
-  padding: 0.1rem 0.35rem;
-  border-radius: var(--radius-full, 9999px);
-  background: rgba(0, 0, 0, 0.25);
-  color: var(--color-text-tertiary, #c4c4d4);
-}
-
-.directory-filter-chip.is-active .directory-filter-chip-count {
-  background: rgba(0, 0, 0, 0.35);
-  color: #f5f3ff;
 }
 
 .directory-filters-text-btn {
