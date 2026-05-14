@@ -4166,9 +4166,15 @@ onUnmounted(() => {
   display: flex;
   align-items: stretch;
   justify-content: center;
-  padding: max(env(safe-area-inset-top), 0.5rem) max(env(safe-area-inset-right), 0.5rem)
-    max(env(safe-area-inset-bottom), 0.5rem) max(env(safe-area-inset-left), 0.5rem);
   box-sizing: border-box;
+  /* Full viewport height; dvh avoids mobile browser chrome clipping */
+  min-height: 100vh;
+  min-height: 100dvh;
+  height: 100vh;
+  height: 100dvh;
+  /* Horizontal inset + safe-area only — no vertical gutter so the PDF column can use full height */
+  padding: env(safe-area-inset-top, 0) max(env(safe-area-inset-right), 0.5rem)
+    env(safe-area-inset-bottom, 0) max(env(safe-area-inset-left), 0.5rem);
 }
 
 .history-pdf-viewer-backdrop {
@@ -4183,7 +4189,11 @@ onUnmounted(() => {
   display: flex;
   flex-direction: column;
   width: min(960px, 100%);
-  max-height: min(92vh, 100%);
+  align-self: stretch;
+  min-height: 0;
+  height: 100%;
+  max-height: min(100vh, 100%);
+  max-height: min(100dvh, 100%);
   background: #12121a;
   border-radius: 14px;
   border: 1px solid rgba(167, 139, 250, 0.35);

@@ -95,6 +95,58 @@ export function normalizePhoneForFill(raw) {
 }
 
 /**
+ * FedEx Angular can ignore a plain `.fill`; verify the value and dispatch input/change if needed.
+ *
+ * @param {import('playwright').Locator} modal
+ * @param {import('playwright').Page} page
+ * @param {Awaited<ReturnType<typeof getResolvedCheckInXpaths>>} CX
+ * @param {string} digits
+ * @param {AbortSignal | undefined} signal
+ */
+export async function fillNotScheduledPhoneModalField(modal, page, CX, digits, signal) {
+  if (signal?.aborted) throw new Error('Aborted')
+  const locators = [
+    modal.locator('input[type="tel"]').first(),
+    modal.locator('input[type="text"]').first(),
+    modal.locator('input').first(),
+    page.locator(xp(CX.phoneModalInput)),
+  ]
+
+  /** @param {import('playwright').Locator} loc */
+  const tryOne = async (loc) => {
+    await loc.waitFor({ state: 'visible', timeout: T.phoneFill })
+    await loc.click({ force: true, timeout: T.phoneFill })
+    await loc.fill('', { force: true, timeout: T.phoneFill })
+    await loc.fill(digits, { force: true, timeout: T.phoneFill })
+    const v = normalizePhoneForFill(await loc.inputValue().catch(() => ''))
+    if (v === digits) return true
+    await loc.evaluate(
+      (el, d) => {
+        const input = /** @type {HTMLInputElement} */ (el)
+        input.value = d
+        input.dispatchEvent(new Event('input', { bubbles: true }))
+        input.dispatchEvent(new Event('change', { bubbles: true }))
+        input.dispatchEvent(new Event('blur', { bubbles: true }))
+      },
+      digits,
+    )
+    const v2 = normalizePhoneForFill(await loc.inputValue().catch(() => ''))
+    return v2 === digits
+  }
+
+  let lastErr = /** @type {Error | null} */ (null)
+  for (const loc of locators) {
+    if (signal?.aborted) throw new Error('Aborted')
+    try {
+      if (await tryOne(loc)) return
+    } catch (e) {
+      lastErr = e instanceof Error ? e : new Error(String(e))
+    }
+  }
+  throw lastErr ?? new Error('Could not fill trip not scheduled phone field')
+}
+
+/**
  * FedEx "Are you sure you want to sign out?" uses an orange **Continue** button (not "Sign out" text).
  * Prefer role inside `app-sign-out-modal`, then saved XPath.
  *
@@ -206,21 +258,9 @@ export async function runPhoneModalUntilMissionComplete(page, { log, signal, get
   log('info', 'Phone modal')
   await modal.waitFor({ state: 'visible', timeout: T.phoneModalWait })
 
-  const inpInModal = modal.locator('input').first()
-  const inpTyped = modal.locator('input[type="tel"], input[type="text"]').first()
-  const inpBySettings = page.locator(xp(CX.phoneModalInput))
-
   if (signal?.aborted) throw new Error('Aborted')
 
-  try {
-    await inpInModal.fill(digits, { force: true, timeout: T.phoneFill })
-  } catch {
-    try {
-      await inpTyped.fill(digits, { force: true, timeout: T.phoneFill })
-    } catch {
-      await inpBySettings.fill(digits, { force: true, timeout: T.phoneFill })
-    }
-  }
+  await fillNotScheduledPhoneModalField(modal, page, CX, digits, signal)
   log('info', 'Entered driver phone')
 
   if (signal?.aborted) throw new Error('Aborted')
@@ -310,21 +350,9 @@ export async function runPhoneModalWithoutSignOut(page, { phone, log, signal }) 
   const modal = page.locator('app-not-scheduled-phone-number-modal')
   await modal.waitFor({ state: 'visible', timeout: T.phoneModalWait })
 
-  const inpInModal = modal.locator('input').first()
-  const inpTyped = modal.locator('input[type="tel"], input[type="text"]').first()
-  const inpBySettings = page.locator(xp(CX.phoneModalInput))
-
   if (signal?.aborted) throw new Error('Aborted')
 
-  try {
-    await inpInModal.fill(digits, { force: true, timeout: T.phoneFill })
-  } catch {
-    try {
-      await inpTyped.fill(digits, { force: true, timeout: T.phoneFill })
-    } catch {
-      await inpBySettings.fill(digits, { force: true, timeout: T.phoneFill })
-    }
-  }
+  await fillNotScheduledPhoneModalField(modal, page, CX, digits, signal)
   log('info', 'Entered driver phone')
 
   if (signal?.aborted) throw new Error('Aborted')

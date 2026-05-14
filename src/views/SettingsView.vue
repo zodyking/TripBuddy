@@ -554,9 +554,13 @@ function onCredTractorInput(e) {
 async function loadAssignmentState() {
   try {
     const a = await getAssignment()
-    phoneDigits.value = String(a.driverPhone ?? '')
+    const fromA = String(a.driverPhone ?? '')
       .replace(/\D/g, '')
       .slice(0, 10)
+    const fromC = String(credMeta.value?.driverPhone ?? '')
+      .replace(/\D/g, '')
+      .slice(0, 10)
+    phoneDigits.value = fromC || fromA
   } catch (e) {
     pushLiveLog({ type: 'error', message: e instanceof Error ? e.message : String(e), ts: Date.now() })
   }
@@ -654,6 +658,7 @@ async function saveCredentials() {
       username: credUser.value,
       password: credPass.value || undefined,
       tractorNumber: credTractor.value,
+      driverPhone: phoneDigits.value,
       workWeekStartDay: workWeekStartDay.value,
       workWeekEndDay: workWeekEndDay.value,
       shiftStartMins: ssm,
@@ -1090,11 +1095,11 @@ function applySettingsRouteFragment() {
   })
 }
 
-onMounted(() => {
+onMounted(async () => {
   tripAlertMode.value = getTripAlertMode()
   unregisterRecover = registerApiRecover(reconnectLiveLogStream)
-  loadCredentials()
-  loadAssignmentState()
+  await loadCredentials()
+  await loadAssignmentState()
   tomtomTrafficDraft.value = trafficTomtomKeyOverride.value
   hereApiDraft.value = hereApiKeyOverride.value
   ny511ApiDraft.value = ny511ApiKeyOverride.value

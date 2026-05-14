@@ -13,6 +13,7 @@ import {
   getTractorNumber,
   getLinehaulDriverId,
   getDecryptedLinehaulBearer,
+  getDriverPhone,
 } from '../credentials-store.mjs'
 import { readAssignment, writeAssignment } from '../assignment-store.mjs'
 import {
@@ -22,7 +23,7 @@ import {
 } from './checkInFlow.mjs'
 import { runCheckInEndToEnd } from './checkInOrchestration.mjs'
 import { runArriveEndToEnd } from './arriveOrchestration.mjs'
-import { normalizePhoneForFill, clickSignOutModalConfirm } from './postCheckInFlow.mjs'
+import { normalizePhoneForFill, clickSignOutModalConfirm, fillNotScheduledPhoneModalField } from './postCheckInFlow.mjs'
 import {
   startPreviewCapture,
   stopPreviewCapture,
@@ -911,21 +912,9 @@ async function executeAction(action, page, ctx) {
       const modal = page.locator('app-not-scheduled-phone-number-modal')
       await modal.waitFor({ state: 'visible', timeout: T.phoneModalWait })
 
-      const inpInModal = modal.locator('input').first()
-      const inpTyped = modal.locator('input[type="tel"], input[type="text"]').first()
-      const inpBySettings = page.locator(`xpath=${CX.phoneModalInput}`)
-
       if (signal?.aborted) throw new Error('Aborted')
 
-      try {
-        await inpInModal.fill(digits, { force: true, timeout: T.phoneFill })
-      } catch {
-        try {
-          await inpTyped.fill(digits, { force: true, timeout: T.phoneFill })
-        } catch {
-          await inpBySettings.fill(digits, { force: true, timeout: T.phoneFill })
-        }
-      }
+      await fillNotScheduledPhoneModalField(modal, page, CX, digits, signal)
       log('info', `Filled phone: ${digits}`)
 
       if (signal?.aborted) throw new Error('Aborted')
@@ -1034,6 +1023,11 @@ export async function runAutomation(automation, opts = {}) {
     ])
     ctx.credentials = { username, password, tractor }
     ctx.assignment = await readAssignment()
+    {
+      const cred = (await getDriverPhone()).trim()
+      const aPhone = String(ctx.assignment?.driverPhone ?? '').trim()
+      ctx.assignment = { ...ctx.assignment, driverPhone: cred || aPhone }
+    }
 
     for (const condition of automation.conditions || []) {
       log('detail', `Checking condition: ${condition.type}`)

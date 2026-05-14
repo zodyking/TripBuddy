@@ -101,6 +101,7 @@ import {
   getTractorNumber,
   getLinehaulDriverId,
   getDecryptedLinehaulBearer,
+  getDriverPhone,
   accountKeyForUsername,
   setLastActiveAccountKey,
   writeUserMeta,
@@ -1551,8 +1552,9 @@ app.post('/api/run', async (req, reply) => {
         .code(400)
         .send({ error: 'Set tractor number in Settings' })
     }
+    const credPhone = (await getDriverPhone()).trim()
     const a = await readAssignment()
-    if (!(a.driverPhone || '').trim()) {
+    if (!(credPhone || (a.driverPhone || '').trim())) {
       return reply.code(400).send({
         error: 'Set driver phone (Driver Credentials in Settings) before Check in',
       })

@@ -1,4 +1,4 @@
-import { getTractorNumber } from '../credentials-store.mjs'
+import { getTractorNumber, getDriverPhone } from '../credentials-store.mjs'
 import { readAssignment } from '../assignment-store.mjs'
 import { ensureDispatchAppReady } from './dispatchAuthGate.mjs'
 import { runFullArrive } from './arriveFlow.mjs'
@@ -49,8 +49,9 @@ export async function runArriveEndToEnd(page, opts) {
         signedOut: false,
       }
     } else {
+      const cred = (await getDriverPhone()).trim()
       const a = await readAssignment()
-      const phone = (a.driverPhone || '').trim()
+      const phone = cred || (a.driverPhone || '').trim()
       if (!phone) {
         throw new Error(
           'Set driver phone (Driver Credentials in Settings) before Arrive',

@@ -12,6 +12,12 @@ const SCRYPT_SALT = 'fedextool-cred-v1'
 /** 0=Sun .. 6=Sat for work-week boundaries in History */
 const DOW = new Set([0, 1, 2, 3, 4, 5, 6])
 
+/** US driver phone for Linehaul / check-in modals: digits only, max 10. */
+function normalizeDriverPhoneDigits(v) {
+  const d = String(v ?? '').replace(/\D/g, '').slice(0, 10)
+  return d.length > 0 ? d : null
+}
+
 export { getLastActiveAccountKey, setLastActiveAccountKey }
 
 export { accountKeyForUsername }
@@ -82,6 +88,7 @@ function resolveAccountKey() {
  *   linehaulBearerEnc: object | null,
  *   driverName: string | null,
  *   linehaulPollMinutes: number | null,
+ *   driverPhone: string | null,
  * }>}
  */
 function parseCredData(data) {
@@ -122,6 +129,7 @@ function parseCredData(data) {
     workWeekEndDay,
     shiftStartMins,
     shiftEndMins,
+    driverPhone: normalizeDriverPhoneDigits(data.driverPhone),
   }
 }
 
@@ -145,6 +153,7 @@ async function readFileRawForAccount(accountKey) {
     workWeekEndDay: 6,
     shiftStartMins: 0,
     shiftEndMins: 1439,
+    driverPhone: null,
   }
 }
 
@@ -200,6 +209,7 @@ export async function getCredentialsMeta() {
     workWeekEndDay,
     shiftStartMins,
     shiftEndMins,
+    driverPhone,
   } = await readFileRaw()
   const tn = tractorNumber?.trim() || null
   const en = employeeNumber?.trim() || null
@@ -223,6 +233,10 @@ export async function getCredentialsMeta() {
     typeof shiftEndMins === 'number' && !Number.isNaN(shiftEndMins)
       ? Math.max(0, Math.min(1439, Math.floor(shiftEndMins)))
       : 1439
+  const dp =
+    typeof driverPhone === 'string' && driverPhone.trim().length > 0
+      ? driverPhone.trim().replace(/\D/g, '').slice(0, 10)
+      : ''
   return {
     username: username || null,
     hasPassword: Boolean(passwordEnc?.data && passwordEnc?.iv && passwordEnc?.tag),
@@ -242,7 +256,14 @@ export async function getCredentialsMeta() {
     shiftStartMins: ssm,
     shiftEndMins: sem,
     appLoginVerified: verified,
+    driverPhone: dp || null,
   }
+}
+
+/** Digits-only driver phone from saved credentials (same field as Settings), or empty string. */
+export async function getDriverPhone() {
+  const { driverPhone } = await readFileRaw()
+  return typeof driverPhone === 'string' ? driverPhone.trim() : ''
 }
 
 /** Non-empty trimmed tractor number for automation, or empty string */
@@ -317,6 +338,9 @@ export async function getDriverName() {
  *   linehaulPollMinutes?: number,
  *   workWeekStartDay?: number,
  *   workWeekEndDay?: number,
+ *   shiftStartMins?: number,
+ *   shiftEndMins?: number,
+ *   driverPhone?: string,
  * }} body password optional = keep; linehaulPollMinutes 0–1440 (0 = no auto refresh)
  */
 export async function saveCredentials(body) {
@@ -407,6 +431,11 @@ export async function saveCredentials(body) {
     shiftEndMins = Math.max(0, Math.min(1439, Math.floor(body.shiftEndMins)))
   }
 
+  let driverPhone = prev.driverPhone ?? null
+  if (typeof body.driverPhone === 'string') {
+    driverPhone = normalizeDriverPhoneDigits(body.driverPhone)
+  }
+
   const next = {
     username: username || null,
     passwordEnc,
@@ -419,6 +448,7 @@ export async function saveCredentials(body) {
     workWeekEndDay,
     shiftStartMins,
     shiftEndMins,
+    driverPhone,
   }
   await writeKeyJson(credsKey(acc), next)
   return getCredentialsMeta()
@@ -441,6 +471,7 @@ export async function clearCredentials() {
     workWeekEndDay: 6,
     shiftStartMins: 0,
     shiftEndMins: 1439,
+    driverPhone: null,
   }
   await writeKeyJson(credsKey(acc), empty)
   try {

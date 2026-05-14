@@ -1,4 +1,4 @@
-import { getTractorNumber, getLinehaulDriverId, getDecryptedLinehaulBearer } from '../credentials-store.mjs'
+import { getTractorNumber, getLinehaulDriverId, getDecryptedLinehaulBearer, getDriverPhone } from '../credentials-store.mjs'
 import { readAssignment } from '../assignment-store.mjs'
 import { linehaulGet } from '../fedex-linehaul-api.mjs'
 import { ensureDispatchAppReady } from './dispatchAuthGate.mjs'
@@ -88,6 +88,8 @@ export async function runCheckInEndToEnd(page, opts) {
       log,
       signal,
       getPhone: async () => {
+        const fromC = (await getDriverPhone()).trim()
+        if (fromC) return fromC
         const a = await readAssignment()
         return (a.driverPhone || '').trim()
       },
