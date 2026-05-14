@@ -672,6 +672,30 @@ body {
   color: white;
 }
 
+/* ═══════════════════════════════════════════════════════════════════════════
+   iOS ZOOM FIX — prevent auto-zoom on input focus
+   Safari zooms when input font-size < 16px; enforce minimum across all inputs
+   ═══════════════════════════════════════════════════════════════════════════ */
+@supports (-webkit-touch-callout: none) {
+  input,
+  input[type="text"],
+  input[type="password"],
+  input[type="email"],
+  input[type="number"],
+  input[type="tel"],
+  input[type="url"],
+  input[type="search"],
+  input[type="date"],
+  input[type="time"],
+  input[type="datetime-local"],
+  input[type="month"],
+  input[type="week"],
+  textarea,
+  select {
+    font-size: 16px !important;
+  }
+}
+
 /* Invisible scrollbars app-wide */
 * {
   scrollbar-width: none;
