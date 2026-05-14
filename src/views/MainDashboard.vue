@@ -2968,7 +2968,7 @@ onUnmounted(() => {
 }
 
 .main--automation-preview {
-  flex: 1 1 auto;
+  flex: 1 1 0;
   min-height: 0;
   justify-content: flex-start;
   padding-block: var(--space-2, 0.5rem);
@@ -2977,7 +2977,7 @@ onUnmounted(() => {
 .automation-preview-host {
   box-sizing: border-box;
   width: 100%;
-  flex: 1 1 auto;
+  flex: 1 1 0;
   min-height: 0;
   display: flex;
   flex-direction: column;
@@ -2987,33 +2987,36 @@ onUnmounted(() => {
 }
 
 .automation-preview-host .preview-panel {
-  flex: 1 1 auto;
+  flex: 1 1 0;
   min-height: 0;
   display: flex;
   flex-direction: column;
   width: 100%;
-  max-width: min(96vw, 58rem);
+  max-width: 100%;
   margin-inline: auto;
 }
 
 .automation-preview-host .preview-panel .preview-frame {
-  flex: 1 1 auto;
+  flex: 1 1 0;
   min-height: 0;
   width: 100%;
   position: relative;
 }
 
+/* Override generic .preview-img max-height so the live screenshot scales to fill the frame */
 .automation-preview-host .preview-img {
   position: absolute;
   inset: 0;
   width: 100%;
   height: 100%;
+  max-height: none;
+  max-width: none;
   object-fit: contain;
   object-position: center center;
 }
 
 .main.main--automation-preview .preview-frame-empty {
-  flex: 1 1 auto;
+  flex: 1 1 0;
   min-height: 12rem;
 }
 

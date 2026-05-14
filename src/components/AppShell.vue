@@ -825,7 +825,7 @@ onUnmounted(() => {
  * Selectors stay under .app-shell so they only apply inside this layout.
  */
 .app-shell .app-main.app-main--home:has(.main--automation-preview) {
-  flex: 1 1 auto;
+  flex: 1 1 0;
   min-height: 0;
   display: flex;
   flex-direction: column;
@@ -833,7 +833,7 @@ onUnmounted(() => {
 }
 
 .app-shell .app-main.app-main--home:has(.main--automation-preview) > * {
-  flex: 1 1 auto;
+  flex: 1 1 0;
   min-height: 0;
   min-width: 0;
   width: 100%;
@@ -842,5 +842,7 @@ onUnmounted(() => {
 
 .app-shell .app-scroll:has(.main--automation-preview) {
   overflow-y: hidden;
+  flex: 1 1 0;
+  min-height: 0;
 }
 </style>
