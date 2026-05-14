@@ -423,6 +423,16 @@ const stateFacetList = computed(() => {
   )
 })
 
+/** Listbox `size` rows — independent, capped for a balanced panel layout. */
+const directoryFilterTypeListboxSize = computed(() =>
+  Math.min(6, Math.max(3, directoryTypeChips.value.length)),
+)
+const directoryFilterCountryListboxSize = computed(() =>
+  Math.min(5, Math.max(2, countryFacetList.value.length)),
+)
+const directoryFilterStateListboxSize = computed(() =>
+  Math.min(8, Math.max(4, stateFacetList.value.length)),
+)
 
 /**
  * @param {{ locationId: string, locationName?: string, locationType?: string, _geo: { countryLabel?: string, stateLabel?: string, stateCode?: string, composite?: string } }} a
@@ -1347,10 +1357,6 @@ onUnmounted(() => {
           aria-labelledby="directory-filters-trigger"
           @click.stop
         >
-          <p class="directory-filters-desc directory-filters-desc--panel">
-            Use the lists below (multi-select). Empty country or region lists mean <strong>all</strong> in scope.
-            Sort applies after search.
-          </p>
           <div class="directory-filters-toolbar">
             <div class="directory-sort-control">
               <label for="directory-sort-key" class="directory-sort-label">Sort</label>
@@ -1385,8 +1391,17 @@ onUnmounted(() => {
             </button>
           </div>
 
-          <div class="directory-filters-select-stack">
-            <div class="directory-filters-select-field">
+          <p id="directory-filters-panel-hint" class="directory-filters-desc directory-filters-desc--panel">
+            Each box is its own multi-select list. Empty country or region = <strong>all</strong>. Ctrl/⌘+click for
+            multiple. Keep at least one location type.
+          </p>
+
+          <div
+            class="directory-filters-listbox-grid"
+            role="group"
+            aria-label="Location type, country, and region filters"
+          >
+            <div class="directory-filters-listbox-card">
               <label for="directory-filter-loc-type" class="directory-filters-field-label">Location type</label>
               <p class="directory-filters-field-hint">{{ locationTypeFilterSummary }}</p>
               <select
@@ -1394,29 +1409,27 @@ onUnmounted(() => {
                 v-model="selectedLocationTypes"
                 class="directory-filter-multiselect tap"
                 multiple
-                :size="Math.min(8, Math.max(3, directoryTypeChips.length))"
-                aria-describedby="directory-filter-ms-help"
+                :size="directoryFilterTypeListboxSize"
+                aria-describedby="directory-filters-panel-hint"
                 @change="normalizeLocationTypesFromSelect"
               >
                 <option v-for="t in directoryTypeChips" :key="t" :value="t">{{ t }}</option>
               </select>
-              <p id="directory-filter-ms-help" class="directory-filters-micro-hint">
-                Multi-select: Ctrl or ⌘ while tapping options (where supported). At least one type stays selected.
-              </p>
               <button type="button" class="directory-filters-text-btn tap" @click="resetLocationTypeFilter">
                 Use Hub + Station only
               </button>
             </div>
 
-            <div v-if="countryFacetList.length" class="directory-filters-select-field">
+            <div v-if="countryFacetList.length" class="directory-filters-listbox-card">
               <label for="directory-filter-country" class="directory-filters-field-label">Country</label>
-              <p class="directory-filters-field-hint">None selected = all countries for the current types.</p>
+              <p class="directory-filters-field-hint">None = all countries.</p>
               <select
                 id="directory-filter-country"
                 v-model="selectedCountryCodes"
                 class="directory-filter-multiselect tap"
                 multiple
-                :size="Math.min(6, Math.max(3, countryFacetList.length))"
+                :size="directoryFilterCountryListboxSize"
+                aria-describedby="directory-filters-panel-hint"
                 @change="normalizeCountrySelectionFromSelect"
               >
                 <option v-for="row in countryFacetList" :key="row.code" :value="row.code">
@@ -1425,15 +1438,16 @@ onUnmounted(() => {
               </select>
             </div>
 
-            <div v-if="stateFacetList.length" class="directory-filters-select-field">
+            <div v-if="stateFacetList.length" class="directory-filters-listbox-card">
               <label for="directory-filter-region" class="directory-filters-field-label">State / province</label>
-              <p class="directory-filters-field-hint">None selected = all regions for the current type and country scope.</p>
+              <p class="directory-filters-field-hint">None = all regions in scope.</p>
               <select
                 id="directory-filter-region"
                 v-model="selectedStateComposites"
                 class="directory-filter-multiselect tap"
                 multiple
-                :size="Math.min(10, Math.max(4, stateFacetList.length))"
+                :size="directoryFilterStateListboxSize"
+                aria-describedby="directory-filters-panel-hint"
                 @change="normalizeStateSelectionFromSelect"
               >
                 <option v-for="row in stateFacetList" :key="row.composite" :value="row.composite">
@@ -2475,15 +2489,15 @@ onUnmounted(() => {
   background: rgba(19, 18, 24, 0.98);
   backdrop-filter: blur(14px);
   box-shadow: 0 20px 48px rgba(0, 0, 0, 0.55);
-  max-height: min(72vh, 30rem);
+  max-height: min(82vh, 36rem);
   overflow-y: auto;
   scrollbar-gutter: stable;
 }
 
 .directory-filters-desc--panel {
-  margin: 0 0 var(--space-2, 0.5rem);
+  margin: 0 0 var(--space-3, 0.75rem);
   font-size: var(--text-xs, 0.6875rem);
-  line-height: 1.4;
+  line-height: 1.45;
   color: var(--color-text-tertiary, #8b8b9a);
 }
 
@@ -2493,20 +2507,32 @@ onUnmounted(() => {
   align-items: flex-end;
   justify-content: space-between;
   gap: var(--space-2, 0.5rem);
-  margin-bottom: var(--space-3, 0.75rem);
+  margin-bottom: var(--space-2, 0.5rem);
 }
 
-.directory-filters-select-stack {
-  display: flex;
-  flex-direction: column;
-  gap: 0.75rem;
+.directory-filters-listbox-grid {
+  display: grid;
+  gap: 0.65rem;
 }
 
-.directory-filters-select-field {
+@media (min-width: 640px) {
+  .directory-filters-listbox-grid {
+    grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr));
+    gap: 0.65rem 0.75rem;
+    align-items: stretch;
+  }
+}
+
+.directory-filters-listbox-card {
   display: flex;
   flex-direction: column;
-  gap: 0.2rem;
+  gap: 0.3rem;
   min-width: 0;
+  min-height: 0;
+  padding: 0.55rem 0.65rem;
+  border-radius: var(--radius-md, 0.5rem);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(0, 0, 0, 0.22);
 }
 
 .directory-filters-field-label {
@@ -2518,7 +2544,7 @@ onUnmounted(() => {
 }
 
 .directory-filters-field-hint {
-  margin: 0 0 0.15rem;
+  margin: 0 0 0.1rem;
   font-size: var(--text-xs, 0.625rem);
   line-height: 1.35;
   color: var(--color-text-tertiary, #7e7e8c);
@@ -2533,6 +2559,8 @@ onUnmounted(() => {
 
 .directory-filter-multiselect {
   width: 100%;
+  flex: 1 1 auto;
+  min-height: 5.5rem;
   margin: 0;
   padding: 0.35rem 0.45rem;
   font-size: var(--text-xs, 0.8125rem);
@@ -2543,6 +2571,11 @@ onUnmounted(() => {
   border-radius: var(--radius-md, 0.5rem);
   cursor: pointer;
   box-sizing: border-box;
+}
+
+.directory-filters-listbox-card .directory-filters-text-btn {
+  margin-top: 0.25rem;
+  align-self: flex-start;
 }
 
 .directory-filter-multiselect:focus {
@@ -2559,11 +2592,6 @@ onUnmounted(() => {
 .directory-filter-multiselect option:checked {
   background: rgba(91, 33, 182, 0.5);
   color: #faf5ff;
-}
-
-.directory-filters-select-field .directory-filters-text-btn {
-  margin-top: 0.35rem;
-  align-self: flex-start;
 }
 
 .directory-filters--dropdown .directory-sort-control {
