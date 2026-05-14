@@ -68,6 +68,89 @@ function entriesEqual(a, b) {
 }
 
 /**
+ * @param {LocationEntry | null | undefined} e
+ */
+function locationHasValidCoords(e) {
+  if (!e) return false
+  const lat = e.latitude != null ? Number(e.latitude) : NaN
+  const lng = e.longitude != null ? Number(e.longitude) : NaN
+  return Number.isFinite(lat) && Number.isFinite(lng)
+}
+
+/**
+ * @param {Omit<LocationEntry, 'lastUpdated'>} data
+ */
+function coordsFromSeedData(data) {
+  const lat = data.latitude != null ? Number(data.latitude) : NaN
+  const lng = data.longitude != null ? Number(data.longitude) : NaN
+  return Number.isFinite(lat) && Number.isFinite(lng) ? { lat, lng } : null
+}
+
+/**
+ * Insert missing directory rows and fill latitude/longitude when the existing row has no valid coordinates.
+ * Does not overwrite coordinates that are already set.
+ * @param {Array<Omit<LocationEntry, 'lastUpdated'>>} entries
+ * @returns {Promise<{ inserted: number, coordsFilled: number, unchanged: number }>}
+ */
+export async function mergeDirectorySeeds(entries) {
+  if (!Array.isArray(entries) || entries.length === 0) {
+    return { inserted: 0, coordsFilled: 0, unchanged: 0 }
+  }
+  const directory = await readDirectory()
+  const now = new Date().toISOString()
+  let inserted = 0
+  let coordsFilled = 0
+  let unchanged = 0
+
+  for (const data of entries) {
+    if (!data || !data.locationId) {
+      unchanged++
+      continue
+    }
+    const id = String(data.locationId).trim()
+    if (!id) {
+      unchanged++
+      continue
+    }
+    const existing = directory[id]
+    if (!existing) {
+      directory[id] = {
+        locationId: id,
+        locationName: String(data.locationName ?? ''),
+        abbreviation: String(data.abbreviation ?? ''),
+        address: String(data.address ?? ''),
+        phone: String(data.phone ?? ''),
+        latitude: data.latitude != null ? Number(data.latitude) : null,
+        longitude: data.longitude != null ? Number(data.longitude) : null,
+        timeZone: String(data.timeZone ?? ''),
+        lastUpdated: now,
+        locationType: mergeOptionalTextField(data.locationType, ''),
+        district: mergeOptionalTextField(data.district, ''),
+      }
+      inserted++
+      continue
+    }
+    const coords = coordsFromSeedData(data)
+    if (!locationHasValidCoords(existing) && coords) {
+      directory[id] = {
+        ...existing,
+        latitude: coords.lat,
+        longitude: coords.lng,
+        lastUpdated: now,
+      }
+      coordsFilled++
+      continue
+    }
+    unchanged++
+  }
+
+  if (inserted > 0 || coordsFilled > 0) {
+    await writeDirectory(directory)
+  }
+  return { inserted, coordsFilled, unchanged }
+}
+
+/**
  * @param {Omit<LocationEntry, 'lastUpdated'>} data
  * @returns {Promise<{ updated: boolean, entry: LocationEntry }>}
  */
@@ -225,14 +308,32 @@ export async function bulkUpsertLocations(entries) {
       continue
     }
     const existing = directory[data.locationId]
+    const hasLatKey = Object.hasOwn(data, 'latitude')
+    const hasLngKey = Object.hasOwn(data, 'longitude')
+    let latitude = existing?.latitude ?? null
+    let longitude = existing?.longitude ?? null
+    if (hasLatKey) {
+      if (data.latitude == null || data.latitude === '') latitude = null
+      else {
+        const n = Number(data.latitude)
+        latitude = Number.isFinite(n) ? n : null
+      }
+    }
+    if (hasLngKey) {
+      if (data.longitude == null || data.longitude === '') longitude = null
+      else {
+        const n = Number(data.longitude)
+        longitude = Number.isFinite(n) ? n : null
+      }
+    }
     const entry = {
       locationId: String(data.locationId),
       locationName: String(data.locationName ?? ''),
       abbreviation: String(data.abbreviation ?? ''),
       address: String(data.address ?? ''),
       phone: String(data.phone ?? ''),
-      latitude: data.latitude != null ? Number(data.latitude) : null,
-      longitude: data.longitude != null ? Number(data.longitude) : null,
+      latitude,
+      longitude,
       timeZone: String(data.timeZone ?? ''),
       lastUpdated: now,
       locationType: mergeOptionalTextField(data.locationType, existing?.locationType),

@@ -108,6 +108,7 @@ import {
   patchLocation,
   bulkUpsertLocations,
 } from './locations-directory-store.mjs'
+import { mergeFedexGroundDirectorySeed } from './directory-fedex-ground-seed.mjs'
 import {
   geocodeDirectoryLocationById,
   geocodeMissingDirectoryLocations,
@@ -1721,6 +1722,11 @@ try {
 } catch (e) {
   console.error('[data-migration]', (e && e.message) || e)
   process.exit(1)
+}
+try {
+  await mergeFedexGroundDirectorySeed()
+} catch (e) {
+  console.error('[fedex-ground-seed]', (e && e.message) || e)
 }
 try {
   await requirePostgresOrThrow()

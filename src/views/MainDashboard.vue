@@ -64,6 +64,7 @@ import {
   registerSessionListener,
   reconnectLiveLogStream,
 } from '../stores/liveLogStore.js'
+import { pushInAppFromStream } from '../stores/inAppNotificationsStore.js'
 import { formatRunErrorForUser } from '../utils/runErrorFormat.js'
 import { isCheckInLocationMismatchMessage } from '../utils/checkInLocationMismatch.js'
 import { parseTripReadyBoolean } from '../utils/tripReadyParse.js'
@@ -119,17 +120,12 @@ import {
 
 const router = useRouter()
 
-const PORTAL_Z_BANNER = 2_147_483_000
 const PORTAL_Z_MODAL = 2_147_483_001
 const PORTAL_Z_LOCATION_MODAL = 2_147_483_002
 
 const loadError = ref(null)
-const runMsg = ref(null)
 const runErrorBanner = ref(null)
 const runStartTs = ref(null)
-
-const checkInSuccessBanner = ref(null)
-const checkInFailureText = ref(null)
 
 const locationRetryOpen = ref(false)
 const locationRetryFedexMessage = ref('')
@@ -217,7 +213,7 @@ let previewPollTimer = null
 let linehaulPollTimer = null
 const lastPreviewBusy = ref(false)
 
-/** Home: while automation preview is active, only the preview is shown (centered); other cards unmount. */
+/** Home: while automation preview is active, only the preview is shown (fills main area); other cards unmount. */
 const showAutomationPreviewFocus = computed(
   () => lastPreviewBusy.value && !automationPreviewHidden.value,
 )
@@ -1087,19 +1083,33 @@ async function loadQuickActions() {
   }
 }
 
+/** Quick action outcomes go to the header notification inbox (no page overlay). */
+function notifyQuickActionInApp(message, kind = 'info') {
+  const raw = typeof message === 'string' ? message : String(message)
+  const m = (kind === 'error' ? formatRunErrorForUser(raw) : raw).trim()
+  if (!m) return
+  pushInAppFromStream({
+    id: `qa-${Date.now()}-${Math.random().toString(36).slice(2, 11)}`,
+    message: m,
+    type: kind,
+    source: 'Quick action',
+    ts: Date.now(),
+    read: false,
+  })
+}
+
 async function runQuickAction(auto) {
   if (runningAutomationId.value) return
   runningAutomationId.value = auto.id
   runStartTs.value = Date.now()
   streamBannerHandledKey.value = null
   dismissRunErrorBanner()
-  dismissCheckInSuccess()
-  dismissCheckInFailure()
   automationPreviewHidden.value = false
   try {
     if (!(await ensureFedexApiReady())) {
-      setRunErrorBanner(
+      notifyQuickActionInApp(
         'API is not running on port 3847. With vite-only dev, wait a few seconds for autostart, or run npm run dev from the project root.',
+        'error',
       )
       return
     }
@@ -1125,7 +1135,7 @@ async function runQuickAction(auto) {
     const result = await runAutomation(auto.id, { headless: true, tripData })
     if (result.ok) {
       if (result.variables?._inspectCheckoutCancelled === true) {
-        runMsg.value = 'No trip to inspect'
+        notifyQuickActionInApp('No trip to inspect', 'info')
         announceInspectCheckoutCancelled()
       } else {
         const arrivePayload = result.variables?._arrivePayload
@@ -1151,17 +1161,13 @@ async function runQuickAction(auto) {
             announceCheckInFail()
           }
         }
-        if (result.variables?._bannerDetected === false) {
-          checkInSuccessBanner.value = `${auto.manualButtonLabel || auto.name} completed`
-        } else {
-          runMsg.value = `${auto.manualButtonLabel || auto.name} completed`
-        }
+        notifyQuickActionInApp(`${auto.manualButtonLabel || auto.name} completed`, 'success')
       }
     } else {
-      setRunErrorBanner(result.error || 'Failed')
+      notifyQuickActionInApp(result.error || 'Failed', 'error')
     }
   } catch (e) {
-    setRunErrorBanner(e instanceof Error ? e.message : String(e))
+    notifyQuickActionInApp(e instanceof Error ? e.message : String(e), 'error')
   } finally {
     runningAutomationId.value = null
     runStartTs.value = null
@@ -1180,7 +1186,7 @@ async function dismissAutomationPreview() {
   try {
     await postCancelRun()
   } catch (e) {
-    setRunErrorBanner(e instanceof Error ? e.message : String(e))
+    notifyQuickActionInApp(e instanceof Error ? e.message : String(e), 'error')
   }
 }
 
@@ -1193,16 +1199,7 @@ function setRunErrorBanner(message) {
   runErrorBanner.value = formatRunErrorForUser(raw)
 }
 
-function dismissCheckInFailure() {
-  checkInFailureText.value = null
-}
-
-function dismissCheckInSuccess() {
-  checkInSuccessBanner.value = null
-}
-
 async function openLocationRetryModal(bannerText, runId = null) {
-  checkInFailureText.value = null
   locationRetryFedexMessage.value = bannerText
   locationRetryInput.value = ''
   if (runId) inBrowserRetryRunId.value = runId
@@ -1225,7 +1222,7 @@ async function cancelLocationRetry() {
     }
     inBrowserRetryRunId.value = null
   }
-  if (msg) checkInFailureText.value = msg
+  if (msg) notifyQuickActionInApp(msg, 'error')
 }
 
 async function saveLocationAndRetry() {
@@ -1377,7 +1374,7 @@ function handleCheckInBannerFromLiveLog() {
       if (mismatch) {
         void openLocationRetryModal(e.bannerText, e.runId || null)
       } else {
-        checkInFailureText.value = e.bannerText
+        notifyQuickActionInApp(e.bannerText, 'error')
         announceCheckInFail()
       }
       return
@@ -1389,7 +1386,7 @@ function handleCheckInBannerFromLiveLog() {
       } else if (e.tripReadyAcknowledged === true) {
         announceCheckInTripReady()
       } else {
-        checkInSuccessBanner.value = 'Check in successful'
+        notifyQuickActionInApp('Check in successful', 'success')
         announceCheckInSuccess()
       }
       return
@@ -1966,42 +1963,6 @@ onUnmounted(() => {
     </Teleport>
     <Teleport to="body">
       <div
-        v-if="checkInFailureText"
-        class="portal-checkin-banner"
-        :style="{ zIndex: PORTAL_Z_BANNER }"
-        role="alert"
-        aria-live="assertive"
-      >
-        <div class="portal-checkin-banner-inner">
-          <strong>FedEx message</strong>
-          <p class="checkin-fail-text">{{ checkInFailureText }}</p>
-        </div>
-        <button type="button" class="tap icon-close" aria-label="Dismiss" @click="dismissCheckInFailure">
-          ×
-        </button>
-      </div>
-    </Teleport>
-
-    <Teleport to="body">
-      <div
-        v-if="checkInSuccessBanner"
-        class="portal-checkin-success"
-        :style="{ zIndex: PORTAL_Z_BANNER }"
-        role="status"
-        aria-live="polite"
-      >
-        <div class="portal-checkin-success-inner">
-          <strong>Success</strong>
-          <p class="checkin-success-text">{{ checkInSuccessBanner }}</p>
-        </div>
-        <button type="button" class="tap icon-close-success" aria-label="Dismiss" @click="dismissCheckInSuccess">
-          ×
-        </button>
-      </div>
-    </Teleport>
-
-    <Teleport to="body">
-      <div
         v-if="locationRetryOpen"
         class="portal-modal-backdrop"
         :style="{ zIndex: PORTAL_Z_MODAL }"
@@ -2256,7 +2217,6 @@ onUnmounted(() => {
     </div>
 
     <p v-if="loadError" class="err">{{ loadError }}</p>
-    <p v-if="runMsg" class="msg">{{ runMsg }}</p>
 
     <div
       v-if="showAutomationPreviewFocus"
@@ -3010,32 +2970,51 @@ onUnmounted(() => {
 .main--automation-preview {
   flex: 1 1 auto;
   min-height: 0;
-  justify-content: center;
+  justify-content: flex-start;
+  padding-block: var(--space-2, 0.5rem);
 }
 
 .automation-preview-host {
   box-sizing: border-box;
   width: 100%;
+  flex: 1 1 auto;
+  min-height: 0;
   display: flex;
   flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  padding: clamp(0.5rem, 2vw, 1.25rem) var(--space-3, 0.75rem);
-  min-height: min(82dvh, 46rem);
+  align-items: stretch;
+  justify-content: flex-start;
+  padding: var(--space-2, 0.5rem) var(--space-3, 0.75rem);
 }
 
 .automation-preview-host .preview-panel {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
   width: 100%;
   max-width: min(96vw, 58rem);
   margin-inline: auto;
 }
 
 .automation-preview-host .preview-panel .preview-frame {
+  flex: 1 1 auto;
+  min-height: 0;
   width: 100%;
+  position: relative;
 }
 
 .automation-preview-host .preview-img {
-  max-height: min(72dvh, 720px);
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  object-position: center center;
+}
+
+.main.main--automation-preview .preview-frame-empty {
+  flex: 1 1 auto;
+  min-height: 12rem;
 }
 
 .copy-toast {
@@ -3163,83 +3142,6 @@ button.trailer-nbr.copyable-inline {
   cursor: pointer;
   font: inherit;
   font-family: inherit;
-}
-.portal-checkin-banner {
-  position: fixed;
-  left: 0;
-  right: 0;
-  top: 0;
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 0.75rem;
-  padding: 0.65rem 0.85rem;
-  padding-top: max(0.65rem, env(safe-area-inset-top));
-  background: #3e1a1a;
-  border-bottom: 1px solid #e57373;
-  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.5);
-  max-height: min(42vh, 320px);
-  overflow-y: auto;
-  font-size: 0.9rem;
-  box-sizing: border-box;
-}
-.portal-checkin-banner-inner {
-  min-width: 0;
-}
-.portal-checkin-banner-inner strong {
-  display: block;
-  margin-bottom: 0.35rem;
-  color: #ffcdd2;
-}
-.checkin-fail-text {
-  margin: 0;
-  line-height: 1.4;
-  color: var(--text, #e8f5e9);
-  white-space: pre-wrap;
-}
-.portal-checkin-success {
-  position: fixed;
-  left: 0;
-  right: 0;
-  top: 0;
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 0.75rem;
-  padding: 0.65rem 0.85rem;
-  padding-top: max(0.65rem, env(safe-area-inset-top));
-  background: #1b2e1b;
-  border-bottom: 1px solid #81c784;
-  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.45);
-  font-size: 0.9rem;
-  box-sizing: border-box;
-}
-.portal-checkin-success-inner {
-  min-width: 0;
-}
-.portal-checkin-success-inner strong {
-  display: block;
-  margin-bottom: 0.35rem;
-  color: #c8e6c9;
-}
-.checkin-success-text {
-  margin: 0;
-  line-height: 1.4;
-  color: var(--text, #e8f5e9);
-  white-space: pre-wrap;
-}
-.portal-checkin-banner .icon-close,
-.portal-checkin-success .icon-close-success {
-  flex-shrink: 0;
-  width: 2.5rem;
-  height: 2.5rem;
-  border-radius: 8px;
-  border: 1px solid var(--border, #2e2e38);
-  background: #2a2a34;
-  color: var(--text, #e8e8ee);
-  font-size: 1.35rem;
-  line-height: 1;
-  cursor: pointer;
 }
 .portal-modal-backdrop {
   position: fixed;
@@ -3703,10 +3605,6 @@ button.trailer-nbr.copyable-inline {
 }
 .err {
   color: #ff8a80;
-}
-.msg {
-  color: #90caf9;
-  font-size: 0.9rem;
 }
 .panel {
   position: relative;
@@ -4630,48 +4528,42 @@ button.trailer-nbr.copyable-inline {
 
   .main > .copy-toast { grid-area: 1 / 1 / 2 / 3; }
   .main > .run-error-banner { grid-area: 1 / 1 / 2 / 3; }
-  .main > .msg,
   .main > .err { grid-area: 1 / 1 / 2 / 3; }
   /* Preview lives inside .automation-preview-host (not a direct .preview-panel child). */
   .main > .automation-preview-host {
     grid-column: 1 / -1;
     grid-row: 1 / -1;
-    justify-self: center;
-    align-self: center;
+    justify-self: stretch;
+    align-self: stretch;
     width: 100%;
-    max-width: min(96vw, 60rem);
+    max-width: none;
     z-index: 2;
   }
 
-  /* Quick-action live preview: drop the home grid so the frame centers and can grow wide/tall. */
+  /* Quick-action live preview: drop the home grid so the frame can use full width/height. */
   .main.main--automation-preview {
     display: flex;
     flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    gap: var(--space-3, 0.75rem);
-    min-height: min(88dvh, 52rem);
+    align-items: stretch;
+    justify-content: flex-start;
+    gap: var(--space-2, 0.5rem);
     padding-inline: var(--space-3, 0.75rem);
   }
 
   .main.main--automation-preview .automation-preview-host {
     flex: 1 1 auto;
     display: flex;
-    min-height: min(78dvh, 44rem);
+    min-height: 0;
     width: 100%;
-    max-width: min(96vw, 62rem);
-    align-items: center;
-    justify-content: center;
+    max-width: none;
+    align-items: stretch;
+    justify-content: flex-start;
     padding-inline: 0;
   }
 
   .main.main--automation-preview .preview-panel {
     width: 100%;
     max-width: 100%;
-  }
-
-  .main.main--automation-preview .preview-img {
-    max-height: min(74dvh, 760px);
   }
 
   .panel.driver-status-panel {

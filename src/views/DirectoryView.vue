@@ -1,6 +1,6 @@
 <script setup>
-import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue'
-import { fetchDirectory, patchDirectoryEntry, saveLocationToDirectory, fetchDirectoryGeocodeStatus, postDirectoryGeocodeOne } from '../api.js'
+import { ref, computed, watch, onMounted, onUnmounted, nextTick } from 'vue'
+import { fetchDirectory, patchDirectoryEntry, saveLocationToDirectory, fetchDirectoryGeocodeStatus, postDirectoryGeocodeOne, getAssignment } from '../api.js'
 import DirectoryMap from '../components/DirectoryMap.vue'
 import { useMapVehicleId } from '../composables/useMapVehicleId.js'
 import {
@@ -9,6 +9,15 @@ import {
   filterKeyForLocationType,
   compareDirectoryTypeFilterKeys,
 } from '../utils/directoryLocationTypes.js'
+import { inferRegionFromDirectoryAddress, countryLabelFromCode } from '../utils/directoryAddressRegion.js'
+import {
+  buildDirectoryVcardString,
+  vcardExportHasRenderableItems,
+  resolveVcardExportLocations,
+  vcardFilenameSuffix,
+  sanitizeLocationNameForLabel,
+} from '../utils/directoryContactExport.js'
+import { countSmartListMatches, SMART_LIST_WINDOW_MS } from '../utils/directoryTripHistorySmartPlaces.js'
 
 /** @type {import('vue').Ref<Array<{
  *   locationId: string,
@@ -33,6 +42,18 @@ const DEFAULT_LOCATION_TYPE_FILTER = Object.freeze(['Hub', 'Station'])
 const directoryTypeFilterOptions = [...DIRECTORY_STATION_TYPES, DIRECTORY_LOCATION_TYPE_OTHER]
 /** @type {import('vue').Ref<string[]>} */
 const selectedLocationTypes = ref([...DEFAULT_LOCATION_TYPE_FILTER])
+
+/** ISO-like country codes; empty = all countries. */
+/** @type {import('vue').Ref<string[]>} */
+const selectedCountryCodes = ref([])
+/** `US|NY` style keys; empty = all states/provinces. */
+/** @type {import('vue').Ref<string[]>} */
+const selectedStateComposites = ref([])
+
+/** @type {import('vue').Ref<'id' | 'name' | 'state' | 'country' | 'type'>} */
+const directorySortKey = ref('id')
+/** @type {import('vue').Ref<'asc' | 'desc'>} */
+const directorySortDir = ref('asc')
 
 const expandedId = ref('')
 /** Brief “Copied” feedback after copying phone (location id). */
@@ -135,7 +156,43 @@ function resetLocationTypeFilter() {
   selectedLocationTypes.value = [...DEFAULT_LOCATION_TYPE_FILTER]
 }
 
-/** One-line summary for the collapsed type filter control. */
+function resetAllDirectoryFilters() {
+  resetLocationTypeFilter()
+  selectedCountryCodes.value = []
+  selectedStateComposites.value = []
+  directorySortKey.value = 'id'
+  directorySortDir.value = 'asc'
+}
+
+function toggleSortDir() {
+  directorySortDir.value = directorySortDir.value === 'asc' ? 'desc' : 'asc'
+}
+
+const directoryFiltersDirty = computed(() => {
+  const def = [...DEFAULT_LOCATION_TYPE_FILTER]
+  const types = [...selectedLocationTypes.value].sort(compareDirectoryTypeFilterKeys)
+  const defSorted = [...def].sort(compareDirectoryTypeFilterKeys)
+  const typesNonDefault =
+    types.length !== defSorted.length || !types.every((t, i) => t === defSorted[i])
+  return (
+    typesNonDefault ||
+    selectedCountryCodes.value.length > 0 ||
+    selectedStateComposites.value.length > 0 ||
+    directorySortKey.value !== 'id' ||
+    directorySortDir.value !== 'asc'
+  )
+})
+
+watch(selectedCountryCodes, (codes) => {
+  const set = new Set(codes)
+  selectedStateComposites.value = selectedStateComposites.value.filter((comp) => {
+    const cc = String(comp).split('|')[0]
+    if (!codes.length) return true
+    return set.has(cc)
+  })
+})
+
+/** Short summary of selected location types (hint under type legend). */
 const locationTypeFilterSummary = computed(() => {
   const sel = selectedLocationTypes.value
   const all = directoryTypeFilterOptions
@@ -169,25 +226,174 @@ function locationTypeBadgeClass(loc) {
     : 'location-type-badge--muted'
 }
 
+const locationsWithRegion = computed(() => {
+  return locations.value.map((loc) => {
+    const geo = inferRegionFromDirectoryAddress(loc.address)
+    return { ...loc, _geo: geo }
+  })
+})
+
 const locationsAfterTypeFilter = computed(() => {
   const sel = selectedLocationTypes.value
-  return locations.value.filter((loc) => sel.includes(filterKeyForLocationType(loc.locationType)))
+  return locationsWithRegion.value.filter((loc) => sel.includes(filterKeyForLocationType(loc.locationType)))
 })
+
+const locationsAfterCountryFilter = computed(() => {
+  const sel = selectedCountryCodes.value
+  if (!sel.length) return locationsAfterTypeFilter.value
+  const set = new Set(sel)
+  return locationsAfterTypeFilter.value.filter((loc) => set.has(loc._geo.countryCode))
+})
+
+const locationsAfterGeoFilter = computed(() => {
+  const sel = selectedStateComposites.value
+  if (!sel.length) return locationsAfterCountryFilter.value
+  const set = new Set(sel)
+  return locationsAfterCountryFilter.value.filter((loc) => {
+    const c = loc._geo.composite
+    return c && set.has(c)
+  })
+})
+
+const countryFacetList = computed(() => {
+  /** @type {Map<string, number>} */
+  const counts = new Map()
+  for (const loc of locationsAfterTypeFilter.value) {
+    const c = loc._geo.countryCode
+    if (!c) continue
+    counts.set(c, (counts.get(c) ?? 0) + 1)
+  }
+  return [...counts.entries()]
+    .map(([code, count]) => ({
+      code,
+      count,
+      label: countryLabelFromCode(code),
+    }))
+    .sort((a, b) => a.label.localeCompare(b.label, undefined, { sensitivity: 'base' }))
+})
+
+const locationsForStateFacet = computed(() => {
+  const tf = locationsAfterTypeFilter.value
+  const cc = selectedCountryCodes.value
+  if (!cc.length) return tf
+  const set = new Set(cc)
+  return tf.filter((loc) => set.has(loc._geo.countryCode))
+})
+
+const stateFacetList = computed(() => {
+  /** @type {Map<string, { composite: string, label: string, count: number }>} */
+  const map = new Map()
+  for (const loc of locationsForStateFacet.value) {
+    const comp = loc._geo.composite
+    if (!comp) continue
+    const prev = map.get(comp)
+    const label = `${loc._geo.stateLabel || loc._geo.stateCode} · ${loc._geo.countryLabel || loc._geo.countryCode}`
+    if (prev) {
+      prev.count += 1
+    } else {
+      map.set(comp, { composite: comp, label, count: 1 })
+    }
+  }
+  return [...map.values()].sort((a, b) =>
+    a.label.localeCompare(b.label, undefined, { sensitivity: 'base' }),
+  )
+})
+
+function toggleCountryFilter(code) {
+  const c = String(code).toUpperCase()
+  const cur = [...selectedCountryCodes.value]
+  const i = cur.indexOf(c)
+  if (i >= 0) {
+    cur.splice(i, 1)
+  } else {
+    cur.push(c)
+  }
+  cur.sort()
+  selectedCountryCodes.value = cur
+}
+
+function toggleStateFilter(composite) {
+  const key = String(composite)
+  const cur = [...selectedStateComposites.value]
+  const i = cur.indexOf(key)
+  if (i >= 0) {
+    cur.splice(i, 1)
+  } else {
+    cur.push(key)
+  }
+  cur.sort()
+  selectedStateComposites.value = cur
+}
+
+/**
+ * @param {{ locationId: string, locationName?: string, locationType?: string, _geo: { countryLabel?: string, stateLabel?: string, stateCode?: string, composite?: string } }} a
+ * @param {{ locationId: string, locationName?: string, locationType?: string, _geo: { countryLabel?: string, stateLabel?: string, stateCode?: string, composite?: string } }} b
+ */
+function directorySortCompare(a, b) {
+  const key = directorySortKey.value
+  const dir = directorySortDir.value === 'desc' ? -1 : 1
+  if (key === 'id') {
+    return compareLocationIdNumeric(a, b) * dir
+  }
+  if (key === 'name') {
+    const an = String(a.locationName ?? '')
+      .trim()
+      .localeCompare(String(b.locationName ?? '').trim(), undefined, { sensitivity: 'base' })
+    if (an !== 0) return an * dir
+    return compareLocationIdNumeric(a, b)
+  }
+  if (key === 'state') {
+    const as = String(a._geo.stateLabel || a._geo.stateCode ?? '')
+      .trim()
+      .localeCompare(String(b._geo.stateLabel || b._geo.stateCode ?? '').trim(), undefined, {
+        sensitivity: 'base',
+      })
+    if (as !== 0) return as * dir
+    return compareLocationIdNumeric(a, b)
+  }
+  if (key === 'country') {
+    const ac = String(a._geo.countryLabel ?? '')
+      .trim()
+      .localeCompare(String(b._geo.countryLabel ?? '').trim(), undefined, { sensitivity: 'base' })
+    if (ac !== 0) return ac * dir
+    return compareLocationIdNumeric(a, b)
+  }
+  if (key === 'type') {
+    const at = filterKeyForLocationType(a.locationType)
+    const bt = filterKeyForLocationType(b.locationType)
+    const cmp = compareDirectoryTypeFilterKeys(at, bt)
+    if (cmp !== 0) return cmp * dir
+    return compareLocationIdNumeric(a, b)
+  }
+  return compareLocationIdNumeric(a, b)
+}
 
 const filteredLocations = computed(() => {
   const q = searchQuery.value.trim().toLowerCase()
-  const base =
-    !q
-      ? [...locationsAfterTypeFilter.value]
-      : locationsAfterTypeFilter.value.filter(
-          (loc) =>
-            loc.locationName.toLowerCase().includes(q) ||
-            loc.abbreviation.toLowerCase().includes(q) ||
-            loc.locationId.includes(q) ||
-            loc.address.toLowerCase().includes(q),
-        )
-  base.sort(compareLocationIdNumeric)
-  return base
+  let rows = [...locationsAfterGeoFilter.value]
+  if (q) {
+    rows = rows.filter(
+      (loc) =>
+        String(loc.locationName ?? '')
+          .toLowerCase()
+          .includes(q) ||
+        String(loc.abbreviation ?? '')
+          .toLowerCase()
+          .includes(q) ||
+        String(loc.locationId).includes(q) ||
+        String(loc.address ?? '')
+          .toLowerCase()
+          .includes(q) ||
+        String(loc._geo.stateLabel ?? '')
+          .toLowerCase()
+          .includes(q) ||
+        String(loc._geo.countryLabel ?? '')
+          .toLowerCase()
+          .includes(q),
+    )
+  }
+  rows.sort(directorySortCompare)
+  return rows
 })
 
 /** Locations with valid coordinates for the map (follows search filter). */
@@ -231,7 +437,7 @@ const showMapNoCoordsNotice = computed(
   () =>
     !loading.value &&
     !serverGeocodeInBatch.value &&
-    locationsAfterTypeFilter.value.length > 0 &&
+    locationsAfterGeoFilter.value.length > 0 &&
     mapPins.value.length === 0,
 )
 
@@ -285,27 +491,15 @@ async function loadFedexLogoForVcard() {
   }
 }
 
-/** vCard download district filter: 'ny-metro' | 'ny-metro-northeast' | 'all' */
-const vcardDistrictFilter = ref('all')
+/** vCard export: `all` | district presets | trip-history smart list (~31 days). */
+const vcardScope = ref(/** @type {'all' | 'ny-metro' | 'ny-metro-northeast' | 'smart-31d'} */ ('all'))
+/** Sort order inside the exported .vcf (independent from directory list sort). */
+const vcardSortKey = ref(/** @type {'id' | 'name' | 'state' | 'country' | 'type' | 'recent-first'} */ ('id'))
+const vcardSortDir = ref(/** @type {'asc' | 'desc'} */ ('asc'))
+/** `null` = not loaded yet; array (possibly empty) after fetch. */
+const tripHistoryLedgerCache = ref(/** @type {unknown[] | null} */ (null))
+const tripHistoryLedgerLoading = ref(false)
 const vcardDropdownOpen = ref(false)
-
-/**
- * Fold one long vCard line to 75-octet chunks (continuation lines start with space).
- * @param {string} line
- */
-function foldVcardContentLine(line) {
-  const max = 75
-  if (line.length <= max) return [line]
-  /** @type {string[]} */
-  const out = []
-  out.push(line.slice(0, max))
-  let rest = line.slice(max)
-  while (rest.length > 0) {
-    out.push(` ${rest.slice(0, max - 1)}`)
-    rest = rest.slice(max - 1)
-  }
-  return out
-}
 
 async function refreshDirectoryListOnly() {
   try {
@@ -602,147 +796,79 @@ function buildTelHref(phone) {
   return ''
 }
 
-/** E.164-style for vCard TEL (digits only, US 10 → +1). */
-function phoneToVcardTel(phone) {
-  const d = String(phone).replace(/\D/g, '')
-  if (d.length === 10) return `+1${d}`
-  if (d.length === 11 && d.startsWith('1')) return `+${d}`
-  if (d.length >= 8) return `+${d}`
-  return ''
-}
-
-function escapeVcardText(s) {
-  return String(s)
-    .replace(/\\/g, '\\\\')
-    .replace(/\n/g, '\\n')
-    .replace(/;/g, '\\;')
-    .replace(/,/g, '\\,')
-}
-
-/**
- * "Bethpage - HD" → "Bethpage"; then remove any remaining dashes / normalize spaces.
- * @param {string} rawName
- */
-function sanitizeLocationNameForLabel(rawName) {
-  const s = String(rawName ?? '').trim()
-  if (!s) return ''
-  const beforeDash = s.includes('-') ? s.split('-')[0].trim() : s
-  return beforeDash.replace(/-/g, '').replace(/\s+/g, ' ').trim()
-}
-
-/**
- * vCard X-ABLabel: `locationId - cleanedName` (e.g. 89 - Woodbridge).
- * @param {{ locationId: string, locationName?: string, abbreviation?: string }} loc
- */
-function vcardContactLabel(loc) {
-  const id = String(loc.locationId ?? '').trim()
-  const namePart = sanitizeLocationNameForLabel(loc.locationName || '')
-  if (!id && !namePart) {
-    return String(loc.abbreviation || '').trim() || 'Location'
-  }
-  if (!namePart) return id
-  if (!id) return namePart
-  return `${id} - ${namePart}`
-}
-
 /** Card title: short name only (before first dash, dashes stripped). */
 function cardLocationTitle(loc) {
   const n = sanitizeLocationNameForLabel(loc.locationName || '')
   return n || loc.abbreviation || 'Unknown'
 }
 
-/**
- * Filter locations by district for vCard export.
- * @param {'ny-metro' | 'ny-metro-northeast' | 'all'} filter
- */
-function filterLocationsByDistrict(locs, filter) {
-  if (filter === 'all') return locs
-  const nyMetroDistricts = ['NEW YORK METRO']
-  const northeastDistricts = ['NORTHEAST']
-  if (filter === 'ny-metro') {
-    return locs.filter((l) => nyMetroDistricts.includes((l.district || '').toUpperCase()))
+async function ensureTripHistoryLedgerForVcard() {
+  if (tripHistoryLedgerCache.value !== null) return
+  tripHistoryLedgerLoading.value = true
+  try {
+    const a = await getAssignment()
+    const raw = a?.tripHistoryLedger
+    tripHistoryLedgerCache.value = Array.isArray(raw) ? raw : []
+  } catch {
+    tripHistoryLedgerCache.value = []
+  } finally {
+    tripHistoryLedgerLoading.value = false
   }
-  if (filter === 'ny-metro-northeast') {
-    const allowed = [...nyMetroDistricts, ...northeastDistricts]
-    return locs.filter((l) => allowed.includes((l.district || '').toUpperCase()))
-  }
-  return locs
 }
 
-/**
- * Parse address string into vCard ADR components.
- * Address format expected: "street, city, state, zip" or similar
- * @param {string} addr
- * @returns {{ street: string, city: string, state: string, zip: string }}
- */
-function parseAddressForVcard(addr) {
-  const parts = (addr || '').split(',').map((p) => p.trim())
-  if (parts.length >= 4) {
-    return { street: parts.slice(0, -3).join(', '), city: parts[parts.length - 3], state: parts[parts.length - 2], zip: parts[parts.length - 1] }
-  }
-  if (parts.length === 3) {
-    return { street: parts[0], city: parts[1], state: '', zip: parts[2] }
-  }
-  if (parts.length === 2) {
-    return { street: parts[0], city: parts[1], state: '', zip: '' }
-  }
-  return { street: addr, city: '', state: '', zip: '' }
+const vcardExportLedger = computed(() =>
+  Array.isArray(tripHistoryLedgerCache.value) ? tripHistoryLedgerCache.value : [],
+)
+
+const vcardExportResolved = computed(() =>
+  resolveVcardExportLocations({
+    allLocations: locations.value,
+    scope: vcardScope.value,
+    sortKey: vcardSortKey.value,
+    sortDir: vcardSortDir.value,
+    ledger: vcardExportLedger.value,
+    windowMs: SMART_LIST_WINDOW_MS,
+  }),
+)
+
+const smartListExportStats = computed(() =>
+  countSmartListMatches(vcardExportLedger.value, locations.value, Date.now(), SMART_LIST_WINDOW_MS),
+)
+
+const hasVcardData = computed(() => vcardExportHasRenderableItems(vcardExportResolved.value.sorted))
+
+function toggleVcardSortDir() {
+  vcardSortDir.value = vcardSortDir.value === 'asc' ? 'desc' : 'asc'
 }
 
-/**
- * Single vCard 3.0 with FN FedEx and one TEL + ADR per location (label = id + cleaned name).
- */
-function buildDirectoryVcardString() {
-  const lines = ['BEGIN:VCARD', 'VERSION:3.0', 'N:;;;;', 'ORG:FedEx;', 'FN:FedEx']
-  const b64 = vcardFedexLogoB64.value
-  if (b64) {
-    lines.push(...foldVcardContentLine(`PHOTO;ENCODING=b:${b64}`))
-  }
-  let item = 1
-  const filtered = filterLocationsByDistrict(locations.value, vcardDistrictFilter.value)
-  const sorted = [...filtered].sort(compareLocationIdNumeric)
-  for (const loc of sorted) {
-    const raw = loc.phone ?? ''
-    const tel = phoneToVcardTel(raw)
-    const label = vcardContactLabel(loc)
-    if (tel) {
-      lines.push(`item${item}.TEL:${tel}`)
-      lines.push(`item${item}.X-ABLabel:${escapeVcardText(label)}`)
-      item += 1
-    }
-    if (loc.address) {
-      const { street, city, state, zip } = parseAddressForVcard(loc.address)
-      const adrValue = `;;${escapeVcardText(street)};${escapeVcardText(city)};${escapeVcardText(state)};${escapeVcardText(zip)};`
-      lines.push(`item${item}.ADR;type=WORK:${adrValue}`)
-      lines.push(`item${item}.X-ABLabel:${escapeVcardText(label)}`)
-      item += 1
-    }
-  }
-  lines.push('END:VCARD')
-  return lines.join('\r\n')
-}
-
-const hasVcardData = computed(() => {
-  const filtered = filterLocationsByDistrict(locations.value, vcardDistrictFilter.value)
-  for (const loc of filtered) {
-    if (phoneToVcardTel(loc.phone ?? '') || loc.address) return true
-  }
-  return false
+watch(vcardDropdownOpen, (open) => {
+  if (open) void ensureTripHistoryLedgerForVcard()
 })
 
-function downloadDirectoryVcard(filter) {
+watch(vcardScope, (s) => {
+  if (s === 'smart-31d') {
+    vcardSortKey.value = 'recent-first'
+    vcardSortDir.value = 'desc'
+  } else if (vcardSortKey.value === 'recent-first') {
+    vcardSortKey.value = 'id'
+    vcardSortDir.value = 'asc'
+  }
+})
+
+function runDirectoryVcardDownload() {
   if (typeof window === 'undefined') return
-  vcardDistrictFilter.value = filter
+  const sorted = vcardExportResolved.value.sorted
+  const { body, itemCount } = buildDirectoryVcardString(sorted, {
+    photoB64: vcardFedexLogoB64.value,
+  })
+  if (itemCount <= 0) return
   vcardDropdownOpen.value = false
   nextTick(() => {
-    const body = buildDirectoryVcardString()
-    if (!body.includes('item1.')) return
     const blob = new Blob([body], { type: 'text/vcard;charset=utf-8' })
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url
-    const suffix = filter === 'all' ? '' : filter === 'ny-metro' ? '-ny-metro' : '-ny-metro-northeast'
-    a.download = `FedEx-directory-contacts${suffix}.vcf`
+    a.download = `FedEx-directory-contacts${vcardFilenameSuffix(vcardScope.value)}.vcf`
     a.rel = 'noopener'
     a.click()
     URL.revokeObjectURL(url)
@@ -893,29 +1019,106 @@ onUnmounted(() => {
               >
                 + Add
               </button>
-              <div v-if="locations.length" class="vcard-dropdown-wrap">
+              <div v-if="locations.length" class="vcard-export-wrap">
                 <button
                   type="button"
                   class="directory-vcard-btn tap"
+                  :class="{ 'is-open': vcardDropdownOpen }"
                   :disabled="loading"
-                  title="Download contacts as .vcf file"
+                  title="Configure and download contacts as a .vcf file"
+                  aria-haspopup="dialog"
+                  :aria-expanded="vcardDropdownOpen"
                   @click="vcardDropdownOpen = !vcardDropdownOpen"
                 >
-                  Download contacts
-                  <svg class="vcard-dropdown-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  Export contacts
+                  <svg class="vcard-dropdown-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
                     <polyline points="6 9 12 15 18 9" />
                   </svg>
                 </button>
-                <div v-if="vcardDropdownOpen" class="vcard-dropdown-menu">
-                  <button type="button" class="vcard-dropdown-item tap" @click="downloadDirectoryVcard('ny-metro')">
-                    New York Metro only
-                  </button>
-                  <button type="button" class="vcard-dropdown-item tap" @click="downloadDirectoryVcard('ny-metro-northeast')">
-                    NY Metro + Northeast
-                  </button>
-                  <button type="button" class="vcard-dropdown-item tap" @click="downloadDirectoryVcard('all')">
-                    All locations
-                  </button>
+                <div
+                  v-if="vcardDropdownOpen"
+                  class="vcard-export-panel"
+                  role="dialog"
+                  aria-label="Contact export options"
+                  @click.stop
+                >
+                  <p class="vcard-export-panel-title">Download <span class="vcard-export-mono">.vcf</span></p>
+                  <p class="vcard-export-panel-desc">
+                    Choose scope, sort order for cards inside the file, then download. Smart list uses your
+                    <strong>trip history</strong> (origin &amp; destination numbers) from roughly the
+                    <strong>last 31 days</strong>, matched to saved directory IDs.
+                  </p>
+
+                  <fieldset class="vcard-export-fieldset">
+                    <legend class="vcard-export-legend">Scope</legend>
+                    <div class="vcard-export-radios">
+                      <label class="vcard-export-radio tap">
+                        <input v-model="vcardScope" type="radio" value="all" class="vcard-export-radio-input" />
+                        <span>All directory</span>
+                      </label>
+                      <label class="vcard-export-radio tap">
+                        <input v-model="vcardScope" type="radio" value="ny-metro" class="vcard-export-radio-input" />
+                        <span>New York Metro <span class="vcard-export-muted">(district)</span></span>
+                      </label>
+                      <label class="vcard-export-radio tap">
+                        <input
+                          v-model="vcardScope"
+                          type="radio"
+                          value="ny-metro-northeast"
+                          class="vcard-export-radio-input"
+                        />
+                        <span>NY Metro + Northeast <span class="vcard-export-muted">(district)</span></span>
+                      </label>
+                      <label class="vcard-export-radio tap">
+                        <input v-model="vcardScope" type="radio" value="smart-31d" class="vcard-export-radio-input" />
+                        <span>Smart list <span class="vcard-export-muted">(~31 days)</span></span>
+                      </label>
+                    </div>
+                    <p v-if="vcardScope === 'smart-31d'" class="vcard-export-smart-hint">
+                      <template v-if="tripHistoryLedgerLoading">Loading trip history…</template>
+                      <template v-else>
+                        {{ smartListExportStats.directoryMatches }} directory match(es) from
+                        {{ smartListExportStats.historyIds }} recent place id(s) in history.
+                      </template>
+                    </p>
+                  </fieldset>
+
+                  <div class="vcard-export-sort-row">
+                    <label class="vcard-export-sort-label" for="vcard-sort-key">Sort in file</label>
+                    <select id="vcard-sort-key" v-model="vcardSortKey" class="vcard-export-select tap">
+                      <option value="id">Location ID</option>
+                      <option value="name">Name</option>
+                      <option value="state">State / province</option>
+                      <option value="country">Country</option>
+                      <option value="type">Location type</option>
+                      <option v-if="vcardScope === 'smart-31d'" value="recent-first">Most recent visit</option>
+                    </select>
+                    <button
+                      type="button"
+                      class="vcard-export-sort-dir tap"
+                      :title="vcardSortDir === 'asc' ? 'Switch to descending' : 'Switch to ascending'"
+                      @click="toggleVcardSortDir"
+                    >
+                      {{ vcardSortDir === 'asc' ? 'A → Z' : 'Z → A' }}
+                    </button>
+                  </div>
+
+                  <p class="vcard-export-meta">
+                    {{ vcardExportResolved.sorted.length }} row(s) in export
+                    <span v-if="!hasVcardData" class="vcard-export-warn"> — add phone or address for at least one row</span>
+                  </p>
+
+                  <div class="vcard-export-actions">
+                    <button
+                      type="button"
+                      class="vcard-export-download tap"
+                      :disabled="!hasVcardData || loading"
+                      @click="runDirectoryVcardDownload"
+                    >
+                      Download .vcf
+                    </button>
+                    <button type="button" class="vcard-export-cancel tap" @click="vcardDropdownOpen = false">Close</button>
+                  </div>
                 </div>
               </div>
             </div>
@@ -991,50 +1194,121 @@ onUnmounted(() => {
       </button>
     </div>
 
-    <details
+    <section
       v-if="locations.length"
-      class="directory-type-filter"
-      aria-label="Filter directory and map by station type"
+      class="directory-filters"
+      aria-label="Directory filters and sort"
     >
-      <summary class="directory-type-filter-summary tap">
-        <span class="directory-type-filter-summary-label">Types</span>
-        <span class="directory-type-filter-summary-value">{{ locationTypeFilterSummary }}</span>
-        <svg
-          class="directory-type-filter-chevron"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          stroke-width="2"
-          aria-hidden="true"
-        >
-          <polyline points="6 9 12 15 18 9" />
-        </svg>
-      </summary>
-      <div class="directory-type-filter-panel">
-        <div class="directory-type-filter-panel-actions">
+      <header class="directory-filters-header">
+        <div class="directory-filters-header-text">
+          <h2 class="directory-filters-title">Filters &amp; sort</h2>
+          <p class="directory-filters-desc">
+            Types, country, and state/province work together. Empty country or region selections include
+            <strong>all</strong> values. Sort applies to the list and map pins after search.
+          </p>
+        </div>
+        <div class="directory-filters-header-actions">
+          <div class="directory-sort-control">
+            <label for="directory-sort-key" class="directory-sort-label">Sort</label>
+            <select
+              id="directory-sort-key"
+              v-model="directorySortKey"
+              class="directory-sort-select tap"
+            >
+              <option value="id">Location ID</option>
+              <option value="name">Name</option>
+              <option value="state">State / province</option>
+              <option value="country">Country</option>
+              <option value="type">Location type</option>
+            </select>
+            <button
+              type="button"
+              class="directory-sort-dir tap"
+              :title="directorySortDir === 'asc' ? 'Switch to descending' : 'Switch to ascending'"
+              :aria-label="directorySortDir === 'asc' ? 'Sort descending' : 'Sort ascending'"
+              @click="toggleSortDir"
+            >
+              {{ directorySortDir === 'asc' ? 'A → Z' : 'Z → A' }}
+            </button>
+          </div>
           <button
+            v-if="directoryFiltersDirty"
             type="button"
-            class="directory-type-filter-reset tap"
-            @click.stop.prevent="resetLocationTypeFilter"
+            class="directory-filters-clear tap"
+            @click="resetAllDirectoryFilters"
           >
-            Reset to Hub + Station
+            Clear filters
           </button>
         </div>
-        <div class="directory-type-filter-chips" role="group" aria-label="Station types">
-          <button
-            v-for="t in directoryTypeFilterOptions"
-            :key="t"
-            type="button"
-            class="directory-type-chip tap"
-            :class="{ 'is-active': selectedLocationTypes.includes(t) }"
-            :aria-pressed="selectedLocationTypes.includes(t)"
-            @click.stop.prevent="toggleLocationTypeFilter(t)"
-          >
-            {{ t }}
+      </header>
+
+      <div class="directory-filters-grid">
+        <fieldset class="directory-filters-fieldset">
+          <legend class="directory-filters-legend">Location type</legend>
+          <p class="directory-filters-hint">{{ locationTypeFilterSummary }}</p>
+          <div class="directory-filters-chip-row" role="group" aria-label="Location types">
+            <button
+              v-for="t in directoryTypeFilterOptions"
+              :key="t"
+              type="button"
+              class="directory-filter-chip tap"
+              :class="{ 'is-active': selectedLocationTypes.includes(t) }"
+              :aria-pressed="selectedLocationTypes.includes(t)"
+              @click="toggleLocationTypeFilter(t)"
+            >
+              {{ t }}
+            </button>
+          </div>
+          <button type="button" class="directory-filters-text-btn tap" @click="resetLocationTypeFilter">
+            Use Hub + Station only
           </button>
-        </div>
+        </fieldset>
+
+        <fieldset v-if="countryFacetList.length" class="directory-filters-fieldset">
+          <legend class="directory-filters-legend">Country</legend>
+          <p class="directory-filters-hint">
+            <template v-if="!selectedCountryCodes.length">Showing all countries for the types above.</template>
+            <template v-else>Filtering to {{ selectedCountryCodes.length }} selected.</template>
+          </p>
+          <div class="directory-filters-chip-row" role="group" aria-label="Countries">
+            <button
+              v-for="row in countryFacetList"
+              :key="row.code"
+              type="button"
+              class="directory-filter-chip directory-filter-chip--grow tap"
+              :class="{ 'is-active': selectedCountryCodes.includes(row.code) }"
+              :aria-pressed="selectedCountryCodes.includes(row.code)"
+              @click="toggleCountryFilter(row.code)"
+            >
+              <span class="directory-filter-chip-label">{{ row.label }}</span>
+              <span class="directory-filter-chip-count">{{ row.count }}</span>
+            </button>
+          </div>
+        </fieldset>
+
+        <fieldset v-if="stateFacetList.length" class="directory-filters-fieldset">
+          <legend class="directory-filters-legend">State / province</legend>
+          <p class="directory-filters-hint">
+            <template v-if="!selectedStateComposites.length">All regions for the current type and country scope.</template>
+            <template v-else>{{ selectedStateComposites.length }} region(s) selected.</template>
+          </p>
+          <div class="directory-filters-chip-scroll" role="group" aria-label="States and provinces">
+            <button
+              v-for="row in stateFacetList"
+              :key="row.composite"
+              type="button"
+              class="directory-filter-chip tap"
+              :class="{ 'is-active': selectedStateComposites.includes(row.composite) }"
+              :aria-pressed="selectedStateComposites.includes(row.composite)"
+              @click="toggleStateFilter(row.composite)"
+            >
+              <span class="directory-filter-chip-label">{{ row.label }}</span>
+              <span class="directory-filter-chip-count">{{ row.count }}</span>
+            </button>
+          </div>
+        </fieldset>
       </div>
-    </details>
+    </section>
 
     <div v-if="error" class="error-banner">
       <span class="error-icon">!</span>
@@ -1075,9 +1349,26 @@ onUnmounted(() => {
         <circle cx="11" cy="11" r="8" />
         <line x1="21" y1="21" x2="16.65" y2="16.65" />
       </svg>
-      <p class="empty-title">No locations for this filter</p>
+      <p class="empty-title">No locations for these types</p>
       <p class="empty-desc">
-        Open <strong>Types</strong> and select more station types, or use Reset to Hub + Station.
+        Select more <strong>location types</strong> above, or use <strong>Use Hub + Station only</strong> as a starting point.
+      </p>
+    </div>
+
+    <div v-else-if="!locationsAfterGeoFilter.length" class="empty-state">
+      <svg
+        class="empty-icon"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="1.5"
+      >
+        <circle cx="11" cy="11" r="8" />
+        <line x1="21" y1="21" x2="16.65" y2="16.65" />
+      </svg>
+      <p class="empty-title">No locations match country or state filters</p>
+      <p class="empty-desc">
+        Clear <strong>country</strong> or <strong>state / province</strong> chips, or tap <strong>Clear filters</strong> to restore defaults.
       </p>
     </div>
 
@@ -1303,11 +1594,12 @@ onUnmounted(() => {
     <p v-if="filteredLocations.length" class="location-count">
       {{ filteredLocations.length }} location{{ filteredLocations.length === 1 ? '' : 's' }}
       <span
-        v-if="locationsAfterTypeFilter.length < locations.length || filteredLocations.length < locationsAfterTypeFilter.length"
+        v-if="locations.length !== filteredLocations.length || searchQuery.trim()"
         class="location-count-hint"
       >
-        ({{ locations.length }} total in directory<template v-if="locationsAfterTypeFilter.length < locations.length"
-          >; {{ locationsAfterTypeFilter.length }} match type filter</template
+        ({{ locations.length }} saved · {{ locationsAfterGeoFilter.length }} after type &amp; region filters<template
+          v-if="searchQuery.trim() && filteredLocations.length !== locationsAfterGeoFilter.length"
+          > · {{ filteredLocations.length }} match search</template
         >)
       </span>
     </p>
@@ -1502,6 +1794,8 @@ onUnmounted(() => {
 }
 
 .directory-vcard-btn {
+  display: inline-flex;
+  align-items: center;
   flex-shrink: 0;
   align-self: flex-start;
   padding: var(--space-2, 0.5rem) var(--space-3, 0.75rem);
@@ -1515,6 +1809,11 @@ onUnmounted(() => {
   border-radius: var(--radius-md, 0.5rem);
   cursor: pointer;
   transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.directory-vcard-btn.is-open {
+  background: rgba(123, 77, 181, 0.52);
+  border-color: rgba(196, 181, 253, 0.75);
 }
 
 .directory-vcard-btn:hover:not(:disabled) {
@@ -1907,123 +2206,265 @@ onUnmounted(() => {
   height: 1rem;
 }
 
-.directory-type-filter {
+.directory-filters {
   margin-bottom: var(--space-4, 1rem);
+  padding: var(--space-4, 1rem);
   border-radius: var(--radius-lg, 0.75rem);
-  border: 1px solid var(--color-border, rgba(255, 255, 255, 0.08));
-  background: rgba(255, 255, 255, 0.03);
-  overflow: hidden;
+  border: 1px solid var(--color-border, rgba(255, 255, 255, 0.1));
+  background: linear-gradient(
+    165deg,
+    rgba(255, 255, 255, 0.055) 0%,
+    rgba(255, 255, 255, 0.02) 48%,
+    rgba(123, 77, 181, 0.06) 100%
+  );
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.04) inset;
 }
 
-.directory-type-filter > summary {
-  list-style: none;
-}
-
-.directory-type-filter > summary::-webkit-details-marker {
-  display: none;
-}
-
-.directory-type-filter-summary {
+.directory-filters-header {
   display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-4, 1rem);
+  margin-bottom: var(--space-4, 1rem);
+  padding-bottom: var(--space-3, 0.75rem);
+  border-bottom: 1px solid var(--color-border, rgba(255, 255, 255, 0.08));
+}
+
+.directory-filters-header-text {
+  flex: 1 1 12rem;
+  min-width: 0;
+}
+
+.directory-filters-title {
+  margin: 0 0 var(--space-1, 0.25rem);
+  font-size: var(--text-sm, 0.875rem);
+  font-weight: var(--weight-semibold, 600);
+  letter-spacing: 0.02em;
+  color: var(--color-text-primary, #f4f4f8);
+}
+
+.directory-filters-desc {
+  margin: 0;
+  font-size: var(--text-xs, 0.75rem);
+  line-height: 1.45;
+  color: var(--color-text-tertiary, #8b8b9a);
+  max-width: 42rem;
+}
+
+.directory-filters-header-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--space-2, 0.5rem);
+}
+
+.directory-sort-control {
+  display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: var(--space-2, 0.5rem);
   padding: var(--space-2, 0.5rem) var(--space-3, 0.75rem);
-  cursor: pointer;
-  user-select: none;
-  min-height: 2.5rem;
-  box-sizing: border-box;
+  border-radius: var(--radius-md, 0.5rem);
+  background: rgba(0, 0, 0, 0.2);
+  border: 1px solid var(--color-border, rgba(255, 255, 255, 0.08));
 }
 
-.directory-type-filter-summary:hover {
-  background: rgba(255, 255, 255, 0.04);
-}
-
-.directory-type-filter-summary-label {
-  flex-shrink: 0;
+.directory-sort-label {
   font-size: var(--text-xs, 0.6875rem);
   font-weight: var(--weight-semibold, 600);
-  letter-spacing: 0.05em;
   text-transform: uppercase;
+  letter-spacing: 0.06em;
   color: var(--color-text-tertiary, #6e6e7e);
 }
 
-.directory-type-filter-summary-value {
-  flex: 1;
-  min-width: 0;
-  font-size: var(--text-sm, 0.8125rem);
-  font-weight: var(--weight-medium, 500);
+.directory-sort-select {
+  min-width: 9.5rem;
+  padding: 0.35rem 0.5rem;
+  font-size: var(--text-xs, 0.8125rem);
   color: var(--color-text-primary, #f4f4f8);
-  text-align: right;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid var(--color-border, rgba(255, 255, 255, 0.12));
+  border-radius: var(--radius-md, 0.375rem);
+  cursor: pointer;
+}
+
+.directory-sort-select:focus {
+  outline: 2px solid rgba(123, 77, 181, 0.55);
+  outline-offset: 1px;
+}
+
+.directory-sort-dir {
+  padding: 0.35rem 0.65rem;
+  font-size: var(--text-xs, 0.75rem);
+  font-weight: var(--weight-medium, 500);
+  color: var(--color-text-secondary, #c4c4d4);
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid var(--color-border, rgba(255, 255, 255, 0.12));
+  border-radius: var(--radius-md, 0.375rem);
+  cursor: pointer;
   white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
 
-.directory-type-filter-chevron {
-  flex-shrink: 0;
-  width: 1rem;
-  height: 1rem;
-  color: var(--color-text-tertiary, #6e6e7e);
-  transition: transform 0.2s ease;
-}
-
-.directory-type-filter[open] .directory-type-filter-chevron {
-  transform: rotate(180deg);
-}
-
-.directory-type-filter-panel {
-  padding: 0 var(--space-3, 0.75rem) var(--space-3, 0.75rem);
-  border-top: 1px solid var(--color-border, rgba(255, 255, 255, 0.08));
-}
-
-.directory-type-filter-panel-actions {
-  display: flex;
-  justify-content: flex-end;
-  padding: var(--space-2, 0.5rem) 0;
-}
-
-.directory-type-filter-reset {
-  padding: 0.25rem 0.5rem;
-  font-size: var(--text-xs, 0.6875rem);
-  font-weight: var(--weight-medium, 500);
-  color: var(--color-accent-purple-light, #c4b5fd);
-  background: rgba(123, 77, 181, 0.15);
-  border: 1px solid rgba(123, 77, 181, 0.35);
-  border-radius: var(--radius-md, 0.5rem);
-  cursor: pointer;
-}
-
-.directory-type-filter-reset:hover {
-  background: rgba(123, 77, 181, 0.25);
-}
-
-.directory-type-filter-chips {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.375rem;
-}
-
-.directory-type-chip {
-  padding: 0.35rem 0.55rem;
-  font-size: var(--text-xs, 0.6875rem);
-  font-weight: var(--weight-medium, 500);
-  color: var(--color-text-secondary, #a0a0b0);
-  background: rgba(255, 255, 255, 0.05);
-  border: 1px solid var(--color-border, rgba(255, 255, 255, 0.1));
-  border-radius: var(--radius-full, 9999px);
-  cursor: pointer;
-  transition: var(--transition-colors, color 0.15s ease, background 0.15s ease, border-color 0.15s ease);
-}
-
-.directory-type-chip:hover {
+.directory-sort-dir:hover {
   border-color: rgba(123, 77, 181, 0.45);
   color: var(--color-text-primary, #f4f4f8);
 }
 
-.directory-type-chip.is-active {
-  color: var(--color-text-primary, #f4f4f8);
+.directory-filters-clear {
+  padding: 0.4rem 0.85rem;
+  font-size: var(--text-xs, 0.8125rem);
+  font-weight: var(--weight-medium, 500);
+  color: var(--color-text-primary, #faf5ff);
   background: rgba(123, 77, 181, 0.35);
-  border-color: rgba(123, 77, 181, 0.65);
+  border: 1px solid rgba(167, 139, 250, 0.45);
+  border-radius: var(--radius-md, 0.5rem);
+  cursor: pointer;
+}
+
+.directory-filters-clear:hover {
+  background: rgba(123, 77, 181, 0.5);
+}
+
+.directory-filters-grid {
+  display: grid;
+  gap: var(--space-4, 1rem);
+}
+
+@media (min-width: 960px) {
+  .directory-filters-grid {
+    grid-template-columns: minmax(0, 1.15fr) minmax(0, 0.85fr) minmax(0, 1.2fr);
+    align-items: start;
+  }
+}
+
+.directory-filters-fieldset {
+  margin: 0;
+  padding: 0;
+  border: none;
+  min-width: 0;
+}
+
+.directory-filters-legend {
+  float: left;
+  width: 100%;
+  margin: 0 0 var(--space-2, 0.5rem);
+  padding: 0;
+  font-size: var(--text-xs, 0.6875rem);
+  font-weight: var(--weight-semibold, 600);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--color-text-secondary, #a8a8b8);
+}
+
+.directory-filters-hint {
+  clear: both;
+  margin: 0 0 var(--space-2, 0.5rem);
+  font-size: var(--text-xs, 0.6875rem);
+  line-height: 1.4;
+  color: var(--color-text-tertiary, #7a7a8a);
+}
+
+.directory-filters-chip-row {
+  clear: both;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.directory-filters-chip-scroll {
+  clear: both;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  max-height: 10.5rem;
+  overflow-y: auto;
+  padding: 2px;
+  margin: -2px;
+  scrollbar-gutter: stable;
+}
+
+.directory-filters-chip-scroll::-webkit-scrollbar {
+  width: 6px;
+}
+
+.directory-filters-chip-scroll::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.12);
+  border-radius: 999px;
+}
+
+.directory-filter-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.4rem 0.65rem;
+  font-size: var(--text-xs, 0.75rem);
+  font-weight: var(--weight-medium, 500);
+  line-height: 1.2;
+  color: var(--color-text-secondary, #b4b4c4);
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--color-border, rgba(255, 255, 255, 0.1));
+  border-radius: var(--radius-md, 0.5rem);
+  cursor: pointer;
+  transition:
+    color 0.15s ease,
+    background 0.15s ease,
+    border-color 0.15s ease,
+    box-shadow 0.15s ease;
+}
+
+.directory-filter-chip--grow {
+  flex: 1 1 auto;
+  justify-content: space-between;
+  min-width: min(100%, 8.5rem);
+}
+
+.directory-filter-chip:hover {
+  border-color: rgba(123, 77, 181, 0.4);
+  color: var(--color-text-primary, #f4f4f8);
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.directory-filter-chip.is-active {
+  color: var(--color-text-primary, #fafafa);
+  background: linear-gradient(145deg, rgba(123, 77, 181, 0.42), rgba(91, 33, 182, 0.35));
+  border-color: rgba(167, 139, 250, 0.55);
+  box-shadow: 0 0 0 1px rgba(123, 77, 181, 0.25);
+}
+
+.directory-filter-chip-label {
+  text-align: left;
+}
+
+.directory-filter-chip-count {
+  font-size: 0.625rem;
+  font-weight: var(--weight-semibold, 600);
+  padding: 0.1rem 0.35rem;
+  border-radius: var(--radius-full, 9999px);
+  background: rgba(0, 0, 0, 0.25);
+  color: var(--color-text-tertiary, #c4c4d4);
+}
+
+.directory-filter-chip.is-active .directory-filter-chip-count {
+  background: rgba(0, 0, 0, 0.35);
+  color: #f5f3ff;
+}
+
+.directory-filters-text-btn {
+  margin-top: var(--space-2, 0.5rem);
+  padding: 0;
+  font-size: var(--text-xs, 0.6875rem);
+  font-weight: var(--weight-medium, 500);
+  color: var(--color-accent-purple-light, #c4b5fd);
+  background: none;
+  border: none;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 0.15em;
+}
+
+.directory-filters-text-btn:hover {
+  color: #e9d5ff;
 }
 
 .error-banner {
@@ -2578,51 +3019,212 @@ button.phone-copy:hover {
   line-height: 1.4;
 }
 
-/* vCard dropdown */
-.vcard-dropdown-wrap {
+.directory-vcard-btn.is-open .vcard-dropdown-chevron {
+  transform: rotate(180deg);
+}
+
+/* vCard export panel */
+.vcard-export-wrap {
   position: relative;
 }
 
 .vcard-dropdown-chevron {
   width: 0.875rem;
   height: 0.875rem;
-  margin-left: 0.25rem;
+  margin-left: 0.35rem;
   flex-shrink: 0;
+  transition: transform 0.2s ease;
 }
 
-.vcard-dropdown-menu {
+.vcard-export-panel {
   position: absolute;
-  top: 100%;
+  top: calc(100% + 0.35rem);
   right: 0;
-  z-index: 10;
-  min-width: 180px;
-  margin-top: 0.25rem;
-  padding: var(--space-1, 0.25rem);
-  background: var(--color-glass, rgba(22, 22, 29, 0.95));
+  z-index: 20;
+  width: min(22rem, calc(100vw - 2rem));
+  max-height: min(70vh, 28rem);
+  overflow-y: auto;
+  padding: var(--space-3, 0.75rem) var(--space-4, 1rem);
+  background: linear-gradient(
+    165deg,
+    rgba(24, 24, 32, 0.98) 0%,
+    rgba(18, 18, 26, 0.98) 100%
+  );
   backdrop-filter: blur(var(--blur-lg, 20px));
   -webkit-backdrop-filter: blur(var(--blur-lg, 20px));
-  border: 1px solid var(--color-glass-border, rgba(255, 255, 255, 0.1));
+  border: 1px solid var(--color-glass-border, rgba(255, 255, 255, 0.12));
   border-radius: var(--radius-lg, 0.75rem);
-  box-shadow: var(--shadow-lg, 0 8px 16px rgba(0, 0, 0, 0.4));
+  box-shadow:
+    0 12px 40px rgba(0, 0, 0, 0.45),
+    0 0 0 1px rgba(123, 77, 181, 0.12) inset;
 }
 
-.vcard-dropdown-item {
-  display: block;
-  width: 100%;
-  padding: 0.5rem 0.75rem;
-  font-size: var(--text-sm, 0.8125rem);
-  font-weight: var(--weight-medium, 500);
+.vcard-export-panel-title {
+  margin: 0 0 0.35rem;
+  font-size: var(--text-sm, 0.875rem);
+  font-weight: var(--weight-semibold, 600);
   color: var(--color-text-primary, #f4f4f8);
-  text-align: left;
-  background: transparent;
+}
+
+.vcard-export-mono {
+  font-family: ui-monospace, monospace;
+  font-size: 0.8125em;
+}
+
+.vcard-export-panel-desc {
+  margin: 0 0 var(--space-3, 0.75rem);
+  font-size: var(--text-xs, 0.75rem);
+  line-height: 1.45;
+  color: var(--color-text-tertiary, #8b8b9a);
+}
+
+.vcard-export-fieldset {
+  margin: 0 0 var(--space-3, 0.75rem);
+  padding: 0;
   border: none;
+}
+
+.vcard-export-legend {
+  margin: 0 0 var(--space-2, 0.5rem);
+  padding: 0;
+  font-size: var(--text-xs, 0.6875rem);
+  font-weight: var(--weight-semibold, 600);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--color-text-secondary, #a8a8b8);
+}
+
+.vcard-export-radios {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.vcard-export-radio {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  font-size: var(--text-xs, 0.8125rem);
+  color: var(--color-text-secondary, #c8c8d8);
+  cursor: pointer;
+}
+
+.vcard-export-radio-input {
+  margin-top: 0.15rem;
+  accent-color: var(--color-accent-purple, #7b4db5);
+}
+
+.vcard-export-muted {
+  font-weight: var(--weight-normal, 400);
+  color: var(--color-text-tertiary, #7a7a8a);
+}
+
+.vcard-export-smart-hint {
+  margin: var(--space-2, 0.5rem) 0 0;
+  font-size: var(--text-xs, 0.6875rem);
+  line-height: 1.4;
+  color: var(--color-text-tertiary, #9a9aaa);
+}
+
+.vcard-export-sort-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2, 0.5rem);
+  margin-bottom: var(--space-3, 0.75rem);
+  padding: var(--space-2, 0.5rem) var(--space-3, 0.75rem);
+  border-radius: var(--radius-md, 0.5rem);
+  background: rgba(0, 0, 0, 0.22);
+  border: 1px solid var(--color-border, rgba(255, 255, 255, 0.08));
+}
+
+.vcard-export-sort-label {
+  font-size: var(--text-xs, 0.6875rem);
+  font-weight: var(--weight-semibold, 600);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--color-text-tertiary, #6e6e7e);
+}
+
+.vcard-export-select {
+  flex: 1 1 9rem;
+  min-width: 0;
+  padding: 0.35rem 0.5rem;
+  font-size: var(--text-xs, 0.8125rem);
+  color: var(--color-text-primary, #f4f4f8);
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid var(--color-border, rgba(255, 255, 255, 0.12));
+  border-radius: var(--radius-md, 0.375rem);
+  cursor: pointer;
+}
+
+.vcard-export-sort-dir {
+  padding: 0.35rem 0.55rem;
+  font-size: var(--text-xs, 0.75rem);
+  font-weight: var(--weight-medium, 500);
+  color: var(--color-text-secondary, #c4c4d4);
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid var(--color-border, rgba(255, 255, 255, 0.12));
+  border-radius: var(--radius-md, 0.375rem);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.vcard-export-sort-dir:hover {
+  border-color: rgba(123, 77, 181, 0.45);
+  color: var(--color-text-primary, #f4f4f8);
+}
+
+.vcard-export-meta {
+  margin: 0 0 var(--space-3, 0.75rem);
+  font-size: var(--text-xs, 0.75rem);
+  color: var(--color-text-tertiary, #8b8b9a);
+}
+
+.vcard-export-warn {
+  color: #fbbf24;
+}
+
+.vcard-export-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2, 0.5rem);
+  justify-content: flex-end;
+}
+
+.vcard-export-download {
+  padding: 0.45rem 1rem;
+  font-size: var(--text-xs, 0.8125rem);
+  font-weight: var(--weight-semibold, 600);
+  color: #faf5ff;
+  background: linear-gradient(145deg, rgba(123, 77, 181, 0.55), rgba(91, 33, 182, 0.45));
+  border: 1px solid rgba(196, 181, 253, 0.45);
   border-radius: var(--radius-md, 0.5rem);
   cursor: pointer;
-  transition: var(--transition-colors);
 }
 
-.vcard-dropdown-item:hover {
-  background: var(--color-hover, rgba(255, 255, 255, 0.08));
+.vcard-export-download:hover:not(:disabled) {
+  filter: brightness(1.06);
+}
+
+.vcard-export-download:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.vcard-export-cancel {
+  padding: 0.45rem 0.75rem;
+  font-size: var(--text-xs, 0.8125rem);
+  font-weight: var(--weight-medium, 500);
+  color: var(--color-text-secondary, #a0a0b0);
+  background: transparent;
+  border: 1px solid var(--color-border, rgba(255, 255, 255, 0.12));
+  border-radius: var(--radius-md, 0.5rem);
+  cursor: pointer;
+}
+
+.vcard-export-cancel:hover {
+  background: rgba(255, 255, 255, 0.06);
 }
 
 /* Hub card styling */

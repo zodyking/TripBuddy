@@ -33,6 +33,7 @@ import {
   countByDirectoryLocationType,
   normalizeLocationTypeForStorage,
 } from '../utils/directoryLocationTypes.js'
+import { parseCsvRecords } from '../utils/csvParse.js'
 import {
   refreshLinehaulApis,
   computeLinehaulReferenceId,
@@ -964,24 +965,23 @@ const directoryTypeStatRows = computed(() => {
 })
 
 /**
- * Parse CSV text into array of row objects using header row as keys.
- * @param {string} csvText
- * @returns {Array<Record<string, string>>}
+ * Read latitude/longitude from a FedEx-style CSV row when columns are present and numeric.
+ * Accepts Lat/Long, lat/lng, latitude/longitude, etc.
+ * @param {Record<string, string>} r
+ * @returns {({ latitude: number, longitude: number }) | null}
  */
-function parseCsv(csvText) {
-  const lines = csvText.split(/\r?\n/).filter((l) => l.trim())
-  if (lines.length < 2) return []
-  const headers = lines[0].split(',').map((h) => h.trim())
-  const rows = []
-  for (let i = 1; i < lines.length; i++) {
-    const values = lines[i].split(',').map((v) => v.trim())
-    const obj = {}
-    headers.forEach((h, idx) => {
-      obj[h] = values[idx] ?? ''
-    })
-    rows.push(obj)
-  }
-  return rows
+function readLatLngFromCsvRow(r) {
+  const latRaw = String(
+    r.Lat ?? r.lat ?? r.latitude ?? r.Latitude ?? r.LAT ?? '',
+  ).trim()
+  const lngRaw = String(
+    r.Long ?? r.lng ?? r.lon ?? r.longitude ?? r.Longitude ?? r.LONG ?? '',
+  ).trim()
+  if (!latRaw || !lngRaw) return null
+  const lat = Number(latRaw)
+  const lng = Number(lngRaw)
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null
+  return { latitude: lat, longitude: lng }
 }
 
 function onCsvFileSelected(event) {
@@ -999,7 +999,7 @@ function onCsvFileSelected(event) {
     try {
       const text = e.target?.result
       if (typeof text !== 'string') throw new Error('Failed to read file')
-      const rows = parseCsv(text)
+      const rows = parseCsvRecords(text)
       const importable = rows.filter((r) => String(r['Station Number'] ?? '').trim())
       csvImportPreview.value = {
         total: rows.length,
@@ -1028,7 +1028,7 @@ async function importCsvToDirectory() {
   csvImportError.value = ''
   try {
     const text = await csvImportFile.value.text()
-    const rows = parseCsv(text)
+    const rows = parseCsvRecords(text)
     const importable = rows.filter((r) => String(r['Station Number'] ?? '').trim())
     const entries = importable.map((r) => {
       const addr1 = (r['Address 1'] || '').trim()
@@ -1037,14 +1037,14 @@ async function importCsvToDirectory() {
       const state = (r.State || '').trim()
       const zip = (r.Zip || '').trim()
       const addressParts = [addr1, addr2, city, state, zip].filter(Boolean)
+      const coords = readLatLngFromCsvRow(r)
       return {
         locationId: (r['Station Number'] || '').trim(),
         locationName: (r['Station Name'] || '').trim(),
         abbreviation: (r['Station Abbreviation'] || '').trim(),
         address: addressParts.join(', '),
         phone: (r.Phone || '').trim(),
-        latitude: null,
-        longitude: null,
+        ...(coords ? coords : {}),
         timeZone: '',
         locationType: normalizeLocationTypeForStorage(r.Status || ''),
         district: (r.District || '').trim().toUpperCase(),

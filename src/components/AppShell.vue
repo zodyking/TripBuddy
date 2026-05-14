@@ -586,6 +586,27 @@ onUnmounted(() => {
   min-height: 0;
 }
 
+/* Home quick action: live preview fills the scroll region (header ↔ bottom nav), no extra page scroll */
+.app-main.app-main--home:has(:deep(.main--automation-preview)) {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  padding-bottom: var(--space-2, 0.5rem);
+}
+
+.app-main.app-main--home:has(:deep(.main--automation-preview)) > :deep(*) {
+  flex: 1 1 auto;
+  min-height: 0;
+  min-width: 0;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.app-scroll:has(:deep(.main--automation-preview)) {
+  overflow-y: hidden;
+}
+
 /* Directory: edge-to-edge horizontal, no centered column — inner view owns scroll regions */
 .app-main.app-main--directory {
   flex: 1;

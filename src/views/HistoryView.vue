@@ -1912,10 +1912,9 @@ onUnmounted(() => {
       <template v-if="tripsByWorkWeek.length">
         <div class="history-hierarchy">
           <details
-            v-for="(wg, wgi) in tripsByWorkWeek"
+            v-for="wg in tripsByWorkWeek"
             :key="wg.key"
             :ref="bindWwDetailsEl(wg.key)"
-            :open="wgi === 0"
             class="history-ww-section history-fold"
             :aria-label="wg.groupLabel"
           >
@@ -2169,7 +2168,7 @@ onUnmounted(() => {
               </details>
             </div>
 
-            <details class="history-pay-fold history-fold history-pay-card" open>
+            <details class="history-pay-fold history-fold history-pay-card">
               <summary class="history-pay-fold__summary history-fold__summary">
                 <span class="history-pay-fold__title">Week totals</span>
               </summary>
@@ -2207,7 +2206,6 @@ onUnmounted(() => {
             <details
               v-if="SHOW_PAY_TOTAL_SECTION"
               class="history-pay-fold history-pay-fold--pay-total history-fold history-pay-card"
-              open
             >
               <summary class="history-pay-fold__summary history-fold__summary history-pay-fold__summary--pay">
                 <span class="history-pay-fold__title">Pay total</span>
