@@ -373,8 +373,12 @@ function appendixDispatchDarkTitlePageSet(appendixStartPage, proofTrips) {
   return s
 }
 
-/** @param {WeekTotalsPdfOpts} opts */
-export function downloadHistoryWeekTotalsPdf(opts) {
+/**
+ * Build the week mileage PDF (caller may `save` or `output('blob')`).
+ * @param {WeekTotalsPdfOpts} opts
+ * @returns {{ doc: import('jspdf').jsPDF, fileName: string }}
+ */
+function buildWeekTotalsJsPdf(opts) {
   const title = ascii(opts.documentTitle?.trim() || 'Weekly Mileage Report')
   const genAt =
     typeof opts.generatedAtMs === 'number' && Number.isFinite(opts.generatedAtMs)
@@ -756,5 +760,21 @@ export function downloadHistoryWeekTotalsPdf(opts) {
     proofTrips.length > 0 ? appendixDispatchDarkTitlePageSet(appendixStartPage, proofTrips) : null
   stampPageNumbers(doc, appendixDarkTitles)
 
-  doc.save(`week-totals-${slug(opts.weekRangeLabel.replace(/\s+/g, '-'))}.pdf`)
+  const fileName = `week-totals-${slug(opts.weekRangeLabel.replace(/\s+/g, '-'))}.pdf`
+  return { doc, fileName }
+}
+
+/** @param {WeekTotalsPdfOpts} opts */
+export function downloadHistoryWeekTotalsPdf(opts) {
+  const { doc, fileName } = buildWeekTotalsJsPdf(opts)
+  doc.save(fileName)
+}
+
+/**
+ * @param {WeekTotalsPdfOpts} opts
+ * @returns {{ blob: Blob, filename: string }}
+ */
+export function getHistoryWeekTotalsPdfBlob(opts) {
+  const { doc, fileName } = buildWeekTotalsJsPdf(opts)
+  return { blob: doc.output('blob'), filename: fileName }
 }

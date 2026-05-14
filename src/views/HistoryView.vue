@@ -19,7 +19,7 @@ import {
   linehaulTractorBody,
   hiddenDailyTripLegSequences,
 } from '../stores/linehaulSnapshotStore.js'
-import { downloadHistoryWeekTotalsPdf } from '../utils/historyWeekTotalsPdf.js'
+import { getHistoryWeekTotalsPdfBlob } from '../utils/historyWeekTotalsPdf.js'
 import {
   buildDirectoryLocationMap,
   directoryLookup,
@@ -93,6 +93,23 @@ const pdfCredMeta = ref(
   /** @type {{ employeeNumber?: string, driverName?: string }} */ ({}),
 )
 const pdfWeekBusyKey = ref('')
+
+/** Full-screen PDF preview for week mileage report */
+const pdfWeekViewerOpen = ref(false)
+const pdfViewerObjectUrl = ref(/** @type {string | null} */ (null))
+const pdfViewerFilename = ref('')
+const pdfViewerTitle = ref('')
+
+function closeWeekPdfViewer() {
+  pdfWeekViewerOpen.value = false
+  const u = pdfViewerObjectUrl.value
+  if (u) {
+    URL.revokeObjectURL(u)
+    pdfViewerObjectUrl.value = null
+  }
+  pdfViewerFilename.value = ''
+  pdfViewerTitle.value = ''
+}
 
 /** Viewed calendar month (prev/next, no year cap). */
 const viewYear = ref(/** @type {number} */(new Date().getFullYear()))
@@ -1246,7 +1263,8 @@ async function onDownloadWeekTotalsPdf(wg) {
         sumBillable: 0,
         rows: [],
       }
-    downloadHistoryWeekTotalsPdf({
+    closeWeekPdfViewer()
+    const { blob, filename } = getHistoryWeekTotalsPdfBlob({
       documentTitle:
         historyWeekViewMode.value === 'paySchedule'
           ? 'FedEx pay schedule mileage report'
@@ -1263,6 +1281,10 @@ async function onDownloadWeekTotalsPdf(wg) {
       days,
       sumBillable: estWeek.sumBillable,
     })
+    pdfViewerObjectUrl.value = URL.createObjectURL(blob)
+    pdfViewerFilename.value = filename
+    pdfViewerTitle.value = wg.groupLabel
+    pdfWeekViewerOpen.value = true
   } catch (e) {
     console.error('[weekTotalsPdf]', e)
     window.alert(
@@ -1770,6 +1792,7 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
+  closeWeekPdfViewer()
   if (typeof document !== 'undefined') {
     document.removeEventListener('click', docClickOutcome, true)
   }
@@ -1841,7 +1864,7 @@ onUnmounted(() => {
       <div class="history-manual-toolbar">
         <button
           type="button"
-          class="history-link tap"
+          class="history-add-manual-trip-btn tap"
           @click="openManualTripModal"
         >
           + Add manual trip
@@ -1924,12 +1947,12 @@ onUnmounted(() => {
                 <div class="history-head-metrics">
                   <button
                     type="button"
-                    class="history-week-download-btn tap"
+                    class="history-week-pdf-btn tap"
                     :disabled="pdfWeekBusyKey === wg.key"
-                    title="Download PDF summary for this work week"
+                    title="Open PDF preview for this work week (download from the viewer)"
                     @click.stop="onDownloadWeekTotalsPdf(wg)"
                   >
-                    {{ pdfWeekBusyKey === wg.key ? 'Working…' : 'Download' }}
+                    {{ pdfWeekBusyKey === wg.key ? 'Working…' : 'View PDF' }}
                   </button>
                   <span class="history-mile-pill">{{
                     mileageHeaderLine(wg.mileageSum, wg.tripsWithMileage)
@@ -2370,6 +2393,40 @@ onUnmounted(() => {
               {{ manualTripBusy ? 'Saving…' : 'Add trip' }}
             </button>
           </div>
+        </div>
+      </div>
+    </Teleport>
+
+    <Teleport to="body">
+      <div
+        v-if="pdfWeekViewerOpen"
+        class="history-pdf-viewer-overlay"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="history-pdf-viewer-title"
+      >
+        <div class="history-pdf-viewer-backdrop" @click="closeWeekPdfViewer" />
+        <div class="history-pdf-viewer-dialog" @click.stop>
+          <header class="history-pdf-viewer-head">
+            <h3 id="history-pdf-viewer-title" class="history-pdf-viewer-title">{{ pdfViewerTitle }}</h3>
+            <div class="history-pdf-viewer-actions">
+              <a
+                v-if="pdfViewerObjectUrl"
+                class="history-pdf-viewer-download tap"
+                :href="pdfViewerObjectUrl"
+                :download="pdfViewerFilename"
+              >Download PDF</a>
+              <button type="button" class="history-pdf-viewer-close tap" @click="closeWeekPdfViewer">
+                Close
+              </button>
+            </div>
+          </header>
+          <iframe
+            v-if="pdfViewerObjectUrl"
+            class="history-pdf-viewer-frame"
+            title="Week mileage PDF preview"
+            :src="pdfViewerObjectUrl"
+          />
         </div>
       </div>
     </Teleport>
@@ -2877,7 +2934,7 @@ onUnmounted(() => {
   flex-shrink: 0;
 }
 
-.history-week-download-btn {
+.history-week-pdf-btn {
   flex-shrink: 0;
   font-size: 0.62rem;
   font-weight: 700;
@@ -2890,16 +2947,17 @@ onUnmounted(() => {
   cursor: pointer;
 }
 
-.history-week-download-btn:hover:not(:disabled) {
+.history-week-pdf-btn:hover:not(:disabled) {
   background: rgba(124, 92, 255, 0.26);
+  border-color: rgba(167, 139, 250, 0.75);
 }
 
-.history-week-download-btn:focus-visible {
+.history-week-pdf-btn:focus-visible {
   outline: 2px solid rgba(167, 139, 250, 0.85);
   outline-offset: 2px;
 }
 
-.history-week-download-btn:disabled {
+.history-week-pdf-btn:disabled {
   opacity: 0.55;
   cursor: wait;
 }
@@ -2985,34 +3043,6 @@ onUnmounted(() => {
 
 .history-pay-fold__summary--pay {
   justify-content: space-between !important;
-}
-
-.history-week-download-btn {
-  flex-shrink: 0;
-  font-size: 0.62rem;
-  font-weight: 700;
-  letter-spacing: 0.04em;
-  padding: 0.32rem 0.65rem;
-  border-radius: 8px;
-  border: 1px solid rgba(124, 92, 255, 0.55);
-  background: rgba(124, 92, 255, 0.16);
-  color: #ece8ff;
-  cursor: pointer;
-}
-
-.history-week-download-btn:hover:not(:disabled) {
-  background: rgba(124, 92, 255, 0.26);
-  border-color: rgba(167, 139, 250, 0.75);
-}
-
-.history-week-download-btn:focus-visible {
-  outline: 2px solid rgba(167, 139, 250, 0.85);
-  outline-offset: 2px;
-}
-
-.history-week-download-btn:disabled {
-  opacity: 0.55;
-  cursor: wait;
 }
 
 .history-pay-fold__pill {
@@ -4099,6 +4129,135 @@ onUnmounted(() => {
 .history-manual-toolbar {
   margin-top: var(--space-3, 0.75rem);
   margin-bottom: var(--space-2, 0.5rem);
+  display: flex;
+  justify-content: center;
+  width: 100%;
+}
+
+.history-add-manual-trip-btn {
+  border: none;
+  background: transparent;
+  padding: 0.4rem 0.65rem;
+  margin: 0;
+  font-size: 0.84rem;
+  font-weight: 650;
+  letter-spacing: 0.02em;
+  color: #c4b5fd;
+  cursor: pointer;
+  text-align: center;
+}
+
+.history-add-manual-trip-btn:hover {
+  color: #e9d5ff;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.history-add-manual-trip-btn:focus-visible {
+  outline: 2px solid rgba(167, 139, 250, 0.75);
+  outline-offset: 2px;
+  border-radius: 8px;
+}
+
+.history-pdf-viewer-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 10050;
+  display: flex;
+  align-items: stretch;
+  justify-content: center;
+  padding: max(env(safe-area-inset-top), 0.5rem) max(env(safe-area-inset-right), 0.5rem)
+    max(env(safe-area-inset-bottom), 0.5rem) max(env(safe-area-inset-left), 0.5rem);
+  box-sizing: border-box;
+}
+
+.history-pdf-viewer-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.72);
+}
+
+.history-pdf-viewer-dialog {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  width: min(960px, 100%);
+  max-height: min(92vh, 100%);
+  background: #12121a;
+  border-radius: 14px;
+  border: 1px solid rgba(167, 139, 250, 0.35);
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.55);
+  overflow: hidden;
+}
+
+.history-pdf-viewer-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  padding: 0.65rem 0.75rem;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  background: linear-gradient(180deg, #1a1a26 0%, #14141c 100%);
+}
+
+.history-pdf-viewer-title {
+  margin: 0;
+  flex: 1;
+  min-width: 0;
+  font-size: 0.85rem;
+  font-weight: 700;
+  line-height: 1.35;
+  color: #f4f4fb;
+}
+
+.history-pdf-viewer-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-shrink: 0;
+}
+
+.history-pdf-viewer-download {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.38rem 0.75rem;
+  border-radius: 8px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-decoration: none;
+  color: #0f0f14;
+  background: linear-gradient(145deg, #ddd6fe, #a78bfa);
+  border: 1px solid rgba(167, 139, 250, 0.6);
+}
+
+.history-pdf-viewer-download:hover {
+  filter: brightness(1.06);
+}
+
+.history-pdf-viewer-close {
+  padding: 0.38rem 0.7rem;
+  border-radius: 8px;
+  font-size: 0.72rem;
+  font-weight: 650;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.06);
+  color: #e4e4ee;
+  cursor: pointer;
+}
+
+.history-pdf-viewer-close:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.history-pdf-viewer-frame {
+  flex: 1 1 0;
+  min-height: 0;
+  width: 100%;
+  border: 0;
+  background: #0a0a10;
 }
 
 .history-modal-field {
