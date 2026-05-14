@@ -7,7 +7,13 @@ import {
   inspectCheckoutHomeGate,
 } from './pages/dispatchHome.mjs'
 import { ensureDispatchAppReady } from './dispatchAuthGate.mjs'
-import { getUsername, getDecryptedPassword, getTractorNumber } from '../credentials-store.mjs'
+import {
+  getUsername,
+  getDecryptedPassword,
+  getTractorNumber,
+  getLinehaulDriverId,
+  getDecryptedLinehaulBearer,
+} from '../credentials-store.mjs'
 import { readAssignment, writeAssignment } from '../assignment-store.mjs'
 import {
   getResolvedCheckInXpaths,
@@ -24,6 +30,11 @@ import {
 } from './runner.mjs'
 import { runInspectCheckoutAfterGate } from './inspectCheckoutOrchestration.mjs'
 import { buildTripDataFromAssignment } from './inspectFieldResolver.mjs'
+import { linehaulGet } from '../fedex-linehaul-api.mjs'
+import {
+  automationNeedsGeolocation,
+  resolveAutomationGeolocation,
+} from './geolocation.mjs'
 
 let runAbort = null
 let runnerBusy = false
@@ -1014,7 +1025,44 @@ export async function runAutomation(automation, opts = {}) {
       log('detail', `Checking condition: ${condition.type}`)
     }
 
-    await ensureContext({ headless, slowMo })
+    let geolocation = null
+    if (automationNeedsGeolocation(automation)) {
+      let driverLocationId = ''
+      try {
+        const tractorNbr = ctx.credentials.tractor
+        const bearer = await getDecryptedLinehaulBearer()
+        if (tractorNbr && bearer) {
+          const tractorResult = await linehaulGet('tractor', tractorNbr, bearer)
+          if (tractorResult.ok && tractorResult.body?.locationId) {
+            driverLocationId = String(tractorResult.body.locationId).trim()
+          }
+        }
+        if (!driverLocationId) {
+          const driverId = await getLinehaulDriverId()
+          if (driverId && bearer) {
+            const driverResult = await linehaulGet('driver', driverId, bearer)
+            if (driverResult.ok && driverResult.body?.driverLocation) {
+              driverLocationId = String(driverResult.body.driverLocation).trim()
+            }
+          }
+        }
+      } catch (e) {
+        log('warn', `Failed to fetch driver location for geolocation: ${e.message || e}`)
+      }
+
+      const geoResult = await resolveAutomationGeolocation({
+        assignment: ctx.assignment,
+        driverLocationId,
+      })
+      if (geoResult.geo) {
+        geolocation = geoResult.geo
+        log('info', `Geolocation: ${geoResult.source} (ID ${geoResult.locationId}) → ${geoResult.geo.latitude.toFixed(4)}, ${geoResult.geo.longitude.toFixed(4)}`)
+      } else {
+        log('warn', 'Geolocation not available — coordinates not in directory')
+      }
+    }
+
+    await ensureContext({ headless, slowMo, geolocation })
     const page = await getOrCreatePage()
     currentPage = page
     startPreviewCapture(page)
