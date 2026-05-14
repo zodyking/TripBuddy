@@ -1,3 +1,5 @@
+import { normalizeLocationTypeForStorage } from './directoryLocationTypes.js'
+
 /**
  * Format FedEx v2 transportation-network location JSON for UI.
  * Rows may include `href` for address (Google Maps Street View) and phone (`tel:`).
@@ -206,6 +208,38 @@ function unwrapLocationRecord(body) {
 }
 
 /**
+ * @param {Record<string, unknown>} o
+ */
+function pickLocationStatusForDirectory(o) {
+  const keys = [
+    'locationType',
+    'locationStatus',
+    'facilityStatus',
+    'facilityType',
+    'stationType',
+    'bookingLocationType',
+    'locType',
+    'statusDescription',
+    'locationCategory',
+    'status',
+    'Status',
+  ]
+  for (const k of keys) {
+    const v = o[k]
+    if (v != null && String(v).trim()) return String(v).trim()
+  }
+  const nested = o.locationDetails ?? o.locationDetail ?? o.facility
+  if (nested && typeof nested === 'object' && !Array.isArray(nested)) {
+    const ro = /** @type {Record<string, unknown>} */ (nested)
+    for (const k of keys) {
+      const v = ro[k]
+      if (v != null && String(v).trim()) return String(v).trim()
+    }
+  }
+  return ''
+}
+
+/**
  * @param {unknown} v
  */
 function formatPhoneDisplay(v) {
@@ -232,6 +266,8 @@ function formatPhoneDisplay(v) {
  *   latitude: number | null,
  *   longitude: number | null,
  *   timeZone: string,
+ *   locationType?: string,
+ *   district?: string,
  * } | null}
  */
 export function extractLocationForDirectory(body) {
@@ -258,6 +294,11 @@ export function extractLocationForDirectory(body) {
     else if (lngD === 'E') lng = Math.abs(lng)
   }
 
+  const statusRaw = pickLocationStatusForDirectory(o)
+  const locationType = normalizeLocationTypeForStorage(statusRaw)
+  const districtRaw = String(o.district ?? o.District ?? '').trim()
+  const district = districtRaw ? districtRaw.toUpperCase() : ''
+
   return {
     locationId: String(id).trim(),
     locationName: String(o.locationName ?? o.name ?? o.siteName ?? '').trim(),
@@ -267,5 +308,7 @@ export function extractLocationForDirectory(body) {
     latitude: lat,
     longitude: lng,
     timeZone: String(o.timeZoneCode ?? o.timeZone ?? '').trim(),
+    ...(locationType ? { locationType } : {}),
+    ...(district ? { district } : {}),
   }
 }

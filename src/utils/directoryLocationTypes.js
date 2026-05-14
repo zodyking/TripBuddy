@@ -21,6 +21,7 @@ export const DIRECTORY_LOCATION_TYPE_OTHER = 'Other'
 function normUpperSpaced(raw) {
   return String(raw ?? '')
     .trim()
+    .replace(/&/g, ' AND ')
     .toUpperCase()
     .replace(/-/g, ' ')
     .replace(/\s+/g, ' ')
@@ -36,13 +37,39 @@ export function filterKeyForLocationType(raw) {
   const u = normUpperSpaced(raw)
   if (!u) return DIRECTORY_LOCATION_TYPE_OTHER
   const compact = u.replace(/\s/g, '')
+
   if (compact === 'HUBLOCAL' || u === 'HUB LOCAL') return 'Hub Local'
-  if (u === 'SUB STATION' || compact === 'SUBSTATION') return 'Sub Station'
-  if (u === 'SMARTPOST HUB' || compact === 'SMARTPOSTHUB' || u === 'SMART POST HUB') return 'Smartpost Hub'
+  if (u === 'SUB STATION' || compact === 'SUBSTATION' || (u.includes('SUB') && u.includes('STATION'))) {
+    return 'Sub Station'
+  }
+  if (
+    u === 'SMARTPOST HUB' ||
+    compact === 'SMARTPOSTHUB' ||
+    u === 'SMART POST HUB' ||
+    u.includes('SMARTPOST')
+  ) {
+    return 'Smartpost Hub'
+  }
+
   if (u === 'ANNEX') return 'Annex'
-  if (u === 'NFS') return 'NFS'
-  if (u === 'STATION') return 'Station'
-  if (u === 'HUB') return 'Hub'
+  if (u === 'NFS' || compact === 'NFS') return 'NFS'
+
+  if (u.includes('HUB') && u.includes('LOCAL')) return 'Hub Local'
+  if (u === 'HUB' || u === 'HUBS' || (u.endsWith(' HUB') && !u.includes('SMARTPOST'))) return 'Hub'
+
+  if (
+    u === 'STATION' ||
+    u === 'STN' ||
+    u === 'PUD' ||
+    u === 'P AND D' ||
+    u === 'SERVICE CENTER' ||
+    u === 'GROUND STATION' ||
+    (u.includes('PICKUP') && u.includes('DELIVERY')) ||
+    (u.includes('STATION') && !u.includes('SUB'))
+  ) {
+    return 'Station'
+  }
+
   return DIRECTORY_LOCATION_TYPE_OTHER
 }
 

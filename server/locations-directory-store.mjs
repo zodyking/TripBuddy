@@ -37,6 +37,17 @@ async function writeDirectory(directory) {
 }
 
 /**
+ * Use `next` when non-empty after trim; otherwise keep `prev` (so trip auto-save does not wipe CSV import fields).
+ * @param {unknown} next
+ * @param {unknown} prev
+ */
+function mergeOptionalTextField(next, prev) {
+  const s = next == null ? '' : String(next).trim()
+  if (s) return s
+  return prev == null ? '' : String(prev).trim()
+}
+
+/**
  * @param {LocationEntry} a
  * @param {LocationEntry} b
  * @returns {boolean}
@@ -77,8 +88,8 @@ export async function upsertLocation(data) {
     longitude: data.longitude != null ? Number(data.longitude) : null,
     timeZone: String(data.timeZone ?? ''),
     lastUpdated: new Date().toISOString(),
-    locationType: String(data.locationType ?? ''),
-    district: String(data.district ?? ''),
+    locationType: mergeOptionalTextField(data.locationType, existing?.locationType),
+    district: mergeOptionalTextField(data.district, existing?.district),
   }
 
   if (existing && entriesEqual(existing, entry)) {
@@ -213,6 +224,7 @@ export async function bulkUpsertLocations(entries) {
       skipped++
       continue
     }
+    const existing = directory[data.locationId]
     const entry = {
       locationId: String(data.locationId),
       locationName: String(data.locationName ?? ''),
@@ -223,10 +235,9 @@ export async function bulkUpsertLocations(entries) {
       longitude: data.longitude != null ? Number(data.longitude) : null,
       timeZone: String(data.timeZone ?? ''),
       lastUpdated: now,
-      locationType: String(data.locationType ?? ''),
-      district: String(data.district ?? ''),
+      locationType: mergeOptionalTextField(data.locationType, existing?.locationType),
+      district: mergeOptionalTextField(data.district, existing?.district),
     }
-    const existing = directory[data.locationId]
     if (existing) {
       if (entriesEqual(existing, entry)) {
         skipped++
