@@ -32,12 +32,15 @@ export function escapeVcardText(s) {
     .replace(/,/g, '\\,')
 }
 
-/** E.164-style for vCard TEL (digits only, US 10 → +1). */
+/**
+ * vCard TEL value: digits only (no +1 / no leading +).
+ * US 10-digit and 1 + 10-digit both normalize to 10 digits.
+ */
 export function phoneToVcardTel(phone) {
   const d = String(phone).replace(/\D/g, '')
-  if (d.length === 10) return `+1${d}`
-  if (d.length === 11 && d.startsWith('1')) return `+${d}`
-  if (d.length >= 8) return `+${d}`
+  if (d.length === 10) return d
+  if (d.length === 11 && d.startsWith('1')) return d.slice(1)
+  if (d.length >= 8) return d
   return ''
 }
 
@@ -73,6 +76,26 @@ export function sanitizeLocationNameForLabel(rawName) {
   if (!s) return ''
   const beforeDash = s.includes('-') ? s.split('-')[0].trim() : s
   return beforeDash.replace(/-/g, '').replace(/\s+/g, ' ').trim()
+}
+
+/**
+ * Location name for vCard N family part: letters and numbers only, spaces between words.
+ * @param {string} rawName
+ */
+export function sanitizeLocationNameForVcardFamilyName(rawName) {
+  const s = String(rawName ?? '').trim()
+  if (!s) return ''
+  try {
+    return s
+      .replace(/[^\p{L}\p{N}\s]/gu, ' ')
+      .replace(/\s+/g, ' ')
+      .trim()
+  } catch {
+    return s
+      .replace(/[^a-zA-Z0-9\s]/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim()
+  }
 }
 
 /**
@@ -272,6 +295,44 @@ export function buildDirectoryVcardString(sortedLocations, opts = {}) {
     }
   }
   lines.push('END:VCARD')
+  return { body: lines.join('\r\n'), itemCount }
+}
+
+/**
+ * One contact per file (directory card download). Given name = location id, family = sanitized name.
+ * @param {object} loc
+ * @param {{ photoB64?: string }} opts
+ * @returns {{ body: string, itemCount: number }}
+ */
+export function buildSingleDirectoryContactVcard(loc, opts = {}) {
+  const given = String(/** @type {{ locationId?: string }} */ (loc).locationId ?? '').trim() || 'Location'
+  const family = sanitizeLocationNameForVcardFamilyName(
+    String(/** @type {{ locationName?: string }} */ (loc).locationName ?? ''),
+  )
+  const lines = ['BEGIN:VCARD', 'VERSION:3.0']
+  lines.push(
+    `N:${escapeVcardText(family)};${escapeVcardText(given)};;;`,
+  )
+  const fn = family ? `${given} ${family}`.trim() : given
+  lines.push(`FN:${escapeVcardText(fn)}`)
+  lines.push('ORG:FedEx;')
+  const b64 = opts.photoB64
+  if (b64) {
+    lines.push(...foldVcardContentLine(`PHOTO;ENCODING=b:${b64}`))
+  }
+  const raw = /** @type {{ phone?: string }} */ (loc).phone ?? ''
+  const tel = phoneToVcardTel(raw)
+  if (tel) {
+    lines.push(`TEL;TYPE=WORK,VOICE:${tel}`)
+  }
+  const addr = String(/** @type {{ address?: string }} */ (loc).address ?? '').trim()
+  if (addr) {
+    const { street, city, state, zip } = parseAddressForVcard(addr)
+    const adrValue = `;;${escapeVcardText(street)};${escapeVcardText(city)};${escapeVcardText(state)};${escapeVcardText(zip)};`
+    lines.push(`ADR;TYPE=WORK:${adrValue}`)
+  }
+  lines.push('END:VCARD')
+  const itemCount = (tel ? 1 : 0) + (addr ? 1 : 0)
   return { body: lines.join('\r\n'), itemCount }
 }
 

@@ -13,6 +13,7 @@ import {
 import { inferRegionFromDirectoryAddress, countryLabelFromCode } from '../utils/directoryAddressRegion.js'
 import {
   buildDirectoryVcardString,
+  buildSingleDirectoryContactVcard,
   vcardExportHasRenderableItems,
   resolveVcardExportLocations,
   vcardFilenameSuffix,
@@ -984,7 +985,7 @@ function runDirectoryVcardDownload() {
   })
 }
 
-/** Same vCard body shape as bulk export; one row in the array. */
+/** Per-card .vcf: one vCard with N/FN from location id + sanitized name; bulk export unchanged. */
 function locationHasSingleVcardExport(loc) {
   return vcardExportHasRenderableItems([loc])
 }
@@ -1000,9 +1001,8 @@ function sanitizeVcardDownloadFilenameSegment(raw) {
 
 function downloadSingleLocationVcard(loc) {
   if (typeof window === 'undefined' || !loc) return
-  const one = [loc]
-  if (!vcardExportHasRenderableItems(one)) return
-  const { body, itemCount } = buildDirectoryVcardString(one, {
+  if (!vcardExportHasRenderableItems([loc])) return
+  const { body, itemCount } = buildSingleDirectoryContactVcard(loc, {
     photoB64: vcardFedexLogoB64.value,
   })
   if (itemCount <= 0) return
