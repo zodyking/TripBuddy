@@ -38,6 +38,70 @@ GET /api/health
 
 Returns `{ "ok": true, "busy": false }` when healthy.
 
+## Verify which UI bundle is deployed
+
+After each deploy, the running app serves Vite-built files from `dist/`. Compare the server to your browser:
+
+```
+GET /api/build-info
+```
+
+Response includes `mainScript` and `mainCss` (filenames under `/assets/`, e.g. `index-DhW1B_kH.js`). Open the site’s **View source** on `(index)` and confirm the same script name appears. If they differ, the browser or a CDN is still serving an old `index.html`, or traffic is not hitting the new container.
+
+This endpoint is public (no auth) and sends `Cache-Control: no-store`.
+
+## Log files and `tail` on the Dokploy host
+
+If you see:
+
+`tail: cannot open '...' for reading: No such file or directory`
+
+common causes:
+
+1. **Wrong app id** — Under `/etc/dokploy/logs/`, each app has its own folder (e.g. `tripbuddy-tripbuddy-thr5x8` vs `tripbuddy-tripbuddy-knuts7`). List the directory and use the folder that actually exists.
+2. **Wrong or rotated filename** — Log filenames often include a timestamp. List the folder and copy the exact name.
+3. **Colons in the filename** — e.g. `tripbuddy-...-2026-05-14:15:56:51.log`. **Quote the full path** in the shell so it is not split:
+   - `tail -n 200 '/etc/dokploy/logs/<your-app-folder>/<exact-file>.log'`
+
+Discovery commands (run over SSH on the Dokploy server):
+
+```bash
+ls -la /etc/dokploy/logs/
+ls -la /etc/dokploy/logs/tripbuddy-tripbuddy-*/
+```
+
+If the log directory is empty or missing, use Docker logs instead (next section).
+
+## Docker logs (when `/etc/dokploy/logs/...` is missing)
+
+```bash
+docker ps --format 'table {{.Names}}\t{{.Image}}\t{{.Status}}'
+docker logs -f <container_name_or_id>
+```
+
+Use the container that matches your TripBuddy / FedEx tool image. Dokploy’s UI “Logs” tab usually wraps the same output.
+
+## Confirm Dockerfile build (not Nixpacks)
+
+Your deploy **must** use the repo **Dockerfile** (multi-stage: Node `ui` + `npm run build`, then Playwright runtime with `COPY --from=ui /app/dist`).
+
+If build logs contain **`Starting nixpacks build...`** or a **Caddy / Railway Nixpacks** base image, Dokploy is **not** using this repo’s Dockerfile. In that case, Dockerfile edits (including `CACHE_BUST`) will not produce the UI you expect.
+
+**In Dokploy application settings:**
+
+1. **Build type** = **Dockerfile** (not Nixpacks / Auto).
+2. **Dockerfile path** = `Dockerfile` (repository root).
+
+**After redeploy, build logs should show** lines such as:
+
+- `FROM node:20-bookworm-slim AS ui`
+- `RUN npm run build`
+- `COPY --from=ui /app/dist ./dist`
+
+They should **not** show `Starting nixpacks build...` as the primary builder for this app.
+
+See also [nixpacks.toml](../nixpacks.toml) (fallback only; explicit Dockerfile is the reliable fix).
+
 ## Environment variables
 
 | Variable | Required | Default | Description |

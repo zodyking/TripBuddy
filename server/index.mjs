@@ -36,6 +36,23 @@ import {
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const DIST_DIR = path.join(__dirname, '..', 'dist')
+
+/** For deploy verification: hashes baked into Vite-built `dist/index.html`. */
+async function getSpaDistFingerprints() {
+  try {
+    const htmlPath = path.join(DIST_DIR, 'index.html')
+    const html = await fs.readFile(htmlPath, 'utf8')
+    const js = html.match(/\/assets\/(index-[a-zA-Z0-9_-]+\.js)/)
+    const css = html.match(/\/assets\/(index-[a-zA-Z0-9_-]+\.css)/)
+    return {
+      indexHtmlExists: true,
+      mainScript: js?.[1] ?? null,
+      mainCss: css?.[1] ?? null,
+    }
+  } catch {
+    return { indexHtmlExists: false, mainScript: null, mainCss: null }
+  }
+}
 import { logBus, emitLog } from './log-bus.mjs'
 import {
   runScenario,
@@ -214,7 +231,7 @@ app.addHook('preHandler', async (req) => {
   if (!path.startsWith('/api')) return
   if (!isAuthEnabled()) return
   if (path.startsWith('/api/auth/')) return
-  if (path === '/api/health') return
+  if (path === '/api/health' || path === '/api/build-info') return
   const sid = req.cookies?.[COOKIE_NAME]
   if (isValidSession(sid)) {
     const ak = getSessionAccountKey(sid)
@@ -227,7 +244,7 @@ app.addHook('preHandler', async (req, reply) => {
   const path = req.url.split('?')[0] || ''
   if (!path.startsWith('/api')) return
   if (!isAuthEnabled()) return
-  if (path === '/api/health') return
+  if (path === '/api/health' || path === '/api/build-info') return
   if (path.startsWith('/api/auth/')) return
   if (path === '/api/login/access-log' && req.method === 'POST') return
   if (path === '/api/visit' && req.method === 'POST') return
@@ -394,6 +411,17 @@ app.get('/api/health', async () => ({
   dataDir: PERSISTENCE_DATA_ROOT,
   localDataPath: LOCAL_DIR,
 }))
+
+/** Public: which Vite bundle the running container serves (compare after deploy / vs browser Sources). */
+app.get('/api/build-info', async (req, reply) => {
+  reply.header('Cache-Control', 'no-store')
+  const dist = await getSpaDistFingerprints()
+  return {
+    ok: true,
+    nodeEnv: process.env.NODE_ENV ?? 'development',
+    ...dist,
+  }
+})
 
 app.get('/api/status', async () => ({
   busy:
