@@ -62,6 +62,8 @@ export function filterKeyForLocationType(raw) {
     u === 'STN' ||
     u === 'PUD' ||
     u === 'P AND D' ||
+    u.includes('PUD') ||
+    u.includes('PICK UP AND DELIVERY') ||
     u === 'SERVICE CENTER' ||
     u === 'GROUND STATION' ||
     (u.includes('PICKUP') && u.includes('DELIVERY')) ||

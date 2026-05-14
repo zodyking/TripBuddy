@@ -33,10 +33,10 @@ export async function mergeFedexGroundDirectorySeed() {
   if (!Array.isArray(arr)) {
     return { ok: false, error: 'seed must be a JSON array' }
   }
-  const { inserted, coordsFilled, unchanged } = await mergeDirectorySeeds(arr)
-  if (inserted > 0 || coordsFilled > 0) {
+  const { inserted, coordsFilled, typesRepaired, unchanged } = await mergeDirectorySeeds(arr)
+  if (inserted > 0 || coordsFilled > 0 || typesRepaired > 0) {
     console.log(
-      `[fedex-ground-seed] merged seed: ${inserted} inserted, ${coordsFilled} coordinates filled (${unchanged} unchanged)`,
+      `[fedex-ground-seed] merged seed: ${inserted} inserted, ${coordsFilled} coordinates filled, ${typesRepaired} types repaired (${unchanged} unchanged)`,
     )
   }
   return { ok: true, inserted, coordsFilled, unchanged }

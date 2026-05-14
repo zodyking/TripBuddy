@@ -1,4 +1,8 @@
-import { normalizeLocationTypeForStorage } from './directoryLocationTypes.js'
+import {
+  DIRECTORY_LOCATION_TYPE_OTHER,
+  filterKeyForLocationType,
+  normalizeLocationTypeForStorage,
+} from './directoryLocationTypes.js'
 
 /**
  * Format FedEx v2 transportation-network location JSON for UI.
@@ -208,35 +212,40 @@ function unwrapLocationRecord(body) {
 }
 
 /**
+ * Prefer CSV / facility Status over generic Linehaul `locationType` (often operational, not Hub/Station).
  * @param {Record<string, unknown>} o
  */
 function pickLocationStatusForDirectory(o) {
   const keys = [
-    'locationType',
-    'locationStatus',
-    'facilityStatus',
-    'facilityType',
+    'Status',
+    'status',
     'stationType',
-    'bookingLocationType',
-    'locType',
+    'facilityType',
+    'facilityStatus',
+    'locationStatus',
     'statusDescription',
     'locationCategory',
-    'status',
-    'Status',
+    'locationType',
+    'bookingLocationType',
+    'locType',
   ]
-  for (const k of keys) {
-    const v = o[k]
-    if (v != null && String(v).trim()) return String(v).trim()
-  }
-  const nested = o.locationDetails ?? o.locationDetail ?? o.facility
-  if (nested && typeof nested === 'object' && !Array.isArray(nested)) {
-    const ro = /** @type {Record<string, unknown>} */ (nested)
+  /** @type {string[]} */
+  const candidates = []
+  const collect = (/** @type {Record<string, unknown>} */ obj) => {
     for (const k of keys) {
-      const v = ro[k]
-      if (v != null && String(v).trim()) return String(v).trim()
+      const v = obj[k]
+      if (v != null && String(v).trim()) candidates.push(String(v).trim())
     }
   }
-  return ''
+  collect(o)
+  const nested = o.locationDetails ?? o.locationDetail ?? o.facility
+  if (nested && typeof nested === 'object' && !Array.isArray(nested)) {
+    collect(/** @type {Record<string, unknown>} */ (nested))
+  }
+  for (const c of candidates) {
+    if (filterKeyForLocationType(c) !== DIRECTORY_LOCATION_TYPE_OTHER) return c
+  }
+  return candidates[0] ?? ''
 }
 
 /**

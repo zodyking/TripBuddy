@@ -1,5 +1,10 @@
 import { readKeyJson, writeKeyJson } from './kv-store.mjs'
 import { G } from './scope-kv.mjs'
+import {
+  DIRECTORY_LOCATION_TYPE_OTHER,
+  filterKeyForLocationType,
+  normalizeLocationTypeForStorage,
+} from '../src/utils/directoryLocationTypes.js'
 
 const DIRECTORY_KV = G('directory:locations')
 
@@ -48,6 +53,24 @@ function mergeOptionalTextField(next, prev) {
 }
 
 /**
+ * When Linehaul sends a generic `locationType` that maps to "Other", keep an existing Hub/Station/etc.
+ * from CSV seed. Prefer any side that maps to a known directory bucket.
+ * @param {unknown} next
+ * @param {unknown} prev
+ */
+function mergeDirectoryLocationType(next, prev) {
+  const n = next == null ? '' : String(next).trim()
+  const p = prev == null ? '' : String(prev).trim()
+  if (!n) return p
+  if (!p) return n
+  const nk = filterKeyForLocationType(n)
+  const pk = filterKeyForLocationType(p)
+  if (nk !== DIRECTORY_LOCATION_TYPE_OTHER) return n
+  if (pk !== DIRECTORY_LOCATION_TYPE_OTHER) return p
+  return n
+}
+
+/**
  * @param {LocationEntry} a
  * @param {LocationEntry} b
  * @returns {boolean}
@@ -90,16 +113,17 @@ function coordsFromSeedData(data) {
  * Insert missing directory rows and fill latitude/longitude when the existing row has no valid coordinates.
  * Does not overwrite coordinates that are already set.
  * @param {Array<Omit<LocationEntry, 'lastUpdated'>>} entries
- * @returns {Promise<{ inserted: number, coordsFilled: number, unchanged: number }>}
+ * @returns {Promise<{ inserted: number, coordsFilled: number, typesRepaired: number, unchanged: number }>}
  */
 export async function mergeDirectorySeeds(entries) {
   if (!Array.isArray(entries) || entries.length === 0) {
-    return { inserted: 0, coordsFilled: 0, unchanged: 0 }
+    return { inserted: 0, coordsFilled: 0, typesRepaired: 0, unchanged: 0 }
   }
   const directory = await readDirectory()
   const now = new Date().toISOString()
   let inserted = 0
   let coordsFilled = 0
+  let typesRepaired = 0
   let unchanged = 0
 
   for (const data of entries) {
@@ -124,10 +148,28 @@ export async function mergeDirectorySeeds(entries) {
         longitude: data.longitude != null ? Number(data.longitude) : null,
         timeZone: String(data.timeZone ?? ''),
         lastUpdated: now,
-        locationType: mergeOptionalTextField(data.locationType, ''),
+        locationType: normalizeLocationTypeForStorage(data.locationType ?? ''),
         district: mergeOptionalTextField(data.district, ''),
       }
       inserted++
+      continue
+    }
+    const seedType = String(data.locationType ?? '').trim()
+    const seedKey = filterKeyForLocationType(seedType)
+    const exType = String(existing.locationType ?? '').trim()
+    const exKey = filterKeyForLocationType(exType)
+    if (
+      seedType &&
+      seedKey !== DIRECTORY_LOCATION_TYPE_OTHER &&
+      (exKey === DIRECTORY_LOCATION_TYPE_OTHER || !exType)
+    ) {
+      directory[id] = {
+        ...existing,
+        locationType: normalizeLocationTypeForStorage(seedType),
+        district: mergeOptionalTextField(data.district, existing?.district),
+        lastUpdated: now,
+      }
+      typesRepaired++
       continue
     }
     const coords = coordsFromSeedData(data)
@@ -144,10 +186,10 @@ export async function mergeDirectorySeeds(entries) {
     unchanged++
   }
 
-  if (inserted > 0 || coordsFilled > 0) {
+  if (inserted > 0 || coordsFilled > 0 || typesRepaired > 0) {
     await writeDirectory(directory)
   }
-  return { inserted, coordsFilled, unchanged }
+  return { inserted, coordsFilled, typesRepaired, unchanged }
 }
 
 /**
@@ -171,7 +213,9 @@ export async function upsertLocation(data) {
     longitude: data.longitude != null ? Number(data.longitude) : null,
     timeZone: String(data.timeZone ?? ''),
     lastUpdated: new Date().toISOString(),
-    locationType: mergeOptionalTextField(data.locationType, existing?.locationType),
+    locationType: normalizeLocationTypeForStorage(
+      mergeDirectoryLocationType(data.locationType, existing?.locationType),
+    ),
     district: mergeOptionalTextField(data.district, existing?.district),
   }
 
@@ -336,7 +380,9 @@ export async function bulkUpsertLocations(entries) {
       longitude,
       timeZone: String(data.timeZone ?? ''),
       lastUpdated: now,
-      locationType: mergeOptionalTextField(data.locationType, existing?.locationType),
+      locationType: normalizeLocationTypeForStorage(
+      mergeDirectoryLocationType(data.locationType, existing?.locationType),
+    ),
       district: mergeOptionalTextField(data.district, existing?.district),
     }
     if (existing) {
