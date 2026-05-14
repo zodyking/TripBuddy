@@ -72,19 +72,20 @@ const geocodeProgressPct = computed(() => {
   return Math.min(100, Math.round((geocodeMappedCount.value / init) * 100))
 })
 
+const GEOCODE_NOMINATIM_HINT_SEC_PER_ROW = 5.5
+/** Up to four Search calls per address (prepared/raw × layer variants), each spaced by the server interval. */
+const GEOCODE_NOMINATIM_MAX_SEARCHES_PER_ROW = 4
+
 const geocodeEtaHint = computed(() => {
   if (!serverGeocodeInBatch.value) return ''
   const rem = serverGeocodeRemaining.value
   if (rem <= 0) return ''
-  const batch = Math.max(1, serverGeocodeLastProcessed.value || 12)
-  const rounds = Math.ceil(rem / batch)
-  const intervalSec = 22
-  const sec = Math.ceil(rounds * intervalSec * 1.1)
+  const sec = Math.ceil(rem * GEOCODE_NOMINATIM_HINT_SEC_PER_ROW * GEOCODE_NOMINATIM_MAX_SEARCHES_PER_ROW)
   if (sec < 120) {
-    return `Rough ETA ~${sec}s (server resolves about one address per second; check back if you leave this page).`
+    return `Rough ETA up to ~${sec}s (Nominatim Search only; the server waits at least five seconds between requests).`
   }
   const m = Math.max(1, Math.round(sec / 60))
-  return `Rough ETA ~${m} min (OpenStreetMap Nominatim rate limits; coordinates persist after each save).`
+  return `Rough ETA up to ~${m} min (OpenStreetMap Nominatim; coordinates persist after each save).`
 })
 
 /**
@@ -902,7 +903,7 @@ onUnmounted(() => {
                 Geocoding: {{ geocodeMappedCount }} / {{ geocodeInitialMissing }} saved
               </p>
               <p v-if="geocodeInitialMissing > 0" class="directory-geocode-banner-line directory-geocode-banner-line--secondary">
-                {{ serverGeocodeRemaining }} still in queue — each address is tried against several free geocoders on the server.
+                {{ serverGeocodeRemaining }} still in queue — the server uses OpenStreetMap Nominatim Search only, with at least five seconds between requests.
               </p>
               <p v-else class="directory-geocode-banner-line directory-geocode-banner-line--primary">
                 Resolving addresses on the server…

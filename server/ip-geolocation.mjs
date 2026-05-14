@@ -40,6 +40,7 @@ export async function lookupIpLatLng(ip) {
 
 /**
  * Reverse geocode via Nominatim (OSM) for display / logging.
+ * See https://nominatim.org/release-docs/develop/api/Reverse/
  * @param {number} lat
  * @param {number} lng
  * @returns {Promise<string | null>}
@@ -83,7 +84,11 @@ function normalizeForwardGeocodeKey(q) {
  * @param {string} raw
  */
 function prepareAddressForNominatim(raw) {
-  let q = raw
+  let q = String(raw ?? '')
+    .trim()
+    .replace(/\s+/g, ' ')
+  const firstLine = q.split(/[\r\n]+/)[0]?.trim()
+  if (firstLine) q = firstLine
   q = q.replace(/,\s*(\d{3,4})\s*$/, (_, z) => `, ${z.padStart(5, '0')}`)
   if (/\b[A-Z]{2}\b/.test(q) && !/\bUS(A)?\b/i.test(q)) {
     q += ', USA'
@@ -98,13 +103,15 @@ const NOMINATIM_USER_AGENT =
   (process.env.NOMINATIM_USER_AGENT || '').trim() ||
   'FedExTool/1.0 (https://github.com/zodyking/TripBuddy; directory geocode)'
 const NOMINATIM_EMAIL = (process.env.NOMINATIM_CONTACT_EMAIL || '').trim()
-const FORWARD_GEOCODE_MIN_INTERVAL_MS = Math.max(
-  800,
-  Math.floor(
-    Number(process.env.FORWARD_GEOCODE_MIN_INTERVAL_MS || process.env.NOMINATIM_MIN_INTERVAL_MS) ||
-      1100,
-  ),
-)
+/** Minimum time between requests to nominatim.openstreetmap.org (Search + Reverse share this slot). */
+const NOMINATIM_MIN_INTERVAL_MS = (() => {
+  const raw = Number(
+    process.env.NOMINATIM_MIN_INTERVAL_MS || process.env.FORWARD_GEOCODE_MIN_INTERVAL_MS,
+  )
+  const fallback = 5000
+  const v = Number.isFinite(raw) && raw > 0 ? Math.floor(raw) : fallback
+  return Math.min(120_000, Math.max(1000, v))
+})()
 
 let nextForwardGeocodeSlot = 0
 let warnedMissingEmail = false
@@ -129,7 +136,7 @@ async function waitForwardGeocodeSlot() {
 }
 
 function markForwardGeocodeRequestDone() {
-  nextForwardGeocodeSlot = Date.now() + FORWARD_GEOCODE_MIN_INTERVAL_MS
+  nextForwardGeocodeSlot = Date.now() + NOMINATIM_MIN_INTERVAL_MS
 }
 
 /**
@@ -191,11 +198,17 @@ async function nominatimGetJson(url, kind) {
 }
 
 /**
+ * Nominatim Search (address → coordinates). See https://nominatim.org/release-docs/develop/api/Search/
+ * (Reverse is for coordinates → address and is not used for directory rows.)
  * @param {string} q address query
+ * @param {{ layer?: string }} [opts]
  * @returns {Promise<Array<Record<string, unknown>> | null>}
  */
-async function nominatimSearch(q) {
-  const path = `search?format=jsonv2&limit=1&countrycodes=us&q=${encodeURIComponent(q)}`
+async function nominatimSearch(q, opts = {}) {
+  const layer = typeof opts.layer === 'string' && opts.layer.trim()
+    ? `&layer=${encodeURIComponent(opts.layer.trim())}`
+    : ''
+  const path = `search?format=jsonv2&limit=1&countrycodes=us&addressdetails=0&dedupe=1${layer}&q=${encodeURIComponent(q)}`
   const url = buildNominatimUrl(path)
   const data = await nominatimGetJson(url, 'search')
   if (!Array.isArray(data)) return null
@@ -211,86 +224,8 @@ function rowToLatLng(row) {
 }
 
 /**
- * Photon (Komoot) — OSM-backed, no API key.
- * @param {string} q
- * @returns {Promise<{ lat: number, lng: number } | null>}
- */
-function coordsFromPhotonFeature(f) {
-  if (!f || typeof f !== 'object') return null
-  const geom = /** @type {{ coordinates?: unknown }} */ (f).geometry
-  if (!geom || typeof geom !== 'object') return null
-  const c = geom.coordinates
-  if (!Array.isArray(c) || c.length < 2) return null
-  const lng = Number(c[0])
-  const lat = Number(c[1])
-  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null
-  return { lat, lng }
-}
-
-async function forwardGeocodePhoton(q) {
-  const s = String(q ?? '').trim()
-  if (s.length < 4) return null
-  await waitForwardGeocodeSlot()
-  try {
-    const url = `https://photon.komoot.io/api/?q=${encodeURIComponent(s.slice(0, 500))}&limit=1&lang=en&bbox=-125,24,-66,50`
-    const res = await fetch(url, {
-      headers: {
-        Accept: 'application/json',
-        'User-Agent': NOMINATIM_USER_AGENT,
-      },
-      signal: AbortSignal.timeout(18_000),
-    })
-    markForwardGeocodeRequestDone()
-    if (!res.ok) return null
-    const data = await res.json()
-    const feat = Array.isArray(data.features) && data.features[0] ? data.features[0] : null
-    return coordsFromPhotonFeature(feat)
-  } catch {
-    markForwardGeocodeRequestDone()
-    return null
-  }
-}
-
-/**
- * Open-Meteo geocoding — free, no key (non-commercial use per their terms).
- * @param {string} q
- * @returns {Promise<{ lat: number, lng: number } | null>}
- */
-async function forwardGeocodeOpenMeteo(q) {
-  const s = String(q ?? '').trim()
-  if (s.length < 4) return null
-  await waitForwardGeocodeSlot()
-  try {
-    const url = `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(s.slice(0, 256))}&count=8&language=en&format=json`
-    const res = await fetch(url, {
-      headers: {
-        Accept: 'application/json',
-        'User-Agent': NOMINATIM_USER_AGENT,
-      },
-      signal: AbortSignal.timeout(18_000),
-    })
-    markForwardGeocodeRequestDone()
-    if (!res.ok) return null
-    const data = await res.json()
-    const results = Array.isArray(data.results) ? data.results : []
-    for (const r of results) {
-      if (!r || typeof r !== 'object') continue
-      const lat = Number(r.latitude)
-      const lng = Number(r.longitude)
-      if (Number.isFinite(lat) && Number.isFinite(lng)) {
-        return { lat, lng }
-      }
-    }
-    return null
-  } catch {
-    markForwardGeocodeRequestDone()
-    return null
-  }
-}
-
-/**
- * Forward geocode (address → lat/lng): OpenStreetMap Nominatim, then Photon, then Open-Meteo.
- * All are free with no API key; a shared min interval applies across providers.
+ * Forward geocode (address → lat/lng) using **only** OpenStreetMap Nominatim Search.
+ * Requests share one global minimum interval (default 5s via `NOMINATIM_MIN_INTERVAL_MS`) per OSM usage policy.
  * @param {string} query
  * @returns {Promise<{ lat: number, lng: number } | null>}
  */
@@ -307,27 +242,27 @@ export async function forwardGeocodeNominatim(query) {
   const prepared = prepareAddressForNominatim(raw)
 
   try {
-    let data = await nominatimSearch(prepared)
+    /** @type {Array<Record<string, unknown>> | null} */
+    let data = await nominatimSearch(prepared, { layer: 'address' })
     let row = data && data.length > 0 ? data[0] : null
     let coords = rowToLatLng(row)
 
-    if (!coords && prepared !== raw) {
-      data = await nominatimSearch(raw)
+    if (!coords) {
+      data = await nominatimSearch(prepared, {})
       row = data && data.length > 0 ? data[0] : null
       coords = rowToLatLng(row)
     }
 
-    if (!coords) {
-      coords = await forwardGeocodePhoton(prepared)
-    }
     if (!coords && prepared !== raw) {
-      coords = await forwardGeocodePhoton(raw)
+      data = await nominatimSearch(raw, { layer: 'address' })
+      row = data && data.length > 0 ? data[0] : null
+      coords = rowToLatLng(row)
     }
-    if (!coords) {
-      coords = await forwardGeocodeOpenMeteo(prepared)
-    }
+
     if (!coords && prepared !== raw) {
-      coords = await forwardGeocodeOpenMeteo(raw)
+      data = await nominatimSearch(raw, {})
+      row = data && data.length > 0 ? data[0] : null
+      coords = rowToLatLng(row)
     }
 
     if (!coords) return null

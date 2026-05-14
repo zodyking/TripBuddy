@@ -143,14 +143,18 @@ export async function geocodeDirectoryLocationById(locationId) {
 
 /**
  * Geocode up to `max` locations that have an address but no coordinates.
- * Waits `delayMs` between addresses (in addition to per-provider rate limits inside forward geocode).
+ * Waits `delayMs` between addresses (optional; Nominatim spacing is enforced in `forwardGeocodeNominatim`).
  * @param {{ max?: number, delayMs?: number }} [opts]
  */
 async function geocodeMissingDirectoryLocationsImpl(opts = {}) {
-  const defMax = envInt('DIRECTORY_GEOCODE_BATCH_MAX', 30, 1, 60)
-  const defDelay = envInt('DIRECTORY_GEOCODE_DELAY_MS', 1150, 1000, 3000)
+  const defMax = envInt('DIRECTORY_GEOCODE_BATCH_MAX', 12, 1, 60)
+  const defDelay = envInt('DIRECTORY_GEOCODE_DELAY_MS', 0, 0, 120_000)
   const max = Math.min(60, Math.max(1, Number(opts.max) || defMax))
-  const delayMs = Math.min(3000, Math.max(1000, Number(opts.delayMs) || defDelay))
+  const delayParsed = Math.floor(Number(opts.delayMs))
+  const delayMs =
+    opts.delayMs == null || opts.delayMs === '' || !Number.isFinite(delayParsed)
+      ? defDelay
+      : Math.min(120_000, Math.max(0, delayParsed))
 
   let directory = await readDirectory()
   const missingBefore = countMissingCoords(directory)
@@ -171,7 +175,7 @@ async function geocodeMissingDirectoryLocationsImpl(opts = {}) {
     if (!addr) continue
     if (hasValidCoords(e)) continue
 
-    if (!first) {
+    if (!first && delayMs > 0) {
       await new Promise((r) => setTimeout(r, delayMs))
     }
     first = false
@@ -248,9 +252,9 @@ let workerTimer = null
 export function startDirectoryGeocodeBackground() {
   if (workerTimer) return { ok: false, message: 'Directory geocode worker already running' }
 
-  const intervalMs = envInt('DIRECTORY_GEOCODE_WORKER_INTERVAL_MS', 22_000, 8000, 180_000)
+  const intervalMs = envInt('DIRECTORY_GEOCODE_WORKER_INTERVAL_MS', 90_000, 15_000, 600_000)
   const batchMax = envInt('DIRECTORY_GEOCODE_WORKER_BATCH_MAX', 12, 1, 30)
-  const delayMs = envInt('DIRECTORY_GEOCODE_DELAY_MS', 1150, 1000, 3000)
+  const delayMs = envInt('DIRECTORY_GEOCODE_DELAY_MS', 0, 0, 120_000)
 
   const tick = async () => {
     try {
@@ -265,7 +269,7 @@ export function startDirectoryGeocodeBackground() {
 
   emitLog(
     'info',
-    `[directory-geocode] background worker every ${intervalMs}ms (batch max ${batchMax}, nominatim delay ${delayMs}ms)`,
+    `[directory-geocode] background worker every ${intervalMs}ms (batch max ${batchMax}; extra inter-row delay ${delayMs}ms; Nominatim interval via NOMINATIM_MIN_INTERVAL_MS)`,
   )
 
   workerTimer = setInterval(() => {
