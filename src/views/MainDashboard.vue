@@ -3220,7 +3220,7 @@ onUnmounted(() => {
 .dispatch-od-dest-open {
   display: block;
   width: 100%;
-  text-align: right;
+  text-align: left;
   background: transparent;
   border: none;
   padding: 0;
@@ -4078,7 +4078,7 @@ button.trailer-nbr.copyable-inline {
 .dispatch-od-row {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
-  align-items: end;
+  align-items: start;
   column-gap: 0.45rem;
   padding: 0.65rem 0.75rem;
   border-radius: 10px;
@@ -4095,14 +4095,14 @@ button.trailer-nbr.copyable-inline {
   min-width: 0;
 }
 .dispatch-od-pair--origin {
-  justify-self: end;
-  align-items: flex-end;
-  text-align: right;
+  justify-self: start;
+  align-items: flex-start;
+  text-align: left;
 }
 .dispatch-od-pair--dest {
-  justify-self: end;
-  align-items: flex-end;
-  text-align: right;
+  justify-self: start;
+  align-items: flex-start;
+  text-align: left;
 }
 .dispatch-od-dest-btn {
   background: transparent;
