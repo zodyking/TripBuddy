@@ -4076,11 +4076,10 @@ button.trailer-nbr.copyable-inline {
   border-radius: 4px;
 }
 .dispatch-od-row {
-  display: flex;
-  flex-wrap: nowrap;
-  align-items: flex-end;
-  justify-content: space-between;
-  gap: 0.5rem 0.75rem;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: end;
+  column-gap: 0.45rem;
   padding: 0.65rem 0.75rem;
   border-radius: 10px;
   background: #22222c;
@@ -4094,13 +4093,14 @@ button.trailer-nbr.copyable-inline {
   flex-direction: column;
   gap: 0.15rem;
   min-width: 0;
-  flex: 1 1 0;
 }
 .dispatch-od-pair--origin {
-  align-items: flex-start;
-  text-align: left;
+  justify-self: end;
+  align-items: flex-end;
+  text-align: right;
 }
 .dispatch-od-pair--dest {
+  justify-self: end;
   align-items: flex-end;
   text-align: right;
 }
@@ -4135,10 +4135,12 @@ button.trailer-nbr.copyable-inline {
   line-height: 1.3;
 }
 .dispatch-od-arrow {
+  justify-self: center;
+  align-self: center;
   color: var(--muted, #9898a8);
   font-size: 1.1rem;
   line-height: 1;
-  padding: 0 0.15rem;
+  padding: 0 0.2rem;
 }
 .trip-details-fetch-err {
   margin: 0 0 0.65rem;
