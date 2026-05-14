@@ -3281,9 +3281,10 @@ button.phone-copy:hover {
   transform: rotate(180deg);
 }
 
-/* vCard export panel */
+/* vCard export panel — stack above directory filters (z-index 24) and back-to-top (40) */
 .vcard-export-wrap {
   position: relative;
+  z-index: 60;
 }
 
 .vcard-dropdown-chevron {
@@ -3298,7 +3299,8 @@ button.phone-copy:hover {
   position: absolute;
   top: calc(100% + 0.35rem);
   right: 0;
-  z-index: 20;
+  z-index: 1;
+  isolation: isolate;
   width: min(22rem, calc(100vw - 2rem));
   max-height: min(70vh, 28rem);
   overflow-y: auto;

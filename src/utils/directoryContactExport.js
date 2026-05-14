@@ -79,14 +79,15 @@ export function sanitizeLocationNameForLabel(rawName) {
  * @param {{ locationId?: string, locationName?: string, abbreviation?: string }} loc
  */
 export function vcardContactLabel(loc) {
-  const id = String(loc.locationId ?? '').trim()
-  const namePart = sanitizeLocationNameForLabel(loc.locationName || '')
+  const idRaw = String(loc.locationId ?? '').trim()
+  const id = idRaw.replace(/-/g, '')
+  const namePart = sanitizeLocationNameForLabel(loc.locationName || '').replace(/-/g, '')
   if (!id && !namePart) {
-    return String(loc.abbreviation || '').trim() || 'Location'
+    return String(loc.abbreviation || '').trim().replace(/-/g, '') || 'Location'
   }
   if (!namePart) return id
   if (!id) return namePart
-  return `${id} - ${namePart}`
+  return `${id} ${namePart}`.trim()
 }
 
 /**
