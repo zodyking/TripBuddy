@@ -1273,6 +1273,14 @@ onUnmounted(() => {
           </p>
           <p v-else-if="!ny511Loading && ny511Payload?.ok" class="bridges-no-crossings">
             No active items for monitored NYC truck routes and crossings.
+            <template v-if="ny511Payload?._stats">
+              <br /><small class="ny511-debug">
+                Debug: {{ ny511Payload._stats.totalFetched }} fetched → {{ ny511Payload._stats.afterFilter }} after filter
+                <template v-if="ny511Payload._sampleUnfiltered?.length">
+                  <br />Sample: {{ JSON.stringify(ny511Payload._sampleUnfiltered[0]?.title || ny511Payload._sampleUnfiltered[0]) }}
+                </template>
+              </small>
+            </template>
           </p>
           <p v-else-if="!ny511Loading" class="bridges-no-crossings">
             {{ ny511Error || 'Could not load NY511 data.' }}
@@ -2012,6 +2020,13 @@ onUnmounted(() => {
 
 .bridge-tile--ny511 {
   border-color: rgba(167, 139, 250, 0.12);
+}
+
+.ny511-debug {
+  color: #6a6a78;
+  font-size: 0.62rem;
+  line-height: 1.5;
+  word-break: break-word;
 }
 
 .bridge-chart-empty {

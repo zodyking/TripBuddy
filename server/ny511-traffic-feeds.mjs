@@ -363,6 +363,8 @@ export async function buildNy511TruckNycBundle(accountKey, apiKey) {
 
   /** @type {Record<string, string>} */
   const feedErrors = {}
+  /** @type {Record<string, number>} */
+  const feedCounts = {}
   /** @type {ReturnType<typeof normalize511RowToItem>[]} */
   const merged = []
 
@@ -371,6 +373,7 @@ export async function buildNy511TruckNycBundle(accountKey, apiKey) {
       try {
         const data = await fetch511Json(key, resource)
         const rows = rowsFrom511Response(data, resource, kind)
+        feedCounts[resource] = rows.length
         merged.push(...rows)
       } catch (e) {
         feedErrors[resource] = e instanceof Error ? e.message : String(e)
@@ -387,11 +390,23 @@ export async function buildNy511TruckNycBundle(accountKey, apiKey) {
     return ta.localeCompare(tb)
   })
 
+  const sampleUnfiltered = merged.slice(0, 5).map((it) => {
+    const { _blob, ...rest } = /** @type {any} */ (it)
+    return rest
+  })
+
   return {
     ok: true,
     items: deduped,
     fetchedAt: Date.now(),
     feedErrors: Object.keys(feedErrors).length ? feedErrors : undefined,
+    _stats: {
+      totalFetched: merged.length,
+      afterFilter: filtered.length,
+      afterDedupe: deduped.length,
+      feedCounts,
+    },
+    _sampleUnfiltered: sampleUnfiltered.length ? sampleUnfiltered : undefined,
   }
 }
 
@@ -417,7 +432,14 @@ export async function getNy511TruckNycPayload(accountKey, apiKey, opts = {}) {
   const bundle = await buildNy511TruckNycBundle(ak, key)
   const payload =
     bundle.ok === true
-      ? { ok: true, items: bundle.items, fetchedAt: bundle.fetchedAt, feedErrors: bundle.feedErrors }
+      ? {
+          ok: true,
+          items: bundle.items,
+          fetchedAt: bundle.fetchedAt,
+          feedErrors: bundle.feedErrors,
+          _stats: bundle._stats,
+          _sampleUnfiltered: bundle._sampleUnfiltered,
+        }
       : { ok: false, items: [], fetchedAt: bundle.fetchedAt, error: bundle.error || 'fetch_failed' }
 
   if (ak && payload.ok) {
