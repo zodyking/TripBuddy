@@ -45,7 +45,10 @@ const RX = {
   validateMtTrailer: /validate\s+mt\s+trailer/i,
   validateTrailer: /validate\s+trailer/i,
   validateGeneric: /^validate$/i,
-  mtTrailerValidationOk: /mt\s+trailer\s+validation\s+successful|trailer\s+validation\s+successful|validation\s+successful/i,
+  // Do not use a bare "validation successful" — it matches "Dolly validation successful"
+  // while the MT trailer number form is still visible, which stalls empty-trailer dispatch.
+  mtTrailerValidationOk:
+    /mt\s+trailer\s+validation\s+successful|trailer\s+validation\s+successful/i,
   invalidSealNumber: /invalid\s+seal\s+number/i,
   invalidTrailerNumber: /invalid\s+trailer\s+number|trailer\s+number\s+invalid|invalid\s+trailer/i,
   agreeAndCheckOut: /agree\s+and\s+check\s+out/i,
