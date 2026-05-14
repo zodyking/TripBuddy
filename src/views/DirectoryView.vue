@@ -8,6 +8,7 @@ import {
   DIRECTORY_LOCATION_TYPE_OTHER,
   filterKeyForLocationType,
   compareDirectoryTypeFilterKeys,
+  countByDirectoryLocationType,
 } from '../utils/directoryLocationTypes.js'
 import { inferRegionFromDirectoryAddress, countryLabelFromCode } from '../utils/directoryAddressRegion.js'
 import {
@@ -182,6 +183,94 @@ const directoryFiltersDirty = computed(() => {
     directorySortDir.value !== 'asc'
   )
 })
+
+/** Filters panel closed by default — compact directory chrome. */
+const directoryFiltersPanelOpen = ref(false)
+
+/** Location type chips: hide “Other” when no rows use that bucket. */
+const directoryTypeChips = computed(() => {
+  const counts = countByDirectoryLocationType(locationsWithRegion.value)
+  return directoryTypeFilterOptions.filter(
+    (t) => t !== DIRECTORY_LOCATION_TYPE_OTHER || (counts[DIRECTORY_LOCATION_TYPE_OTHER] ?? 0) > 0,
+  )
+})
+
+const directorySortKeyShort = computed(() => {
+  const k = directorySortKey.value
+  if (k === 'id') return 'ID'
+  if (k === 'name') return 'Name'
+  if (k === 'state') return 'State'
+  if (k === 'country') return 'Country'
+  if (k === 'type') return 'Type'
+  return k
+})
+
+/** One-line summary for the collapsed filters control. */
+const directoryFiltersTriggerSummary = computed(() => {
+  const t = locationTypeFilterSummary.value
+  const ord = directorySortDir.value === 'asc' ? 'A→Z' : 'Z→A'
+  const s = `${directorySortKeyShort.value} ${ord}`
+  if (!selectedCountryCodes.value.length && !selectedStateComposites.value.length) {
+    return `${t} · ${s}`
+  }
+  const bits = [t]
+  if (selectedCountryCodes.value.length) {
+    bits.push(`${selectedCountryCodes.value.length} countries`)
+  }
+  if (selectedStateComposites.value.length) {
+    bits.push(`${selectedStateComposites.value.length} regions`)
+  }
+  bits.push(s)
+  return bits.join(' · ')
+})
+
+const directoryListInnerRef = ref(/** @type {HTMLElement | null} */ (null))
+const directoryListHeadingRef = ref(/** @type {HTMLElement | null} */ (null))
+/** True while the Directory heading is visible in the scroll viewport (list pane or app scroll). */
+const directoryHeadingPinnedVisible = ref(true)
+/** @type {IntersectionObserver | null} */
+let directoryHeadingIo = null
+
+function directoryFilterScrollRoot() {
+  if (typeof document === 'undefined') return null
+  return document.querySelector('.app-scroll')
+}
+
+function tearDownDirectoryHeadingObserver() {
+  if (directoryHeadingIo) {
+    directoryHeadingIo.disconnect()
+    directoryHeadingIo = null
+  }
+}
+
+function setupDirectoryHeadingObserver() {
+  if (typeof IntersectionObserver === 'undefined') return
+  tearDownDirectoryHeadingObserver()
+  const heading = directoryListHeadingRef.value
+  if (!heading) return
+  const inner = directoryListInnerRef.value
+  const rootEl =
+    isLandscapeSplit.value && inner ? inner : directoryFilterScrollRoot()
+  const root = rootEl instanceof Element ? rootEl : null
+  directoryHeadingIo = new IntersectionObserver(
+    (entries) => {
+      const e = entries[0]
+      directoryHeadingPinnedVisible.value = !!(e && e.isIntersecting)
+    },
+    { root, threshold: 0, rootMargin: '0px' },
+  )
+  directoryHeadingIo.observe(heading)
+}
+
+function scrollDirectoryToTop() {
+  const inner = directoryListInnerRef.value
+  const heading = directoryListHeadingRef.value
+  if (isLandscapeSplit.value && inner) {
+    inner.scrollTo({ top: 0, behavior: 'smooth' })
+    return
+  }
+  heading?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+}
 
 watch(selectedCountryCodes, (codes) => {
   const set = new Set(codes)
@@ -893,6 +982,10 @@ function onSplitMqlChange() {
   updateLandscapeSplit()
 }
 
+watch([isLandscapeSplit, () => locations.value.length], () => {
+  void nextTick(() => setupDirectoryHeadingObserver())
+})
+
 /** Auto-refresh directory data (replaces manual refresh control). */
 let directoryPollTimer = null
 const DIRECTORY_POLL_MS = 60_000
@@ -928,6 +1021,7 @@ onMounted(() => {
       })()
     }, DIRECTORY_GEOCODE_STATUS_POLL_MS)
   }
+  void nextTick(() => setupDirectoryHeadingObserver())
 })
 
 onUnmounted(() => {
@@ -946,6 +1040,7 @@ onUnmounted(() => {
     clearInterval(geocodeStatusPollTimer)
     geocodeStatusPollTimer = null
   }
+  tearDownDirectoryHeadingObserver()
 })
 </script>
 
@@ -1001,10 +1096,11 @@ onUnmounted(() => {
 
     <div class="directory-list-column" :class="{ 'is-scroll-pane': isLandscapeSplit }">
       <div
+        ref="directoryListInnerRef"
         class="directory-list-inner"
         :class="{ 'is-scroll-pane': isLandscapeSplit }"
       >
-        <header class="directory-list-heading">
+        <header ref="directoryListHeadingRef" class="directory-list-heading">
           <div class="directory-list-heading-top">
             <div class="directory-heading-text">
               <h1 class="directory-title">Directory</h1>
@@ -1199,15 +1295,49 @@ onUnmounted(() => {
       class="directory-filters"
       aria-label="Directory filters and sort"
     >
-      <header class="directory-filters-header">
-        <div class="directory-filters-header-text">
-          <h2 class="directory-filters-title">Filters &amp; sort</h2>
-          <p class="directory-filters-desc">
-            Types, country, and state/province work together. Empty country or region selections include
-            <strong>all</strong> values. Sort applies to the list and map pins after search.
-          </p>
-        </div>
-        <div class="directory-filters-header-actions">
+      <button
+        id="directory-filters-trigger"
+        type="button"
+        class="directory-filters-trigger tap"
+        :aria-expanded="directoryFiltersPanelOpen"
+        aria-controls="directory-filters-panel"
+        @click="directoryFiltersPanelOpen = !directoryFiltersPanelOpen"
+      >
+        <span class="directory-filters-trigger-main">
+          <span class="directory-filters-trigger-title">Filters &amp; sort</span>
+          <span
+            v-if="directoryFiltersDirty"
+            class="directory-filters-dirty-dot"
+            aria-hidden="true"
+            title="Non-default filters"
+          />
+        </span>
+        <span class="directory-filters-trigger-summary">{{ directoryFiltersTriggerSummary }}</span>
+        <svg
+          class="directory-filters-trigger-chevron"
+          :class="{ 'is-open': directoryFiltersPanelOpen }"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+          aria-hidden="true"
+        >
+          <polyline points="6 9 12 15 18 9" />
+        </svg>
+      </button>
+
+      <div
+        id="directory-filters-panel"
+        v-show="directoryFiltersPanelOpen"
+        class="directory-filters-panel"
+        role="region"
+        aria-labelledby="directory-filters-trigger"
+      >
+        <p class="directory-filters-desc directory-filters-desc--panel">
+          Types, country, and state/province combine. Empty country or region means
+          <strong>all</strong>. Sort applies to the list and map pins after search.
+        </p>
+        <div class="directory-filters-toolbar">
           <div class="directory-sort-control">
             <label for="directory-sort-key" class="directory-sort-label">Sort</label>
             <select
@@ -1240,73 +1370,73 @@ onUnmounted(() => {
             Clear filters
           </button>
         </div>
-      </header>
 
-      <div class="directory-filters-grid">
-        <fieldset class="directory-filters-fieldset">
-          <legend class="directory-filters-legend">Location type</legend>
-          <p class="directory-filters-hint">{{ locationTypeFilterSummary }}</p>
-          <div class="directory-filters-chip-row" role="group" aria-label="Location types">
-            <button
-              v-for="t in directoryTypeFilterOptions"
-              :key="t"
-              type="button"
-              class="directory-filter-chip tap"
-              :class="{ 'is-active': selectedLocationTypes.includes(t) }"
-              :aria-pressed="selectedLocationTypes.includes(t)"
-              @click="toggleLocationTypeFilter(t)"
-            >
-              {{ t }}
+        <div class="directory-filters-grid directory-filters-grid--panel">
+          <fieldset class="directory-filters-fieldset">
+            <legend class="directory-filters-legend">Location type</legend>
+            <p class="directory-filters-hint">{{ locationTypeFilterSummary }}</p>
+            <div class="directory-filters-chip-row" role="group" aria-label="Location types">
+              <button
+                v-for="t in directoryTypeChips"
+                :key="t"
+                type="button"
+                class="directory-filter-chip tap"
+                :class="{ 'is-active': selectedLocationTypes.includes(t) }"
+                :aria-pressed="selectedLocationTypes.includes(t)"
+                @click="toggleLocationTypeFilter(t)"
+              >
+                {{ t }}
+              </button>
+            </div>
+            <button type="button" class="directory-filters-text-btn tap" @click="resetLocationTypeFilter">
+              Use Hub + Station only
             </button>
-          </div>
-          <button type="button" class="directory-filters-text-btn tap" @click="resetLocationTypeFilter">
-            Use Hub + Station only
-          </button>
-        </fieldset>
+          </fieldset>
 
-        <fieldset v-if="countryFacetList.length" class="directory-filters-fieldset">
-          <legend class="directory-filters-legend">Country</legend>
-          <p class="directory-filters-hint">
-            <template v-if="!selectedCountryCodes.length">Showing all countries for the types above.</template>
-            <template v-else>Filtering to {{ selectedCountryCodes.length }} selected.</template>
-          </p>
-          <div class="directory-filters-chip-row" role="group" aria-label="Countries">
-            <button
-              v-for="row in countryFacetList"
-              :key="row.code"
-              type="button"
-              class="directory-filter-chip directory-filter-chip--grow tap"
-              :class="{ 'is-active': selectedCountryCodes.includes(row.code) }"
-              :aria-pressed="selectedCountryCodes.includes(row.code)"
-              @click="toggleCountryFilter(row.code)"
-            >
-              <span class="directory-filter-chip-label">{{ row.label }}</span>
-              <span class="directory-filter-chip-count">{{ row.count }}</span>
-            </button>
-          </div>
-        </fieldset>
+          <fieldset v-if="countryFacetList.length" class="directory-filters-fieldset">
+            <legend class="directory-filters-legend">Country</legend>
+            <p class="directory-filters-hint">
+              <template v-if="!selectedCountryCodes.length">Showing all countries for the types above.</template>
+              <template v-else>Filtering to {{ selectedCountryCodes.length }} selected.</template>
+            </p>
+            <div class="directory-filters-chip-row" role="group" aria-label="Countries">
+              <button
+                v-for="row in countryFacetList"
+                :key="row.code"
+                type="button"
+                class="directory-filter-chip directory-filter-chip--grow tap"
+                :class="{ 'is-active': selectedCountryCodes.includes(row.code) }"
+                :aria-pressed="selectedCountryCodes.includes(row.code)"
+                @click="toggleCountryFilter(row.code)"
+              >
+                <span class="directory-filter-chip-label">{{ row.label }}</span>
+                <span class="directory-filter-chip-count">{{ row.count }}</span>
+              </button>
+            </div>
+          </fieldset>
 
-        <fieldset v-if="stateFacetList.length" class="directory-filters-fieldset">
-          <legend class="directory-filters-legend">State / province</legend>
-          <p class="directory-filters-hint">
-            <template v-if="!selectedStateComposites.length">All regions for the current type and country scope.</template>
-            <template v-else>{{ selectedStateComposites.length }} region(s) selected.</template>
-          </p>
-          <div class="directory-filters-chip-scroll" role="group" aria-label="States and provinces">
-            <button
-              v-for="row in stateFacetList"
-              :key="row.composite"
-              type="button"
-              class="directory-filter-chip tap"
-              :class="{ 'is-active': selectedStateComposites.includes(row.composite) }"
-              :aria-pressed="selectedStateComposites.includes(row.composite)"
-              @click="toggleStateFilter(row.composite)"
-            >
-              <span class="directory-filter-chip-label">{{ row.label }}</span>
-              <span class="directory-filter-chip-count">{{ row.count }}</span>
-            </button>
-          </div>
-        </fieldset>
+          <fieldset v-if="stateFacetList.length" class="directory-filters-fieldset">
+            <legend class="directory-filters-legend">State / province</legend>
+            <p class="directory-filters-hint">
+              <template v-if="!selectedStateComposites.length">All regions for the current type and country scope.</template>
+              <template v-else>{{ selectedStateComposites.length }} region(s) selected.</template>
+            </p>
+            <div class="directory-filters-chip-scroll" role="group" aria-label="States and provinces">
+              <button
+                v-for="row in stateFacetList"
+                :key="row.composite"
+                type="button"
+                class="directory-filter-chip tap"
+                :class="{ 'is-active': selectedStateComposites.includes(row.composite) }"
+                :aria-pressed="selectedStateComposites.includes(row.composite)"
+                @click="toggleStateFilter(row.composite)"
+              >
+                <span class="directory-filter-chip-label">{{ row.label }}</span>
+                <span class="directory-filter-chip-count">{{ row.count }}</span>
+              </button>
+            </div>
+          </fieldset>
+        </div>
       </div>
     </section>
 
@@ -1351,7 +1481,8 @@ onUnmounted(() => {
       </svg>
       <p class="empty-title">No locations for these types</p>
       <p class="empty-desc">
-        Select more <strong>location types</strong> above, or use <strong>Use Hub + Station only</strong> as a starting point.
+        Open <strong>Filters &amp; sort</strong> and select more <strong>location types</strong>, or use
+        <strong>Use Hub + Station only</strong> as a starting point.
       </p>
     </div>
 
@@ -1368,7 +1499,8 @@ onUnmounted(() => {
       </svg>
       <p class="empty-title">No locations match country or state filters</p>
       <p class="empty-desc">
-        Clear <strong>country</strong> or <strong>state / province</strong> chips, or tap <strong>Clear filters</strong> to restore defaults.
+        Open <strong>Filters &amp; sort</strong> and clear <strong>country</strong> or <strong>state / province</strong> chips,
+        or tap <strong>Clear filters</strong> inside that panel to restore defaults.
       </p>
     </div>
 
@@ -1604,6 +1736,17 @@ onUnmounted(() => {
       </span>
     </p>
       </div>
+
+      <button
+        v-if="locations.length"
+        v-show="!directoryHeadingPinnedVisible"
+        type="button"
+        class="directory-back-top tap"
+        aria-label="Back to top"
+        @click="scrollDirectoryToTop"
+      >
+        Back to top
+      </button>
     </div>
 
     <!-- Add Location Modal -->
@@ -2207,8 +2350,8 @@ onUnmounted(() => {
 }
 
 .directory-filters {
-  margin-bottom: var(--space-4, 1rem);
-  padding: var(--space-4, 1rem);
+  margin-bottom: var(--space-3, 0.75rem);
+  padding: 0;
   border-radius: var(--radius-lg, 0.75rem);
   border: 1px solid var(--color-border, rgba(255, 255, 255, 0.1));
   background: linear-gradient(
@@ -2218,45 +2361,150 @@ onUnmounted(() => {
     rgba(123, 77, 181, 0.06) 100%
   );
   box-shadow: 0 1px 0 rgba(255, 255, 255, 0.04) inset;
+  overflow: hidden;
 }
 
-.directory-filters-header {
+.directory-filters-trigger {
   display: flex;
-  flex-wrap: wrap;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: var(--space-4, 1rem);
-  margin-bottom: var(--space-4, 1rem);
-  padding-bottom: var(--space-3, 0.75rem);
-  border-bottom: 1px solid var(--color-border, rgba(255, 255, 255, 0.08));
+  align-items: center;
+  gap: var(--space-2, 0.5rem);
+  width: 100%;
+  margin: 0;
+  padding: var(--space-2, 0.5rem) var(--space-3, 0.75rem);
+  text-align: left;
+  font: inherit;
+  color: var(--color-text-primary, #f4f4f8);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  min-height: 2.75rem;
 }
 
-.directory-filters-header-text {
-  flex: 1 1 12rem;
-  min-width: 0;
+.directory-filters-trigger:hover {
+  background: rgba(255, 255, 255, 0.04);
 }
 
-.directory-filters-title {
-  margin: 0 0 var(--space-1, 0.25rem);
+.directory-filters-trigger:focus-visible {
+  outline: 2px solid rgba(123, 77, 181, 0.55);
+  outline-offset: -2px;
+}
+
+.directory-filters-trigger-main {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  flex-shrink: 0;
+}
+
+.directory-filters-trigger-title {
   font-size: var(--text-sm, 0.875rem);
   font-weight: var(--weight-semibold, 600);
   letter-spacing: 0.02em;
-  color: var(--color-text-primary, #f4f4f8);
 }
 
-.directory-filters-desc {
-  margin: 0;
+.directory-filters-dirty-dot {
+  width: 0.45rem;
+  height: 0.45rem;
+  border-radius: var(--radius-full, 9999px);
+  background: rgba(167, 139, 250, 0.95);
+  box-shadow: 0 0 0 2px rgba(123, 77, 181, 0.35);
+}
+
+.directory-filters-trigger-summary {
+  flex: 1 1 auto;
+  min-width: 0;
   font-size: var(--text-xs, 0.75rem);
+  line-height: 1.25;
+  color: var(--color-text-tertiary, #8b8b9a);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.directory-filters-trigger-chevron {
+  flex-shrink: 0;
+  width: 1.1rem;
+  height: 1.1rem;
+  color: var(--color-text-tertiary, #8b8b9a);
+  transition: transform 0.2s ease;
+}
+
+.directory-filters-trigger-chevron.is-open {
+  transform: rotate(180deg);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .directory-filters-trigger-chevron {
+    transition: none;
+  }
+}
+
+.directory-filters-panel {
+  border-top: 1px solid var(--color-border, rgba(255, 255, 255, 0.08));
+  padding: var(--space-3, 0.75rem);
+  max-height: min(70vh, 28rem);
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+}
+
+.directory-filters-desc--panel {
+  margin: 0 0 var(--space-3, 0.75rem);
+  font-size: var(--text-xs, 0.6875rem);
   line-height: 1.45;
   color: var(--color-text-tertiary, #8b8b9a);
   max-width: 42rem;
 }
 
-.directory-filters-header-actions {
+.directory-filters-toolbar {
   display: flex;
   flex-wrap: wrap;
   align-items: flex-end;
+  justify-content: space-between;
   gap: var(--space-2, 0.5rem);
+  margin-bottom: var(--space-3, 0.75rem);
+}
+
+.directory-filters-grid--panel {
+  gap: var(--space-3, 0.75rem);
+}
+
+.directory-filters-panel .directory-filters-chip-scroll {
+  max-height: 7rem;
+}
+
+.directory-back-top {
+  position: fixed;
+  left: 50%;
+  transform: translateX(-50%);
+  bottom: calc(var(--nav-height, 4rem) + 0.75rem + env(safe-area-inset-bottom, 0px));
+  z-index: 40;
+  padding: 0.55rem 1.15rem;
+  font-size: var(--text-xs, 0.8125rem);
+  font-weight: var(--weight-semibold, 600);
+  letter-spacing: 0.02em;
+  color: var(--color-text-primary, #fafafa);
+  background: rgba(22, 20, 30, 0.94);
+  border: 1px solid rgba(167, 139, 250, 0.42);
+  border-radius: var(--radius-full, 9999px);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.35);
+  backdrop-filter: blur(10px);
+  cursor: pointer;
+}
+
+.directory-back-top:hover {
+  border-color: rgba(196, 181, 253, 0.55);
+  background: rgba(32, 28, 44, 0.96);
+}
+
+.directory-back-top:focus-visible {
+  outline: 2px solid rgba(123, 77, 181, 0.65);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .directory-back-top {
+    backdrop-filter: none;
+  }
 }
 
 .directory-sort-control {
