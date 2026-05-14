@@ -122,6 +122,7 @@ export function automationNeedsGeolocation(automation) {
   const actions = Array.isArray(a.actions) ? a.actions : []
 
   const geoActionTypes = new Set([
+    'checkInEndToEnd',
     'arriveEndToEnd',
     'inspectCheckoutHomeGate',
     'inspectCheckoutContinue',
