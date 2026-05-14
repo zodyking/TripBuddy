@@ -370,3 +370,8 @@ export function testErrorAlert() {
   pushLiveLog({ type: 'info', message: `[Test] testErrorAlert called`, ts: Date.now() })
   speakDirect('Check-in failed.')
 }
+
+export function announceInspectCheckoutNewTripDetails() {
+  pushLiveLog({ type: 'warn', message: `[Alert] Inspect & Checkout failed: new trip details`, ts: Date.now() })
+  speakDirect('Inspect and Checkout failed, new trip details added.')
+}

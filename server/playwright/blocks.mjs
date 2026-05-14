@@ -735,8 +735,22 @@ async function executeAction(action, page, ctx) {
         reason: outcome.reason,
         proofLegSeq: outcome.proofLegSeq,
         proofCount: outcome.proofScreenshots?.length || 0,
+        requiresReCheckin: outcome.requiresReCheckin || false,
+        speechMessage: outcome.speechMessage || null,
       }
-      log('info', 'Inspect & Check Out post-gate finished', { inspectCheckoutContinue: outcome.ok })
+      log('info', 'Inspect & Check Out post-gate finished', {
+        inspectCheckoutContinue: outcome.ok,
+        reason: outcome.reason,
+        requiresReCheckin: outcome.requiresReCheckin || false,
+      })
+
+      // If new trip details detected, signal for speech and re-checkin
+      if (outcome.requiresReCheckin) {
+        log('warn', 'Inspect & Check Out requires re-checkin due to trip changes', {
+          speechMessage: outcome.speechMessage,
+          requiresReCheckin: true,
+        })
+      }
       break
     }
 

@@ -43,7 +43,11 @@ const RX = {
   validateSeals: /validate\s+seals/i,
   validateSeal: /validate\s+seal/i,
   validateMtTrailer: /validate\s+mt\s+trailer/i,
+  validateTrailer: /validate\s+trailer/i,
+  validateGeneric: /^validate$/i,
+  mtTrailerValidationOk: /mt\s+trailer\s+validation\s+successful|trailer\s+validation\s+successful|validation\s+successful/i,
   invalidSealNumber: /invalid\s+seal\s+number/i,
+  invalidTrailerNumber: /invalid\s+trailer\s+number|trailer\s+number\s+invalid|invalid\s+trailer/i,
   agreeAndCheckOut: /agree\s+and\s+check\s+out/i,
   dispatch: /^dispatch$/i,
   dispatchConfirmYes: /^yes$/i,
@@ -52,6 +56,9 @@ const RX = {
   checkOffItems: /check\s+off\s+items/i,
   dispatchSummary: /dispatch\s+summary/i,
   reviewStartTrip: /review\s+and\s+start\s+trip/i,
+  newTripDetails: /new\s+trip\s+details/i,
+  tripDetailsChanged: /details.*have\s+been\s+changed|no\s+longer\s+match/i,
+  refreshBtn: /^refresh$/i,
 }
 
 const WARN_MODAL_MS = 4_000
@@ -289,6 +296,44 @@ async function clickSealValidateButton(page) {
 }
 
 /**
+ * Click any visible trailer validation button (VALIDATE MT TRAILER / VALIDATE TRAILER / VALIDATE).
+ * @param {import('playwright').Page} page
+ * @returns {Promise<boolean>}
+ */
+async function clickTrailerValidateButton(page) {
+  const mtTrailer = buttonLikeByVisibleText(page, RX.validateMtTrailer).first()
+  if (await mtTrailer.isVisible().catch(() => false)) {
+    await mtTrailer.click()
+    return true
+  }
+  const trailer = buttonLikeByVisibleText(page, RX.validateTrailer).first()
+  if (await trailer.isVisible().catch(() => false)) {
+    await trailer.click()
+    return true
+  }
+  const generic = buttonLikeByVisibleText(page, RX.validateGeneric).first()
+  if (await generic.isVisible().catch(() => false)) {
+    await generic.click()
+    return true
+  }
+  const roleBtn = page.getByRole('button', { name: /^validate$/i }).first()
+  if (await roleBtn.isVisible().catch(() => false)) {
+    await roleBtn.click()
+    return true
+  }
+  return false
+}
+
+/**
+ * Check if an invalid trailer number error is visible.
+ * @param {import('playwright').Page} page
+ */
+async function hasInvalidTrailerError(page) {
+  const errorBanner = page.getByText(RX.invalidTrailerNumber).first()
+  return await errorBanner.isVisible().catch(() => false)
+}
+
+/**
  * @param {import('playwright').Locator} loc
  * @param {number} timeout
  */
@@ -380,6 +425,15 @@ async function isDollyEntryScreen(page) {
  */
 async function isDollySuccessScreen(page) {
   const ok = page.getByText(RX.dollyValidationOk).first()
+  return await ok.isVisible().catch(() => false)
+}
+
+/**
+ * Check if MT Trailer validation success screen is visible (single empty trailer flow).
+ * @param {import('playwright').Page} page
+ */
+async function isMtTrailerSuccessScreen(page) {
+  const ok = page.getByText(RX.mtTrailerValidationOk).first()
   return await ok.isVisible().catch(() => false)
 }
 
@@ -524,6 +578,39 @@ async function isDispatchedSuccessScreen(page) {
 }
 
 /**
+ * Check if "New Trip Details" modal is visible (trip changed mid-inspection).
+ * @param {import('playwright').Page} page
+ */
+async function isNewTripDetailsModal(page) {
+  const title = page.getByText(RX.newTripDetails).first()
+  if (!(await title.isVisible().catch(() => false))) return false
+  const refreshBtn = buttonLikeByVisibleText(page, RX.refreshBtn).first()
+  return await refreshBtn.isVisible().catch(() => false)
+}
+
+/**
+ * Handle "New Trip Details" modal — click REFRESH and signal re-checkin needed.
+ * @param {import('playwright').Page} page
+ * @param {(type: string, message: string, extra?: object) => void} log
+ * @returns {Promise<boolean>} true if handled
+ */
+async function handleNewTripDetailsModal(page, log) {
+  if (!(await isNewTripDetailsModal(page))) return false
+
+  log('warn', 'New Trip Details modal detected — trip changed mid-inspection')
+
+  // Click REFRESH button
+  const refreshBtn = buttonLikeByVisibleText(page, RX.refreshBtn).first()
+  if (await refreshBtn.isVisible().catch(() => false)) {
+    await refreshBtn.click()
+    log('info', 'Clicked REFRESH on New Trip Details modal')
+    await page.waitForTimeout(2_000)
+  }
+
+  return true
+}
+
+/**
  * Click all unchecked checkboxes in the inspection checklist.
  * @param {import('playwright').Page} page
  * @param {(type: string, message: string, extra?: object) => void} log
@@ -637,6 +724,24 @@ export async function runInspectCheckoutAfterGate(page, opts) {
       return { ok: true, reason: 'dispatched', proofScreenshots }
     }
 
+    // --- Check for "New Trip Details" modal (trip changed mid-inspection) ---
+    if (await isNewTripDetailsModal(page)) {
+      await captureProof(page, 'New Trip Details', proofScreenshots, log)
+      log('warn', 'New Trip Details detected — trip details changed mid-inspection, need re-checkin', {
+        inspectCheckoutPhaseDone: true,
+        dispatched: false,
+        newTripDetails: true,
+      })
+      await handleNewTripDetailsModal(page, log)
+      return {
+        ok: false,
+        reason: 'new_trip_details',
+        proofScreenshots,
+        requiresReCheckin: true,
+        speechMessage: 'Inspect and Checkout failed, new trip details added',
+      }
+    }
+
     // --- Dispatch confirmation modal (YES/NO) ---
     if (await isDispatchConfirmModal(page)) {
       await clickDispatchConfirmYes(page)
@@ -644,7 +749,7 @@ export async function runInspectCheckoutAfterGate(page, opts) {
       lastProgress = Date.now()
       await page.waitForTimeout(AFTER_CLICK_MS)
 
-      // Wait for dispatched success
+      // Wait for dispatched success or new trip details
       const t0 = Date.now()
       while (Date.now() - t0 < DISPATCHED_SUCCESS_WAIT_MS) {
         aborted()
@@ -655,6 +760,23 @@ export async function runInspectCheckoutAfterGate(page, opts) {
             dispatched: true,
           })
           return { ok: true, reason: 'dispatched', proofScreenshots }
+        }
+        // Check for "New Trip Details" modal after dispatch confirmation
+        if (await isNewTripDetailsModal(page)) {
+          await captureProof(page, 'New Trip Details', proofScreenshots, log)
+          log('warn', 'New Trip Details after dispatch confirm — trip changed, need re-checkin', {
+            inspectCheckoutPhaseDone: true,
+            dispatched: false,
+            newTripDetails: true,
+          })
+          await handleNewTripDetailsModal(page, log)
+          return {
+            ok: false,
+            reason: 'new_trip_details',
+            proofScreenshots,
+            requiresReCheckin: true,
+            speechMessage: 'Inspect and Checkout failed, new trip details added',
+          }
         }
         await page.waitForTimeout(POLL_MS)
       }
@@ -719,6 +841,23 @@ export async function runInspectCheckoutAfterGate(page, opts) {
         await page.waitForTimeout(AFTER_CLICK_MS)
         continue
       }
+    }
+
+    // --- MT Trailer validation success (single empty trailer) → proceed to checklist ---
+    if (await isMtTrailerSuccessScreen(page)) {
+      await captureProof(page, 'MT Trailer Validated', proofScreenshots, log)
+      log('info', 'MT Trailer validation successful — waiting for checklist')
+      lastProgress = Date.now()
+      await page.waitForTimeout(AFTER_CLICK_MS)
+      const waitStart = Date.now()
+      while (Date.now() - waitStart < DOLLY_SUCCESS_WAIT_MS) {
+        aborted()
+        if (await isInspectionChecklistScreen(page)) break
+        if (await isDispatchScreen(page)) break
+        if (!(await isMtTrailerSuccessScreen(page))) break
+        await page.waitForTimeout(POLL_MS)
+      }
+      continue
     }
 
     // --- Warning / Begin (late) ---
@@ -832,14 +971,23 @@ export async function runInspectCheckoutAfterGate(page, opts) {
       }
     }
 
-    // --- Batch empty-trailer numbers (multiple fields, one validate) ---
+    // --- Batch or single empty-trailer numbers (one or more fields + validate button) ---
+    // Handles: (1) multiple empty trailers, (2) single empty trailer (no dolly needed).
     if (!(await isDollyEntryScreen(page))) {
       const trailerRows = await collectVisibleTrailerNumberInputs(page)
       const vmtBtn = buttonLikeByVisibleText(page, RX.validateMtTrailer).first()
-      const batchMt =
-        trailerRows.length >= 2 ||
-        (trailerRows.length >= 1 && (await vmtBtn.isVisible().catch(() => false)))
-      if (batchMt) {
+      const vmtVisible = await vmtBtn.isVisible().catch(() => false)
+      // Also check for alternative validate button patterns
+      const altValidateBtn = buttonLikeByVisibleText(page, RX.validateTrailer).first()
+      const altValidateVisible = await altValidateBtn.isVisible().catch(() => false)
+      const genericValidateBtn = buttonLikeByVisibleText(page, RX.validateGeneric).first()
+      const genericValidateVisible = await genericValidateBtn.isVisible().catch(() => false)
+      const hasAnyValidateBtn = vmtVisible || altValidateVisible || genericValidateVisible
+
+      // Single or batch MT mode: we have trailer number input(s) and a validate button
+      const emptyTrailerMode = trailerRows.length >= 1 && hasAnyValidateBtn
+      if (emptyTrailerMode) {
+        log('info', `Detected ${trailerRows.length} empty trailer input(s) with validate button`)
         for (const row of trailerRows) {
           aborted()
           const trailerIndex = row.trailerIndex
@@ -859,18 +1007,62 @@ export async function runInspectCheckoutAfterGate(page, opts) {
           if (!val) throw new Error(`Inspect: trailer number required for Trailer ${trailerIndex}`)
           await row.input.fill(val)
         }
-        if (await vmtBtn.isVisible().catch(() => false)) {
-          await vmtBtn.click()
-          log('info', 'Clicked VALIDATE MT TRAILER after batch trailer numbers')
+
+        // Try clicking validate button with multiple fallback patterns
+        const clickedValidate = await clickTrailerValidateButton(page)
+        if (clickedValidate) {
+          log('info', `Clicked trailer validate button (${trailerRows.length} trailer(s))`)
           lastProgress = Date.now()
           await page.waitForTimeout(AFTER_CLICK_MS)
+
+          // Check for invalid trailer error first
+          if (await hasInvalidTrailerError(page)) {
+            log('warn', 'Invalid trailer number error detected — will retry with fresh input')
+            await page.waitForTimeout(500)
+            continue
+          }
+
+          // Wait for MT Trailer validation success → checklist transition
+          const mtWaitStart = Date.now()
+          while (Date.now() - mtWaitStart < DOLLY_SUCCESS_WAIT_MS) {
+            aborted()
+            if (await isInspectionChecklistScreen(page)) {
+              log('info', 'Empty trailer validated — advanced to checklist')
+              await captureProof(page, 'Trailer Validated', proofScreenshots, log)
+              break
+            }
+            if (await isDispatchScreen(page)) {
+              log('info', 'Empty trailer validated — advanced to dispatch')
+              break
+            }
+            if (await isMtTrailerSuccessScreen(page)) {
+              log('info', 'Trailer validation success screen visible — waiting for transition')
+              await page.waitForTimeout(POLL_MS)
+              continue
+            }
+            // Check if we returned to an error state or need retry
+            if (await hasInvalidTrailerError(page)) {
+              log('warn', 'Invalid trailer error appeared — breaking to retry')
+              break
+            }
+            // Check if validate button and inputs are both gone (validation likely succeeded)
+            const stillHasInputs = (await collectVisibleTrailerNumberInputs(page)).length > 0
+            if (!stillHasInputs) {
+              log('info', 'No more trailer inputs visible — validation likely successful')
+              break
+            }
+            await page.waitForTimeout(POLL_MS)
+          }
           continue
         }
+
+        // Fallback: try generic button patterns
         const fallbackBtn = page
           .getByRole('button', { name: /validate|submit|continue|next/i })
           .first()
         if (await fallbackBtn.isVisible().catch(() => false)) {
           await fallbackBtn.click()
+          log('info', 'Clicked fallback validate/submit button')
           lastProgress = Date.now()
           await page.waitForTimeout(AFTER_CLICK_MS)
           continue

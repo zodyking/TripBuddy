@@ -115,6 +115,7 @@ import {
   announceCheckInTripReady,
   announceCheckInNewTrip,
   announceInspectCheckoutCancelled,
+  announceInspectCheckoutNewTripDetails,
   cancelAllAlerts,
 } from '../utils/alertAudioQueue.js'
 
@@ -1164,7 +1165,16 @@ async function runQuickAction(auto) {
         notifyQuickActionInApp(`${auto.manualButtonLabel || auto.name} completed`, 'success')
       }
     } else {
-      notifyQuickActionInApp(result.error || 'Failed', 'error')
+      // Check for "New Trip Details" scenario that requires re-checkin
+      const inspectOutcome = result.variables?._inspectCheckoutContinue
+      if (inspectOutcome?.requiresReCheckin === true) {
+        announceInspectCheckoutNewTripDetails()
+        notifyQuickActionInApp('Inspect failed: new trip details. Running check-in…', 'warning')
+        // Auto-trigger check-in quick action
+        setTimeout(() => void autoRunCheckInQuickAction(), 2000)
+      } else {
+        notifyQuickActionInApp(result.error || 'Failed', 'error')
+      }
     }
   } catch (e) {
     notifyQuickActionInApp(e instanceof Error ? e.message : String(e), 'error')
@@ -1173,6 +1183,21 @@ async function runQuickAction(auto) {
     runStartTs.value = null
     setTimeout(() => void refreshLinehaulApis(), 1500)
   }
+}
+
+async function autoRunCheckInQuickAction() {
+  const checkInAuto = quickActionAutomations.value.find(
+    (a) =>
+      /check[-\s]?in/i.test(a.name) ||
+      /check[-\s]?in/i.test(a.manualButtonLabel || '') ||
+      (a.actions && a.actions.some((act) => act.action === 'checkInEndToEnd'))
+  )
+  if (!checkInAuto) {
+    notifyQuickActionInApp('No check-in quick action found to auto-run', 'warning')
+    return
+  }
+  notifyQuickActionInApp(`Auto-running ${checkInAuto.manualButtonLabel || checkInAuto.name}…`, 'info')
+  await runQuickAction(checkInAuto)
 }
 
 function clearAutomationPreviewNow() {
