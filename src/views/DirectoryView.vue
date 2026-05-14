@@ -135,6 +135,18 @@ function resetLocationTypeFilter() {
   selectedLocationTypes.value = [...DEFAULT_LOCATION_TYPE_FILTER]
 }
 
+/** One-line summary for the collapsed type filter control. */
+const locationTypeFilterSummary = computed(() => {
+  const sel = selectedLocationTypes.value
+  const all = directoryTypeFilterOptions
+  if (sel.length >= all.length) return 'All types'
+  const def = [...DEFAULT_LOCATION_TYPE_FILTER]
+  if (sel.length === def.length && def.every((t) => sel.includes(t))) {
+    return 'Hub + Station'
+  }
+  return [...sel].sort(compareDirectoryTypeFilterKeys).join(' · ')
+})
+
 /**
  * @param {{ locationType?: string }} loc
  */
@@ -959,7 +971,7 @@ onUnmounted(() => {
                 Geocoding: {{ geocodeMappedCount }} / {{ geocodeInitialMissing }} saved
               </p>
               <p v-if="geocodeInitialMissing > 0" class="directory-geocode-banner-line directory-geocode-banner-line--secondary">
-                {{ serverGeocodeRemaining }} still in queue — each address is tried against several free geocoders on the server.
+                {{ serverGeocodeRemaining }} still in queue — the server uses OpenStreetMap Nominatim Search only, with at least five seconds between requests.
               </p>
               <p v-else class="directory-geocode-banner-line directory-geocode-banner-line--primary">
                 Resolving addresses on the server…
@@ -1001,36 +1013,50 @@ onUnmounted(() => {
       </button>
     </div>
 
-    <div
+    <details
       v-if="locations.length"
       class="directory-type-filter"
-      role="group"
       aria-label="Filter directory and map by station type"
     >
-      <div class="directory-type-filter-head">
-        <span class="directory-type-filter-label">Station type</span>
-        <button
-          type="button"
-          class="directory-type-filter-reset tap"
-          @click="resetLocationTypeFilter"
+      <summary class="directory-type-filter-summary tap">
+        <span class="directory-type-filter-summary-label">Types</span>
+        <span class="directory-type-filter-summary-value">{{ locationTypeFilterSummary }}</span>
+        <svg
+          class="directory-type-filter-chevron"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+          aria-hidden="true"
         >
-          Hub + Station
-        </button>
+          <polyline points="6 9 12 15 18 9" />
+        </svg>
+      </summary>
+      <div class="directory-type-filter-panel">
+        <div class="directory-type-filter-panel-actions">
+          <button
+            type="button"
+            class="directory-type-filter-reset tap"
+            @click.stop.prevent="resetLocationTypeFilter"
+          >
+            Reset to Hub + Station
+          </button>
+        </div>
+        <div class="directory-type-filter-chips" role="group" aria-label="Station types">
+          <button
+            v-for="t in directoryTypeFilterOptions"
+            :key="t"
+            type="button"
+            class="directory-type-chip tap"
+            :class="{ 'is-active': selectedLocationTypes.includes(t) }"
+            :aria-pressed="selectedLocationTypes.includes(t)"
+            @click.stop.prevent="toggleLocationTypeFilter(t)"
+          >
+            {{ t }}
+          </button>
+        </div>
       </div>
-      <div class="directory-type-filter-chips">
-        <button
-          v-for="t in directoryTypeFilterOptions"
-          :key="t"
-          type="button"
-          class="directory-type-chip tap"
-          :class="{ 'is-active': selectedLocationTypes.includes(t) }"
-          :aria-pressed="selectedLocationTypes.includes(t)"
-          @click="toggleLocationTypeFilter(t)"
-        >
-          {{ t }}
-        </button>
-      </div>
-    </div>
+    </details>
 
     <div v-if="error" class="error-banner">
       <span class="error-icon">!</span>
@@ -1073,7 +1099,7 @@ onUnmounted(() => {
       </svg>
       <p class="empty-title">No locations for this filter</p>
       <p class="empty-desc">
-        Turn on more station types above, or reset to Hub + Station.
+        Open <strong>Types</strong> and select more station types, or use Reset to Hub + Station.
       </p>
     </div>
 
@@ -1959,42 +1985,92 @@ onUnmounted(() => {
 
 .directory-type-filter {
   margin-bottom: var(--space-4, 1rem);
-  padding: var(--space-3, 0.75rem) var(--space-3, 0.75rem);
   border-radius: var(--radius-lg, 0.75rem);
-  background: rgba(123, 77, 181, 0.08);
-  border: 1px solid rgba(123, 77, 181, 0.28);
+  border: 1px solid var(--color-border, rgba(255, 255, 255, 0.08));
+  background: rgba(255, 255, 255, 0.03);
+  overflow: hidden;
 }
 
-.directory-type-filter-head {
+.directory-type-filter > summary {
+  list-style: none;
+}
+
+.directory-type-filter > summary::-webkit-details-marker {
+  display: none;
+}
+
+.directory-type-filter-summary {
   display: flex;
   align-items: center;
-  justify-content: space-between;
   gap: var(--space-2, 0.5rem);
-  margin-bottom: var(--space-2, 0.5rem);
+  padding: var(--space-2, 0.5rem) var(--space-3, 0.75rem);
+  cursor: pointer;
+  user-select: none;
+  min-height: 2.5rem;
+  box-sizing: border-box;
 }
 
-.directory-type-filter-label {
+.directory-type-filter-summary:hover {
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.directory-type-filter-summary-label {
+  flex-shrink: 0;
   font-size: var(--text-xs, 0.6875rem);
   font-weight: var(--weight-semibold, 600);
   letter-spacing: 0.05em;
   text-transform: uppercase;
-  color: var(--color-text-secondary, #a0a0b0);
+  color: var(--color-text-tertiary, #6e6e7e);
+}
+
+.directory-type-filter-summary-value {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--text-sm, 0.8125rem);
+  font-weight: var(--weight-medium, 500);
+  color: var(--color-text-primary, #f4f4f8);
+  text-align: right;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.directory-type-filter-chevron {
+  flex-shrink: 0;
+  width: 1rem;
+  height: 1rem;
+  color: var(--color-text-tertiary, #6e6e7e);
+  transition: transform 0.2s ease;
+}
+
+.directory-type-filter[open] .directory-type-filter-chevron {
+  transform: rotate(180deg);
+}
+
+.directory-type-filter-panel {
+  padding: 0 var(--space-3, 0.75rem) var(--space-3, 0.75rem);
+  border-top: 1px solid var(--color-border, rgba(255, 255, 255, 0.08));
+}
+
+.directory-type-filter-panel-actions {
+  display: flex;
+  justify-content: flex-end;
+  padding: var(--space-2, 0.5rem) 0;
 }
 
 .directory-type-filter-reset {
-  flex-shrink: 0;
-  padding: 0.2rem 0.5rem;
+  padding: 0.25rem 0.5rem;
   font-size: var(--text-xs, 0.6875rem);
   font-weight: var(--weight-medium, 500);
   color: var(--color-accent-purple-light, #c4b5fd);
-  background: rgba(123, 77, 181, 0.2);
-  border: 1px solid rgba(123, 77, 181, 0.45);
+  background: rgba(123, 77, 181, 0.15);
+  border: 1px solid rgba(123, 77, 181, 0.35);
   border-radius: var(--radius-md, 0.5rem);
   cursor: pointer;
 }
 
 .directory-type-filter-reset:hover {
-  background: rgba(123, 77, 181, 0.3);
+  background: rgba(123, 77, 181, 0.25);
 }
 
 .directory-type-filter-chips {
