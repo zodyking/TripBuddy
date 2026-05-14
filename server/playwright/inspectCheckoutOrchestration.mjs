@@ -432,12 +432,20 @@ async function isDollySuccessScreen(page) {
 }
 
 /**
- * Check if MT Trailer validation success screen is visible (single empty trailer flow).
+ * MT trailer validation success toast is visible.
+ * The toast often stays on screen while the next empty-trailer field appears; in that case
+ * we must return false so the main loop continues to fill/validate Trailer 2+ instead of
+ * waiting for the checklist indefinitely.
  * @param {import('playwright').Page} page
  */
 async function isMtTrailerSuccessScreen(page) {
   const ok = page.getByText(RX.mtTrailerValidationOk).first()
-  return await ok.isVisible().catch(() => false)
+  if (!(await ok.isVisible().catch(() => false))) return false
+
+  const trailerRows = await collectVisibleTrailerNumberInputs(page)
+  if (trailerRows.length > 0) return false
+
+  return true
 }
 
 /**
