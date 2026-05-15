@@ -32,13 +32,35 @@ const smoothHeading = ref(/** @type {number | null} */ (null))
 /** User-configurable heading offset in degrees (calibration). */
 const headingOffsetDeg = ref(0)
 
+const COMPASS_OFFSET_STORAGE_KEY = 'compass_heading_offset'
+
 /**
- * Set the compass heading offset for calibration.
+ * Set the compass heading offset for calibration (degrees, any numeric; normalized 0–359).
+ * Persists a signed -180…180 value to localStorage for compatibility with existing settings.
  * @param {number} deg
  */
 export function setCompassHeadingOffset(deg) {
   headingOffsetDeg.value = ((Number(deg) || 0) % 360 + 360) % 360
+  let signed = headingOffsetDeg.value
+  if (signed > 180) signed -= 360
+  try {
+    localStorage.setItem(COMPASS_OFFSET_STORAGE_KEY, String(Math.round(signed)))
+  } catch {
+    /* ignore */
+  }
 }
+
+function hydrateCompassHeadingOffsetFromStorage() {
+  try {
+    const raw = Number(localStorage.getItem(COMPASS_OFFSET_STORAGE_KEY))
+    if (!Number.isFinite(raw)) return
+    headingOffsetDeg.value = ((raw % 360) + 360) % 360
+  } catch {
+    /* ignore */
+  }
+}
+
+hydrateCompassHeadingOffsetFromStorage()
 
 const SMOOTHING_FACTOR = 0.15
 
@@ -278,6 +300,31 @@ function getMarkerRotationTransform(headingDeg, mapBearing = 0) {
 }
 
 /**
+ * Rotation for the user-location truck raster: when `headingDeg` is null, keep the cab
+ * visually north-aligned on the map while leaflet-rotate changes map bearing. When
+ * heading is set (compass + heading-up), same as {@link getMarkerRotationTransform}.
+ *
+ * @param {number | null} headingDeg
+ * @param {number} [mapBearing=0]
+ * @returns {string} CSS transform or '' for default
+ */
+export function getUserTruckMarkerTransform(headingDeg, mapBearing = 0) {
+  const b = (((Number(mapBearing) || 0) % 360) + 360) % 360
+  if (
+    headingDeg === null ||
+    headingDeg === undefined ||
+    !Number.isFinite(Number(headingDeg))
+  ) {
+    if (b === 0) return ''
+    return `rotate(${-b}deg)`
+  }
+  const h = Number(headingDeg)
+  const rotation = ((h - b) % 360 + 360) % 360
+  if (rotation === 0) return ''
+  return `rotate(${rotation}deg)`
+}
+
+/**
  * Whether compass mode should show UI toggle (device may support it).
  */
 const showCompassToggle = computed(() => {
@@ -333,6 +380,7 @@ export function useCompassOrientation() {
     toggleTracking,
     applyMapRotation,
     getMarkerRotationTransform,
+    getUserTruckMarkerTransform,
     detectSupport,
   }
 }

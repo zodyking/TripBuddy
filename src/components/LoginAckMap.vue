@@ -4,6 +4,11 @@ import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 import 'leaflet-rotate'
 import { userLocationTruckIcon } from '../utils/mapMarkers.js'
+import {
+  syncMapNavigationGestures,
+  centerMapOnLatLng,
+  applyUserTruckMarkerDomRotation,
+} from '../composables/useMapFollowControls.js'
 
 const DEFAULT_CENTER = [40.7128, -74.006]
 const DEFAULT_ZOOM = 11
@@ -23,8 +28,29 @@ const props = defineProps({
   vehicleId: { type: String, default: '' },
 })
 
-/** First fix uses setView; later updates use panTo when smoothFollow is on */
+/** First fix uses setView; later updates center at current zoom when smoothFollow is on */
 const userViewInitialized = ref(false)
+
+/** @type {null | (() => void)} */
+let unbindTruckBearingSync = null
+
+function bindTruckBearingSync() {
+  if (!map || unbindTruckBearingSync) return
+  const onRotate = () => applyDotRotation()
+  const onZoomEnd = () => applyDotRotation()
+  map.on('rotate', onRotate)
+  map.on('zoomend', onZoomEnd)
+  unbindTruckBearingSync = () => {
+    map.off('rotate', onRotate)
+    map.off('zoomend', onZoomEnd)
+    unbindTruckBearingSync = null
+  }
+}
+
+function applyDotRotation() {
+  if (!dot || !map) return
+  applyUserTruckMarkerDomRotation(dot, map, null)
+}
 
 const rootRef = ref(/** @type {HTMLElement | null} */ (null))
 
@@ -57,6 +83,7 @@ function sync() {
       layer.removeLayer(dot)
       dot = null
     }
+    syncMapNavigationGestures(map, { follow: false, compass: false })
     map.setView(DEFAULT_CENTER, DEFAULT_ZOOM, { animate: false })
     return
   }
@@ -74,9 +101,18 @@ function sync() {
     dot.setIcon(userLocationTruckIcon(props.vehicleId || ''))
   }
 
+  applyDotRotation()
+
   const motion = !prefersReducedMotion()
-  if (props.smoothFollow && userViewInitialized.value) {
-    map.panTo(ll, { animate: motion, duration: 0.22 })
+  const follow = props.smoothFollow && hasFix && !props.pending
+  syncMapNavigationGestures(map, { follow, compass: false })
+  if (follow) {
+    if (props.smoothFollow && userViewInitialized.value) {
+      centerMapOnLatLng(map, ll, { animate: motion })
+    } else {
+      map.setView(ll, 14, { animate: motion })
+      userViewInitialized.value = true
+    }
   } else {
     map.setView(ll, 14, { animate: motion })
     userViewInitialized.value = true
@@ -110,9 +146,11 @@ function initMap() {
     map?.invalidateSize()
     setTimeout(() => map?.invalidateSize(), 200)
   })
+  bindTruckBearingSync()
 }
 
 function destroyMap() {
+  unbindTruckBearingSync?.()
   if (map) {
     map.remove()
     map = null

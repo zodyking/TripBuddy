@@ -40,6 +40,7 @@ import {
   linehaulTripsNoActive,
   linehaulLastFetchAt,
   linehaulFetching,
+  linehaulAuthRecoveryInProgress,
   linehaulLocationMatch,
   refreshLinehaulApis,
   tripPhase,
@@ -988,7 +989,10 @@ const tripAlertOn = computed(() => isTripAlertEnabled())
  * snapshot fetch finishes — show loading placeholders instead.
  */
 const suppressHomeLinehaulErrors = computed(
-  () => apiOk.value !== true || linehaulLastFetchAt.value == null,
+  () =>
+    apiOk.value !== true ||
+    linehaulLastFetchAt.value == null ||
+    linehaulAuthRecoveryInProgress.value === true,
 )
 
 function syncTripVoiceUnlockHint() {
@@ -2425,7 +2429,13 @@ onUnmounted(() => {
         <span class="linehaul-loading-dot" />
         <span class="linehaul-loading-dot" />
       </div>
-      <div v-if="linehaulFetching" class="driver-status-fetching" aria-live="polite">Updating…</div>
+      <div
+        v-if="linehaulFetching || linehaulAuthRecoveryInProgress"
+        class="driver-status-fetching"
+        aria-live="polite"
+      >
+        {{ linehaulAuthRecoveryInProgress ? 'Refreshing FedEx session…' : 'Updating…' }}
+      </div>
       <div class="driver-status-cards">
           <div v-if="linehaulTractorBody" class="linehaul-block">
             <h4 class="linehaul-h3">Tractor</h4>

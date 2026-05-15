@@ -17,6 +17,13 @@ import {
   userLocationTruckIcon,
 } from '../utils/mapMarkers.js'
 import { useCompassOrientation } from '../composables/useCompassOrientation.js'
+import { useMapCompassLongPress } from '../composables/useMapCompassLongPress.js'
+import CompassCalibrationModal from './CompassCalibrationModal.vue'
+import {
+  syncMapNavigationGestures,
+  centerMapOnLatLng,
+  applyUserTruckMarkerDomRotation,
+} from '../composables/useMapFollowControls.js'
 
 /**
  * @typedef {{
@@ -79,8 +86,14 @@ const {
   permissionState: compassPermission,
   errorMessage: compassError,
   toggleTracking: toggleCompass,
-  getMarkerRotationTransform,
 } = useCompassOrientation()
+
+const {
+  calibrationModalOpen,
+  onCompassPointerDown,
+  onCompassPointerUp,
+  wrapCompassToggle,
+} = useMapCompassLongPress()
 
 const compassModeActive = ref(false)
 
@@ -425,8 +438,32 @@ let geoWatchId = null
 /** @type {ReturnType<typeof setTimeout> | null} */
 let fitDebounce = null
 let geoStopped = false
-let watchStarted = false
+/** Browser geolocation watch active — map follows user (center, no pan). */
+const trailerGeoFollowActive = ref(false)
 let didFitWithUser = false
+/** @type {null | (() => void)} */
+let unbindTruckBearingSync = null
+
+function syncNavigationGestures() {
+  syncMapNavigationGestures(map, {
+    follow: trailerGeoFollowActive.value,
+    compass: compassModeActive.value,
+  })
+}
+
+function bindTruckBearingSync() {
+  if (!map || unbindTruckBearingSync) return
+  const fn = () => {
+    applyUserMarkerRotation()
+  }
+  map.on('rotate', fn)
+  map.on('zoomend', fn)
+  unbindTruckBearingSync = () => {
+    map?.off('rotate', fn)
+    map?.off('zoomend', fn)
+    unbindTruckBearingSync = null
+  }
+}
 
 function prefersReducedMotion() {
   if (typeof window === 'undefined') return false
@@ -535,21 +572,12 @@ function syncUserOverlay() {
 }
 
 function applyUserMarkerRotation() {
-  if (!userMarker) return
-  const outer = userMarker.getElement()
-  if (!outer) return
-  const inner = outer.querySelector('.map-marker-raster-root')
-  if (!inner) return
-
-  if (compassModeActive.value && smoothHeading.value !== null) {
-    const mapBearing = map && typeof map.getBearing === 'function' ? map.getBearing() : 0
-    const transform = getMarkerRotationTransform(smoothHeading.value, mapBearing)
-    inner.style.transform = transform
-    inner.style.transformOrigin = 'center center'
-  } else {
-    inner.style.transform = ''
-    inner.style.transformOrigin = ''
-  }
+  if (!userMarker || !map) return
+  const heading =
+    compassModeActive.value && smoothHeading.value !== null
+      ? smoothHeading.value
+      : null
+  applyUserTruckMarkerDomRotation(userMarker, map, heading)
 }
 
 function applyMapCompassRotation() {
@@ -567,6 +595,7 @@ async function handleCompassToggle() {
     if (map && typeof map.setBearing === 'function') {
       map.setBearing(0)
     }
+    syncNavigationGestures()
     return
   }
 
@@ -574,7 +603,15 @@ async function handleCompassToggle() {
   if (started) {
     compassModeActive.value = true
   }
+  syncNavigationGestures()
 }
+
+function onCompassPressStart() {
+  if (compassPermission.value === 'denied') return
+  onCompassPointerDown()
+}
+
+const onCompassButtonClick = wrapCompassToggle(handleCompassToggle)
 
 /**
  * @param {number} lat
@@ -590,6 +627,12 @@ function setUserFixFromLatLng(lat, lng, accuracyM = 40, fitCamera = false) {
     accuracyM: Number.isFinite(accuracyM) && accuracyM > 0 ? accuracyM : 40,
   }
   syncUserOverlay()
+  if (trailerGeoFollowActive.value && map && userFix.value) {
+    const motion = prefersReducedMotion()
+    centerMapOnLatLng(map, L.latLng(userFix.value.lat, userFix.value.lng), {
+      animate: !motion,
+    })
+  }
   if (fitCamera && map && effectiveTrailers.value.length && !didFitWithUser) {
     didFitWithUser = true
     scheduleFitBounds()
@@ -613,7 +656,8 @@ function stopWatch() {
     navigator.geolocation.clearWatch(geoWatchId)
   }
   geoWatchId = null
-  watchStarted = false
+  trailerGeoFollowActive.value = false
+  syncNavigationGestures()
 }
 
 function startWatchForLiveUpdates() {
@@ -621,12 +665,11 @@ function startWatchForLiveUpdates() {
     typeof navigator === 'undefined' ||
     !navigator.geolocation ||
     geoStopped ||
-    watchStarted ||
+    geoWatchId != null ||
     !hasUserFix.value
   ) {
     return
   }
-  watchStarted = true
   let first = true
   geoWatchId = navigator.geolocation.watchPosition(
     (pos) => {
@@ -642,6 +685,8 @@ function startWatchForLiveUpdates() {
       timeout: 10_000,
     },
   )
+  trailerGeoFollowActive.value = true
+  syncNavigationGestures()
 }
 
 function applyUserCoordsFromProps() {
@@ -763,9 +808,12 @@ function initMap() {
     map?.invalidateSize()
     setTimeout(() => map?.invalidateSize(), 320)
   })
+  bindTruckBearingSync()
+  syncNavigationGestures()
 }
 
 function destroyMap() {
+  unbindTruckBearingSync?.()
   geoStopped = true
   stopWatch()
   if (fitDebounce) {
@@ -846,6 +894,10 @@ watch(compassModeActive, (active) => {
   }
 })
 
+watch([trailerGeoFollowActive, compassModeActive], () => {
+  syncNavigationGestures()
+})
+
 watch(
   () => [trailerNumRows.value.length, terminalCardDisplay.value != null],
   () => {
@@ -892,10 +944,14 @@ watch(
           compassPermission === 'denied'
             ? 'Compass blocked — enable in device settings'
             : compassModeActive
-              ? 'Exit compass mode'
-              : 'Compass mode (rotate map to heading)'
+              ? 'Exit compass mode (hold for calibration)'
+              : 'Compass mode — rotate map to heading (hold for calibration)'
         "
-        @click="handleCompassToggle"
+        @pointerdown="onCompassPressStart"
+        @pointerup="onCompassPointerUp"
+        @pointerleave="onCompassPointerUp"
+        @pointercancel="onCompassPointerUp"
+        @click="onCompassButtonClick"
       >
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
           <circle cx="12" cy="12" r="10" />
@@ -904,7 +960,11 @@ watch(
           <circle cx="12" cy="12" r="2" />
         </svg>
         <span class="sr-only">
-          {{ compassModeActive ? 'Exit compass mode' : 'Compass mode' }}
+          {{
+            compassModeActive
+              ? 'Exit compass mode. Press and hold for heading calibration.'
+              : 'Compass mode. Press and hold for heading calibration.'
+          }}
         </span>
       </button>
       </div>
@@ -1024,6 +1084,10 @@ watch(
         </div>
       </div>
     </div>
+    <CompassCalibrationModal
+      v-model="calibrationModalOpen"
+      :map-compass-mode-active="compassModeActive"
+    />
   </div>
 </template>
 

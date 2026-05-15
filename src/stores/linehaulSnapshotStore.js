@@ -71,7 +71,7 @@ function computeTripFingerprint(body) {
   const trailerFp = trailers
     .map((t) => {
       const tr = t && typeof t === 'object' ? /** @type {Record<string, unknown>} */ (t) : {}
-      return `${tr.trlrNbr ?? ''}:${tr.sealNumber ?? ''}:${tr.pkgWeight ?? ''}`
+      return `${tr.trlrNbr ?? ''}:${tr.sealNumber ?? ''}:${tr.pkgWeight ?? ''}:${tr.detlCodeLoadStatus ?? ''}`
     })
     .sort()
     .join('|')
@@ -95,7 +95,7 @@ function computeStateFingerprint(state) {
   const trailerFp = (state.trailers || [])
     .map((t) => {
       const tr = t && typeof t === 'object' ? /** @type {Record<string, unknown>} */ (t) : {}
-      return `${tr.trlrNbr ?? ''}:${tr.sealNumber ?? ''}:${tr.pkgWeight ?? ''}`
+      return `${tr.trlrNbr ?? ''}:${tr.sealNumber ?? ''}:${tr.pkgWeight ?? ''}:${tr.detlCodeLoadStatus ?? ''}`
     })
     .sort()
     .join('|')
@@ -566,6 +566,8 @@ export const linehaulTripsNoActive = ref(false)
 export const lastDailyTripLegSequence = ref(null)
 export const linehaulLastFetchAt = ref(null)
 export const linehaulFetching = ref(false)
+/** True while Playwright bearer capture runs after FedEx 401/403 (avoid flashing errors in cards). */
+export const linehaulAuthRecoveryInProgress = ref(false)
 
 /** Cached full trip snapshot (from APRVD) with trailer details for persistence after dispatch. */
 export const cachedTripSnapshot = ref(null)
@@ -599,6 +601,7 @@ export function resetLinehaulSession() {
   linehaulTripsNoActive.value = false
   lastDailyTripLegSequence.value = null
   linehaulLastFetchAt.value = null
+  linehaulAuthRecoveryInProgress.value = false
   cachedTripSnapshot.value = null
   prePlanTripSnapshot.value = null
   hiddenDailyTripLegSequences.value = []
@@ -1101,6 +1104,305 @@ function isAuthFailure(res) {
 }
 
 /**
+ * Apply tractor/driver/trip-ready/trips merge + stableTripState from one Linehaul poll.
+ * @param {{
+ *   tr: object,
+ *   dr: object,
+ *   cred: Record<string, unknown>,
+ *   trip: object | null,
+ *   tripsAprvd: object,
+ *   tripsByLeg: object | null,
+ *   assignmentInstructions: string,
+ *   refId: string | null,
+ * }} p
+ */
+function applyLinehaulFedexPollSnapshot(p) {
+  const { tr, dr, cred, trip, tripsAprvd, tripsByLeg, assignmentInstructions, refId } = p
+
+  linehaulTractorError.value = null
+  linehaulDriverError.value = null
+  linehaulTripReadyError.value = null
+  linehaulTripsError.value = null
+  linehaulTripsNoActive.value = false
+
+  if (tr.ok && tr.body !== undefined) {
+    linehaulTractorBody.value = tr.body
+    linehaulTractorError.value = null
+  } else {
+    linehaulTractorBody.value = null
+    linehaulTractorError.value = tr.error || 'Tractor request failed'
+  }
+  if (dr.ok && dr.body !== undefined) {
+    linehaulDriverBody.value = dr.body
+    linehaulDriverError.value = null
+  } else {
+    linehaulDriverBody.value = null
+    linehaulDriverError.value = dr.error || 'Driver request failed'
+  }
+
+  const driverId = linehaulDriverIdFromCredMeta(cred)
+  const tractorBody = tr.ok && tr.body !== undefined ? tr.body : null
+
+  if (!refId) {
+    linehaulTripReadyBody.value = null
+    if (!driverId) {
+      linehaulTripReadyError.value =
+        'Trip Ready: set digits-only Username or Employee # to build reference id.'
+    } else if (
+      !tractorBody ||
+      tractorBody.tractorNbr == null ||
+      tractorBody.locationId == null
+    ) {
+      linehaulTripReadyError.value =
+        'Trip Ready: need tractor locationId and tractorNbr (tractor API must succeed).'
+    } else {
+      linehaulTripReadyError.value = null
+    }
+  } else if (trip) {
+    if (trip.ok && trip.body !== undefined) {
+      linehaulTripReadyBody.value = trip.body
+      linehaulTripReadyError.value = null
+    } else {
+      linehaulTripReadyBody.value = null
+      linehaulTripReadyError.value =
+        trip.error || 'Trip Ready request failed'
+    }
+  }
+
+  let seqFromAprvd = null
+  if (tripsAprvd.ok && tripsAprvd.body != null && typeof tripsAprvd.body === 'object') {
+    seqFromAprvd = tripBodyDailySeq(tripsAprvd.body)
+  }
+
+  const prePlanSeqAtPollStart = tripBodyDailySeq(prePlanTripSnapshot.value)
+
+  const driverStatPoll =
+    dr.ok && dr.body && typeof dr.body === 'object'
+      ? String(dr.body.driverAvlStat ?? '').toUpperCase()
+      : ''
+  const tractorStatPoll =
+    tr.ok && tr.body && typeof tr.body === 'object'
+      ? String(tr.body.detlCodeAvailStat ?? '').toUpperCase()
+      : ''
+  const aprvdListStatus =
+    tripsAprvd.ok && tripsAprvd.body != null && typeof tripsAprvd.body === 'object'
+      ? String(/** @type {Record<string, unknown>} */ (tripsAprvd.body).tripStatus ?? '')
+          .trim()
+          .toUpperCase()
+      : ''
+
+  const treatAsDispatchedPoll =
+    driverStatPoll === 'ENRT' ||
+    tractorStatPoll === 'ENRT' ||
+    aprvdListStatus === 'DSPCH'
+
+  const activeLegGuess =
+    stableTripState.value.dailyTripLegSequence ||
+    tripBodyDailySeq(cachedTripSnapshot.value) ||
+    tripBodyDailySeq(linehaulTripsBody.value)
+
+  const aprvdListIsPrePlanLeg = Boolean(
+    seqFromAprvd &&
+      prePlanSeqAtPollStart &&
+      seqFromAprvd === prePlanSeqAtPollStart,
+  )
+
+  const fetchActiveLegInsteadOfAprvdList =
+    aprvdListIsPrePlanLeg &&
+    treatAsDispatchedPoll &&
+    Boolean(activeLegGuess && activeLegGuess !== seqFromAprvd)
+
+  if (tripsByLeg?.ok && tripsByLeg.body != null && typeof tripsByLeg.body === 'object') {
+    const seqL = tripBodyDailySeq(tripsByLeg.body)
+    if (seqL) lastDailyTripLegSequence.value = seqL
+  }
+
+  const currentDriverAvlStat =
+    dr.ok && dr.body && typeof dr.body === 'object'
+      ? String(dr.body.driverAvlStat ?? '').toUpperCase()
+      : ''
+
+  if (
+    prevDriverAvlStat === 'ENRT' &&
+    currentDriverAvlStat !== 'ENRT' &&
+    currentDriverAvlStat !== ''
+  ) {
+    if (prePlanTripSnapshot.value != null) {
+      cachedTripSnapshot.value = prePlanTripSnapshot.value
+      prePlanTripSnapshot.value = null
+    } else {
+      cachedTripSnapshot.value = null
+    }
+    lastDailyTripLegSequence.value = null
+  }
+  prevDriverAvlStat = currentDriverAvlStat
+
+  /** @type {Record<string, unknown> | null} */
+  let aprvdBody = null
+  if (tripsAprvd.ok && tripsAprvd.body != null && !tripsAprvd.noActiveTrip) {
+    const b = tripsAprvd.body
+    if (typeof b === 'object' && !Array.isArray(b)) {
+      aprvdBody = /** @type {Record<string, unknown>} */ (b)
+    }
+  }
+
+  /** @type {Record<string, unknown> | null} */
+  let dspchBody = null
+  if (
+    tripsByLeg != null &&
+    tripsByLeg.ok &&
+    tripsByLeg.body != null &&
+    !tripsByLeg.noActiveTrip
+  ) {
+    const leg = tripsByLeg.body
+    if (typeof leg === 'object' && leg !== null && !Array.isArray(leg)) {
+      dspchBody = /** @type {Record<string, unknown>} */ (leg)
+    }
+  }
+
+  const incomingSeq = tripBodyDailySeq(aprvdBody)
+  const cachedSeq = tripBodyDailySeq(cachedTripSnapshot.value)
+
+  if (aprvdBody && Array.isArray(aprvdBody.trailers) && aprvdBody.trailers.length > 0) {
+    if (!cachedSeq || cachedSeq === incomingSeq) {
+      const cacheWouldPolluteActiveWithPrePlanAprvd =
+        fetchActiveLegInsteadOfAprvdList &&
+        incomingSeq != null &&
+        prePlanSeqAtPollStart != null &&
+        incomingSeq === prePlanSeqAtPollStart
+      if (!cacheWouldPolluteActiveWithPrePlanAprvd) {
+        cachedTripSnapshot.value = { ...aprvdBody }
+      }
+    }
+  }
+
+  const cached =
+    cachedTripSnapshot.value != null &&
+    typeof cachedTripSnapshot.value === 'object'
+      ? /** @type {Record<string, unknown>} */ (cachedTripSnapshot.value)
+      : null
+
+  const mergePrimarySeq =
+    tripBodyDailySeq(dspchBody) ||
+    tripBodyDailySeq(cached) ||
+    tripBodyDailySeq(aprvdBody)
+
+  const merged = deepMergeNonEmpty(
+    bodyOmitTrailersIfDifferentLeg(aprvdBody, mergePrimarySeq),
+    bodyOmitTrailersIfDifferentLeg(dspchBody, mergePrimarySeq),
+    bodyOmitTrailersIfDifferentLeg(cached, mergePrimarySeq),
+  )
+
+  if (merged != null) {
+    linehaulTripsBody.value = merged
+    linehaulTripsError.value = null
+    linehaulTripsNoActive.value = false
+  } else if (
+    tripsAprvd.noActiveTrip &&
+    !(
+      tripsByLeg != null &&
+      tripsByLeg.ok &&
+      tripsByLeg.body != null &&
+      !tripsByLeg.noActiveTrip
+    ) &&
+    cachedTripSnapshot.value == null
+  ) {
+    linehaulTripsBody.value = null
+    linehaulTripsError.value = null
+    linehaulTripsNoActive.value = true
+  } else {
+    if (cachedTripSnapshot.value != null) {
+      linehaulTripsBody.value = cachedTripSnapshot.value
+      linehaulTripsError.value = null
+      linehaulTripsNoActive.value = false
+    } else {
+      linehaulTripsBody.value = null
+      linehaulTripsNoActive.value = false
+      const aprErr =
+        tripsAprvd.ok || tripsAprvd.noActiveTrip ? null : tripsAprvd.error
+      const legErr =
+        tripsByLeg && !tripsByLeg.ok && !tripsByLeg.noActiveTrip
+          ? tripsByLeg.error
+          : null
+      linehaulTripsError.value =
+        aprErr || legErr || 'Trip details request failed'
+    }
+  }
+
+  const mergedSeq = tripBodyDailySeq(linehaulTripsBody.value)
+  const existingPrePlanSeq = tripBodyDailySeq(prePlanTripSnapshot.value)
+
+  if (
+    incomingSeq != null &&
+    mergedSeq != null &&
+    incomingSeq !== mergedSeq &&
+    existingPrePlanSeq !== incomingSeq
+  ) {
+    prePlanTripSnapshot.value = { ...aprvdBody }
+  }
+
+  if (mergedSeq && existingPrePlanSeq && mergedSeq === existingPrePlanSeq) {
+    prePlanTripSnapshot.value = null
+  }
+
+  const { changed: stateChanged } = processApiResponse(
+    /** @type {Record<string, unknown> | null} */ (linehaulTripsBody.value),
+    assignmentInstructions,
+    {
+      prePlanSnapshot: prePlanTripSnapshot.value,
+      hiddenSequences: hiddenDailyTripLegSequences.value,
+    },
+  )
+
+  if (stateChanged) {
+    const historyGate = shouldUpsertToHistory(stableTripState.value, {
+      prePlanSnapshot: prePlanTripSnapshot.value,
+      tripPhase: tripPhase.value,
+    })
+
+    if (historyGate.allow) {
+      scheduleHistoryUpsert(stableTripState.value, assignmentInstructions)
+    }
+
+    const seq = stableTripState.value.dailyTripLegSequence
+    if (seq) {
+      void syncDollyFromLinehaul(seq, stableTripState.value).catch(() => {})
+    }
+  }
+  return { aprvdBody, dspchBody }
+}
+
+/**
+ * Mileage fetch, unhide legs, persist snapshots — after poll results are applied.
+ * @param {unknown[]} tripHistoryLedgerSnapshot
+ * @param {Record<string, unknown> | null} aprvdBody
+ * @param {Record<string, unknown> | null} dspchBody
+ */
+async function finishLinehaulPollSideEffects(
+  tripHistoryLedgerSnapshot,
+  aprvdBody,
+  dspchBody,
+) {
+  void maybeFetchTripMileageAfterDispatched()
+
+  const legsFromApi = new Set()
+  for (const b of [
+    linehaulTripsBody.value,
+    prePlanTripSnapshot.value,
+    cachedTripSnapshot.value,
+    aprvdBody,
+    dspchBody,
+  ]) {
+    const s = tripBodyDailySeq(b)
+    if (s) legsFromApi.add(s)
+  }
+  await unhideTripLegSequencesIfHidden([...legsFromApi], tripHistoryLedgerSnapshot)
+
+  applyHiddenTripFilter()
+  schedulePersistLinehaulTripSnapshots()
+}
+
+/**
  * Fetches Linehaul tractor, driver, trip-ready (when reference id can be built), and trip details.
  * On 401/403 (attempt 0), runs browser bearer capture once then retries fetch.
  */
@@ -1139,11 +1441,6 @@ async function refreshLinehaulApisImpl(attempt) {
     /* getAssignment failed — do not clear hidden list or trip UI (stale is safer than empty). */
   }
 
-  linehaulTractorError.value = null
-  linehaulDriverError.value = null
-  linehaulTripReadyError.value = null
-  linehaulTripsError.value = null
-  linehaulTripsNoActive.value = false
   const [tr, dr] = await Promise.all([
     fetchFedexLinehaulTractor(),
     fetchFedexLinehaulDriver(),
@@ -1154,20 +1451,6 @@ async function refreshLinehaulApisImpl(attempt) {
   } catch {
     cred = {}
   }
-  if (tr.ok && tr.body !== undefined) {
-    linehaulTractorBody.value = tr.body
-    linehaulTractorError.value = null
-  } else {
-    linehaulTractorBody.value = null
-    linehaulTractorError.value = tr.error || 'Tractor request failed'
-  }
-  if (dr.ok && dr.body !== undefined) {
-    linehaulDriverBody.value = dr.body
-    linehaulDriverError.value = null
-  } else {
-    linehaulDriverBody.value = null
-    linehaulDriverError.value = dr.error || 'Driver request failed'
-  }
 
   const driverId = linehaulDriverIdFromCredMeta(cred)
   const tractorBody = tr.ok && tr.body !== undefined ? tr.body : null
@@ -1175,31 +1458,8 @@ async function refreshLinehaulApisImpl(attempt) {
 
   /** @type {{ ok: boolean, status: number, body?: unknown, error?: string } | null} */
   let trip = null
-  if (!refId) {
-    linehaulTripReadyBody.value = null
-    if (!driverId) {
-      linehaulTripReadyError.value =
-        'Trip Ready: set digits-only Username or Employee # to build reference id.'
-    } else if (
-      !tractorBody ||
-      tractorBody.tractorNbr == null ||
-      tractorBody.locationId == null
-    ) {
-      linehaulTripReadyError.value =
-        'Trip Ready: need tractor locationId and tractorNbr (tractor API must succeed).'
-    } else {
-      linehaulTripReadyError.value = null
-    }
-  } else {
+  if (refId) {
     trip = await fetchFedexLinehaulTripStatus({ referenceId: refId })
-    if (trip.ok && trip.body !== undefined) {
-      linehaulTripReadyBody.value = trip.body
-      linehaulTripReadyError.value = null
-    } else {
-      linehaulTripReadyBody.value = null
-      linehaulTripReadyError.value =
-        trip.error || 'Trip Ready request failed'
-    }
   }
 
   const tripsAprvd = await fetchFedexLinehaulTrips({})
@@ -1273,181 +1533,6 @@ async function refreshLinehaulApisImpl(attempt) {
     })
   }
 
-  if (tripsByLeg?.ok && tripsByLeg.body != null && typeof tripsByLeg.body === 'object') {
-    const seqL = tripBodyDailySeq(tripsByLeg.body)
-    if (seqL) lastDailyTripLegSequence.value = seqL
-  }
-
-  const currentDriverAvlStat =
-    dr.ok && dr.body && typeof dr.body === 'object'
-      ? String(dr.body.driverAvlStat ?? '').toUpperCase()
-      : ''
-
-  if (
-    prevDriverAvlStat === 'ENRT' &&
-    currentDriverAvlStat !== 'ENRT' &&
-    currentDriverAvlStat !== ''
-  ) {
-    // Promote pre-plan to current if exists, else clear
-    if (prePlanTripSnapshot.value != null) {
-      cachedTripSnapshot.value = prePlanTripSnapshot.value
-      prePlanTripSnapshot.value = null
-    } else {
-      cachedTripSnapshot.value = null
-    }
-    lastDailyTripLegSequence.value = null
-  }
-  prevDriverAvlStat = currentDriverAvlStat
-
-  /** @type {Record<string, unknown> | null} */
-  let aprvdBody = null
-  if (tripsAprvd.ok && tripsAprvd.body != null && !tripsAprvd.noActiveTrip) {
-    const b = tripsAprvd.body
-    if (typeof b === 'object' && !Array.isArray(b)) {
-      aprvdBody = /** @type {Record<string, unknown>} */ (b)
-    }
-  }
-
-  /** @type {Record<string, unknown> | null} */
-  let dspchBody = null
-  if (
-    tripsByLeg != null &&
-    tripsByLeg.ok &&
-    tripsByLeg.body != null &&
-    !tripsByLeg.noActiveTrip
-  ) {
-    const leg = tripsByLeg.body
-    if (typeof leg === 'object' && leg !== null && !Array.isArray(leg)) {
-      dspchBody = /** @type {Record<string, unknown>} */ (leg)
-    }
-  }
-
-  // Update cached trip if aprvdBody has trailer data (preserve rich data for merge)
-  const incomingSeq = tripBodyDailySeq(aprvdBody)
-  const cachedSeq = tripBodyDailySeq(cachedTripSnapshot.value)
-
-  if (aprvdBody && Array.isArray(aprvdBody.trailers) && aprvdBody.trailers.length > 0) {
-    // Only update cached if same sequence or no cached trip yet
-    if (!cachedSeq || cachedSeq === incomingSeq) {
-      const cacheWouldPolluteActiveWithPrePlanAprvd =
-        fetchActiveLegInsteadOfAprvdList &&
-        incomingSeq != null &&
-        prePlanSeqAtPollStart != null &&
-        incomingSeq === prePlanSeqAtPollStart
-      if (!cacheWouldPolluteActiveWithPrePlanAprvd) {
-        cachedTripSnapshot.value = { ...aprvdBody }
-      }
-    }
-  }
-
-  const cached =
-    cachedTripSnapshot.value != null &&
-    typeof cachedTripSnapshot.value === 'object'
-      ? /** @type {Record<string, unknown>} */ (cachedTripSnapshot.value)
-      : null
-
-  /** Prefer DSPCH leg detail, else cached APRVD snapshot, else list APRVD (pre-plan seq may differ). */
-  const mergePrimarySeq =
-    tripBodyDailySeq(dspchBody) ||
-    tripBodyDailySeq(cached) ||
-    tripBodyDailySeq(aprvdBody)
-
-  // Merge API responses — order: APRVD base, DSPCH overlay, cached last (richest equipment wins).
-  // Do not union trailers across legs (omit trailers when dailyTripLegSequence ≠ mergePrimarySeq).
-  const merged = deepMergeNonEmpty(
-    bodyOmitTrailersIfDifferentLeg(aprvdBody, mergePrimarySeq),
-    bodyOmitTrailersIfDifferentLeg(dspchBody, mergePrimarySeq),
-    bodyOmitTrailersIfDifferentLeg(cached, mergePrimarySeq),
-  )
-
-  if (merged != null) {
-    linehaulTripsBody.value = merged
-    linehaulTripsError.value = null
-    linehaulTripsNoActive.value = false
-  } else if (
-    tripsAprvd.noActiveTrip &&
-    !(
-      tripsByLeg != null &&
-      tripsByLeg.ok &&
-      tripsByLeg.body != null &&
-      !tripsByLeg.noActiveTrip
-    ) &&
-    cachedTripSnapshot.value == null
-  ) {
-    linehaulTripsBody.value = null
-    linehaulTripsError.value = null
-    linehaulTripsNoActive.value = true
-  } else {
-    if (cachedTripSnapshot.value != null) {
-      linehaulTripsBody.value = cachedTripSnapshot.value
-      linehaulTripsError.value = null
-      linehaulTripsNoActive.value = false
-    } else {
-      linehaulTripsBody.value = null
-      linehaulTripsNoActive.value = false
-      const aprErr =
-        tripsAprvd.ok || tripsAprvd.noActiveTrip ? null : tripsAprvd.error
-      const legErr =
-        tripsByLeg && !tripsByLeg.ok && !tripsByLeg.noActiveTrip
-          ? tripsByLeg.error
-          : null
-      linehaulTripsError.value =
-        aprErr || legErr || 'Trip details request failed'
-    }
-  }
-
-  // PRE-PLAN DETECTION: Compare against MERGED body sequence (not stale cachedTripSnapshot)
-  // This prevents false positives when cachedTripSnapshot has stale data
-  const mergedSeq = tripBodyDailySeq(linehaulTripsBody.value)
-  const existingPrePlanSeq = tripBodyDailySeq(prePlanTripSnapshot.value)
-
-  if (
-    incomingSeq != null &&
-    mergedSeq != null &&
-    incomingSeq !== mergedSeq &&
-    existingPrePlanSeq !== incomingSeq
-  ) {
-    // aprvdBody has a different sequence than the merged current trip = pre-plan
-    prePlanTripSnapshot.value = { ...aprvdBody }
-  }
-
-  // Clear pre-plan if it now matches current trip (duplicate detection)
-  if (mergedSeq && existingPrePlanSeq && mergedSeq === existingPrePlanSeq) {
-    prePlanTripSnapshot.value = null
-  }
-
-  // === GATED STATE UPDATE ===
-  // Process API response through logic gates to update stableTripState
-  const { changed: stateChanged, reason: updateReason } = processApiResponse(
-    /** @type {Record<string, unknown> | null} */ (linehaulTripsBody.value),
-    assignmentInstructions,
-    {
-      prePlanSnapshot: prePlanTripSnapshot.value,
-      hiddenSequences: hiddenDailyTripLegSequences.value,
-    },
-  )
-
-  // Only downstream effects if data actually changed through gates
-  if (stateChanged) {
-    // Schedule history upsert (debounced, gated, serialized)
-    const historyGate = shouldUpsertToHistory(stableTripState.value, {
-      prePlanSnapshot: prePlanTripSnapshot.value,
-      tripPhase: tripPhase.value,
-    })
-
-    if (historyGate.allow) {
-      scheduleHistoryUpsert(stableTripState.value, assignmentInstructions)
-    }
-
-    // Dolly sync
-    const seq = stableTripState.value.dailyTripLegSequence
-    if (seq) {
-      void syncDollyFromLinehaul(seq, stableTripState.value).catch(() => {})
-    }
-  }
-
-  void maybeFetchTripMileageAfterDispatched()
-
   const authFailed =
     attempt === 0 &&
     (isAuthFailure(tr) ||
@@ -1457,13 +1542,15 @@ async function refreshLinehaulApisImpl(attempt) {
       (tripsByLeg != null && isAuthFailure(tripsByLeg)))
 
   if (authFailed) {
-    pushLiveLog({
-      type: 'info',
-      message:
-        'Linehaul returned 401/403 — refreshing bearer from browser, then retrying…',
-      ts: Date.now(),
-    })
+    linehaulAuthRecoveryInProgress.value = true
+    let recovered = false
     try {
+      pushLiveLog({
+        type: 'info',
+        message:
+          'Linehaul returned 401/403 — refreshing bearer from browser, then retrying…',
+        ts: Date.now(),
+      })
       const cap = await postLinehaulCaptureBearer({
         bypassValidityProbe: true,
         clearSession: false,
@@ -1472,6 +1559,7 @@ async function refreshLinehaulApisImpl(attempt) {
       })
       if (cap && cap.ok === true && cap.saved === true) {
         await refreshLinehaulApisImpl(1)
+        recovered = true
       }
     } catch (e) {
       pushLiveLog({
@@ -1482,25 +1570,27 @@ async function refreshLinehaulApisImpl(attempt) {
             : `Linehaul bearer capture failed: ${String(e)}`,
         ts: Date.now(),
       })
+    } finally {
+      linehaulAuthRecoveryInProgress.value = false
     }
+    if (recovered) return
   }
 
-  /** FedEx still reports these legs — clear stale "hidden from home" so assignments stay visible. */
-  const legsFromApi = new Set()
-  for (const b of [
-    linehaulTripsBody.value,
-    prePlanTripSnapshot.value,
-    cachedTripSnapshot.value,
+  const { aprvdBody, dspchBody } = applyLinehaulFedexPollSnapshot({
+    tr,
+    dr,
+    cred,
+    trip,
+    tripsAprvd,
+    tripsByLeg,
+    assignmentInstructions,
+    refId,
+  })
+  await finishLinehaulPollSideEffects(
+    tripHistoryLedgerSnapshot,
     aprvdBody,
     dspchBody,
-  ]) {
-    const s = tripBodyDailySeq(b)
-    if (s) legsFromApi.add(s)
-  }
-  await unhideTripLegSequencesIfHidden([...legsFromApi], tripHistoryLedgerSnapshot)
-
-  applyHiddenTripFilter()
-  schedulePersistLinehaulTripSnapshots()
+  )
 }
 
 /**
