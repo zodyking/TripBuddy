@@ -36,6 +36,8 @@ async function loadTrailerNumberCandidates(legSeq) {
 const RX = {
   warningTitle: /warning/i,
   acknowledgeBtn: /acknowledge/i,
+  /** Single-trailer empty assignment dialog (Trip Summary / inspect path). */
+  emptyTrailerModalBody: /assigned\s+an\s+empty\s+trailer/i,
   checkInSuccessful: /check\s+in\s+successful/i,
   beginInspection: /begin\s+inspection/i,
   validateDolly: /validate\s+dolly/i,
@@ -61,6 +63,8 @@ const RX = {
 }
 
 const WARN_MODAL_MS = 4_000
+/** FedEx "Empty Trailer" info dialog — click VERIFIED to continue inspect/checkout. */
+const EMPTY_TRAILER_MODAL_MS = 6_000
 const BEGIN_INSPECTION_MS = 20_000
 const AFTER_CLICK_MS = 2_500
 const IDLE_EXIT_MS = 24_000
@@ -377,6 +381,47 @@ export async function dismissInspectWarningIfPresent(page, log) {
       return
     }
     await page.waitForTimeout(200)
+  }
+}
+
+/**
+ * Single empty-trailer assignment notice — dismiss with VERIFIED (extra step before
+ * dolly / MT trailer validation on some single-trailer dispatches).
+ * @param {import('playwright').Page} page
+ * @param {(type: string, message: string, extra?: object) => void} log
+ */
+async function dismissEmptyTrailerVerifiedModalIfPresent(page, log) {
+  const deadline = Date.now() + EMPTY_TRAILER_MODAL_MS
+  while (Date.now() < deadline) {
+    const verified = page.getByRole('button', { name: /^\s*verified\s*$/i }).first()
+    if (!(await verified.isVisible().catch(() => false))) {
+      await page.waitForTimeout(200)
+      continue
+    }
+    const bodyHit = await page
+      .getByText(RX.emptyTrailerModalBody)
+      .first()
+      .isVisible()
+      .catch(() => false)
+    const titleHit = await page
+      .getByText(/\bempty\s+trailer\b/i)
+      .first()
+      .isVisible()
+      .catch(() => false)
+    if (!bodyHit && !titleHit) {
+      await page.waitForTimeout(200)
+      continue
+    }
+    try {
+      await verified.click({ timeout: 2_500 })
+    } catch {
+      const alt = buttonLikeByVisibleText(page, /^verified$/i).first()
+      if (await alt.isVisible().catch(() => false)) await alt.click({ timeout: 2_500 })
+    }
+    log('info', 'Dismissed Empty Trailer modal (VERIFIED)')
+    await page.waitForLoadState('domcontentloaded', { timeout: 8_000 }).catch(() => {})
+    await page.waitForTimeout(400)
+    return
   }
 }
 
@@ -698,11 +743,13 @@ export async function runInspectCheckoutAfterGate(page, opts) {
   }
 
   await dismissInspectWarningIfPresent(page, log)
+  await dismissEmptyTrailerVerifiedModalIfPresent(page, log)
   await clickBeginInspectionIfPresent(page, log)
 
   for (;;) {
     aborted()
     await page.waitForTimeout(POLL_MS)
+    await dismissEmptyTrailerVerifiedModalIfPresent(page, log)
 
     // --- Check for "You are Dispatched!" success ---
     if (await isDispatchedSuccessScreen(page)) {
@@ -835,6 +882,7 @@ export async function runInspectCheckoutAfterGate(page, opts) {
 
     // --- Warning / Begin (late) ---
     await dismissInspectWarningIfPresent(page, log)
+    await dismissEmptyTrailerVerifiedModalIfPresent(page, log)
     const beginLate = buttonLikeByVisibleText(page, RX.beginInspection).first()
     if (await beginLate.isVisible().catch(() => false)) {
       const clicked = await clickIfVisible(buttonLikeByVisibleText(page, RX.beginInspection))
