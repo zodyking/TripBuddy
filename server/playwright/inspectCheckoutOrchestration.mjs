@@ -619,6 +619,8 @@ async function isDispatchedSuccessScreen(page) {
 async function isNewTripDetailsModal(page) {
   const title = page.getByText(RX.newTripDetails).first()
   if (!(await title.isVisible().catch(() => false))) return false
+  const refreshRole = page.getByRole('button', { name: /^refresh$/i }).first()
+  if (await refreshRole.isVisible().catch(() => false)) return true
   const refreshBtn = buttonLikeByVisibleText(page, RX.refreshBtn).first()
   return await refreshBtn.isVisible().catch(() => false)
 }
@@ -634,7 +636,13 @@ async function handleNewTripDetailsModal(page, log) {
 
   log('warn', 'New Trip Details modal detected — trip changed mid-inspection')
 
-  // Click REFRESH button
+  const refreshRole = page.getByRole('button', { name: /^refresh$/i }).first()
+  if (await refreshRole.isVisible().catch(() => false)) {
+    await refreshRole.click()
+    log('info', 'Clicked REFRESH on New Trip Details modal')
+    await page.waitForTimeout(2_000)
+    return true
+  }
   const refreshBtn = buttonLikeByVisibleText(page, RX.refreshBtn).first()
   if (await refreshBtn.isVisible().catch(() => false)) {
     await refreshBtn.click()

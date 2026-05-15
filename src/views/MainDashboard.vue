@@ -1111,7 +1111,12 @@ async function runQuickAction(auto) {
     const legSeq = currentTripLegSeq.value
     if (legSeq) tripData.dailyTripLegSequence = String(legSeq)
     const result = await runAutomation(auto.id, { headless: true, tripData })
-    if (result.ok) {
+    const inspectReCheckin = result.variables?._inspectCheckoutContinue
+    if (inspectReCheckin?.requiresReCheckin === true) {
+      announceInspectCheckoutNewTripDetails()
+      notifyQuickActionInApp('Inspect failed: new trip details. Running check-in…', 'warning')
+      setTimeout(() => void autoRunCheckInQuickAction(), 2000)
+    } else if (result.ok) {
       if (result.variables?._inspectCheckoutCancelled === true) {
         notifyQuickActionInApp('No trip to inspect', 'info')
         announceInspectCheckoutCancelled()
@@ -1142,16 +1147,7 @@ async function runQuickAction(auto) {
         notifyQuickActionInApp(`${auto.manualButtonLabel || auto.name} completed`, 'success')
       }
     } else {
-      // Check for "New Trip Details" scenario that requires re-checkin
-      const inspectOutcome = result.variables?._inspectCheckoutContinue
-      if (inspectOutcome?.requiresReCheckin === true) {
-        announceInspectCheckoutNewTripDetails()
-        notifyQuickActionInApp('Inspect failed: new trip details. Running check-in…', 'warning')
-        // Auto-trigger check-in quick action
-        setTimeout(() => void autoRunCheckInQuickAction(), 2000)
-      } else {
-        notifyQuickActionInApp(result.error || 'Failed', 'error')
-      }
+      notifyQuickActionInApp(result.error || 'Failed', 'error')
     }
   } catch (e) {
     notifyQuickActionInApp(e instanceof Error ? e.message : String(e), 'error')

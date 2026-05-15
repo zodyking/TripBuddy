@@ -372,6 +372,11 @@ export function testErrorAlert() {
 }
 
 export function announceInspectCheckoutNewTripDetails() {
+  const prefs = getAlertPrefs()
+  if (!prefs.inspectCheckout) {
+    pushLiveLog({ type: 'warn', message: `[Alert] inspectCheckout blocked by prefs`, ts: Date.now() })
+    return
+  }
   pushLiveLog({ type: 'warn', message: `[Alert] Inspect & Checkout failed: new trip details`, ts: Date.now() })
-  speakDirect('Inspect and Checkout failed, new trip details added.')
+  speakDirect('Inspect and checkout failed, begin new checkin.')
 }
