@@ -165,7 +165,7 @@ export function buildTrailerCards(body) {
 /**
  * Parse trailer metadata for display badges.
  * @param {Record<string, unknown>} trailer
- * @param {{ force20ft?: boolean, multiTrailerTrip?: boolean }} [opts] When `force20ft`, size is always 20′ (e.g. multi-trailer trips). When `multiTrailerTrip`, trust `emptyFlag === 'Y'` over a positive `pkgWeight` for load+MT legs.
+ * @param {{ force20ft?: boolean }} [opts] When `force20ft`, size is always 20′ (e.g. multi-trailer trips).
  */
 export function parseTrailerMeta(trailer, opts = {}) {
   const trlrNbr = String(trailer.trlrNbr ?? '').trim()
@@ -173,14 +173,6 @@ export function parseTrailerMeta(trailer, opts = {}) {
     opts.force20ft === true ? '20ft' : trlrNbr.startsWith('8') ? '20ft' : '53ft'
 
   const loadStatus = String(trailer.detlCodeLoadStatus ?? '').toUpperCase()
-  const emptyFlag = String(trailer.emptyFlag ?? '').toUpperCase()
-  const multi = opts.multiTrailerTrip === true
-  /**
-   * FedEx “load + empty (MT)”: portal shows MT / empty on one position while Linehaul may still
-   * send `LDNG` and a positive `pkgWeight` on that trailer row.
-   */
-  const mtEmptySlot = multi && emptyFlag === 'Y'
-
   let statusLabel = '—'
   let statusClass = 'status-unknown'
   if (loadStatus === 'LDNG') {
@@ -196,10 +188,7 @@ export function parseTrailerMeta(trailer, opts = {}) {
     statusLabel = loadStatus
   }
 
-  if (mtEmptySlot) {
-    statusLabel = 'MT'
-    statusClass = 'status-mt'
-  }
+  const emptyFlag = String(trailer.emptyFlag ?? '').toUpperCase()
 
   /** @returns {number | null} */
   const pkgWeightLbs = () => {
@@ -210,17 +199,13 @@ export function parseTrailerMeta(trailer, opts = {}) {
   }
 
   /**
-   * Empty vs LOAD badge: `emptyFlag` alone is unreliable on single-trailer rows (e.g. N + 0 lbs).
-   * Prefer actual weight when present; for **multi-trailer** trips, trust `emptyFlag === 'Y'` over
-   * a positive weight so load+MT matches the FedEx portal.
+   * Empty vs LOAD badge: `emptyFlag` alone is unreliable next to `pkgWeight` (e.g. N + 0 lbs).
+   * Prefer actual weight when present; fall back to Y/N only when weight is absent.
    */
   let loadType = '—'
   let loadTypeClass = 'load-unknown'
   const lbs = pkgWeightLbs()
-  if (mtEmptySlot) {
-    loadType = 'Empty'
-    loadTypeClass = 'load-empty'
-  } else if (lbs !== null) {
+  if (lbs !== null) {
     if (lbs > 0) {
       loadType = 'LOAD'
       loadTypeClass = 'load-full'
@@ -240,11 +225,11 @@ export function parseTrailerMeta(trailer, opts = {}) {
   const lng = trailer.longitude != null ? Number(trailer.longitude) : null
   const hasGps = lat !== null && lng !== null && !isNaN(lat) && !isNaN(lng)
 
-  const sealNumber = mtEmptySlot ? '—' : fmt(trailer.sealNumber)
+  const sealNumber = fmt(trailer.sealNumber)
   const loadDest = trailer.loadDest
     ? `${fmt(trailer.loadDestNumber)} · ${fmt(trailer.loadDest)}`
     : fmt(trailer.loadDestNumber)
-  const pkgWeight = mtEmptySlot ? 'MT (empty)' : trailer.pkgWeight != null ? `${fmt(trailer.pkgWeight)} lbs` : '—'
+  const pkgWeight = trailer.pkgWeight != null ? `${fmt(trailer.pkgWeight)} lbs` : '—'
 
   let dueDate = '—'
   if (trailer.dueDate) {
@@ -273,8 +258,8 @@ export function parseTrailerMeta(trailer, opts = {}) {
     sealNumber,
     loadDest,
     pkgWeight,
-    /** Numeric lbs when API sends pkgWeight; null if unknown or MT empty slot (ignore bogus weight). */
-    pkgWeightLbs: mtEmptySlot ? null : lbs,
+    /** Numeric lbs when API sends pkgWeight; null if unknown */
+    pkgWeightLbs: lbs,
     dueDate,
   }
 }
@@ -396,7 +381,7 @@ export function buildEnhancedTrailerCards(body) {
   return indexed
     .map(({ tr, i }) => {
       const order = tr.trlrOrder != null ? String(tr.trlrOrder) : String(i + 1)
-      const meta = parseTrailerMeta(tr, { force20ft: multiTrailerTrip, multiTrailerTrip })
+      const meta = parseTrailerMeta(tr, { force20ft: multiTrailerTrip })
 
       const summaryRows = [
         { label: 'Seal', value: meta.sealNumber },
