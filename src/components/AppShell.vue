@@ -184,6 +184,7 @@ onUnmounted(() => {
             'app-main--home': route.name === 'home' || route.name === 'dispatch',
             'app-main--directory': route.name === 'directory',
             'app-main--traffic': route.name === 'traffic',
+            'app-main--trailer-map': route.name === 'trailer-map',
           }"
         >
           <RouterView />
@@ -191,7 +192,7 @@ onUnmounted(() => {
       </div>
     </div>
 
-    <nav class="bottom-nav" aria-label="Main navigation">
+    <nav v-if="route.name !== 'trailer-map'" class="bottom-nav" aria-label="Main navigation">
       <RouterLink
         class="nav-item"
         :class="{ 'is-active': route.name === 'home' }"
@@ -626,10 +627,35 @@ onUnmounted(() => {
   min-height: 0;
 }
 
+/* Full-page trailer GPS map (same flex fill pattern as traffic) */
+.app-main.app-main--trailer-map {
+  flex: 1;
+  min-height: 0;
+  max-width: none;
+  width: 100%;
+  margin-inline: 0;
+  padding-inline: 0;
+  padding-bottom: 0;
+  overflow-x: hidden;
+  overflow-y: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.app-main.app-main--trailer-map > * {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 0;
+  width: 100%;
+  min-width: 0;
+  min-height: 0;
+}
+
 /* Split-pane directory / traffic crossings: only the list column scrolls, not the main element */
 @media (orientation: landscape) and (min-width: 700px) {
   .app-main.app-main--directory,
-  .app-main.app-main--traffic {
+  .app-main.app-main--traffic,
+  .app-main.app-main--trailer-map {
     overflow-y: hidden;
   }
 }
@@ -659,11 +685,13 @@ onUnmounted(() => {
 /* Directory + Traffic: fill viewport height in landscape (no scroll on app-main) */
 @media (orientation: landscape) and (min-width: 700px) {
   .app-scroll:has(.app-main--directory),
-  .app-scroll:has(.app-main--traffic) {
+  .app-scroll:has(.app-main--traffic),
+  .app-scroll:has(.app-main--trailer-map) {
     overflow-y: hidden;
   }
   .app-main.app-main--directory,
-  .app-main.app-main--traffic {
+  .app-main.app-main--traffic,
+  .app-main.app-main--trailer-map {
     flex: 1;
     overflow-y: hidden;
   }

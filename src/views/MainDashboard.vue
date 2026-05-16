@@ -79,7 +79,7 @@ import {
   formatLinehaulLocationForDisplay,
   extractLocationForDirectory,
 } from '../utils/linehaulLocationDisplay.js'
-import TrailerLocationMap from '../components/TrailerLocationMap.vue'
+import { writeTrailerGpsSession, patchTrailerGpsSessionMap } from '../utils/trailerGpsMapSession.js'
 import { copyTextToClipboard } from '../utils/copyToClipboard.js'
 import { vehicleIdForUserMapMarker } from '../utils/mapVehicleLabel.js'
 import {
@@ -89,12 +89,10 @@ import {
   unlockTripVoiceFromUserGesture,
   tripVoiceShowUnlockHint,
   isTripAlertEnabled,
-  isTrailerGpsTtsEnabled,
   syncTripPhaseVoiceStable,
   seedTripVoiceFromSnapshot,
   maybeAnnounceTrailerStatusChange,
   maybeAnnounceTrailerRelocated,
-  maybeAnnounceNearTrailer,
   clearTrailerStatusTracking,
   clearTrailerGpsTracking,
   clearTripPhaseTracking,
@@ -147,21 +145,6 @@ const originLocationLoading = ref(false)
 const originLocationError = ref('')
 /** @type {import('vue').Ref<unknown>} */
 const originLocationBody = ref(null)
-
-const trailerGpsModalOpen = ref(false)
-/** @type {import('vue').Ref<{
- *   order: string,
- *   trlrNbr: string,
- *   size?: string,
- *   lat: number,
- *   lng: number,
- *   userLat: number | null,
- *   userLng: number | null,
- *   userGpsPending: boolean,
- *   userGeoDenied: boolean,
- *   userVehicleId: string,
- * } | null>} */
-const trailerGpsData = ref(null)
 
 const instructions = ref('')
 
@@ -875,82 +858,6 @@ function buildTrailerGpsTerminalPair() {
   }
 }
 
-async function hydrateTrailerGpsTerminalPair() {
-  const data = trailerGpsData.value
-  const pair = data?.terminalPair
-  if (!pair || typeof pair !== 'object') return
-
-  /**
-   * @param {'origin' | 'destination'} slotKey
-   * @param {string} id
-   * @param {string} [otherTripLegId]
-   */
-  async function fillSlot(slotKey, id, otherTripLegId) {
-    const idStr = String(id).trim()
-    if (!idStr) return
-    const slot0 = trailerGpsData.value?.terminalPair?.[slotKey]
-    if (!slot0 || slot0.loading !== true || String(slot0.locationId) !== idStr) return
-
-    const cached = linehaulCachedBodyForId(idStr)
-    let body = cached
-    if (!body) {
-      const r = await fetchFedexLinehaulLocation({
-        locationId: idStr,
-        originId: otherTripLegId || linehaulOriginIdForApi.value || undefined,
-      })
-      if (!trailerGpsModalOpen.value) return
-      const curPair = trailerGpsData.value?.terminalPair
-      if (!curPair?.[slotKey] || String(curPair[slotKey].locationId) !== idStr) return
-      body = r.ok ? r.body : null
-    }
-
-    if (!trailerGpsModalOpen.value) return
-    const cur2 = trailerGpsData.value?.terminalPair
-    if (!cur2?.[slotKey] || String(cur2[slotKey].locationId) !== idStr) return
-
-    if (!body || typeof body !== 'object') {
-      trailerGpsData.value = {
-        ...trailerGpsData.value,
-        terminalPair: {
-          ...cur2,
-          [slotKey]: { ...cur2[slotKey], loading: false },
-        },
-      }
-      return
-    }
-    const fmt = formatLinehaulLocationForDisplay(body)
-    const locRow = fmt.rows.find((x) => x.label === 'Location')
-    const phoneR = fmt.rows.find((x) => x.label === 'Phone')
-    const fallbackName = String(cur2[slotKey].name ?? '').trim() || `Location ${idStr}`
-    trailerGpsData.value = {
-      ...trailerGpsData.value,
-      terminalPair: {
-        ...cur2,
-        [slotKey]: {
-          locationId: idStr,
-          name: (locRow?.value && String(locRow.value).trim()) || fallbackName,
-          phoneDisplay: phoneR?.value ? String(phoneR.value).trim() : '',
-          telHref: phoneR?.href ? String(phoneR.href) : '',
-          loading: false,
-        },
-      },
-    }
-  }
-
-  await Promise.all([
-    pair.origin?.locationId && pair.origin.loading === true
-      ? fillSlot('origin', String(pair.origin.locationId), tripDestLocationId.value || undefined)
-      : Promise.resolve(),
-    pair.destination?.locationId && pair.destination.loading === true
-      ? fillSlot(
-          'destination',
-          String(pair.destination.locationId),
-          tripOriginLocationId.value || undefined,
-        )
-      : Promise.resolve(),
-  ])
-}
-
 /** originId header for Linehaul calls: tractor snapshot, else trip current location (active slide). */
 const linehaulOriginIdForApi = computed(() => {
   const tid = linehaulTractorBody.value?.locationId
@@ -999,61 +906,9 @@ function syncTripVoiceUnlockHint() {
   tripVoiceUnlockHint.value = tripVoiceShowUnlockHint()
 }
 
-/** @type {number | null} */
-let tripProximityWatchId = null
-
-function stopTripProximityWatch() {
-  if (
-    tripProximityWatchId != null &&
-    typeof navigator !== 'undefined' &&
-    navigator.geolocation &&
-    typeof navigator.geolocation.clearWatch === 'function'
-  ) {
-    navigator.geolocation.clearWatch(tripProximityWatchId)
-  }
-  tripProximityWatchId = null
-}
-
-function tryStartTripProximityWatch() {
-  syncTripVoiceUnlockHint()
-  if (!isTripAlertEnabled()) {
-    stopTripProximityWatch()
-    return
-  }
-  if (!isTrailerGpsTtsEnabled()) {
-    stopTripProximityWatch()
-    return
-  }
-  if (!trailerGpsModalOpen.value) {
-    stopTripProximityWatch()
-    return
-  }
-  if (tripVoiceUnlockHint.value) {
-    stopTripProximityWatch()
-    return
-  }
-  if (typeof navigator === 'undefined' || !navigator.geolocation?.watchPosition) return
-  stopTripProximityWatch()
-  tripProximityWatchId = navigator.geolocation.watchPosition(
-    (pos) => {
-      if (!trailerGpsModalOpen.value) return
-      const body = tripDetailsBodyForSlide.value
-      if (!body || typeof body !== 'object') return
-      const tr = /** @type {Record<string, unknown>} */ (body).trailers
-      if (!Array.isArray(tr)) return
-      maybeAnnounceNearTrailer(pos.coords.latitude, pos.coords.longitude, tr, {
-        mapOpen: true,
-      })
-    },
-    () => {},
-    { enableHighAccuracy: true, maximumAge: 5000, timeout: 20000 },
-  )
-}
-
 function onUnlockTripVoiceTap() {
   unlockTripVoiceFromUserGesture()
   syncTripVoiceUnlockHint()
-  tryStartTripProximityWatch()
 }
 
 async function loadQuickActions() {
@@ -1468,13 +1323,6 @@ watch(
   { deep: true },
 )
 
-watch(
-  [tripVoiceUnlockHint, tripAlertOn, trailerGpsModalOpen],
-  () => {
-    tryStartTripProximityWatch()
-  },
-)
-
 let prevTractorFingerprint = ''
 let prevDriverFingerprint = ''
 
@@ -1689,10 +1537,19 @@ function closeOriginLocationModal() {
 }
 
 /**
+ * @param {unknown} body
+ */
+function extractProximityTrailersForTrailerMap(body) {
+  if (!body || typeof body !== 'object' || Array.isArray(body)) return []
+  const tr = /** @type {Record<string, unknown>} */ (body).trailers
+  return Array.isArray(tr) ? tr : []
+}
+
+/**
  * WebKit (iOS Safari / Chrome) only ties geolocation permission to a **synchronous**
  * call from a user gesture. Calling getCurrentPosition from the map component’s
  * mount runs after the gesture stack ends, so the prompt never appears. Invoke it
- * here in the same tick as the pin button click, then pass coords into the map.
+ * here in the same tick as the pin button click, then pass coords into the map page.
  */
 function openTrailerGpsModal(card) {
   if (!card.hasGps || card.lat == null || card.lng == null) return
@@ -1745,7 +1602,7 @@ function openTrailerGpsModal(card) {
 
   const terminalPair = buildTrailerGpsTerminalPair()
 
-  trailerGpsData.value = {
+  const map = {
     order: card.order,
     trlrNbr: card.trlrNbr,
     size: card.size,
@@ -1761,15 +1618,17 @@ function openTrailerGpsModal(card) {
     userGeoDenied: !hasGeo,
     userVehicleId: vehicleIdForUserMapMarker(linehaulTractorBody.value, linehaulCredMeta.value),
   }
-  trailerGpsModalOpen.value = true
 
-  if (
-    terminalPair &&
-    ((terminalPair.origin?.loading === true) ||
-      (terminalPair.destination?.loading === true))
-  ) {
-    void hydrateTrailerGpsTerminalPair()
+  const meta = {
+    odHeaderSingleLine: trailerGpsOdHeader.value.singleLine,
+    linehaulOriginIdForApi: linehaulOriginIdForApi.value,
+    tripOriginLocationId: tripOriginLocationId.value,
+    tripDestLocationId: tripDestLocationId.value,
+    proximityTrailers: extractProximityTrailersForTrailerMap(tripDetailsBodyForSlide.value),
   }
+
+  writeTrailerGpsSession({ map, meta })
+  void router.push({ name: 'trailer-map' })
 
   if (!hasGeo) return
 
@@ -1781,9 +1640,7 @@ function openTrailerGpsModal(card) {
 
   navigator.geolocation.getCurrentPosition(
     (pos) => {
-      if (!trailerGpsModalOpen.value || !trailerGpsData.value) return
-      trailerGpsData.value = {
-        ...trailerGpsData.value,
+      patchTrailerGpsSessionMap({
         userLat: pos.coords.latitude,
         userLng: pos.coords.longitude,
         userAccuracyM:
@@ -1792,27 +1649,22 @@ function openTrailerGpsModal(card) {
             : null,
         userGpsPending: false,
         userGeoDenied: false,
-      }
-      tryStartTripProximityWatch()
+      })
     },
     (err) => {
       if (err && err.code === 1) {
-        if (!trailerGpsModalOpen.value || !trailerGpsData.value) return
-        trailerGpsData.value = {
-          ...trailerGpsData.value,
+        patchTrailerGpsSessionMap({
           userLat: null,
           userLng: null,
           userAccuracyM: null,
           userGpsPending: false,
           userGeoDenied: true,
-        }
+        })
         return
       }
       navigator.geolocation.getCurrentPosition(
         (pos) => {
-          if (!trailerGpsModalOpen.value || !trailerGpsData.value) return
-          trailerGpsData.value = {
-            ...trailerGpsData.value,
+          patchTrailerGpsSessionMap({
             userLat: pos.coords.latitude,
             userLng: pos.coords.longitude,
             userAccuracyM:
@@ -1821,30 +1673,22 @@ function openTrailerGpsModal(card) {
                 : null,
             userGpsPending: false,
             userGeoDenied: false,
-          }
-          tryStartTripProximityWatch()
+          })
         },
         () => {
-          if (!trailerGpsModalOpen.value || !trailerGpsData.value) return
-          trailerGpsData.value = {
-            ...trailerGpsData.value,
+          patchTrailerGpsSessionMap({
             userLat: null,
             userLng: null,
             userAccuracyM: null,
             userGpsPending: false,
             userGeoDenied: true,
-          }
+          })
         },
         { enableHighAccuracy: false, maximumAge: 60_000, timeout: 20_000 },
       )
     },
     geoOpts,
   )
-}
-
-function closeTrailerGpsModal() {
-  trailerGpsModalOpen.value = false
-  trailerGpsData.value = null
 }
 
 /** Credentials snapshot for Driver ID row (same rule as header badges used). */
@@ -1988,7 +1832,6 @@ onUnmounted(() => {
     clearTimeout(tripPhaseVoiceTimer)
     tripPhaseVoiceTimer = null
   }
-  stopTripProximityWatch()
   cancelTripVoiceAnnouncement()
   cancelAllAlerts()
   clearTrailerStatusTracking()
@@ -2304,60 +2147,6 @@ onUnmounted(() => {
           </template>
           <div class="modal-actions dest-loc-actions">
             <button type="button" class="btn primary tap" @click="closeOriginLocationModal">Close</button>
-          </div>
-        </div>
-      </div>
-    </Teleport>
-
-    <Teleport to="body">
-      <div
-        v-if="trailerGpsModalOpen && trailerGpsData"
-        class="portal-modal-backdrop trailer-gps-modal-backdrop"
-        :style="{ zIndex: PORTAL_Z_LOCATION_MODAL }"
-        role="presentation"
-        @click.self="closeTrailerGpsModal"
-      >
-        <div
-          class="portal-modal trailer-gps-modal"
-          role="dialog"
-          aria-modal="true"
-          aria-label="Trailer location map"
-          @click.stop
-        >
-          <div class="trailer-gps-topbar">
-            <div
-              class="trailer-gps-topbar-info"
-              role="group"
-              :aria-label="trailerGpsOdHeader.singleLine"
-            >
-              <p class="trailer-gps-od-single">{{ trailerGpsOdHeader.singleLine }}</p>
-              <span
-                v-if="trailerGpsData.lat != null && trailerGpsData.lng != null"
-                class="sr-only"
-              >Selected trailer coordinates {{ trailerGpsData.lat.toFixed(5) }}, {{ trailerGpsData.lng.toFixed(5) }}</span>
-            </div>
-            <button
-              type="button"
-              class="trailer-gps-close tap"
-              aria-label="Close"
-              @click="closeTrailerGpsModal"
-            >
-              ×
-            </button>
-          </div>
-          <div class="trailer-gps-map-wrap">
-            <TrailerLocationMap
-              :trailers="trailerGpsData.trailerMapPins || []"
-              :heavy-trailer-order="trailerGpsData.heavyTrailerOrder || ''"
-              :terminal-pair="trailerGpsData.terminalPair ?? null"
-              :user-lat="trailerGpsData.userLat"
-              :user-lng="trailerGpsData.userLng"
-              :user-location-pending="trailerGpsData.userGpsPending"
-              :user-location-denied="trailerGpsData.userGeoDenied"
-              :user-location-accuracy-m="trailerGpsData.userAccuracyM ?? null"
-              :user-vehicle-id="trailerGpsData.userVehicleId || ''"
-              :trailer-label="`Trailer ${trailerGpsData.order}${trailerGpsData.trlrNbr ? ` · #${trailerGpsData.trlrNbr}` : ''}`"
-            />
           </div>
         </div>
       </div>
@@ -5002,106 +4791,4 @@ button.trailer-nbr.copyable-inline {
   word-break: break-word;
 }
 
-/* ═══════════════════════════════════════════════════════════════════════════
-   TRAILER GPS MODAL — full-screen map with overlay top bar
-   ═══════════════════════════════════════════════════════════════════════════ */
-
-.portal-modal-backdrop.trailer-gps-modal-backdrop {
-  padding: 0;
-  align-items: stretch;
-}
-
-.trailer-gps-modal {
-  width: 100%;
-  max-width: none;
-  height: 100vh;
-  height: 100dvh;
-  max-height: none;
-  margin: 0;
-  border-radius: 0;
-  padding: 0;
-  border: none;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-  background: #0a0a0f;
-}
-
-@media (min-width: 720px) {
-  .portal-modal-backdrop.trailer-gps-modal-backdrop {
-    padding: 0;
-    align-items: stretch;
-  }
-  .trailer-gps-modal {
-    width: 100%;
-    max-width: none;
-    height: 100vh;
-    height: 100dvh;
-    border-radius: 0;
-    margin: 0;
-    border: none;
-    box-shadow: none;
-  }
-}
-
-.trailer-gps-topbar {
-  flex-shrink: 0;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.75rem;
-  padding: 0.5rem 0.75rem;
-  padding-top: max(0.5rem, env(safe-area-inset-top, 0px));
-  background: #0a0a0f;
-  border-bottom: 1px solid #1e1e28;
-}
-
-.trailer-gps-topbar-info {
-  display: flex;
-  flex-direction: row;
-  align-items: center;
-  gap: 0.5rem;
-  min-width: 0;
-  flex: 1;
-}
-
-.trailer-gps-od-single {
-  margin: 0;
-  min-width: 0;
-  flex: 1;
-  font-size: clamp(0.72rem, 2.2vw + 0.15vh, 0.92rem);
-  font-weight: 600;
-  line-height: 1.28;
-  color: #ececf4;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.trailer-gps-close {
-  flex-shrink: 0;
-  width: 2.25rem;
-  height: 2.25rem;
-  border-radius: 8px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  background: rgba(40, 40, 50, 0.8);
-  color: #e8e8ee;
-  font-size: 1.25rem;
-  line-height: 1;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.trailer-gps-close:hover {
-  background: rgba(60, 60, 70, 0.9);
-}
-
-.trailer-gps-map-wrap {
-  flex: 1 1 auto;
-  min-height: 0;
-  overflow: hidden;
-  background: #0a0a0f;
-}
 </style>
