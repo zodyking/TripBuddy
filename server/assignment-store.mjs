@@ -55,6 +55,50 @@ const TRIP_OUTCOMES = new Set(['delivered', 'rejected', 'removed', 'none'])
 const MAX_TRIP_OUTCOME_REASON_LEN = 500
 
 /**
+ * @param {Record<string, unknown>} dh
+ * @returns {Record<string, unknown>}
+ */
+function stripTripHistoryOutcomeFields(dh) {
+  const o = dh && typeof dh === 'object' ? { ...dh } : {}
+  delete o.historyOutcome
+  delete o.historyOutcomeAt
+  delete o.historyOutcomeReason
+  return o
+}
+
+/**
+ * @param {unknown} row
+ * @returns {'removed' | 'rejected' | ''}
+ */
+function ledgerTerminalOutcome(row) {
+  if (!row || typeof row !== 'object') return ''
+  const p = String(/** @type {Record<string, unknown>} */ (row).outcome ?? '')
+    .trim()
+    .toLowerCase()
+  if (p === 'removed' || p === 'rejected') return /** @type {'removed' | 'rejected'} */ (p)
+  const dh = /** @type {Record<string, unknown>} */ (row).dispatchHeader
+  if (dh && typeof dh === 'object') {
+    const h = String(dh.historyOutcome ?? '')
+      .trim()
+      .toLowerCase()
+    if (h === 'removed' || h === 'rejected') return /** @type {'removed' | 'rejected'} */ (h)
+  }
+  return ''
+}
+
+/**
+ * When dispatch re-uses the same leg # after a user-marked removed/rejected row, keep the old
+ * row and insert a fresh ledger entry so history is not silently overwritten.
+ * @param {unknown} prior
+ * @param {string} incomingSource
+ */
+function shouldForkTripHistoryAfterRemoval(prior, incomingSource) {
+  if (!prior || typeof prior !== 'object') return false
+  if (String(incomingSource || '').trim().toLowerCase() !== 'linehaul') return false
+  return ledgerTerminalOutcome(prior) !== ''
+}
+
+/**
  * @param {unknown} s
  * @returns {string}
  */
@@ -709,52 +753,16 @@ export async function writeAssignment(body) {
           ? tripHistoryLedger.find((x) => x && x.id === id)
           : null
       const prior = existingForSeq || existingForId
-      const priorAt =
-        prior && typeof prior.recordedAt === 'number' && Number.isFinite(prior.recordedAt) && prior.recordedAt > 0
-          ? prior.recordedAt
-          : prior &&
-              typeof prior.completedAt === 'number' &&
-              Number.isFinite(prior.completedAt) &&
-              prior.completedAt > 0
-            ? prior.completedAt
-            : 0
-      /** First-seen instant only — do not move forward on every Linehaul poll. */
-      const at = priorAt > 0 ? priorAt : incomingAt
+      const incomingSource =
+        typeof e.source === 'string' && e.source.trim() ? e.source.trim() : 'linehaul'
       const newDh =
         e.dispatchHeader && typeof e.dispatchHeader === 'object' ? e.dispatchHeader : {}
-      const oldDh =
-        prior && prior.dispatchHeader && typeof prior.dispatchHeader === 'object'
-          ? prior.dispatchHeader
-          : {}
-      const mergedDispatchHeader = { ...oldDh, ...newDh }
       const newTd = e.tripDetails && typeof e.tripDetails === 'object' ? e.tripDetails : {}
-      const oldTd = prior && prior.tripDetails && typeof prior.tripDetails === 'object' ? prior.tripDetails : {}
-      const mergedTripDetails = { ...oldTd, ...newTd }
       const incomingCompletedAt =
         typeof e.completedAt === 'number' &&
         Number.isFinite(e.completedAt) &&
         e.completedAt > 0
           ? e.completedAt
-          : null
-      const priorCompletedAt =
-        prior &&
-        typeof prior.completedAt === 'number' &&
-        Number.isFinite(prior.completedAt) &&
-        prior.completedAt > 0
-          ? prior.completedAt
-          : 0
-      const completedAt =
-        incomingCompletedAt != null
-          ? Math.max(priorCompletedAt, incomingCompletedAt)
-          : priorCompletedAt > 0
-            ? priorCompletedAt
-            : at
-      const priorAudit =
-        prior &&
-        typeof prior.historyAuditBucketMs === 'number' &&
-        Number.isFinite(prior.historyAuditBucketMs) &&
-        prior.historyAuditBucketMs > 0
-          ? prior.historyAuditBucketMs
           : null
       const incomingAudit =
         typeof e.historyAuditBucketMs === 'number' &&
@@ -762,25 +770,105 @@ export async function writeAssignment(body) {
         e.historyAuditBucketMs > 0
           ? e.historyAuditBucketMs
           : null
-      const nextEntry = {
-        id,
-        source: typeof e.source === 'string' && e.source.trim() ? e.source.trim() : 'linehaul',
-        /** API snapshots: first poll only; later polls must not change this. */
-        recordedAt: at,
-        completedAt,
-        dailyTripLegSequence: seq,
-        dispatchHeader: mergedDispatchHeader,
-        tripDetails: mergedTripDetails,
-        ...(incomingAudit != null
-          ? { historyAuditBucketMs: incomingAudit }
-          : priorAudit != null
-            ? { historyAuditBucketMs: priorAudit }
-            : {}),
+
+      if (shouldForkTripHistoryAfterRemoval(prior, incomingSource)) {
+        const priorFrozen =
+          prior && typeof prior === 'object'
+            ? {
+                ...prior,
+                dispatchHeader:
+                  prior.dispatchHeader && typeof prior.dispatchHeader === 'object'
+                    ? { ...prior.dispatchHeader }
+                    : {},
+                tripDetails:
+                  prior.tripDetails && typeof prior.tripDetails === 'object'
+                    ? { ...prior.tripDetails }
+                    : {},
+              }
+            : null
+        const forkId = `h-${seq}-n${incomingAt}-${Math.random().toString(36).slice(2, 9)}`
+        const cleanDh = stripTripHistoryOutcomeFields({ ...newDh })
+        const nextFork = {
+          id: forkId,
+          source: incomingSource,
+          recordedAt: incomingAt,
+          completedAt: incomingCompletedAt != null ? incomingCompletedAt : incomingAt,
+          dailyTripLegSequence: seq,
+          dispatchHeader: cleanDh,
+          tripDetails: { ...newTd },
+          ...(incomingAudit != null ? { historyAuditBucketMs: incomingAudit } : {}),
+        }
+        const rest = tripHistoryLedger.filter(
+          (x) => !x || String(x.dailyTripLegSequence) !== seq,
+        )
+        tripHistoryLedger = priorFrozen
+          ? [nextFork, priorFrozen, ...rest].slice(0, MAX_TRIP_HISTORY)
+          : [nextFork, ...rest].slice(0, MAX_TRIP_HISTORY)
+      } else {
+        const priorAt =
+          prior && typeof prior.recordedAt === 'number' && Number.isFinite(prior.recordedAt) && prior.recordedAt > 0
+            ? prior.recordedAt
+            : prior &&
+                typeof prior.completedAt === 'number' &&
+                Number.isFinite(prior.completedAt) &&
+                prior.completedAt > 0
+              ? prior.completedAt
+              : 0
+        /** First-seen instant only — do not move forward on every Linehaul poll. */
+        const at = priorAt > 0 ? priorAt : incomingAt
+        const oldDh =
+          prior && prior.dispatchHeader && typeof prior.dispatchHeader === 'object'
+            ? prior.dispatchHeader
+            : {}
+        const mergedDispatchHeader = { ...oldDh, ...newDh }
+        const oldTd =
+          prior && prior.tripDetails && typeof prior.tripDetails === 'object' ? prior.tripDetails : {}
+        const mergedTripDetails = { ...oldTd, ...newTd }
+        const priorCompletedAt =
+          prior &&
+          typeof prior.completedAt === 'number' &&
+          Number.isFinite(prior.completedAt) &&
+          prior.completedAt > 0
+            ? prior.completedAt
+            : 0
+        const completedAt =
+          incomingCompletedAt != null
+            ? Math.max(priorCompletedAt, incomingCompletedAt)
+            : priorCompletedAt > 0
+              ? priorCompletedAt
+              : at
+        const priorAudit =
+          prior &&
+          typeof prior.historyAuditBucketMs === 'number' &&
+          Number.isFinite(prior.historyAuditBucketMs) &&
+          prior.historyAuditBucketMs > 0
+            ? prior.historyAuditBucketMs
+            : null
+        const resolvedId =
+          prior && prior.id && String(prior.id).trim() ? String(prior.id).trim() : id
+        const nextEntry = {
+          id: resolvedId,
+          source: incomingSource,
+          /** API snapshots: first poll only; later polls must not change this. */
+          recordedAt: at,
+          completedAt,
+          dailyTripLegSequence: seq,
+          dispatchHeader: mergedDispatchHeader,
+          tripDetails: mergedTripDetails,
+          ...(incomingAudit != null
+            ? { historyAuditBucketMs: incomingAudit }
+            : priorAudit != null
+              ? { historyAuditBucketMs: priorAudit }
+              : {}),
+        }
+        const rest = tripHistoryLedger.filter(
+          (x) =>
+            !x ||
+            String(x.dailyTripLegSequence) !== seq ||
+            String(x.id) !== resolvedId,
+        )
+        tripHistoryLedger = [nextEntry, ...rest].slice(0, MAX_TRIP_HISTORY)
       }
-      const rest = tripHistoryLedger.filter(
-        (x) => x && String(x.dailyTripLegSequence) !== seq && x.id !== id,
-      )
-      tripHistoryLedger = [nextEntry, ...rest].slice(0, MAX_TRIP_HISTORY)
     }
   } else if (body.applyOdMileageFromFetch && typeof body.applyOdMileageFromFetch === 'object') {
     const p = body.applyOdMileageFromFetch
@@ -800,6 +888,7 @@ export async function writeAssignment(body) {
   } else if (body.patchTripHistoryEntry && typeof body.patchTripHistoryEntry === 'object') {
     const p = body.patchTripHistoryEntry
     const seq = String(p.dailyTripLegSequence ?? '').trim()
+    const entryId = typeof p.entryId === 'string' ? p.entryId.trim() : ''
     const out =
       typeof p.outcome === 'string' && TRIP_OUTCOMES.has(p.outcome.trim().toLowerCase())
         ? p.outcome.trim().toLowerCase()
@@ -817,6 +906,7 @@ export async function writeAssignment(body) {
       tripHistoryLedger = tripHistoryLedger
         .map((x) => {
           if (!x || String(x.dailyTripLegSequence) !== seq) return x
+          if (entryId && String(x.id) !== entryId) return x
           const o = { ...x, outcome: out, outcomeTouchedAt: at }
           if (o.dispatchHeader && typeof o.dispatchHeader === 'object') {
             const nextDh = { ...o.dispatchHeader, historyOutcome: out, historyOutcomeAt: at }
@@ -874,12 +964,12 @@ export async function writeAssignment(body) {
     const p = body.deleteTripHistoryEntry
     const seq = String(p.dailyTripLegSequence ?? '').trim()
     const id = typeof p.id === 'string' ? p.id.trim() : ''
-    if (/^\d+$/.test(seq)) {
+    if (id) {
+      tripHistoryLedger = tripHistoryLedger.filter((x) => !x || String(x.id) !== id)
+    } else if (/^\d+$/.test(seq)) {
       tripHistoryLedger = tripHistoryLedger.filter(
         (x) => !x || String(x.dailyTripLegSequence) !== seq,
       )
-    } else if (id) {
-      tripHistoryLedger = tripHistoryLedger.filter((x) => !x || String(x.id) !== id)
     }
   }
 

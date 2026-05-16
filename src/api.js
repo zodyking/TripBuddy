@@ -268,6 +268,7 @@ export async function putAssignment(body) {
  *   dailyTripLegSequence: string,
  *   outcome: 'delivered' | 'rejected' | 'removed' | 'none',
  *   outcomeReason?: string,
+ *   entryId?: string,
  * }} p
  */
 export async function patchTripHistoryOutcome(p) {
@@ -278,6 +279,9 @@ export async function patchTripHistoryOutcome(p) {
   }
   if (typeof p.outcomeReason === 'string') {
     patch.outcomeReason = p.outcomeReason
+  }
+  if (typeof p.entryId === 'string' && p.entryId.trim()) {
+    patch.entryId = p.entryId.trim()
   }
   return putAssignment({
     patchTripHistoryEntry: patch,

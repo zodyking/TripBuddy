@@ -465,7 +465,11 @@ function shouldUpsertToHistory(tripState, context) {
     return { allow: false, reason: 'is_preplan' }
   }
 
-  if (!tripState.trailers?.length && !tripState.destination?.number) {
+  const hasTrailers = Boolean(tripState.trailers?.length)
+  const hasDest = Boolean(String(tripState.destination?.number ?? '').trim())
+  const hasOrigin = Boolean(String(tripState.origin?.number ?? '').trim())
+  const hasInstr = Boolean(String(tripState.instructions ?? '').trim())
+  if (!hasTrailers && !hasDest && !hasOrigin && !hasInstr) {
     return { allow: false, reason: 'insufficient_data' }
   }
 

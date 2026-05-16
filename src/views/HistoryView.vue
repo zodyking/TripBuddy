@@ -640,8 +640,10 @@ async function load() {
     if (!Array.isArray(raw)) {
       entries.value = []
     } else {
+      /** @type {LedgerEntry[]} */
+      const list = []
       /** @type {Map<string, LedgerEntry>} */
-      const byLeg = new Map()
+      const byId = new Map()
       for (const x of raw) {
         if (!x || typeof x !== 'object') continue
         const sourceStr0 = typeof x.source === 'string' ? x.source : 'complete'
@@ -672,7 +674,6 @@ async function load() {
             : 0
         const displayDate = auditMs > 0 ? auditMs : ledgerEventMs
         const seq = String(x.dailyTripLegSequence ?? '').trim()
-        const legKey = /^\d+$/.test(seq) ? seq : ''
         const rawO =
           typeof oRaw.outcome === 'string' && oRaw.outcome
             ? normalizeOutcome(oRaw.outcome)
@@ -702,23 +703,21 @@ async function load() {
           e.historyAuditBucketMs = auditMs
         }
         if (!e.id) continue
-        if (!legKey) {
-          byLeg.set(e.id, e)
-          continue
-        }
-        const cur = byLeg.get(legKey)
-        if (!cur) {
-          byLeg.set(legKey, e)
-        } else {
-          const tNew = e.ledgerEventMs
-          const tCur = cur.ledgerEventMs
-          const tN = typeof tNew === 'number' && tNew > 0 ? tNew : Infinity
-          const tC = typeof tCur === 'number' && tCur > 0 ? tCur : Infinity
-          if (tN < tC) byLeg.set(legKey, e)
-        }
+        if (byId.has(e.id)) continue
+        byId.set(e.id, e)
+        list.push(e)
       }
       entries.value = /** @type {LedgerEntry[]} */ (
-        Array.from(byLeg.values()).filter((e) => e && e.id)
+        list
+          .filter((e) => e && e.id)
+          .sort((a, b) => {
+            const da = typeof a.displayDate === 'number' ? a.displayDate : 0
+            const db = typeof b.displayDate === 'number' ? b.displayDate : 0
+            if (db !== da) return db - da
+            const la = typeof a.ledgerEventMs === 'number' ? a.ledgerEventMs : 0
+            const lb = typeof b.ledgerEventMs === 'number' ? b.ledgerEventMs : 0
+            return lb - la
+          })
       )
     }
   } catch (e) {
@@ -1501,7 +1500,7 @@ async function confirmOutcomeReasonModal() {
   }
   outcomeReasonBusy.value = true
   outcomeReasonError.value = ''
-  const ok = await setOutcome(e.dailyTripLegSequence, o, t)
+  const ok = await setOutcome(e.dailyTripLegSequence, o, t, e.id)
   outcomeReasonBusy.value = false
   if (ok) closeOutcomeReasonModal()
   else if (error.value) outcomeReasonError.value = error.value
@@ -1523,19 +1522,28 @@ const historySavingId = ref('')
  * @param {string} legSeq
  * @param {'delivered' | 'rejected' | 'removed' | 'none'} o
  * @param {string} [outcomeReason] required text when o is rejected or removed (enforced in modal); empty clears when delivered
+ * @param {string} [entryId] ledger row id (required when multiple rows share the same leg #)
  * @returns {Promise<boolean>}
  */
-async function setOutcome(legSeq, o, outcomeReason = '') {
+async function setOutcome(legSeq, o, outcomeReason = '', entryId = '') {
   if (!/^\d+$/.test(legSeq)) return false
   historySavingId.value = `seq-${legSeq}`
   try {
     const reasonStr = typeof outcomeReason === 'string' ? outcomeReason.trim() : ''
-    await patchTripHistoryOutcome({
+    const eid = typeof entryId === 'string' ? entryId.trim() : ''
+    /** @type {{ dailyTripLegSequence: string, outcome: string, outcomeReason: string, entryId?: string }} */
+    const payload = {
       dailyTripLegSequence: legSeq,
       outcome: o,
       outcomeReason: o === 'rejected' || o === 'removed' ? reasonStr : '',
+    }
+    if (eid) payload.entryId = eid
+    await patchTripHistoryOutcome(payload)
+    const idx = entries.value.findIndex((e) => {
+      if (e.dailyTripLegSequence !== legSeq) return false
+      if (eid) return e.id === eid
+      return true
     })
-    const idx = entries.value.findIndex((e) => e.dailyTripLegSequence === legSeq)
     if (idx >= 0) {
       const e = { ...entries.value[idx], outcome: o }
       const priorDh =
@@ -1623,7 +1631,7 @@ function pickOutcomeFromMenu(e, o, ev) {
     return
   }
   if (o === 'delivered') {
-    void setOutcome(e.dailyTripLegSequence, o, '')
+    void setOutcome(e.dailyTripLegSequence, o, '', e.id)
   }
   nextTick(() => {
     closeOutcomeMenu()
@@ -1856,15 +1864,8 @@ async function confirmDeleteTrip() {
   try {
     const del = deleteTarget.value
     const seq = String(del.dailyTripLegSequence ?? '').trim()
-    if (/^\d+$/.test(seq)) {
-      await deleteTripHistoryEntry({ dailyTripLegSequence: seq })
-    } else {
-      await deleteTripHistoryEntry({ dailyTripLegSequence: '', id: del.id })
-    }
-    entries.value = entries.value.filter((x) => {
-      if (/^\d+$/.test(seq)) return x.dailyTripLegSequence !== seq
-      return x.id !== del.id
-    })
+    await deleteTripHistoryEntry({ id: del.id, dailyTripLegSequence: seq })
+    entries.value = entries.value.filter((x) => x.id !== del.id)
     closeDeleteModal()
   } catch (err) {
     deleteError.value = err instanceof Error ? err.message : 'Failed to delete trip'
