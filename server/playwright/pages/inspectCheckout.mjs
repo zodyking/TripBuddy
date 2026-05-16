@@ -15,7 +15,7 @@ async function firstMatchingInput(page, hints) {
  * @param {{ orderedValues?: string[], dolly?: string, field1?: string, field2?: string }} data
  */
 export async function fillInspectCheckoutForm(page, data, log) {
-  await page.waitForTimeout(600)
+  await page.waitForTimeout(220)
 
   let ordered =
     Array.isArray(data.orderedValues) && data.orderedValues.length > 0
