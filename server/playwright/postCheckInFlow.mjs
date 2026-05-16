@@ -7,8 +7,8 @@ import { detectCheckInMissionPageState } from './checkInMissionDetectors.mjs'
  * and shared dialogs (Contact Linehaul). Short action timeouts (Okta-style).
  */
 const DIALOG_MS = 2_000
-/** Sign-out confirmation modal can render slowly after toolbar click (Angular / network). */
-const SIGN_OUT_MODAL_MS = 15_000
+/** Sign-out confirmation modal — same 2s cap as other Playwright waits (demo-tuned). */
+const SIGN_OUT_MODAL_MS = 2_000
 const ACTION_MS = 2_000
 
 const T = {
@@ -18,9 +18,9 @@ const T = {
 }
 
 /** Check-in post-submit: poll for success text; no automated sign-out. */
-const MISSION_POLL_MS = 400
-const CHECKIN_MISSION_MAX_MS = 240_000
-const WAIT_MODAL_OR_SUCCESS_MS = 120_000
+const MISSION_POLL_MS = 80
+const CHECKIN_MISSION_MAX_MS = 60_000
+const WAIT_MODAL_OR_SUCCESS_MS = 8_000
 
 /**
  * @param {number} ms

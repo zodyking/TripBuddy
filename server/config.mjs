@@ -62,7 +62,7 @@ export const POLL_INTERVAL_MS = Number(process.env.FEDEX_POLL_INTERVAL_MS ?? 120
  * Lower = faster but may race; set FEDEX_DISPATCH_STABLE_MS in .env to tune.
  */
 export const DISPATCH_STABLE_MS = Number(
-  process.env.FEDEX_DISPATCH_STABLE_MS ?? 2000,
+  process.env.FEDEX_DISPATCH_STABLE_MS ?? 1_200,
 )
 
 /** Set in .env for encrypting stored Okta password (change default in production). */

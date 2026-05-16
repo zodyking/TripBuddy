@@ -71,7 +71,7 @@ function bannerIndicatesLocationMismatch(text) {
 /** Post-check-in tail — keep in sync with [`postCheckInFlow.mjs`](./postCheckInFlow.mjs). */
 const DIALOG_MS = 2_000
 const ACTION_MS = 2_000
-const TOOLBAR_MS = 5_000
+const TOOLBAR_MS = 2_000
 
 const T = {
   phoneModalWait: DIALOG_MS,

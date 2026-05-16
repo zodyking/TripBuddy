@@ -2,10 +2,9 @@
  * Inspect & Check Out — Smart automation with label-based field detection,
  * seal fallback logic, and complete dispatch flow.
  *
- * Timing: DOM settle waits use PAGE_SETTLE_MS (500ms) so we do not interact before
- * domcontentloaded. Phase caps (dolly, seals, dispatch, idle) are tuned so a
- * prefilled happy path typically completes in ~15s or less; slow networks may need
- * constant tweaks in production.
+ * Timing: DOM settle waits use PAGE_SETTLE_MS (2s cap) so we do not interact before
+ * domcontentloaded. Phase caps keep each automation step within ~2s waits where
+ * possible; slow FedEx may need env tuning.
  *
  * Key behavior:
  * - Detects field type by floating LABEL text (not placeholder)
@@ -71,12 +70,12 @@ const RX = {
  * Max time to wait for DOM navigation settle per step (domcontentloaded). Keeps automation
  * from acting before paint while staying within a tight full-flow budget (~15s happy path).
  */
-const PAGE_SETTLE_MS = 500
+const PAGE_SETTLE_MS = 2_000
 
 const WARN_MODAL_MS = 1_800
 /** FedEx "Empty Trailer" info dialog — click VERIFIED to continue inspect/checkout. */
-const EMPTY_TRAILER_MODAL_MS = 2_200
-const BEGIN_INSPECTION_MS = 4_500
+const EMPTY_TRAILER_MODAL_MS = 2_000
+const BEGIN_INSPECTION_MS = 2_000
 /** Post-click bounded advance (paired with element polls, not blind multi-second sleeps). */
 const AFTER_CLICK_MS = 500
 /** No recognized progress before giving up on a screen (keeps total flow bounded). */
@@ -96,8 +95,8 @@ const DOLLY_POLL_MS = 28
 /** Max wall time after VALIDATE DOLLY click until success or leaving dolly entry (per attempt). */
 const DOLLY_CLICK_TO_OUTCOME_MS = 1_500
 const CHECKLIST_CHECKBOX_DELAY_MS = 12
-const DISPATCH_CONFIRM_WAIT_MS = 2_800
-const DISPATCHED_SUCCESS_WAIT_MS = 3_000
+const DISPATCH_CONFIRM_WAIT_MS = 2_000
+const DISPATCHED_SUCCESS_WAIT_MS = 2_000
 
 /**
  * @param {import('playwright').Page} page
@@ -403,7 +402,7 @@ async function waitForTrailerValidationSettle(page, maxMs, stepMs = TRAILER_POLL
  * @param {import('playwright').Locator} loc
  * @param {number} timeout
  */
-async function clickIfVisible(loc, timeout = 1_500) {
+async function clickIfVisible(loc, timeout = 2_000) {
   try {
     await loc.first().click({ timeout })
     return true
@@ -495,10 +494,10 @@ async function dismissEmptyTrailerVerifiedModalIfPresent(page, log) {
       continue
     }
     try {
-      await verified.click({ timeout: 2_500 })
+      await verified.click({ timeout: 2_000 })
     } catch {
       const alt = buttonLikeByVisibleText(page, /^verified$/i).first()
-      if (await alt.isVisible().catch(() => false)) await alt.click({ timeout: 2_500 })
+      if (await alt.isVisible().catch(() => false)) await alt.click({ timeout: 2_000 })
     }
     log('info', 'Dismissed Empty Trailer modal (VERIFIED)')
     await waitForPageSettle(page)

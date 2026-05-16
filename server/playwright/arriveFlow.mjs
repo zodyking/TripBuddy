@@ -5,11 +5,11 @@ import { ARRIVE_XPATH } from './arriveXpathDefaults.mjs'
 export { ARRIVE_XPATH } from './arriveXpathDefaults.mjs'
 
 /**
- * Timeouts aligned with checkInFlow for blazing fast speed.
+ * Demo-tuned: each `waitFor` / `waitForLoadState` cap is 2s (see CHECKIN flow).
  */
-export const ARRIVE_LOC_VISIBLE_MS = 18_000
-export const ARRIVE_LOC_VISIBLE_SHORT_MS = 12_000
-export const ARRIVE_LOC_AFTER_NAV_MS = 10_000
+export const ARRIVE_LOC_VISIBLE_MS = 2_000
+export const ARRIVE_LOC_VISIBLE_SHORT_MS = 2_000
+export const ARRIVE_LOC_AFTER_NAV_MS = 2_000
 
 const LOC_VISIBLE_MS = ARRIVE_LOC_VISIBLE_MS
 const LOC_VISIBLE_SHORT_MS = ARRIVE_LOC_VISIBLE_SHORT_MS
@@ -70,8 +70,8 @@ export async function runFullArrive({ page, tractorNumber, log, signal }) {
   let arriveClicked = false
   const arriveLoc = page.locator(xp(AX.arriveHome))
   try {
-    await arriveLoc.waitFor({ state: 'visible', timeout: 8_000 })
-    await arriveLoc.click({ timeout: 3_000 })
+    await arriveLoc.waitFor({ state: 'visible', timeout: 2_000 })
+    await arriveLoc.click({ timeout: 2_000 })
     arriveClicked = true
     log('info', 'Clicked Arrive (xpath)')
   } catch {
@@ -89,7 +89,7 @@ export async function runFullArrive({ page, tractorNumber, log, signal }) {
   if (!arriveClicked) {
     const byRole = page.getByRole('button', { name: /arrive/i }).first()
     try {
-      await byRole.waitFor({ state: 'visible', timeout: 5_000 })
+      await byRole.waitFor({ state: 'visible', timeout: 2_000 })
       await byRole.click()
       arriveClicked = true
       log('info', 'Clicked Arrive (role fallback)')
@@ -99,7 +99,7 @@ export async function runFullArrive({ page, tractorNumber, log, signal }) {
   if (!arriveClicked) {
     const byText = page.getByText(/^arrive$/i).first()
     try {
-      await byText.waitFor({ state: 'visible', timeout: 3_000 })
+      await byText.waitFor({ state: 'visible', timeout: 2_000 })
       await byText.click()
       arriveClicked = true
       log('info', 'Clicked Arrive (text fallback)')
@@ -110,7 +110,7 @@ export async function runFullArrive({ page, tractorNumber, log, signal }) {
     throw new Error('Arrive button not available on homepage')
   }
 
-  await page.waitForLoadState('domcontentloaded', { timeout: 8_000 }).catch(() => {})
+  await page.waitForLoadState('domcontentloaded', { timeout: 2_000 }).catch(() => {})
 
   if (signal?.aborted) throw new Error('Aborted')
 
@@ -119,7 +119,7 @@ export async function runFullArrive({ page, tractorNumber, log, signal }) {
   await selectTractorLoc.click()
   log('info', 'Selected Tractor Number option')
 
-  await page.waitForLoadState('domcontentloaded', { timeout: 8_000 }).catch(() => {})
+  await page.waitForLoadState('domcontentloaded', { timeout: 2_000 }).catch(() => {})
 
   if (signal?.aborted) throw new Error('Aborted')
 
@@ -135,8 +135,8 @@ export async function runFullArrive({ page, tractorNumber, log, signal }) {
   await continueLoc.click()
   log('info', 'Clicked Continue')
 
-  await page.waitForLoadState('domcontentloaded', { timeout: 10_000 }).catch(() => {})
-  await sleep(1000, signal)
+  await page.waitForLoadState('domcontentloaded', { timeout: 2_000 }).catch(() => {})
+  await sleep(120, signal)
 
   if (signal?.aborted) throw new Error('Aborted')
 
@@ -151,7 +151,7 @@ export async function runFullArrive({ page, tractorNumber, log, signal }) {
     await arriveSubmitLoc.waitFor({ state: 'visible', timeout: LOC_VISIBLE_MS })
   } catch {
     const byRole = page.getByRole('button', { name: /arrive/i })
-    await byRole.first().waitFor({ state: 'visible', timeout: 5_000 })
+    await byRole.first().waitFor({ state: 'visible', timeout: 2_000 })
     await byRole.first().click()
     log('info', 'Clicked Arrive (role fallback)')
     return { success: true, alreadyArrivedByGeofence: false }

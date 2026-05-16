@@ -31,21 +31,20 @@ function bannerIndicatesLocationMismatch(text) {
 }
 
 /**
- * FedEx Ground (Angular) can be slow in headless, VPN, or congested networks.
- * Short waits produce Playwright "Timeout … exceeded" → generic "app took too long" in the UI.
- * Exported for block automations (`blocks.mjs`) to stay aligned with `runFullCheckIn`.
+ * Demo-tuned: each Playwright `waitFor` / `waitForLoadState` cap is 2s unless noted.
+ * Exported so `blocks.mjs` stays aligned with `runFullCheckIn`.
  */
-export const CHECKIN_LOC_VISIBLE_MS = 30_000
-export const CHECKIN_LOC_VISIBLE_SHORT_MS = 20_000
-export const CHECKIN_LOC_AFTER_NAV_MS = 15_000
+export const CHECKIN_LOC_VISIBLE_MS = 2_000
+export const CHECKIN_LOC_VISIBLE_SHORT_MS = 2_000
+export const CHECKIN_LOC_AFTER_NAV_MS = 2_000
 
 const LOC_VISIBLE_MS = CHECKIN_LOC_VISIBLE_MS
 const LOC_VISIBLE_SHORT_MS = CHECKIN_LOC_VISIBLE_SHORT_MS
 const LOC_AFTER_NAV_MS = CHECKIN_LOC_AFTER_NAV_MS
 
-/** Max time to poll for FedEx app-banner after submit (banner often appears after >5s) */
-const BANNER_WINDOW_MS = 11_000
-const BANNER_POLL_MS = 80
+/** Max time to poll for FedEx app-banner after submit */
+const BANNER_WINDOW_MS = 2_000
+const BANNER_POLL_MS = 50
 const BANNER_INITIAL_MS = 0
 /** When isVisible() is false (animations), still detect non-empty banner text via textContent */
 const BANNER_TEXT_MIN_LEN = 20
@@ -128,7 +127,7 @@ async function isControlDisabled(loc) {
  * @param {(type: string, message: string) => void} log
  */
 async function waitUntilBeginNewDisabled(page, beginLoc, signal, log) {
-  const timeoutMs = 60_000
+  const timeoutMs = 2_000
   const start = Date.now()
   while (Date.now() - start < timeoutMs) {
     if (signal?.aborted) throw new Error('Aborted')
@@ -136,7 +135,7 @@ async function waitUntilBeginNewDisabled(page, beginLoc, signal, log) {
       log('info', 'Check-in session ready')
       return
     }
-    await sleep(50, signal)
+    await sleep(40, signal)
   }
   throw new Error(
     'Begin new check-in did not gray out — close the browser session, sign in again, then retry Check in',
@@ -144,7 +143,7 @@ async function waitUntilBeginNewDisabled(page, beginLoc, signal, log) {
 }
 
 /** Overall cap for parallel Continue strategies (Promise.any + race). */
-const CONFIRM_BEGIN_NEW_OVERALL_MS = 12_000
+const CONFIRM_BEGIN_NEW_OVERALL_MS = 2_000
 
 /**
  * FedEx may show "Begin New Check In?" with Continue/Cancel after clicking Begin New Check In.
@@ -169,13 +168,13 @@ async function confirmBeginNewIfPresent(page, CX, log, signal) {
    * @param {import('playwright').Locator} loc
    */
   async function clickContinueBranch(loc) {
-    await loc.first().waitFor({ state: 'attached', timeout: 3_500 })
+    await loc.first().waitFor({ state: 'attached', timeout: 2_000 })
     if (signal?.aborted) throw new Error('Aborted')
     try {
-      await loc.first().click({ timeout: 1_500 })
+      await loc.first().click({ timeout: 2_000 })
     } catch {
       if (signal?.aborted) throw new Error('Aborted')
-      await loc.first().click({ timeout: 1_500, force: true })
+      await loc.first().click({ timeout: 2_000, force: true })
     }
   }
 
@@ -290,7 +289,7 @@ export async function runFullCheckIn({
         }
       } else {
         await beginLoc
-          .waitFor({ state: 'visible', timeout: 6_000 })
+          .waitFor({ state: 'visible', timeout: 2_000 })
           .catch(() => {})
         await confirmBeginNewIfPresent(page, CX, log, signal)
         needWaitForBeginDisabled = true
@@ -312,10 +311,10 @@ export async function runFullCheckIn({
     if (!ok) throw new Error('Check In button not available')
   }
 
-  await page.waitForLoadState('domcontentloaded', { timeout: 8_000 }).catch(() => {})
+  await page.waitForLoadState('domcontentloaded', { timeout: 2_000 }).catch(() => {})
 
   const optionBtn = page.locator(xp(CX.checkInSelectFirst))
-  await optionBtn.waitFor({ state: 'visible', timeout: 10_000 })
+  await optionBtn.waitFor({ state: 'visible', timeout: 2_000 })
   await optionBtn.click()
   log('info', 'Choosing check-in option')
 
