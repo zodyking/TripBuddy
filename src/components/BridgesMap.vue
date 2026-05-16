@@ -930,6 +930,7 @@ watch([geoTracking, compassModeActive], () => {
               ? 'Exit compass mode (hold for calibration)'
               : 'Compass mode — rotate map to heading (hold for calibration)'
         "
+        @contextmenu.prevent
         @pointerdown="onCompassPressStart"
         @pointerup="onCompassPointerUp"
         @pointerleave="onCompassPointerUp"

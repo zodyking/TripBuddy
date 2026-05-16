@@ -415,6 +415,20 @@ body {
   flex-shrink: 0;
 }
 
+/* Compass: long-press opens calibration; block mobile selection/callout on SVG */
+.map-control-btn--compass {
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+  touch-action: none;
+}
+
+.map-control-btn--compass svg {
+  pointer-events: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
 .map-control-btn--traffic.is-on {
   color: #bfdbfe;
   border-color: rgba(96, 165, 250, 0.55);
