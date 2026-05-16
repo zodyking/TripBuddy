@@ -56,6 +56,7 @@ const {
   permissionState: compassPermission,
   errorMessage: compassError,
   toggleTracking: toggleCompass,
+  startTracking,
 } = useCompassOrientation()
 
 const {
@@ -324,6 +325,15 @@ function onCompassPressStart() {
 }
 
 const onCompassButtonClick = wrapCompassToggle(handleCompassToggle)
+
+async function onCalibrationControlClick() {
+  try {
+    await startTracking()
+  } catch {
+    /* still open panel */
+  }
+  openCompassCalibration()
+}
 
 /**
  * @param {GeolocationPosition} pos
@@ -959,7 +969,7 @@ watch([geoTracking, compassModeActive], () => {
         title="Heading offset / calibration"
         aria-label="Heading offset and calibration"
         @contextmenu.prevent
-        @click="openCompassCalibration"
+        @click="onCalibrationControlClick"
       >
         <svg
           viewBox="0 0 24 24"

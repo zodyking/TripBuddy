@@ -5,13 +5,12 @@ import {
   setCompassHeadingOffset,
 } from '../composables/useCompassOrientation.js'
 
+const isOpen = defineModel({ type: Boolean, default: false })
+
 const props = defineProps({
-  modelValue: { type: Boolean, default: false },
   /** When true, keep device orientation listener after close (map compass mode on). */
   mapCompassModeActive: { type: Boolean, default: false },
 })
-
-const emit = defineEmits(['update:modelValue'])
 
 const {
   smoothHeading,
@@ -26,11 +25,11 @@ const {
 const wasTrackingWhenOpened = ref(false)
 
 function close() {
-  emit('update:modelValue', false)
+  isOpen.value = false
 }
 
 watch(
-  () => props.modelValue,
+  isOpen,
   async (open) => {
     if (!open) {
       if (!wasTrackingWhenOpened.value && !props.mapCompassModeActive) {
@@ -40,7 +39,11 @@ watch(
     }
     wasTrackingWhenOpened.value = isTracking.value
     if (!wasTrackingWhenOpened.value) {
-      await startTracking()
+      try {
+        await startTracking()
+      } catch {
+        /* dialog still opens; heading may stay unavailable */
+      }
     }
   },
 )
@@ -84,13 +87,13 @@ const previewRotate = computed(() => {
 <template>
   <Teleport to="body">
     <div
-      v-if="modelValue"
+      v-if="isOpen"
       class="cal-backdrop tap"
       role="presentation"
       @click.self="close"
     />
     <div
-      v-if="modelValue"
+      v-if="isOpen"
       class="cal-dialog"
       role="dialog"
       aria-modal="true"
@@ -102,8 +105,9 @@ const previewRotate = computed(() => {
       </header>
 
       <p class="cal-lead">
-        Rotate the offset until the preview matches the road ahead. Short tap the map compass still toggles heading-up
-        mode; press and hold opens this panel.
+        Rotate the offset until the preview matches the road ahead. Tap the map compass to toggle heading-up
+        mode; use the sliders button under the compass for this panel (press-and-hold on the compass also works on
+        desktop).
       </p>
 
       <p v-if="permissionState === 'denied'" class="cal-warn" role="status">
