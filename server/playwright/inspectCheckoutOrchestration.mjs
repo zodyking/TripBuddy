@@ -77,12 +77,12 @@ const MAX_DOLLY_ATTEMPTS = 6
 const DOLLY_SUCCESS_WAIT_MS = 18_000
 const SEAL_VALIDATION_WAIT_MS = 4_000
 /** Poll interval while waiting for seal validation result (max wait unchanged). */
-const SEAL_POLL_STEP_MS = 62
+const SEAL_POLL_STEP_MS = 40
 /** Poll for invalid-trailer banner after validate (max wait unchanged). */
-const TRAILER_POLL_STEP_MS = 62
-const DOLLY_POLL_MS = 72
-/** Poll after VALIDATE DOLLY while still on dolly entry (same cap as blind sleep, exits on progress). */
-const DOLLY_VALIDATE_SETTLE_STEP_MS = 52
+const TRAILER_POLL_STEP_MS = 40
+const DOLLY_POLL_MS = 40
+/** Single budget for dolly click → outcome (replaces stacked short wait + DOLLY_SUCCESS_WAIT_MS loop). */
+const DOLLY_CLICK_TO_OUTCOME_MS = DOLLY_SUCCESS_WAIT_MS + AFTER_CLICK_MS
 const CHECKLIST_CHECKBOX_DELAY_MS = 38
 const DISPATCH_CONFIRM_WAIT_MS = 10_000
 const DISPATCHED_SUCCESS_WAIT_MS = 15_000
@@ -348,6 +348,20 @@ async function hasInvalidTrailerError(page) {
 }
 
 /**
+ * True when the UI already shows a later inspect/checkout step (same checks the main loop uses),
+ * so we can stop waiting for validate API / spinners without changing branch outcomes.
+ * @param {import('playwright').Page} page
+ */
+async function inspectAdvancedPastEntryValidate(page) {
+  if (await isInspectionChecklistScreen(page)) return true
+  if (await isDispatchScreen(page)) return true
+  if (await isDispatchedSuccessScreen(page)) return true
+  if (await isDispatchConfirmModal(page)) return true
+  if (await isNewTripDetailsModal(page)) return true
+  return false
+}
+
+/**
  * After trailer validate click, wait up to `maxMs` (same cap as a blind sleep) but return
  * as soon as the invalid-trailer banner appears.
  * @param {import('playwright').Page} page
@@ -358,6 +372,7 @@ async function waitForTrailerValidationSettle(page, maxMs, stepMs = TRAILER_POLL
   const deadline = Date.now() + maxMs
   while (Date.now() < deadline) {
     if (await hasInvalidTrailerError(page)) return
+    if (await inspectAdvancedPastEntryValidate(page)) return
     const remaining = deadline - Date.now()
     if (remaining <= 0) break
     await page.waitForTimeout(Math.min(stepMs, remaining))
@@ -388,7 +403,7 @@ async function hasInvalidSealError(page) {
 
 /**
  * After a seal validate click, wait up to `maxMs` (same cap as a fixed sleep) but return
- * as soon as the invalid-seal banner appears so wrong candidates fail fast.
+ * as soon as the invalid-seal banner appears, or when a later step is already visible.
  * @param {import('playwright').Page} page
  * @param {number} maxMs
  * @param {number} [stepMs]
@@ -397,6 +412,7 @@ async function waitForSealValidationSettle(page, maxMs, stepMs = SEAL_POLL_STEP_
   const deadline = Date.now() + maxMs
   while (Date.now() < deadline) {
     if (await hasInvalidSealError(page)) return
+    if (await inspectAdvancedPastEntryValidate(page)) return
     const remaining = deadline - Date.now()
     if (remaining <= 0) break
     await page.waitForTimeout(Math.min(stepMs, remaining))
@@ -515,24 +531,6 @@ async function isDollyEntryScreen(page) {
 async function isDollySuccessScreen(page) {
   const ok = page.getByText(RX.dollyValidationOk).first()
   return await ok.isVisible().catch(() => false)
-}
-
-/**
- * After VALIDATE DOLLY, wait up to `maxMs` (replaces a blind sleep) but return as soon as
- * dolly success is shown or we are clearly off the dolly entry screen.
- * @param {import('playwright').Page} page
- * @param {number} maxMs
- * @param {number} [stepMs]
- */
-async function waitForDollyValidateProgress(page, maxMs, stepMs = DOLLY_VALIDATE_SETTLE_STEP_MS) {
-  const deadline = Date.now() + maxMs
-  while (Date.now() < deadline) {
-    if (await isDollySuccessScreen(page)) return
-    if (!(await isDollyEntryScreen(page))) return
-    const remaining = deadline - Date.now()
-    if (remaining <= 0) break
-    await page.waitForTimeout(Math.min(stepMs, remaining))
-  }
 }
 
 /**
@@ -1001,7 +999,7 @@ export async function runInspectCheckoutAfterGate(page, opts) {
         await vs.click()
         log('info', 'Clicked VALIDATE SEALS after dolly success')
         lastProgress = Date.now()
-        await page.waitForTimeout(AFTER_CLICK_MS)
+        await waitForSealValidationSettle(page, AFTER_CLICK_MS)
         continue
       }
     }
@@ -1041,10 +1039,8 @@ export async function runInspectCheckoutAfterGate(page, opts) {
         const vd = buttonLikeByVisibleText(page, RX.validateDolly).first()
         await vd.click()
         lastProgress = Date.now()
-        await waitForDollyValidateProgress(page, AFTER_CLICK_MS)
-
         const t0 = Date.now()
-        while (Date.now() - t0 < DOLLY_SUCCESS_WAIT_MS) {
+        while (Date.now() - t0 < DOLLY_CLICK_TO_OUTCOME_MS) {
           aborted()
           if (await isDollySuccessScreen(page)) { dollyAdvanced = true; break }
           if (!(await isDollyEntryScreen(page))) { dollyAdvanced = true; break }
@@ -1076,7 +1072,13 @@ export async function runInspectCheckoutAfterGate(page, opts) {
         const vd = buttonLikeByVisibleText(page, RX.validateDolly).first()
         await vd.click()
         lastProgress = Date.now()
-        await waitForDollyValidateProgress(page, AFTER_CLICK_MS)
+        const tDriver = Date.now()
+        while (Date.now() - tDriver < AFTER_CLICK_MS) {
+          aborted()
+          if (await isDollySuccessScreen(page)) break
+          if (!(await isDollyEntryScreen(page))) break
+          await page.waitForTimeout(DOLLY_POLL_MS)
+        }
       }
       continue
     }
@@ -1207,7 +1209,7 @@ export async function runInspectCheckoutAfterGate(page, opts) {
           if (await hasInvalidSealError(page)) {
             log('warn', `Invalid seal: ${candidate} for Trailer ${trailerIndex} — trying next`)
             await input.clear()
-            await page.waitForTimeout(280)
+            await page.waitForTimeout(110)
             continue
           }
 
@@ -1233,7 +1235,7 @@ export async function runInspectCheckoutAfterGate(page, opts) {
             await validateBtn.click()
             log('info', `Clicked VALIDATE SEAL with driver value: ${val}`)
             lastProgress = Date.now()
-            await page.waitForTimeout(AFTER_CLICK_MS)
+            await waitForSealValidationSettle(page, AFTER_CLICK_MS)
           }
         }
 
@@ -1325,7 +1327,7 @@ export async function runInspectCheckoutAfterGate(page, opts) {
           if (await hasInvalidSealError(page)) {
             log('warn', `Invalid seal: ${candidate} for Trailer ${trailerIndex}`)
             await el.clear()
-            await page.waitForTimeout(280)
+            await page.waitForTimeout(110)
             continue
           }
 
@@ -1347,7 +1349,7 @@ export async function runInspectCheckoutAfterGate(page, opts) {
           if (await btn.isVisible().catch(() => false)) {
             await btn.click()
             lastProgress = Date.now()
-            await page.waitForTimeout(AFTER_CLICK_MS)
+            await waitForSealValidationSettle(page, AFTER_CLICK_MS)
           }
         }
 
