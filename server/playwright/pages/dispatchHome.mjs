@@ -69,7 +69,7 @@ export async function clickMenuIfEnabled(page, key, log) {
  */
 export async function inspectCheckoutHomeGate(page, log) {
   const GATE_TIMEOUT_MS = 15_000
-  const POLL_MS = 600
+  const POLL_MS = 280
   const deadline = Date.now() + GATE_TIMEOUT_MS
 
   while (Date.now() < deadline) {

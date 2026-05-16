@@ -66,13 +66,18 @@ const WARN_MODAL_MS = 4_000
 /** FedEx "Empty Trailer" info dialog — click VERIFIED to continue inspect/checkout. */
 const EMPTY_TRAILER_MODAL_MS = 6_000
 const BEGIN_INSPECTION_MS = 20_000
-const AFTER_CLICK_MS = 2_500
+/** Post-click UI settle — kept bounded; main loop still re-probes screens. */
+const AFTER_CLICK_MS = 1_200
 const IDLE_EXIT_MS = 24_000
-const POLL_MS = 450
+/** Main orchestration loop idle stride — lower = faster screen detection, same branch order. */
+const POLL_MS = 200
 const MAX_DOLLY_ATTEMPTS = 6
 const DOLLY_SUCCESS_WAIT_MS = 18_000
 const SEAL_VALIDATION_WAIT_MS = 4_000
-const CHECKLIST_CHECKBOX_DELAY_MS = 150
+/** Poll interval while waiting for seal validation result (max wait unchanged). */
+const SEAL_POLL_STEP_MS = 100
+const DOLLY_POLL_MS = 125
+const CHECKLIST_CHECKBOX_DELAY_MS = 60
 const DISPATCH_CONFIRM_WAIT_MS = 10_000
 const DISPATCHED_SUCCESS_WAIT_MS = 15_000
 
@@ -359,6 +364,23 @@ async function hasInvalidSealError(page) {
 }
 
 /**
+ * After a seal validate click, wait up to `maxMs` (same cap as a fixed sleep) but return
+ * as soon as the invalid-seal banner appears so wrong candidates fail fast.
+ * @param {import('playwright').Page} page
+ * @param {number} maxMs
+ * @param {number} [stepMs]
+ */
+async function waitForSealValidationSettle(page, maxMs, stepMs = SEAL_POLL_STEP_MS) {
+  const deadline = Date.now() + maxMs
+  while (Date.now() < deadline) {
+    if (await hasInvalidSealError(page)) return
+    const remaining = deadline - Date.now()
+    if (remaining <= 0) break
+    await page.waitForTimeout(Math.min(stepMs, remaining))
+  }
+}
+
+/**
  * Optional TSPA warning — dismiss with ACKNOWLEDGE.
  * @param {import('playwright').Page} page
  * @param {(type: string, message: string, extra?: object) => void} log
@@ -369,7 +391,7 @@ export async function dismissInspectWarningIfPresent(page, log) {
     const warnText = page.getByText(RX.warningTitle).first()
     const hasWarn = await warnText.isVisible().catch(() => false)
     if (!hasWarn) {
-      await page.waitForTimeout(200)
+      await page.waitForTimeout(90)
       continue
     }
     const ack = buttonLikeByVisibleText(page, RX.acknowledgeBtn).first()
@@ -380,7 +402,7 @@ export async function dismissInspectWarningIfPresent(page, log) {
       await page.waitForTimeout(400)
       return
     }
-    await page.waitForTimeout(200)
+    await page.waitForTimeout(90)
   }
 }
 
@@ -395,7 +417,7 @@ async function dismissEmptyTrailerVerifiedModalIfPresent(page, log) {
   while (Date.now() < deadline) {
     const verified = page.getByRole('button', { name: /^\s*verified\s*$/i }).first()
     if (!(await verified.isVisible().catch(() => false))) {
-      await page.waitForTimeout(200)
+      await page.waitForTimeout(90)
       continue
     }
     const bodyHit = await page
@@ -409,7 +431,7 @@ async function dismissEmptyTrailerVerifiedModalIfPresent(page, log) {
       .isVisible()
       .catch(() => false)
     if (!bodyHit && !titleHit) {
-      await page.waitForTimeout(200)
+      await page.waitForTimeout(90)
       continue
     }
     try {
@@ -439,17 +461,17 @@ export async function clickBeginInspectionIfPresent(page, log) {
       await beginBtn.click()
       log('info', 'Clicked Begin Inspection')
       await page.waitForLoadState('domcontentloaded', { timeout: 12_000 }).catch(() => {})
-      await page.waitForTimeout(500)
+      await page.waitForTimeout(350)
       return
     }
     const anyBegin = await page.getByText(RX.beginInspection).first().isVisible().catch(() => false)
     if (anyBegin) {
       await clickIfVisible(buttonLikeByVisibleText(page, RX.beginInspection))
       log('info', 'Clicked Begin Inspection (relaxed match)')
-      await page.waitForTimeout(500)
+      await page.waitForTimeout(350)
       return
     }
-    await page.waitForTimeout(300)
+    await page.waitForTimeout(120)
   }
   log('warn', 'Begin Inspection not found within timeout — continuing to form loop')
 }
@@ -640,14 +662,14 @@ async function handleNewTripDetailsModal(page, log) {
   if (await refreshRole.isVisible().catch(() => false)) {
     await refreshRole.click()
     log('info', 'Clicked REFRESH on New Trip Details modal')
-    await page.waitForTimeout(2_000)
+    await page.waitForTimeout(900)
     return true
   }
   const refreshBtn = buttonLikeByVisibleText(page, RX.refreshBtn).first()
   if (await refreshBtn.isVisible().catch(() => false)) {
     await refreshBtn.click()
     log('info', 'Clicked REFRESH on New Trip Details modal')
-    await page.waitForTimeout(2_000)
+    await page.waitForTimeout(900)
   }
 
   return true
@@ -851,7 +873,7 @@ export async function runInspectCheckoutAfterGate(page, opts) {
     // --- Inspection checklist screen ---
     if (await isInspectionChecklistScreen(page)) {
       await completeInspectionChecklist(page, log)
-      await page.waitForTimeout(500)
+      await page.waitForTimeout(320)
 
       await captureProof(page, 'Inspection Checklist', proofScreenshots, log)
       const agreeBtn = buttonLikeByVisibleText(page, RX.agreeAndCheckOut).first()
@@ -930,7 +952,7 @@ export async function runInspectCheckoutAfterGate(page, opts) {
           aborted()
           if (await isDollySuccessScreen(page)) { dollyAdvanced = true; break }
           if (!(await isDollyEntryScreen(page))) { dollyAdvanced = true; break }
-          await page.waitForTimeout(350)
+          await page.waitForTimeout(DOLLY_POLL_MS)
         }
 
         if (dollyAdvanced) {
@@ -989,7 +1011,7 @@ export async function runInspectCheckoutAfterGate(page, opts) {
           if (clickedValidate) {
             log('info', 'Clicked seal validation after batch trailer seal fill')
             lastProgress = Date.now()
-            await page.waitForTimeout(Math.max(SEAL_VALIDATION_WAIT_MS, 2_000))
+            await waitForSealValidationSettle(page, Math.max(SEAL_VALIDATION_WAIT_MS, 2_000))
             if (!(await hasInvalidSealError(page))) {
               await captureProof(page, 'Seals Validated', proofScreenshots, log)
               continue
@@ -1037,7 +1059,7 @@ export async function runInspectCheckoutAfterGate(page, opts) {
           await page.waitForTimeout(AFTER_CLICK_MS)
           if (await hasInvalidTrailerError(page)) {
             log('warn', 'Invalid trailer number after batch validate — will retry next pass')
-            await page.waitForTimeout(500)
+            await page.waitForTimeout(320)
           }
           continue
         }
@@ -1083,13 +1105,13 @@ export async function runInspectCheckoutAfterGate(page, opts) {
           if (await validateBtn.isVisible().catch(() => false)) {
             await validateBtn.click()
             lastProgress = Date.now()
-            await page.waitForTimeout(SEAL_VALIDATION_WAIT_MS)
+            await waitForSealValidationSettle(page, SEAL_VALIDATION_WAIT_MS)
           }
 
           if (await hasInvalidSealError(page)) {
             log('warn', `Invalid seal: ${candidate} for Trailer ${trailerIndex} — trying next`)
             await input.clear()
-            await page.waitForTimeout(500)
+            await page.waitForTimeout(280)
             continue
           }
 
@@ -1201,13 +1223,13 @@ export async function runInspectCheckoutAfterGate(page, opts) {
           if (await btn.isVisible().catch(() => false)) {
             await btn.click()
             lastProgress = Date.now()
-            await page.waitForTimeout(SEAL_VALIDATION_WAIT_MS)
+            await waitForSealValidationSettle(page, SEAL_VALIDATION_WAIT_MS)
           }
 
           if (await hasInvalidSealError(page)) {
             log('warn', `Invalid seal: ${candidate} for Trailer ${trailerIndex}`)
             await el.clear()
-            await page.waitForTimeout(500)
+            await page.waitForTimeout(280)
             continue
           }
 
