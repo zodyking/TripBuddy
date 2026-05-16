@@ -445,13 +445,20 @@ async function waitForSealValidationSettle(page, maxMs, stepMs = SEAL_POLL_STEP_
  * @param {(type: string, message: string, extra?: object) => void} log
  */
 export async function dismissInspectWarningIfPresent(page, log) {
+  const warnText = page.getByText(RX.warningTitle).first()
+  const appearDeadline = Date.now() + 350
+  while (Date.now() < appearDeadline) {
+    if (await warnText.isVisible().catch(() => false)) break
+    await page.waitForTimeout(40)
+  }
+  if (!(await warnText.isVisible().catch(() => false))) return
+
   const deadline = Date.now() + WARN_MODAL_MS
   while (Date.now() < deadline) {
-    const warnText = page.getByText(RX.warningTitle).first()
     const hasWarn = await warnText.isVisible().catch(() => false)
     if (!hasWarn) {
-      await page.waitForTimeout(55)
-      continue
+      await waitForPageSettle(page)
+      return
     }
     const ack = buttonLikeByVisibleText(page, RX.acknowledgeBtn).first()
     if (await ack.isVisible().catch(() => false)) {
@@ -472,13 +479,17 @@ export async function dismissInspectWarningIfPresent(page, log) {
  * @param {(type: string, message: string, extra?: object) => void} log
  */
 async function dismissEmptyTrailerVerifiedModalIfPresent(page, log) {
+  const verified = page.getByRole('button', { name: /^\s*verified\s*$/i }).first()
+  const appearDeadline = Date.now() + 350
+  while (Date.now() < appearDeadline) {
+    if (await verified.isVisible().catch(() => false)) break
+    await page.waitForTimeout(40)
+  }
+  if (!(await verified.isVisible().catch(() => false))) return
+
+  const wrongContextGiveUp = Date.now() + 450
   const deadline = Date.now() + EMPTY_TRAILER_MODAL_MS
   while (Date.now() < deadline) {
-    const verified = page.getByRole('button', { name: /^\s*verified\s*$/i }).first()
-    if (!(await verified.isVisible().catch(() => false))) {
-      await page.waitForTimeout(55)
-      continue
-    }
     const bodyHit = await page
       .getByText(RX.emptyTrailerModalBody)
       .first()
@@ -490,6 +501,7 @@ async function dismissEmptyTrailerVerifiedModalIfPresent(page, log) {
       .isVisible()
       .catch(() => false)
     if (!bodyHit && !titleHit) {
+      if (Date.now() >= wrongContextGiveUp) return
       await page.waitForTimeout(55)
       continue
     }
@@ -1031,14 +1043,14 @@ export async function runInspectCheckoutAfterGate(page, opts) {
 
     // --- Warning / Begin (late) ---
     await dismissInspectWarningIfPresent(page, log)
-    await dismissEmptyTrailerVerifiedModalIfPresent(page, log)
     const beginLate = buttonLikeByVisibleText(page, RX.beginInspection).first()
     if (await beginLate.isVisible().catch(() => false)) {
       const clicked = await clickIfVisible(buttonLikeByVisibleText(page, RX.beginInspection))
       if (clicked) {
         log('info', 'Clicked Begin Inspection (late)')
         lastProgress = Date.now()
-        await page.waitForTimeout(AFTER_CLICK_MS)
+        await waitForPageSettle(page)
+        await page.waitForTimeout(60)
         continue
       }
     }
