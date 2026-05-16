@@ -55,6 +55,8 @@ const props = defineProps({
   userLng: { type: Number, default: null },
   userLocationPending: { type: Boolean, default: false },
   userLocationDenied: { type: Boolean, default: false },
+  /** Meters — from `GeolocationCoordinates.accuracy` when available */
+  userLocationAccuracyM: { type: Number, default: null },
   userVehicleId: { type: String, default: '' },
   /**
    * Origin + destination terminal rows for the map overlay (double-tap to switch).
@@ -443,6 +445,28 @@ const trailerGeoFollowActive = ref(false)
 let didFitWithUser = false
 /** @type {null | (() => void)} */
 let unbindTruckBearingSync = null
+/** @type {ResizeObserver | null} */
+let mapResizeObserver = null
+/** @type {ReturnType<typeof setTimeout> | null} */
+let layoutRetryTimer = null
+
+/**
+ * @param {number} aLat
+ * @param {number} aLng
+ * @param {number} bLat
+ * @param {number} bLng
+ * @returns {number} distance in meters
+ */
+function haversineMeters(aLat, aLng, bLat, bLng) {
+  const R = 6_371_000
+  const toR = (d) => (d * Math.PI) / 180
+  const dLat = toR(bLat - aLat)
+  const dLng = toR(bLng - aLng)
+  const s1 = Math.sin(dLat / 2)
+  const s2 = Math.sin(dLng / 2)
+  const q = s1 * s1 + Math.cos(toR(aLat)) * Math.cos(toR(bLat)) * s2 * s2
+  return 2 * R * Math.asin(Math.min(1, Math.sqrt(q)))
+}
 
 function syncNavigationGestures() {
   syncMapNavigationGestures(map, {
@@ -499,9 +523,24 @@ function setBaseLayer(mode) {
   map.removeLayer(darkLayer)
   map.removeLayer(streetLayer)
   map.removeLayer(satelliteLayer)
-  if (mode === 'satellite') satelliteLayer.addTo(map)
-  else if (mode === 'street') streetLayer.addTo(map)
-  else darkLayer.addTo(map)
+  /** @type {L.TileLayer} */
+  let active = darkLayer
+  if (mode === 'satellite') {
+    satelliteLayer.addTo(map)
+    active = satelliteLayer
+  } else if (mode === 'street') {
+    streetLayer.addTo(map)
+    active = streetLayer
+  } else {
+    darkLayer.addTo(map)
+    active = darkLayer
+  }
+  try {
+    map.invalidateSize({ animate: false })
+  } catch {
+    /* ignore */
+  }
+  if (typeof active.redraw === 'function') active.redraw()
 }
 
 function cycleBaseLayer() {
@@ -514,6 +553,7 @@ function scheduleFitBounds() {
   if (!map || !overlayLayer) return
   const pins = effectiveTrailers.value
   if (!pins.length) return
+  if (compassModeActive.value) return
   if (fitDebounce) clearTimeout(fitDebounce)
   fitDebounce = setTimeout(() => {
     fitDebounce = null
@@ -595,6 +635,7 @@ async function handleCompassToggle() {
     if (map && typeof map.setBearing === 'function') {
       map.setBearing(0)
     }
+    relayoutMapSurface()
     syncNavigationGestures()
     return
   }
@@ -602,6 +643,7 @@ async function handleCompassToggle() {
   const started = await toggleCompass()
   if (started) {
     compassModeActive.value = true
+    relayoutMapSurface()
   }
   syncNavigationGestures()
 }
@@ -618,9 +660,23 @@ const onCompassButtonClick = wrapCompassToggle(handleCompassToggle)
  * @param {number} lng
  * @param {number} [accuracyM]
  * @param {boolean} [fitCamera]
+ * @param {{ minMoveM?: number }} [opts] When set, ignore updates that move less than this many meters (reduces GPS jitter).
  */
-function setUserFixFromLatLng(lat, lng, accuracyM = 40, fitCamera = false) {
+function setUserFixFromLatLng(lat, lng, accuracyM = 40, fitCamera = false, opts = {}) {
   if (!Number.isFinite(lat) || !Number.isFinite(lng)) return
+  const prev = userFix.value
+  const minMove = opts.minMoveM
+  if (
+    prev &&
+    Number.isFinite(prev.lat) &&
+    Number.isFinite(prev.lng) &&
+    Number.isFinite(minMove) &&
+    minMove > 0 &&
+    !fitCamera &&
+    haversineMeters(prev.lat, prev.lng, lat, lng) < minMove
+  ) {
+    return
+  }
   userFix.value = {
     lat,
     lng,
@@ -641,14 +697,16 @@ function setUserFixFromLatLng(lat, lng, accuracyM = 40, fitCamera = false) {
 
 /**
  * @param {GeolocationPosition} pos
- * @param {{ fitCamera?: boolean }} [opts]
+ * @param {{ fitCamera?: boolean, skipMicroJitter?: boolean }} [opts]
  */
 function applyUserGeolocation(pos, opts = {}) {
   const fitCamera = opts.fitCamera === true
   const lat = pos.coords.latitude
   const lng = pos.coords.longitude
   const acc = pos.coords.accuracy
-  setUserFixFromLatLng(lat, lng, acc, fitCamera)
+  setUserFixFromLatLng(lat, lng, acc, fitCamera, {
+    minMoveM: opts.skipMicroJitter === true ? 14 : undefined,
+  })
 }
 
 function stopWatch() {
@@ -673,7 +731,7 @@ function startWatchForLiveUpdates() {
   let first = true
   geoWatchId = navigator.geolocation.watchPosition(
     (pos) => {
-      applyUserGeolocation(pos, { fitCamera: first })
+      applyUserGeolocation(pos, { fitCamera: first, skipMicroJitter: !first })
       first = false
     },
     () => {
@@ -698,7 +756,12 @@ function applyUserCoordsFromProps() {
     Number.isFinite(la) &&
     Number.isFinite(ln)
   ) {
-    setUserFixFromLatLng(la, ln, 40, true)
+    const accRaw = props.userLocationAccuracyM
+    const acc =
+      accRaw != null && Number.isFinite(Number(accRaw)) && Number(accRaw) > 0
+        ? Number(accRaw)
+        : 40
+    setUserFixFromLatLng(la, ln, acc, true)
     startWatchForLiveUpdates()
   } else if (!props.userLocationPending && props.userLocationDenied) {
     stopWatch()
@@ -708,7 +771,7 @@ function applyUserCoordsFromProps() {
   }
 }
 
-function syncTrailerMarkers() {
+function applyTrailerMarkersToMap() {
   if (!map || !overlayLayer) return
   const pins = effectiveTrailers.value
   const nextKeys = new Set(pins.map((p) => String(p.order)))
@@ -744,11 +807,37 @@ function syncTrailerMarkers() {
       mk.setZIndexOffset(t.highlightHeavy ? 450 : 400)
     }
   }
+}
 
+function syncTrailerMarkers() {
+  applyTrailerMarkersToMap()
+  const pins = effectiveTrailers.value
   if (!didFitWithUser) {
     scheduleFitBounds()
   } else if (pins.length && userFix.value) {
     scheduleFitBounds()
+  }
+}
+
+/**
+ * Leaflet often needs `invalidateSize` after the map container gets a real flex height
+ * (mobile modals) or after rotation. Does not change the camera framing.
+ */
+function relayoutMapSurface() {
+  if (!map || !overlayLayer) return
+  try {
+    map.invalidateSize({ animate: false })
+  } catch {
+    /* ignore */
+  }
+  applyTrailerMarkersToMap()
+  syncUserOverlay()
+  try {
+    darkLayer?.redraw?.()
+    streetLayer?.redraw?.()
+    satelliteLayer?.redraw?.()
+  } catch {
+    /* ignore */
   }
 }
 
@@ -757,6 +846,14 @@ function initMap() {
 
   geoStopped = false
   didFitWithUser = false
+  if (mapResizeObserver) {
+    mapResizeObserver.disconnect()
+    mapResizeObserver = null
+  }
+  if (layoutRetryTimer) {
+    clearTimeout(layoutRetryTimer)
+    layoutRetryTimer = null
+  }
 
   map = L.map(containerRef.value, {
     zoomControl: false,
@@ -801,12 +898,45 @@ function initMap() {
   overlayLayer = L.layerGroup().addTo(map)
   userLayer = L.layerGroup().addTo(map)
 
-  syncTrailerMarkers()
+  applyTrailerMarkersToMap()
   applyUserCoordsFromProps()
 
+  const el = containerRef.value
+  if (el && typeof ResizeObserver !== 'undefined') {
+    let roTimer = null
+    mapResizeObserver = new ResizeObserver(() => {
+      if (!map) return
+      if (roTimer) clearTimeout(roTimer)
+      roTimer = setTimeout(() => {
+        roTimer = null
+        relayoutMapSurface()
+      }, 48)
+    })
+    mapResizeObserver.observe(el)
+  }
+
+  map.whenReady(() => {
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        relayoutMapSurface()
+        if (effectiveTrailers.value.length) {
+          scheduleFitBounds()
+        }
+      })
+    })
+    layoutRetryTimer = setTimeout(() => {
+      layoutRetryTimer = null
+      relayoutMapSurface()
+      if (effectiveTrailers.value.length && !compassModeActive.value) {
+        scheduleFitBounds()
+      }
+    }, 420)
+  })
+
   nextTick(() => {
-    map?.invalidateSize()
-    setTimeout(() => map?.invalidateSize(), 320)
+    relayoutMapSurface()
+    setTimeout(() => relayoutMapSurface(), 120)
+    setTimeout(() => relayoutMapSurface(), 360)
   })
   bindTruckBearingSync()
   syncNavigationGestures()
@@ -816,6 +946,14 @@ function destroyMap() {
   unbindTruckBearingSync?.()
   geoStopped = true
   stopWatch()
+  if (mapResizeObserver) {
+    mapResizeObserver.disconnect()
+    mapResizeObserver = null
+  }
+  if (layoutRetryTimer) {
+    clearTimeout(layoutRetryTimer)
+    layoutRetryTimer = null
+  }
   if (fitDebounce) {
     clearTimeout(fitDebounce)
     fitDebounce = null
@@ -863,7 +1001,12 @@ watch(
   ],
   () => {
     syncTrailerMarkers()
-    nextTick(() => map?.invalidateSize())
+    nextTick(() => {
+      relayoutMapSurface()
+      if (effectiveTrailers.value.length && !compassModeActive.value) {
+        scheduleFitBounds()
+      }
+    })
   },
   { deep: true },
 )
@@ -874,6 +1017,7 @@ watch(
     props.userLng,
     props.userLocationPending,
     props.userLocationDenied,
+    props.userLocationAccuracyM,
     props.userVehicleId,
   ],
   () => {
@@ -885,6 +1029,11 @@ watch(smoothHeading, () => {
   if (compassModeActive.value) {
     applyMapCompassRotation()
     applyUserMarkerRotation()
+    try {
+      map?.invalidateSize({ animate: false })
+    } catch {
+      /* ignore */
+    }
   }
 })
 
@@ -892,6 +1041,12 @@ watch(compassModeActive, (active) => {
   if (!active && map && typeof map.setBearing === 'function') {
     map.setBearing(0)
   }
+  nextTick(() => {
+    relayoutMapSurface()
+    if (active === false && effectiveTrailers.value.length) {
+      scheduleFitBounds()
+    }
+  })
 })
 
 watch([trailerGeoFollowActive, compassModeActive], () => {
@@ -902,8 +1057,8 @@ watch(
   () => [trailerNumRows.value.length, terminalCardDisplay.value != null],
   () => {
     nextTick(() => {
-      map?.invalidateSize()
-      setTimeout(() => map?.invalidateSize(), 200)
+      relayoutMapSurface()
+      setTimeout(() => relayoutMapSurface(), 200)
     })
   },
 )
@@ -1485,7 +1640,13 @@ watch(
 
 :deep(.leaflet-container) {
   font-family: inherit;
-  background: #1e293b;
+  /* Match dark basemap average so pre-tile paint is not a flat “gray sheet” */
+  background: #0d1117;
+  outline: none;
+}
+
+:deep(.leaflet-tile-pane) {
+  opacity: 1;
 }
 
 

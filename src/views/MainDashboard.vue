@@ -1756,6 +1756,7 @@ function openTrailerGpsModal(card) {
     terminalPair,
     userLat: null,
     userLng: null,
+    userAccuracyM: null,
     userGpsPending: hasGeo,
     userGeoDenied: !hasGeo,
     userVehicleId: vehicleIdForUserMapMarker(linehaulTractorBody.value, linehaulCredMeta.value),
@@ -1785,6 +1786,10 @@ function openTrailerGpsModal(card) {
         ...trailerGpsData.value,
         userLat: pos.coords.latitude,
         userLng: pos.coords.longitude,
+        userAccuracyM:
+          pos.coords.accuracy != null && Number.isFinite(pos.coords.accuracy)
+            ? pos.coords.accuracy
+            : null,
         userGpsPending: false,
         userGeoDenied: false,
       }
@@ -1795,6 +1800,9 @@ function openTrailerGpsModal(card) {
         if (!trailerGpsModalOpen.value || !trailerGpsData.value) return
         trailerGpsData.value = {
           ...trailerGpsData.value,
+          userLat: null,
+          userLng: null,
+          userAccuracyM: null,
           userGpsPending: false,
           userGeoDenied: true,
         }
@@ -1807,6 +1815,10 @@ function openTrailerGpsModal(card) {
             ...trailerGpsData.value,
             userLat: pos.coords.latitude,
             userLng: pos.coords.longitude,
+            userAccuracyM:
+              pos.coords.accuracy != null && Number.isFinite(pos.coords.accuracy)
+                ? pos.coords.accuracy
+                : null,
             userGpsPending: false,
             userGeoDenied: false,
           }
@@ -1816,6 +1828,9 @@ function openTrailerGpsModal(card) {
           if (!trailerGpsModalOpen.value || !trailerGpsData.value) return
           trailerGpsData.value = {
             ...trailerGpsData.value,
+            userLat: null,
+            userLng: null,
+            userAccuracyM: null,
             userGpsPending: false,
             userGeoDenied: true,
           }
@@ -2339,6 +2354,7 @@ onUnmounted(() => {
               :user-lng="trailerGpsData.userLng"
               :user-location-pending="trailerGpsData.userGpsPending"
               :user-location-denied="trailerGpsData.userGeoDenied"
+              :user-location-accuracy-m="trailerGpsData.userAccuracyM ?? null"
               :user-vehicle-id="trailerGpsData.userVehicleId || ''"
               :trailer-label="`Trailer ${trailerGpsData.order}${trailerGpsData.trlrNbr ? ` · #${trailerGpsData.trlrNbr}` : ''}`"
             />
