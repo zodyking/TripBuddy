@@ -5,12 +5,13 @@ import {
   setCompassHeadingOffset,
 } from '../composables/useCompassOrientation.js'
 
-const isOpen = defineModel({ type: Boolean, default: false })
-
 const props = defineProps({
+  modelValue: { type: Boolean, default: false },
   /** When true, keep device orientation listener after close (map compass mode on). */
   mapCompassModeActive: { type: Boolean, default: false },
 })
+
+const emit = defineEmits(['update:modelValue'])
 
 const {
   smoothHeading,
@@ -25,11 +26,11 @@ const {
 const wasTrackingWhenOpened = ref(false)
 
 function close() {
-  isOpen.value = false
+  emit('update:modelValue', false)
 }
 
 watch(
-  isOpen,
+  () => props.modelValue,
   async (open) => {
     if (!open) {
       if (!wasTrackingWhenOpened.value && !props.mapCompassModeActive) {
@@ -87,18 +88,20 @@ const previewRotate = computed(() => {
 <template>
   <Teleport to="body">
     <div
-      v-if="isOpen"
-      class="cal-backdrop tap"
+      v-if="props.modelValue"
+      class="cal-portal"
       role="presentation"
-      @click.self="close"
-    />
-    <div
-      v-if="isOpen"
-      class="cal-dialog"
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="cal-title"
     >
+      <div
+        class="cal-backdrop tap"
+        @click.self="close"
+      />
+      <div
+        class="cal-dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="cal-title"
+      >
       <header class="cal-header">
         <h2 id="cal-title" class="cal-title">Compass calibration</h2>
         <button type="button" class="cal-close tap" aria-label="Close" @click="close">×</button>
@@ -161,25 +164,35 @@ const previewRotate = computed(() => {
       <footer class="cal-footer">
         <button type="button" class="cal-done tap" @click="close">Done</button>
       </footer>
+      </div>
     </div>
   </Teleport>
 </template>
 
 <style scoped>
-.cal-backdrop {
+/* Above dashboard overlays (e.g. trip-complete ~2147483000) and map popups */
+.cal-portal {
   position: fixed;
   inset: 0;
-  z-index: 10050;
+  z-index: 2147483001;
+  pointer-events: none;
+}
+
+.cal-backdrop {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: auto;
   background: rgba(0, 0, 0, 0.55);
   backdrop-filter: blur(2px);
 }
 
 .cal-dialog {
-  position: fixed;
+  position: absolute;
   left: 50%;
   top: 50%;
+  z-index: 1;
   transform: translate(-50%, -50%);
-  z-index: 10051;
   width: min(22rem, calc(100vw - 1.5rem));
   max-height: min(90vh, 36rem);
   overflow: auto;
@@ -189,6 +202,7 @@ const previewRotate = computed(() => {
   border: 1px solid rgba(255, 255, 255, 0.12);
   box-shadow: 0 16px 48px rgba(0, 0, 0, 0.55);
   color: var(--color-text-primary, #f0f0f5);
+  pointer-events: auto;
 }
 
 .cal-header {

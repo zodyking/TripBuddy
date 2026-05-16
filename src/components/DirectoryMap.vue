@@ -317,13 +317,9 @@ function onCompassPressStart() {
 
 const onCompassButtonClick = wrapCompassToggle(handleCompassToggle)
 
-async function onCalibrationControlClick() {
-  try {
-    await startTracking()
-  } catch {
-    /* still open panel */
-  }
-  openCompassCalibration()
+function onCalibrationControlClick() {
+  calibrationModalOpen.value = true
+  void Promise.resolve(startTracking()).catch(() => {})
 }
 
 /**
@@ -671,7 +667,7 @@ watch([geoTracking, compassModeActive], () => {
         title="Heading offset / calibration"
         aria-label="Heading offset and calibration"
         @contextmenu.prevent
-        @click="onCalibrationControlClick"
+        @click.stop.prevent="onCalibrationControlClick"
       >
         <svg
           viewBox="0 0 24 24"
