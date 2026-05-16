@@ -94,7 +94,7 @@ const SEAL_POLL_STEP_MS = 28
 const TRAILER_POLL_STEP_MS = 28
 const DOLLY_POLL_MS = 28
 /** Max wall time after VALIDATE DOLLY click until success or leaving dolly entry (per attempt). */
-const DOLLY_CLICK_TO_OUTCOME_MS = 2_600
+const DOLLY_CLICK_TO_OUTCOME_MS = 1_500
 const CHECKLIST_CHECKBOX_DELAY_MS = 12
 const DISPATCH_CONFIRM_WAIT_MS = 2_800
 const DISPATCHED_SUCCESS_WAIT_MS = 3_000
