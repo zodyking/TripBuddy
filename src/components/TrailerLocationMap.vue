@@ -21,7 +21,6 @@ import { useMapCompassLongPress } from '../composables/useMapCompassLongPress.js
 import CompassCalibrationModal from './CompassCalibrationModal.vue'
 import {
   syncMapNavigationGestures,
-  centerMapOnLatLng,
   applyUserTruckMarkerDomRotation,
 } from '../composables/useMapFollowControls.js'
 
@@ -449,6 +448,10 @@ let unbindTruckBearingSync = null
 let mapResizeObserver = null
 /** @type {ReturnType<typeof setTimeout> | null} */
 let layoutRetryTimer = null
+/** @type {ReturnType<typeof setTimeout> | null} */
+let followFitDebounce = null
+/** Debounced fitBounds while live GPS follow is on — keeps trailers + truck in view (centering on user alone hid trailer pins). */
+const FOLLOW_FIT_DEBOUNCE_MS = 700
 
 /**
  * @param {number} aLat
@@ -553,7 +556,6 @@ function scheduleFitBounds() {
   if (!map || !overlayLayer) return
   const pins = effectiveTrailers.value
   if (!pins.length) return
-  if (compassModeActive.value) return
   if (fitDebounce) clearTimeout(fitDebounce)
   fitDebounce = setTimeout(() => {
     fitDebounce = null
@@ -577,7 +579,22 @@ function scheduleFitBounds() {
       maxZoom: 19,
       animate: motion,
     })
+    // fitBounds resets bearing on leaflet-rotate; restore heading-up mode
+    if (compassModeActive.value) {
+      applyMapCompassRotation()
+      applyUserMarkerRotation()
+    }
   }, 80)
+}
+
+function scheduleFollowFitDebounced() {
+  if (!map || compassModeActive.value || !trailerGeoFollowActive.value) return
+  if (!effectiveTrailers.value.length) return
+  if (followFitDebounce) clearTimeout(followFitDebounce)
+  followFitDebounce = setTimeout(() => {
+    followFitDebounce = null
+    scheduleFitBounds()
+  }, FOLLOW_FIT_DEBOUNCE_MS)
 }
 
 function syncUserOverlay() {
@@ -684,10 +701,7 @@ function setUserFixFromLatLng(lat, lng, accuracyM = 40, fitCamera = false, opts 
   }
   syncUserOverlay()
   if (trailerGeoFollowActive.value && map && userFix.value) {
-    const motion = prefersReducedMotion()
-    centerMapOnLatLng(map, L.latLng(userFix.value.lat, userFix.value.lng), {
-      animate: !motion,
-    })
+    scheduleFollowFitDebounced()
   }
   if (fitCamera && map && effectiveTrailers.value.length && !didFitWithUser) {
     didFitWithUser = true
@@ -872,6 +886,7 @@ function initMap() {
       attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a> &copy; <a href="https://carto.com/attributions">CARTO</a>',
       subdomains: 'abcd',
       maxZoom: 20,
+      detectRetina: false,
     },
   )
 
@@ -881,6 +896,7 @@ function initMap() {
       attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a> &copy; <a href="https://carto.com/attributions">CARTO</a>',
       subdomains: 'abcd',
       maxZoom: 20,
+      detectRetina: false,
     },
   )
 
@@ -927,7 +943,7 @@ function initMap() {
     layoutRetryTimer = setTimeout(() => {
       layoutRetryTimer = null
       relayoutMapSurface()
-      if (effectiveTrailers.value.length && !compassModeActive.value) {
+      if (effectiveTrailers.value.length) {
         scheduleFitBounds()
       }
     }, 420)
@@ -957,6 +973,10 @@ function destroyMap() {
   if (fitDebounce) {
     clearTimeout(fitDebounce)
     fitDebounce = null
+  }
+  if (followFitDebounce) {
+    clearTimeout(followFitDebounce)
+    followFitDebounce = null
   }
   trailerMarkers.clear()
   userMarker = null
@@ -1003,7 +1023,7 @@ watch(
     syncTrailerMarkers()
     nextTick(() => {
       relayoutMapSurface()
-      if (effectiveTrailers.value.length && !compassModeActive.value) {
+      if (effectiveTrailers.value.length) {
         scheduleFitBounds()
       }
     })
@@ -1040,6 +1060,10 @@ watch(smoothHeading, () => {
 watch(compassModeActive, (active) => {
   if (!active && map && typeof map.setBearing === 'function') {
     map.setBearing(0)
+  }
+  if (active && followFitDebounce) {
+    clearTimeout(followFitDebounce)
+    followFitDebounce = null
   }
   nextTick(() => {
     relayoutMapSurface()
