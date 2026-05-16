@@ -429,6 +429,19 @@ body {
   -webkit-user-select: none;
 }
 
+.map-control-btn--compass-cal {
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+  touch-action: manipulation;
+}
+
+.map-control-btn--compass-cal svg {
+  pointer-events: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
 .map-control-btn--traffic.is-on {
   color: #bfdbfe;
   border-color: rgba(96, 165, 250, 0.55);

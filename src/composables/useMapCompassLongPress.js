@@ -3,13 +3,20 @@ import { ref, onBeforeUnmount } from 'vue'
 const LONG_PRESS_MS = 550
 
 /**
- * Long-press the map compass control to open calibration; short tap still toggles compass mode.
+ * Map compass: tap toggles compass mode; long-press opens calibration (desktop).
+ * Use {@link openCompassCalibration} from a dedicated control for reliable mobile access.
  */
 export function useMapCompassLongPress() {
   const calibrationModalOpen = ref(false)
   /** @type {ReturnType<typeof setTimeout> | null} */
   let timer = null
   let suppressNextToggle = false
+
+  function openCompassCalibration() {
+    clearTimer()
+    suppressNextToggle = false
+    calibrationModalOpen.value = true
+  }
 
   function clearTimer() {
     if (timer != null) {
@@ -49,6 +56,7 @@ export function useMapCompassLongPress() {
 
   return {
     calibrationModalOpen,
+    openCompassCalibration,
     onCompassPointerDown,
     onCompassPointerUp,
     wrapCompassToggle,

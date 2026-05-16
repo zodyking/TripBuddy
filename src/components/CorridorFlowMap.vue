@@ -66,6 +66,7 @@ const {
 
 const {
   calibrationModalOpen,
+  openCompassCalibration,
   onCompassPointerDown,
   onCompassPointerUp,
   wrapCompassToggle,
@@ -783,8 +784,8 @@ watch([geoTracking, compassModeActive], () => {
           compassPermission === 'denied'
             ? 'Compass blocked — enable in device settings'
             : compassModeActive
-              ? 'Exit compass mode (hold for calibration)'
-              : 'Compass mode — rotate map to heading (hold for calibration)'
+              ? 'Exit compass mode'
+              : 'Compass mode — rotate map to heading'
         "
         @contextmenu.prevent
         @pointerdown="onCompassPressStart"
@@ -802,10 +803,40 @@ watch([geoTracking, compassModeActive], () => {
         <span class="sr-only">
           {{
             compassModeActive
-              ? 'Exit compass mode. Press and hold for heading calibration.'
-              : 'Compass mode. Press and hold for heading calibration.'
+              ? 'Exit compass mode. Heading offset: tap the sliders button below.'
+              : 'Compass mode. Heading offset: tap the sliders button below.'
           }}
         </span>
+      </button>
+      <button
+        v-if="showCompassToggle"
+        type="button"
+        class="map-control-btn map-control-btn--compass-cal tap"
+        title="Heading offset / calibration"
+        aria-label="Heading offset and calibration"
+        @contextmenu.prevent
+        @click="openCompassCalibration"
+      >
+        <svg
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          aria-hidden="true"
+        >
+          <line x1="4" y1="21" x2="4" y2="14" />
+          <line x1="4" y1="10" x2="4" y2="3" />
+          <line x1="12" y1="21" x2="12" y2="12" />
+          <line x1="12" y1="8" x2="12" y2="3" />
+          <line x1="20" y1="21" x2="20" y2="16" />
+          <line x1="20" y1="12" x2="20" y2="3" />
+          <line x1="1" y1="14" x2="7" y2="14" />
+          <line x1="9" y1="8" x2="15" y2="8" />
+          <line x1="17" y1="16" x2="23" y2="16" />
+        </svg>
+        <span class="sr-only">Open heading offset and calibration</span>
       </button>
     </div>
     <CompassCalibrationModal
