@@ -29,6 +29,7 @@ import {
   workWeekGroupMeta,
   workWeekInclusiveDayCount,
 } from '../utils/workWeekGroup.js'
+import { TRIP_OUTCOME_REASON_PRESETS } from '../constants/tripOutcomeReasonPresets.js'
 import { shiftDateKeyForEventMs } from '../utils/shiftCalendar.js'
 import {
   formatTripEquipmentPdfBlock,
@@ -149,6 +150,15 @@ const deleteTarget = ref(/** @type {LedgerEntry | null} */ (null))
 const deleteUsernameInput = ref('')
 const deleteError = ref('')
 const deleteBusy = ref(false)
+
+const outcomeReasonModalOpen = ref(false)
+/** @type {import('vue').Ref<LedgerEntry | null>} */
+const outcomeReasonTarget = ref(null)
+const outcomeReasonPendingOutcome = ref(/** @type {'rejected' | 'removed'} */ ('rejected'))
+const outcomeReasonPresetChoice = ref('')
+const outcomeReasonText = ref('')
+const outcomeReasonError = ref('')
+const outcomeReasonBusy = ref(false)
 
 const manualTripModalOpen = ref(false)
 const manualTripOrigin = ref('')
@@ -1228,6 +1238,7 @@ async function onDownloadWeekTotalsPdf(wg) {
             pickupAddress: oDir?.address ?? '',
             deliveryAddress: dDir?.address ?? '',
           }),
+          outcomeReasonRight: e ? outcomePdfReasonLine(e) : '',
           dailyTripLegSequence: r.dailyTripLegSequence || '',
           proofScreenshots: /** @type {{ label: string, jpeg: string, ts: number }[] | undefined} */ (
             undefined
@@ -1430,6 +1441,74 @@ const outcomeLabel = (o) => {
 
 /**
  * @param {LedgerEntry} e
+ */
+function outcomeReasonFromEntry(e) {
+  const dh = e?.dispatchHeader && typeof e.dispatchHeader === 'object' ? e.dispatchHeader : null
+  if (!dh) return ''
+  const r = /** @type {Record<string, unknown>} */ (dh).historyOutcomeReason
+  return typeof r === 'string' ? r.trim() : ''
+}
+
+/**
+ * @param {LedgerEntry} e
+ */
+function outcomePdfReasonLine(e) {
+  const o = outcomeSelectValue(e)
+  if (o !== 'rejected' && o !== 'removed') return ''
+  return outcomeReasonFromEntry(e)
+}
+
+/**
+ * @param {LedgerEntry} e
+ * @param {'rejected' | 'removed'} o
+ */
+function openOutcomeReasonModal(e, o) {
+  outcomeReasonTarget.value = e
+  outcomeReasonPendingOutcome.value = o
+  outcomeReasonPresetChoice.value = ''
+  outcomeReasonText.value = outcomeReasonFromEntry(e)
+  outcomeReasonError.value = ''
+  outcomeReasonModalOpen.value = true
+}
+
+function closeOutcomeReasonModal() {
+  outcomeReasonModalOpen.value = false
+  outcomeReasonTarget.value = null
+  outcomeReasonPresetChoice.value = ''
+  outcomeReasonText.value = ''
+  outcomeReasonError.value = ''
+  outcomeReasonBusy.value = false
+}
+
+function onOutcomeReasonPresetSelect() {
+  const v = String(outcomeReasonPresetChoice.value ?? '').trim()
+  if (!v) return
+  outcomeReasonText.value = v
+}
+
+async function confirmOutcomeReasonModal() {
+  const e = outcomeReasonTarget.value
+  const o = outcomeReasonPendingOutcome.value
+  const t = outcomeReasonText.value.trim()
+  if (!e || !/^\d+$/.test(e.dailyTripLegSequence)) return
+  if (!t) {
+    outcomeReasonError.value = 'Enter a reason (pick a common reason or type your own).'
+    return
+  }
+  if (t.length > 500) {
+    outcomeReasonError.value = 'Reason is too long (max 500 characters).'
+    return
+  }
+  outcomeReasonBusy.value = true
+  outcomeReasonError.value = ''
+  const ok = await setOutcome(e.dailyTripLegSequence, o, t)
+  outcomeReasonBusy.value = false
+  if (ok) closeOutcomeReasonModal()
+  else if (error.value) outcomeReasonError.value = error.value
+}
+
+/**
+ * @param {LedgerEntry} e
  * @returns {'none' | 'delivered' | 'rejected' | 'removed'}
  */
 function outcomeSelectValue(e) {
@@ -1440,25 +1519,45 @@ function outcomeSelectValue(e) {
 
 const historySavingId = ref('')
 
-async function setOutcome(legSeq, o) {
-  if (!/^\d+$/.test(legSeq)) return
+/**
+ * @param {string} legSeq
+ * @param {'delivered' | 'rejected' | 'removed' | 'none'} o
+ * @param {string} [outcomeReason] required text when o is rejected or removed (enforced in modal); empty clears when delivered
+ * @returns {Promise<boolean>}
+ */
+async function setOutcome(legSeq, o, outcomeReason = '') {
+  if (!/^\d+$/.test(legSeq)) return false
   historySavingId.value = `seq-${legSeq}`
   try {
-    await patchTripHistoryOutcome({ dailyTripLegSequence: legSeq, outcome: o })
+    const reasonStr = typeof outcomeReason === 'string' ? outcomeReason.trim() : ''
+    await patchTripHistoryOutcome({
+      dailyTripLegSequence: legSeq,
+      outcome: o,
+      outcomeReason: o === 'rejected' || o === 'removed' ? reasonStr : '',
+    })
     const idx = entries.value.findIndex((e) => e.dailyTripLegSequence === legSeq)
     if (idx >= 0) {
       const e = { ...entries.value[idx], outcome: o }
-      if (e.dispatchHeader && typeof e.dispatchHeader === 'object') {
-        e.dispatchHeader = { ...e.dispatchHeader, historyOutcome: o, historyOutcomeAt: Date.now() }
+      const priorDh =
+        e.dispatchHeader && typeof e.dispatchHeader === 'object'
+          ? /** @type {Record<string, unknown>} */ ({ ...e.dispatchHeader })
+          : {}
+      priorDh.historyOutcome = o
+      priorDh.historyOutcomeAt = Date.now()
+      if (o === 'rejected' || o === 'removed') {
+        priorDh.historyOutcomeReason = reasonStr
       } else {
-        e.dispatchHeader = { historyOutcome: o, historyOutcomeAt: Date.now() }
+        delete priorDh.historyOutcomeReason
       }
+      e.dispatchHeader = priorDh
       entries.value[idx] = e
     } else {
       void load()
     }
+    return true
   } catch (err) {
     error.value = err instanceof Error ? err.message : String(err)
+    return false
   } finally {
     historySavingId.value = ''
   }
@@ -1516,8 +1615,15 @@ function toggleOutcomeMenu(row, id, ev) {
 function pickOutcomeFromMenu(e, o, ev) {
   ev?.stopPropagation()
   if (!/^\d+$/.test(e.dailyTripLegSequence)) return
-  if (o === 'delivered' || o === 'rejected' || o === 'removed') {
-    void setOutcome(e.dailyTripLegSequence, o)
+  if (o === 'rejected' || o === 'removed') {
+    openOutcomeReasonModal(e, o)
+    nextTick(() => {
+      closeOutcomeMenu()
+    })
+    return
+  }
+  if (o === 'delivered') {
+    void setOutcome(e.dailyTripLegSequence, o, '')
   }
   nextTick(() => {
     closeOutcomeMenu()
@@ -2085,6 +2191,13 @@ onUnmounted(() => {
                               <span>{{ sourceLabel((str(e.dispatchHeader?.source) || e.source) || '') }}</span>
                             </template>
                           </p>
+                          <p
+                            v-if="e.dailyTripLegSequence && outcomePdfReasonLine(e)"
+                            class="history-outcome-reason-line"
+                          >
+                            <span class="history-outcome-reason-line__lab">Reason</span>
+                            <span class="history-outcome-reason-line__txt">{{ outcomePdfReasonLine(e) }}</span>
+                          </p>
                         </div>
                       </summary>
                     <div class="history-dispatch">
@@ -2322,6 +2435,73 @@ onUnmounted(() => {
           </button>
         </li>
       </ul>
+    </Teleport>
+
+    <Teleport to="body">
+      <div
+        v-if="outcomeReasonModalOpen && outcomeReasonTarget"
+        class="delete-modal-overlay"
+        @click.self="closeOutcomeReasonModal"
+      >
+        <div
+          class="delete-modal"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="outcome-reason-modal-title"
+        >
+          <h2 id="outcome-reason-modal-title" class="delete-modal-title">
+            {{
+              outcomeReasonPendingOutcome === 'removed'
+                ? 'Removed trip — reason'
+                : 'Rejected trip — reason'
+            }}
+          </h2>
+          <p class="delete-modal-desc">
+            Pick a common reason to fill the box, or type your own. This is saved with the trip and shown on work week
+            and FedEx pay schedule mileage PDFs.
+          </p>
+          <label class="history-modal-field">
+            <span class="history-modal-label">Common reasons</span>
+            <select
+              v-model="outcomeReasonPresetChoice"
+              class="delete-modal-input"
+              @change="onOutcomeReasonPresetSelect"
+            >
+              <option value="">— Choose to fill text below —</option>
+              <option v-for="p in TRIP_OUTCOME_REASON_PRESETS" :key="p" :value="p">{{ p }}</option>
+            </select>
+          </label>
+          <label class="history-modal-field">
+            <span class="history-modal-label">Reason (required)</span>
+            <textarea
+              v-model="outcomeReasonText"
+              class="delete-modal-input history-modal-textarea"
+              rows="3"
+              maxlength="500"
+              autocomplete="off"
+            />
+          </label>
+          <p v-if="outcomeReasonError" class="delete-modal-error">{{ outcomeReasonError }}</p>
+          <div class="delete-modal-actions">
+            <button
+              type="button"
+              class="delete-modal-btn delete-modal-btn--cancel"
+              :disabled="outcomeReasonBusy"
+              @click="closeOutcomeReasonModal"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              class="delete-modal-btn delete-modal-btn--confirm"
+              :disabled="outcomeReasonBusy"
+              @click="confirmOutcomeReasonModal"
+            >
+              Save
+            </button>
+          </div>
+        </div>
+      </div>
     </Teleport>
 
     <Teleport to="body">
@@ -4285,6 +4465,24 @@ onUnmounted(() => {
 .history-modal-textarea {
   min-height: 3.25rem;
   resize: vertical;
+}
+
+.history-outcome-reason-line {
+  margin: 0.35rem 0 0;
+  padding: 0 0 0.15rem;
+  font-size: 0.72rem;
+  line-height: 1.4;
+  color: var(--color-text-secondary, #a8a8b8);
+}
+
+.history-outcome-reason-line__lab {
+  font-weight: 700;
+  margin-right: 0.4rem;
+  color: #c4b5fd;
+}
+
+.history-outcome-reason-line__txt {
+  color: #e4e4ee;
 }
 
 .delete-modal-actions--wrap {

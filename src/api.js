@@ -264,15 +264,23 @@ export async function putAssignment(body) {
 }
 
 /**
- * @param {{ dailyTripLegSequence: string, outcome: 'delivered' | 'rejected' | 'removed' | 'none' }} p
+ * @param {{
+ *   dailyTripLegSequence: string,
+ *   outcome: 'delivered' | 'rejected' | 'removed' | 'none',
+ *   outcomeReason?: string,
+ * }} p
  */
 export async function patchTripHistoryOutcome(p) {
+  const patch = {
+    dailyTripLegSequence: String(p.dailyTripLegSequence),
+    outcome: p.outcome,
+    touchedAt: Date.now(),
+  }
+  if (typeof p.outcomeReason === 'string') {
+    patch.outcomeReason = p.outcomeReason
+  }
   return putAssignment({
-    patchTripHistoryEntry: {
-      dailyTripLegSequence: String(p.dailyTripLegSequence),
-      outcome: p.outcome,
-      touchedAt: Date.now(),
-    },
+    patchTripHistoryEntry: patch,
   })
 }
 

@@ -52,6 +52,18 @@ export const PRESETS = {
 const MAX_TRIP_HISTORY = 2000
 
 const TRIP_OUTCOMES = new Set(['delivered', 'rejected', 'removed', 'none'])
+const MAX_TRIP_OUTCOME_REASON_LEN = 500
+
+/**
+ * @param {unknown} s
+ * @returns {string}
+ */
+function sanitizeTripOutcomeReason(s) {
+  if (typeof s !== 'string') return ''
+  let t = s.replace(/[\u0000-\u001F\u007F]/g, ' ').trim()
+  if (t.length > MAX_TRIP_OUTCOME_REASON_LEN) t = t.slice(0, MAX_TRIP_OUTCOME_REASON_LEN)
+  return t
+}
 
 /**
  * @param {unknown} originId
@@ -792,6 +804,11 @@ export async function writeAssignment(body) {
       typeof p.outcome === 'string' && TRIP_OUTCOMES.has(p.outcome.trim().toLowerCase())
         ? p.outcome.trim().toLowerCase()
         : 'none'
+    const reasonIncoming =
+      out === 'rejected' || out === 'removed' ? sanitizeTripOutcomeReason(p.outcomeReason) : ''
+    if ((out === 'rejected' || out === 'removed') && !reasonIncoming) {
+      throw new Error('Outcome reason is required for rejected or removed trips')
+    }
     if (/^\d+$/.test(seq)) {
       const at =
         typeof p.touchedAt === 'number' && Number.isFinite(p.touchedAt)
@@ -802,7 +819,21 @@ export async function writeAssignment(body) {
           if (!x || String(x.dailyTripLegSequence) !== seq) return x
           const o = { ...x, outcome: out, outcomeTouchedAt: at }
           if (o.dispatchHeader && typeof o.dispatchHeader === 'object') {
-            o.dispatchHeader = { ...o.dispatchHeader, historyOutcome: out, historyOutcomeAt: at }
+            const nextDh = { ...o.dispatchHeader, historyOutcome: out, historyOutcomeAt: at }
+            if (out === 'rejected' || out === 'removed') {
+              nextDh.historyOutcomeReason = reasonIncoming
+            } else {
+              delete nextDh.historyOutcomeReason
+            }
+            o.dispatchHeader = nextDh
+          } else if (out === 'rejected' || out === 'removed') {
+            o.dispatchHeader = {
+              historyOutcome: out,
+              historyOutcomeAt: at,
+              historyOutcomeReason: reasonIncoming,
+            }
+          } else {
+            o.dispatchHeader = { historyOutcome: out, historyOutcomeAt: at }
           }
           return o
         })

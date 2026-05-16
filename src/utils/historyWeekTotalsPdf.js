@@ -67,6 +67,7 @@ function proofDedupeKey(seq, o, dest, dispatchDate, leg) {
  *     legLabel: string,
  *     tractorNumber: string,
  *     equipmentBlock?: string,
+ *     outcomeReasonRight?: string,
  *     dailyTripLegSequence?: string,
  *     proofScreenshots?: { label: string, jpeg: string, ts: number }[],
  *   }[],
@@ -319,19 +320,41 @@ function buildTableBody(opts, proofRangeByKey) {
         const [from, to] = span.split('-').map((s) => String(s ?? '').trim() || '0')
         proofLine = `Proof of Dispatch: pg${from} - pg${to}`
       }
-      const subContent = [eqLine, proofLine].filter(Boolean).join('\n')
-      if (subContent) {
-        body.push([
-          {
-            content: '',
-            _equipSpacer: true,
-          },
-          {
-            content: subContent,
-            colSpan: 7,
-            _equip: true,
-          },
-        ])
+      const reasonRaw =
+        typeof r.outcomeReasonRight === 'string' ? r.outcomeReasonRight.trim() : ''
+      const reasonLine = reasonRaw ? `Reason: ${ascii(reasonRaw)}` : ''
+      const leftBlock = [eqLine, proofLine].filter(Boolean).join('\n')
+      if (leftBlock || reasonLine) {
+        if (reasonLine) {
+          body.push([
+            {
+              content: '',
+              _equipSpacer: true,
+            },
+            {
+              content: leftBlock,
+              colSpan: 5,
+              _equip: true,
+            },
+            {
+              content: reasonLine,
+              colSpan: 2,
+              _equipReason: true,
+            },
+          ])
+        } else {
+          body.push([
+            {
+              content: '',
+              _equipSpacer: true,
+            },
+            {
+              content: leftBlock,
+              colSpan: 7,
+              _equip: true,
+            },
+          ])
+        }
       }
     })
   }
@@ -638,6 +661,18 @@ function buildWeekTotalsJsPdf(opts) {
           data.cell.styles.fontSize = 6.2
           data.cell.styles.textColor = DGRAY
           data.cell.styles.halign = 'left'
+          data.cell.styles.cellPadding = { top: 0.35, bottom: 0.35, left: 0.5, right: 1.2 }
+          data.cell.styles.lineColor = [235, 235, 235]
+          data.cell.styles.lineWidth = 0.05
+          data.cell.styles.minCellHeight = 3.2
+          data.cell.styles.overflow = 'linebreak'
+        }
+        if (raw && typeof raw === 'object' && '_equipReason' in raw) {
+          data.cell.styles.fillColor = BG
+          data.cell.styles.fontSize = 6.2
+          data.cell.styles.textColor = DGRAY
+          data.cell.styles.halign = 'right'
+          data.cell.styles.valign = 'top'
           data.cell.styles.cellPadding = { top: 0.35, bottom: 0.35, left: 0.5, right: 1.2 }
           data.cell.styles.lineColor = [235, 235, 235]
           data.cell.styles.lineWidth = 0.05
