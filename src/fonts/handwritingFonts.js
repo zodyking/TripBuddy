@@ -1,8 +1,9 @@
-// Caveat (signature) + Indie Flower (handwritten fields) — TTF bytes loaded via Vite ?url + fetch
-// so jsPDF VFS always gets valid font data (large base64 ?raw imports can mis-bundle).
+// Notera2 (signature) + Indie Flower (handwritten fields) — TTF bytes via Vite ?url + fetch
 
-import caveatFontUrl from './Caveat-Regular.ttf?url'
+import notera2FontUrl from './Notera2PersonalUseOnlyLight-maBV.ttf?url'
 import indieFlowerFontUrl from './IndieFlower-Regular.ttf?url'
+
+const NOTERA_VFS = 'Notera2PersonalUseOnlyLight-maBV.ttf'
 
 /** @param {ArrayBuffer} buf */
 function arrayBufferToBinaryString(buf) {
@@ -27,19 +28,19 @@ async function loadTtfBinaryString(url) {
 }
 
 /** Cached TTF binary strings (shared across PDFs). */
-let caveatBin = /** @type {string | null} */ (null)
+let notera2Bin = /** @type {string | null} */ (null)
 let indieBin = /** @type {string | null} */ (null)
 let loadPromise = /** @type {Promise<void> | null} */ (null)
 
 async function ensureFontBytesLoaded() {
-  if (caveatBin != null && indieBin != null) return
+  if (notera2Bin != null && indieBin != null) return
   if (!loadPromise) {
     loadPromise = (async () => {
-      const [c, i] = await Promise.all([
-        loadTtfBinaryString(caveatFontUrl),
+      const [n, i] = await Promise.all([
+        loadTtfBinaryString(notera2FontUrl),
         loadTtfBinaryString(indieFlowerFontUrl),
       ])
-      caveatBin = c
+      notera2Bin = n
       indieBin = i
     })()
   }
@@ -52,10 +53,10 @@ async function ensureFontBytesLoaded() {
  */
 export async function registerHandwritingFonts(doc) {
   await ensureFontBytesLoaded()
-  if (!caveatBin || !indieBin) throw new Error('Handwriting fonts failed to load')
-  if (!doc.existsFileInVFS('Caveat-Regular.ttf')) {
-    doc.addFileToVFS('Caveat-Regular.ttf', caveatBin)
-    doc.addFont('Caveat-Regular.ttf', 'Caveat', 'normal', undefined, 'Identity-H')
+  if (!notera2Bin || !indieBin) throw new Error('Handwriting fonts failed to load')
+  if (!doc.existsFileInVFS(NOTERA_VFS)) {
+    doc.addFileToVFS(NOTERA_VFS, notera2Bin)
+    doc.addFont(NOTERA_VFS, 'Notera2', 'normal', undefined, 'Identity-H')
   }
   if (!doc.existsFileInVFS('IndieFlower-Regular.ttf')) {
     doc.addFileToVFS('IndieFlower-Regular.ttf', indieBin)
@@ -63,5 +64,5 @@ export async function registerHandwritingFonts(doc) {
   }
 }
 
-export const FONT_SIGNATURE = 'Caveat'
+export const FONT_SIGNATURE = 'Notera2'
 export const FONT_HANDWRITING = 'IndieFlower'

@@ -1398,6 +1398,7 @@ async function onOpenTripFormPdf(e) {
       },
       driverName: String(pdfCredMeta.value.driverName ?? '').trim(),
       employeeNumber: String(pdfCredMeta.value.employeeNumber ?? '').trim(),
+      username: storedUsername.value.trim(),
       directory: dirMap,
       originLocationId: oId,
       destLocationId: dId,

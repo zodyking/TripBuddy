@@ -162,6 +162,55 @@ function formatDriverFedex(name) {
   return ascii(t).toUpperCase()
 }
 
+/** @param {string} w */
+function titleCaseLettersOnly(w) {
+  const letters = ascii(w).replace(/[^A-Za-z]/g, '')
+  if (!letters) return ''
+  return letters.charAt(0).toUpperCase() + letters.slice(1).toLowerCase()
+}
+
+/**
+ * Signature line: "Firstname Lastname" (letters only, title case).
+ * Handles FedEx "LAST, FIRST [MIDDLE]" and plain "first last".
+ * @param {string} name
+ */
+function formatDriverSignatureNatural(name) {
+  const raw = String(name || '').trim()
+  if (!raw) return ''
+  const t = ascii(raw)
+  if (/,/.test(t)) {
+    const parts = t.split(',').map((p) => p.trim()).filter(Boolean)
+    if (parts.length >= 2) {
+      const lastSegment = parts[0]
+      const givenSegment = parts.slice(1).join(' ')
+      const lastWords = lastSegment.split(/\s+/).filter(Boolean).map(titleCaseLettersOnly).filter(Boolean)
+      const givenWords = givenSegment.split(/\s+/).filter(Boolean).map(titleCaseLettersOnly).filter(Boolean)
+      const last = lastWords.join(' ')
+      const first = givenWords.join(' ')
+      return [first, last].filter(Boolean).join(' ').trim()
+    }
+  }
+  const words = t
+    .replace(/[^A-Za-z\s]/g, ' ')
+    .split(/\s+/)
+    .filter(Boolean)
+    .map(titleCaseLettersOnly)
+    .filter(Boolean)
+  return words.join(' ')
+}
+
+/**
+ * Same rule as linehaulDriverIdFromCredMeta: digits-only username, else digits-only employeeNumber.
+ * @param {{ username?: string, employeeNumber?: string }} p
+ */
+function pickDriverIdForPdf(p) {
+  const u = String(p.username ?? '').trim()
+  if (u && /^\d+$/.test(u)) return u
+  const e = String(p.employeeNumber ?? '').trim()
+  if (e && /^\d+$/.test(e)) return e
+  return ''
+}
+
 /** Strip " lbs" etc. so the form shows numeric weight like the FedEx sheet (e.g. 11701.88). */
 function packageWeightFedexDisplay(raw) {
   const t = String(raw ?? '').trim()
@@ -225,6 +274,7 @@ function formatBasedUponDepartur(tsMs) {
  *   entry: TripFormLedgerEntry,
  *   driverName: string,
  *   employeeNumber: string,
+ *   username?: string,
  *   directory: Map<string, { locationName: string, abbreviation: string, address: string, phone: string, lat: number | null, lng: number | null }>,
  *   originLocationId: string,
  *   destLocationId: string,
@@ -359,6 +409,11 @@ async function buildTripFormJsPdf(opts) {
       : destId || ascii(str(dh.destination)).toUpperCase() || '-'
 
   const driverFedex = formatDriverFedex((opts.driverName || '').trim())
+  const driverSignatureNatural = formatDriverSignatureNatural((opts.driverName || '').trim())
+  const driverIdPdf = pickDriverIdForPdf({
+    username: opts.username,
+    employeeNumber: opts.employeeNumber,
+  })
 
   const destDir = dirGet(opts.directory, opts.destLocationId)
   const originDir = dirGet(opts.directory, opts.originLocationId)
@@ -524,9 +579,9 @@ async function buildTripFormJsPdf(opts) {
     })),
     dollies: [dolly1, dolly2],
     // Driver-filled fields (handwriting style)
-    driverSignature: driverFedex, // Use driver name as signature
+    driverSignature: driverSignatureNatural,
     signatureDate: formatSignatureDateFedex(dispatchTs ?? Date.now()), // Use trip date
-    driverId: ascii(String(opts.employeeNumber ?? '').trim()),
+    driverId: ascii(driverIdPdf),
   })
   const slug =
     legSeq && /^\d+$/.test(legSeq)

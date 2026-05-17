@@ -88,24 +88,25 @@ export async function generateLinehaulPretripPDF(input = {}) {
 
   const checkbox = (x, y) => box(x, y, 9.5, 9.5, 1.0)
 
-  // Handwriting-style text for general driver-filled fields (Indie Flower - realistic handwriting)
+  // Subtle blue-black ink (ballpoint on white paper — not purple screen tint)
+  const PEN_INK = [26, 32, 42]
+
+  // Handwriting-style text for general driver-filled fields (Indie Flower)
   const handwriting = (value, x, y, size = 11) => {
     if (!value) return
     doc.setFont(FONT_HANDWRITING, 'normal')
     doc.setFontSize(size)
-    // Blue-black color to simulate ballpoint pen
-    doc.setTextColor(10, 10, 90)
+    doc.setTextColor(PEN_INK[0], PEN_INK[1], PEN_INK[2])
     doc.text(String(value), x, y)
     doc.setTextColor(0, 0, 0)
   }
 
-  // Cursive signature style (Caveat - flowing cursive for signatures)
+  // Cursive signature (Notera2)
   const signature = (value, x, y, size = 14) => {
     if (!value) return
     doc.setFont(FONT_SIGNATURE, 'normal')
     doc.setFontSize(size)
-    // Blue-black color to simulate ballpoint pen
-    doc.setTextColor(10, 10, 90)
+    doc.setTextColor(PEN_INK[0], PEN_INK[1], PEN_INK[2])
     doc.text(String(value), x, y)
     doc.setTextColor(0, 0, 0)
   }
@@ -271,7 +272,7 @@ export async function generateLinehaulPretripPDF(input = {}) {
 
   text('Driver Signature', 29, 727, 7.0)
   line(102, 727, 347, 727)
-  // Driver signature in cursive style (Caveat font)
+  // Driver signature in cursive (Notera2)
   if (data.driverSignature) signature(data.driverSignature, 110, 724, 14)
 
   text('Date', 365, 727, 7.0)
