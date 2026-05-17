@@ -116,6 +116,66 @@ function closeWeekPdfViewer() {
   }
   pdfViewerFilename.value = ''
   pdfViewerTitle.value = ''
+  pdfFrameZoom.value = 1
+}
+
+/** Mobile PDF preview: wider layout + zoom so text stays readable (iframe blob PDF is tiny if squeezed to viewport width). */
+const pdfViewerLayoutNarrow = ref(false)
+/** Multiplier on base mobile PDF column width (see `PDF_VIEWER_MOBILE_BASE_W`). */
+const pdfFrameZoom = ref(1)
+const PDF_VIEWER_MOBILE_BASE_W = 920
+
+function updatePdfViewerLayoutNarrow() {
+  pdfViewerLayoutNarrow.value =
+    typeof window !== 'undefined' && window.matchMedia('(max-width: 640px)').matches
+}
+
+/** @param {number} delta */
+function bumpPdfFrameZoom(delta) {
+  pdfFrameZoom.value = Math.min(
+    2.35,
+    Math.max(0.65, Math.round((pdfFrameZoom.value + delta) * 100) / 100),
+  )
+}
+
+function resetPdfFrameZoom() {
+  pdfFrameZoom.value = 1
+}
+
+function openPdfInNewTab() {
+  const url = pdfViewerObjectUrl.value
+  if (!url) return
+  const w = window.open(url, '_blank', 'noopener,noreferrer')
+  if (!w) {
+    window.alert('Allow pop-ups for this site to open the PDF in a new tab (better pinch-zoom on phones).')
+  }
+}
+
+const pdfViewerIframeStyle = computed(() => {
+  if (!pdfViewerLayoutNarrow.value) return /** @type {Record<string, string>} */ ({})
+  const w = Math.round(PDF_VIEWER_MOBILE_BASE_W * pdfFrameZoom.value)
+  return {
+    width: `${w}px`,
+    maxWidth: 'none',
+    flex: 'none',
+    height: 'auto',
+    minHeight: 'min(88dvh, 1200px)',
+  }
+})
+
+watch(
+  () => !!(pdfWeekViewerOpen.value && pdfViewerObjectUrl.value),
+  (active) => {
+    if (active) {
+      updatePdfViewerLayoutNarrow()
+      pdfFrameZoom.value = 1
+    }
+  },
+  { flush: 'sync' },
+)
+
+function onPdfViewerWindowResize() {
+  if (pdfWeekViewerOpen.value) updatePdfViewerLayoutNarrow()
 }
 
 /** Viewed calendar month (prev/next, no year cap). */
@@ -1964,6 +2024,7 @@ onMounted(() => {
   if (typeof window !== 'undefined') {
     window.addEventListener('scroll', onOutcomeMenuViewport, true)
     window.addEventListener('resize', onOutcomeMenuViewport, true)
+    window.addEventListener('resize', onPdfViewerWindowResize)
   }
   void load()
 })
@@ -1976,6 +2037,7 @@ onUnmounted(() => {
   if (typeof window !== 'undefined') {
     window.removeEventListener('scroll', onOutcomeMenuViewport, true)
     window.removeEventListener('resize', onOutcomeMenuViewport, true)
+    window.removeEventListener('resize', onPdfViewerWindowResize)
   }
 })
 </script>
@@ -2667,9 +2729,23 @@ onUnmounted(() => {
       >
         <div class="history-pdf-viewer-backdrop" @click="closeWeekPdfViewer" />
         <div class="history-pdf-viewer-dialog" @click.stop>
-          <header class="history-pdf-viewer-head">
+          <header
+            class="history-pdf-viewer-head"
+            :class="{ 'history-pdf-viewer-head--narrow': pdfViewerLayoutNarrow }"
+          >
             <h3 id="history-pdf-viewer-title" class="history-pdf-viewer-title">{{ pdfViewerTitle }}</h3>
-            <div class="history-pdf-viewer-actions">
+            <div
+              class="history-pdf-viewer-actions"
+              :class="{ 'history-pdf-viewer-actions--narrow': pdfViewerLayoutNarrow }"
+            >
+              <button
+                v-if="pdfViewerObjectUrl && pdfViewerLayoutNarrow"
+                type="button"
+                class="history-pdf-viewer-open-tab tap"
+                @click="openPdfInNewTab"
+              >
+                Open in tab
+              </button>
               <a
                 v-if="pdfViewerObjectUrl"
                 class="history-pdf-viewer-download tap"
@@ -2681,12 +2757,53 @@ onUnmounted(() => {
               </button>
             </div>
           </header>
-          <iframe
-            v-if="pdfViewerObjectUrl"
-            class="history-pdf-viewer-frame"
-            title="PDF preview (week mileage or trip form)"
-            :src="pdfViewerObjectUrl"
-          />
+          <div
+            v-if="pdfViewerLayoutNarrow"
+            class="history-pdf-viewer-zoombar"
+            role="toolbar"
+            aria-label="PDF zoom"
+          >
+            <button
+              type="button"
+              class="history-pdf-viewer-zoombtn tap"
+              aria-label="Zoom out"
+              @click="bumpPdfFrameZoom(-0.12)"
+            >
+              −
+            </button>
+            <span class="history-pdf-viewer-zoompct">{{ Math.round(pdfFrameZoom * 100) }}%</span>
+            <button
+              type="button"
+              class="history-pdf-viewer-zoombtn tap"
+              aria-label="Zoom in"
+              @click="bumpPdfFrameZoom(0.12)"
+            >
+              +
+            </button>
+            <button
+              type="button"
+              class="history-pdf-viewer-zoombtn history-pdf-viewer-zoombtn--text tap"
+              @click="resetPdfFrameZoom"
+            >
+              Reset
+            </button>
+          </div>
+          <p v-if="pdfViewerLayoutNarrow" class="history-pdf-viewer-hint">
+            Drag to pan when zoomed. Use Open in tab for pinch-zoom in your browser viewer.
+          </p>
+          <div
+            class="history-pdf-viewer-frame-scroll"
+            :class="{ 'history-pdf-viewer-frame-scroll--narrow': pdfViewerLayoutNarrow }"
+          >
+            <iframe
+              v-if="pdfViewerObjectUrl"
+              class="history-pdf-viewer-frame"
+              :class="{ 'history-pdf-viewer-frame--narrow': pdfViewerLayoutNarrow }"
+              title="PDF preview (week mileage or trip form)"
+              :src="pdfViewerObjectUrl"
+              :style="pdfViewerIframeStyle"
+            />
+          </div>
         </div>
       </div>
     </Teleport>
@@ -4466,6 +4583,13 @@ onUnmounted(() => {
     env(safe-area-inset-bottom, 0) max(env(safe-area-inset-left), 0.5rem);
 }
 
+@media (max-width: 640px) {
+  .history-pdf-viewer-overlay {
+    padding: env(safe-area-inset-top, 0) env(safe-area-inset-right, 0) env(safe-area-inset-bottom, 0)
+      env(safe-area-inset-left, 0);
+  }
+}
+
 .history-pdf-viewer-backdrop {
   position: absolute;
   inset: 0;
@@ -4490,6 +4614,15 @@ onUnmounted(() => {
   overflow: hidden;
 }
 
+@media (max-width: 640px) {
+  .history-pdf-viewer-dialog {
+    width: 100%;
+    max-width: 100%;
+    border-radius: 0;
+    box-shadow: none;
+  }
+}
+
 .history-pdf-viewer-head {
   display: flex;
   align-items: flex-start;
@@ -4499,6 +4632,13 @@ onUnmounted(() => {
   padding: 0.65rem 0.75rem;
   border-bottom: 1px solid rgba(255, 255, 255, 0.08);
   background: linear-gradient(180deg, #1a1a26 0%, #14141c 100%);
+}
+
+.history-pdf-viewer-head--narrow {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.5rem;
+  padding: 0.55rem 0.65rem;
 }
 
 .history-pdf-viewer-title {
@@ -4518,6 +4658,104 @@ onUnmounted(() => {
   flex-shrink: 0;
 }
 
+.history-pdf-viewer-actions--narrow {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 0.45rem;
+  width: 100%;
+}
+
+.history-pdf-viewer-actions--narrow .history-pdf-viewer-open-tab,
+.history-pdf-viewer-actions--narrow .history-pdf-viewer-download,
+.history-pdf-viewer-actions--narrow .history-pdf-viewer-close {
+  justify-content: center;
+  min-height: 44px;
+  font-size: 0.78rem;
+}
+
+.history-pdf-viewer-open-tab {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.38rem 0.6rem;
+  border-radius: 8px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  border: 1px solid rgba(167, 139, 250, 0.5);
+  background: rgba(167, 139, 250, 0.14);
+  color: #ede9fe;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+.history-pdf-viewer-open-tab:hover {
+  background: rgba(167, 139, 250, 0.22);
+}
+
+.history-pdf-viewer-open-tab:focus-visible {
+  outline: 2px solid rgba(167, 139, 250, 0.75);
+  outline-offset: 2px;
+}
+
+.history-pdf-viewer-zoombar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  padding: 0.3rem 0.65rem 0.45rem;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+  background: rgba(0, 0, 0, 0.22);
+}
+
+.history-pdf-viewer-zoombtn {
+  min-width: 44px;
+  min-height: 44px;
+  padding: 0;
+  border-radius: 10px;
+  font-size: 1.25rem;
+  font-weight: 700;
+  line-height: 1;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(255, 255, 255, 0.07);
+  color: #f4f4fb;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+.history-pdf-viewer-zoombtn--text {
+  min-width: auto;
+  padding: 0 0.85rem;
+  font-size: 0.76rem;
+  font-weight: 650;
+}
+
+.history-pdf-viewer-zoombtn:hover {
+  background: rgba(255, 255, 255, 0.11);
+}
+
+.history-pdf-viewer-zoombtn:focus-visible {
+  outline: 2px solid rgba(167, 139, 250, 0.75);
+  outline-offset: 2px;
+}
+
+.history-pdf-viewer-zoompct {
+  min-width: 3.25rem;
+  text-align: center;
+  font-size: 0.76rem;
+  font-weight: 700;
+  color: rgba(255, 255, 255, 0.72);
+}
+
+.history-pdf-viewer-hint {
+  margin: 0;
+  padding: 0.35rem 0.75rem 0.5rem;
+  font-size: 0.68rem;
+  line-height: 1.4;
+  color: rgba(200, 200, 220, 0.55);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
 .history-pdf-viewer-download {
   display: inline-flex;
   align-items: center;
@@ -4530,6 +4768,7 @@ onUnmounted(() => {
   color: #0f0f14;
   background: linear-gradient(145deg, #ddd6fe, #a78bfa);
   border: 1px solid rgba(167, 139, 250, 0.6);
+  touch-action: manipulation;
 }
 
 .history-pdf-viewer-download:hover {
@@ -4545,10 +4784,26 @@ onUnmounted(() => {
   background: rgba(255, 255, 255, 0.06);
   color: #e4e4ee;
   cursor: pointer;
+  touch-action: manipulation;
 }
 
 .history-pdf-viewer-close:hover {
   background: rgba(255, 255, 255, 0.1);
+}
+
+.history-pdf-viewer-frame-scroll {
+  flex: 1 1 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.history-pdf-viewer-frame-scroll--narrow {
+  overflow: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+  touch-action: pan-x pan-y;
 }
 
 .history-pdf-viewer-frame {
@@ -4557,6 +4812,10 @@ onUnmounted(() => {
   width: 100%;
   border: 0;
   background: #0a0a10;
+}
+
+.history-pdf-viewer-frame--narrow {
+  flex: none;
 }
 
 .history-modal-field {
