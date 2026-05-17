@@ -9,7 +9,7 @@ import {
   FONT_HANDWRITING,
 } from '../fonts/handwritingFonts.js'
 
-export function generateLinehaulPretripPDF(input = {}) {
+export async function generateLinehaulPretripPDF(input = {}) {
   const data = {
     tractor: '',
     destination: '',
@@ -59,8 +59,8 @@ export function generateLinehaulPretripPDF(input = {}) {
   doc.setTextColor(0, 0, 0)
   doc.setDrawColor(0, 0, 0)
 
-  // Register custom handwriting fonts
-  registerHandwritingFonts(doc)
+  // Register custom handwriting fonts (TTF via Vite asset URL + fetch)
+  await registerHandwritingFonts(doc)
 
   const font = (size = 8, style = 'normal', family = 'helvetica') => {
     doc.setFont(family, style)
@@ -291,7 +291,7 @@ export function generateLinehaulPretripPDF(input = {}) {
   return doc
 }
 
-export function downloadLinehaulPretripPDF(data = {}) {
-  const doc = generateLinehaulPretripPDF(data)
+export async function downloadLinehaulPretripPDF(data = {}) {
+  const doc = await generateLinehaulPretripPDF(data)
   doc.save('linehaul-pretrip-refined-v7.pdf')
 }

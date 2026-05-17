@@ -326,9 +326,9 @@ function formatSignatureDateFedex(tsMs = Date.now()) {
 
 /**
  * @param {TripFormPdfOpts} opts
- * @returns {{ doc: import('jspdf').jsPDF, fileName: string }}
+ * @returns {Promise<{ doc: import('jspdf').jsPDF, fileName: string }>}
  */
-function buildTripFormJsPdf(opts) {
+async function buildTripFormJsPdf(opts) {
   const e = opts.entry
   const dh = e.dispatchHeader && typeof e.dispatchHeader === 'object' ? e.dispatchHeader : {}
   const td = e.tripDetails && typeof e.tripDetails === 'object' && !Array.isArray(e.tripDetails)
@@ -490,7 +490,7 @@ function buildTripFormJsPdf(opts) {
 
   const tractorField = tractor === '-' ? '' : tractor
 
-  const doc = generateLinehaulPretripPDF({
+  const doc = await generateLinehaulPretripPDF({
     tractor: tractorField,
     destination: tripDestHeaderShort,
     tripDestination: tripDestHeaderShort,
@@ -540,9 +540,9 @@ function buildTripFormJsPdf(opts) {
 
 /**
  * @param {TripFormPdfOpts} opts
- * @returns {{ blob: Blob, filename: string }}
+ * @returns {Promise<{ blob: Blob, filename: string }>}
  */
-export function getHistoryTripFormPdfBlob(opts) {
-  const { doc, fileName } = buildTripFormJsPdf(opts)
+export async function getHistoryTripFormPdfBlob(opts) {
+  const { doc, fileName } = await buildTripFormJsPdf(opts)
   return { blob: doc.output('blob'), filename: fileName }
 }

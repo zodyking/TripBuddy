@@ -1384,7 +1384,7 @@ async function onOpenTripFormPdf(e) {
     const oId = leadingLocationId(e.dispatchHeader?.origin)
     const dId = leadingLocationId(e.dispatchHeader?.destination)
     closeWeekPdfViewer()
-    const { blob, filename } = getHistoryTripFormPdfBlob({
+    const { blob, filename } = await getHistoryTripFormPdfBlob({
       entry: {
         id: e.id,
         displayDate: e.displayDate,
