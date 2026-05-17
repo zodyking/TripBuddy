@@ -186,9 +186,46 @@ export async function generateLinehaulPretripPDF(input = {}) {
   line(94, 604, 296, 604)
   if (data.invoiceRef) text(data.invoiceRef, 100, 601, 8.5, 'bold')
 
+  /**
+   * Empty trailer move: no real load/weight in TMS — mimic driver handwriting the trailer # (not system Courier).
+   * @param {{ number?: string, load?: string, weight?: string, seal?: string } | undefined} values
+   */
+  function trailerSlotLooksEmptyMove(values) {
+    if (!values || typeof values !== 'object') return false
+    const load = String(values.load ?? '').trim()
+    const weight = String(values.weight ?? '').trim()
+    const loadU = load.toUpperCase()
+    const loadEmpty =
+      !load ||
+      loadU === 'N/A' ||
+      load === '—' ||
+      load === '-' ||
+      loadU === 'EMPTY' ||
+      /\bEMPTY\b/i.test(load)
+    const wNorm = weight.replace(/,/g, '').trim()
+    const wNum = Number.parseFloat(wNorm)
+    const weightEmpty =
+      !weight ||
+      weight === '—' ||
+      weight === '-' ||
+      weight.toUpperCase() === 'N/A' ||
+      wNorm === '0' ||
+      wNorm === '0.0' ||
+      wNorm === '0.00' ||
+      (Number.isFinite(wNum) && wNum === 0)
+    return loadEmpty && weightEmpty
+  }
+
   function trailerBlock(index, values, titleY, sealY, loadY, weightY) {
     text(`TRAILER ${index}:`, rightX + 6, titleY, 8.8, 'bold')
-    if (values?.number) text(values.number, rightX + 70, titleY, 11.2, 'bold', { family: 'courier' })
+    const trlrN = values?.number != null ? String(values.number).trim() : ''
+    if (trlrN) {
+      if (trailerSlotLooksEmptyMove(values)) {
+        handwriting(trlrN, rightX + 70, titleY - 2, 11)
+      } else {
+        text(trlrN, rightX + 70, titleY, 11.2, 'bold', { family: 'courier' })
+      }
+    }
 
     text('SEAL:', rightX + 6, sealY, 8.3)
     line(rightX + 46, sealY, rightX + rightW - 12, sealY, 0.9)
