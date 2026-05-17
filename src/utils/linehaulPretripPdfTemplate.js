@@ -37,6 +37,10 @@ export function generateLinehaulPretripPDF(input = {}) {
       { number: '', seal: '', load: '', weight: '' },
     ],
     dollies: ['', ''],
+    // Driver-filled fields (handwriting style)
+    driverSignature: '',
+    signatureDate: '',
+    driverId: '',
     ...input,
   }
 
@@ -75,6 +79,17 @@ export function generateLinehaulPretripPDF(input = {}) {
   }
 
   const checkbox = (x, y) => box(x, y, 9.5, 9.5, 1.0)
+
+  // Handwriting-style text for driver-filled fields (italic Times for cursive look)
+  const handwriting = (value, x, y, size = 9) => {
+    if (!value) return
+    doc.setFont('times', 'italic')
+    doc.setFontSize(size)
+    // Slight blue-black color to simulate ballpoint pen
+    doc.setTextColor(15, 15, 80)
+    doc.text(String(value), x, y)
+    doc.setTextColor(0, 0, 0) // Reset to black
+  }
 
   // Header
   text('Tractor:', 22, 24, 9.2, 'bold')
@@ -158,7 +173,7 @@ export function generateLinehaulPretripPDF(input = {}) {
     text('SEAL:', rightX + 6, sealY, 8.3)
     line(rightX + 46, sealY, rightX + rightW - 12, sealY, 0.9)
     // Render seal value in handwriting style if present
-    if (values?.seal) text(values.seal, rightX + 50, sealY - 3, 8.0, 'normal', { family: 'courier' })
+    if (values?.seal) handwriting(values.seal, rightX + 50, sealY - 3, 9)
 
     text('LOAD', rightX + 6, loadY, 8.3)
     center(values?.load || '', rightX + 114, loadY, 145, 8.8, 'bold')
@@ -171,13 +186,13 @@ export function generateLinehaulPretripPDF(input = {}) {
 
   text('DOLLY 1:', rightX + 6, 254, 8.8)
   line(371, 254, 582, 254, 0.9)
-  if (data.dollies?.[0]) text(data.dollies[0], 376, 251, 8.5, 'bold')
+  if (data.dollies?.[0]) handwriting(data.dollies[0], 376, 251, 9)
 
   trailerBlock(2, data.trailers?.[1], 297, 316, 337, 356)
 
   text('DOLLY 2:', rightX + 6, 398, 8.8)
   line(371, 398, 582, 398, 0.9)
-  if (data.dollies?.[1]) text(data.dollies[1], 376, 395, 8.5, 'bold')
+  if (data.dollies?.[1]) handwriting(data.dollies[1], 376, 395, 9)
 
   trailerBlock(3, data.trailers?.[2], 439, 458, 478, 497)
 
@@ -237,11 +252,18 @@ export function generateLinehaulPretripPDF(input = {}) {
 
   text('Driver Signature', 29, 727, 7.0)
   line(102, 727, 347, 727)
+  // Driver signature in handwriting style
+  if (data.driverSignature) handwriting(data.driverSignature, 110, 724, 10)
+
   text('Date', 365, 727, 7.0)
   line(398, 727, 554, 727)
+  // Date in handwriting style
+  if (data.signatureDate) handwriting(data.signatureDate, 405, 724, 9)
+
   text('Driver ID Number:', 29, 744, 7.0)
   line(122, 744, 347, 744)
-  if (data.driverId) text(data.driverId, 126, 741, 7.0, 'bold')
+  // Driver ID in handwriting style
+  if (data.driverId) handwriting(data.driverId, 130, 741, 9)
 
   // Kept at the crop edge like the scanned original.
   text('Printed Time:', 348, 766, 7.0, 'bold')
