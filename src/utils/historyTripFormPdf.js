@@ -15,7 +15,7 @@ function ascii(s) {
 
 /**
  * Canonical FedEx Ground linehaul trip sheet wording (printed reference).
- * Keep literals aligned with `public/trip sheet.png` when present in the repo.
+ * Keep literals aligned with the printed FedEx linehaul sheet (Adobe scan reference).
  */
 const FEDEX_FORM = {
   headerTractorLab: 'Tractor: ',
@@ -481,8 +481,8 @@ function buildTripFormJsPdf(opts) {
   const IW = W - M * 2
   let y = M
 
-  /** FedEx scan (image 2): sans-serif / Helvetica, not monospace. */
-  const FONT = 'helvetica'
+  /** FedEx printed sheet uses monospaced type (Courier-class), not proportional sans. */
+  const FONT = 'courier'
   const FS_HEAD = 9
   const FS_BODY = 7.2
   const FS_SMALL = 6.5
@@ -587,16 +587,17 @@ function buildTripFormJsPdf(opts) {
   doc.text(doc.splitTextToSize(ascii(FEDEX_FORM.instrLinehaulRespBullets), IW * 0.48 - 2), M + IW * 0.5 + 2, y + 7.5)
   y += instrH + 2.2
 
-  /** ---------- Safety (thick top/bottom, thin sides; prompts left/right aligned) ---------- */
-  const safetyH = 9.2
+  /** ---------- Safety (thick top/bottom, thin sides; single-line prompts like FedEx scan) ---------- */
+  const safetyH = 10.5
   strokeRectThickHorizontalEnds(M, y, IW, safetyH)
   doc.setDrawColor(...BLACK)
   doc.setLineWidth(BW_THIN)
   doc.line(W / 2, y, W / 2, y + safetyH)
   const halfW = IW / 2
   const safetyPad = 2.5
-  const safetyMidY = y + safetyH / 2 + 1.2
-  setF('bold', FS_BODY - 0.2)
+  const safetyMidY = y + safetyH / 2 + 1.35
+  const safetyFs = 5.85
+  setF('bold', safetyFs)
   doc.text(FEDEX_FORM.safetyLights, M + safetyPad, safetyMidY, {
     align: 'left',
     maxWidth: halfW - safetyPad * 2,
@@ -607,10 +608,10 @@ function buildTripFormJsPdf(opts) {
   })
   y += safetyH + 2.2
 
-  /** ---------- Two-column body (FedEx ~58% / 42% split) ---------- */
+  /** ---------- Two-column body (FedEx scan ~56% left / remainder right) ---------- */
   const midTop = y
   const colGap = 2
-  const leftW = IW * 0.58
+  const leftW = IW * 0.56
   const rightW = IW - leftW - colGap
   const rx = M + leftW + colGap
   const splitX = M + leftW
@@ -888,9 +889,9 @@ function buildTripFormJsPdf(opts) {
 
   y = midTop + midH + 2.5
 
-  /** ---------- Purchased carrier invoice — full width (FedEx image 2) ---------- */
+  /** ---------- Purchased carrier invoice — left column width only (matches FedEx scan) ---------- */
   const invH = 16
-  strokeRect(M, y, IW, invH, BW_THIN)
+  strokeRect(M, y, leftW, invH, BW_THIN)
   setF('bold', FS_BODY)
   doc.text(FEDEX_FORM.purchasedCarrierInvoice, M + 2, y + 4.5)
   setF('bold', FS_SMALL)
@@ -900,7 +901,8 @@ function buildTripFormJsPdf(opts) {
   doc.setLineWidth(BW_THIN)
   const refLabW = doc.getTextWidth(refLab)
   const refLineX0 = M + 2 + refLabW + 1.2
-  doc.line(refLineX0, y + 9.3, M + IW - 2, y + 9.3)
+  const invInnerR = M + leftW - 2
+  doc.line(refLineX0, y + 9.3, invInnerR, y + 9.3)
   if (tmsRef) {
     setF('normal', FS_SMALL)
     doc.text(tmsRef, refLineX0 + 0.6, y + 10.1)
