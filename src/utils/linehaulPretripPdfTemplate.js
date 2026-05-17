@@ -157,6 +157,8 @@ export function generateLinehaulPretripPDF(input = {}) {
 
     text('SEAL:', rightX + 6, sealY, 8.3)
     line(rightX + 46, sealY, rightX + rightW - 12, sealY, 0.9)
+    // Render seal value in handwriting style if present
+    if (values?.seal) text(values.seal, rightX + 50, sealY - 3, 8.0, 'normal', { family: 'courier' })
 
     text('LOAD', rightX + 6, loadY, 8.3)
     center(values?.load || '', rightX + 114, loadY, 145, 8.8, 'bold')
@@ -201,13 +203,28 @@ export function generateLinehaulPretripPDF(input = {}) {
     items.forEach((item, index) => {
       const y = base + index * 14
       checkbox(x, y - 9)
+      // Add checkmark inside the checkbox to simulate filled form
+      text('X', x + 2.5, y - 1, 7.5, 'bold')
       text(item, x + 18, y, 6.5, 'bold')
     })
   }
 
   checklistColumn(27, items1)
   checklistColumn(166, items2)
-  checklistColumn(322, items3)
+  // Third column - only check first two items (COUPLING DEVICES, SAFETY CHAIN), leave BODY and OTHER unchecked
+  const items3First = items3.slice(0, 2)
+  const items3Last = items3.slice(2)
+  items3First.forEach((item, index) => {
+    const y = base + index * 14
+    checkbox(322, y - 9)
+    text('X', 324.5, y - 1, 7.5, 'bold')
+    text(item, 340, y, 6.5, 'bold')
+  })
+  items3Last.forEach((item, index) => {
+    const y = base + (index + 2) * 14
+    checkbox(322, y - 9)
+    text(item, 340, y, 6.5, 'bold')
+  })
   line(373, 684, 554, 684)
   line(373, 698, 554, 698)
 

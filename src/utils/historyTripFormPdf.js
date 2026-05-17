@@ -325,15 +325,16 @@ function buildTripFormJsPdf(opts) {
   const destId = padLocationId(opts.destLocationId)
   const originId = padLocationId(opts.originLocationId)
 
+  // Prefer directory abbreviation (4-letter code like "BETH") over dispatch label which may have full name
   const destAbbr =
+    dirGet(opts.directory, opts.destLocationId)?.abbreviation ||
     extras.tripDestAbbrv ||
     locAbbrFromDispatchLabel(dh.destination) ||
-    dirGet(opts.directory, opts.destLocationId)?.abbreviation ||
     ''
   const originAbbr =
+    dirGet(opts.directory, opts.originLocationId)?.abbreviation ||
     extras.currentLocationAbbrv ||
     locAbbrFromDispatchLabel(dh.origin) ||
-    dirGet(opts.directory, opts.originLocationId)?.abbreviation ||
     ''
 
   const tripDestHeaderShort =
