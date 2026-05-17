@@ -305,6 +305,8 @@ function formatPrintedTimeFedex(tsMs = Date.now()) {
   const tzParts = new Intl.DateTimeFormat('en-US', { timeZone: tz, timeZoneName: 'short' }).formatToParts(d)
   const tzRaw = tzParts.find((p) => p.type === 'timeZoneName')?.value?.trim() ?? ''
   const tzAbbr = /^(EST|EDT|CST|CDT|MST|MDT|PST|PDT)$/i.test(tzRaw) ? tzRaw.toUpperCase() : 'EDT'
+  return `${mon} ${day} ${yr} ${hr}:${min} ${tzAbbr}`
+}
 
 /** Signature date format (MM/DD/YY style for handwritten look). */
 function formatSignatureDateFedex(tsMs = Date.now()) {
@@ -320,8 +322,6 @@ function formatSignatureDateFedex(tsMs = Date.now()) {
   /** @param {string} t */
   const get = (t) => parts.find((p) => p.type === t)?.value ?? ''
   return `${get('month')}/${get('day')}/${get('year')}`
-}
-  return `${mon} ${day} ${yr} ${hr}:${min} ${tzAbbr}`
 }
 
 /**
@@ -525,7 +525,7 @@ function buildTripFormJsPdf(opts) {
     dollies: [dolly1, dolly2],
     // Driver-filled fields (handwriting style)
     driverSignature: driverFedex, // Use driver name as signature
-    signatureDate: formatSignatureDateFedex(),
+    signatureDate: formatSignatureDateFedex(dispatchTs ?? Date.now()), // Use trip date
     driverId: ascii(String(opts.employeeNumber ?? '').trim()),
   })
   const slug =
