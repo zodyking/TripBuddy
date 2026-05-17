@@ -1401,7 +1401,6 @@ async function onOpenTripFormPdf(e) {
       directory: dirMap,
       originLocationId: oId,
       destLocationId: dId,
-      generatedAtMs: Date.now(),
     })
     pdfViewerObjectUrl.value = URL.createObjectURL(blob)
     pdfViewerFilename.value = filename
