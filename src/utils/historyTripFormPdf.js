@@ -1,4 +1,3 @@
-import { buildEnhancedTrailerCards } from './tripDetailsDisplay.js'
 import { normalizeDirectoryLocationId } from './directoryLocationLookup.js'
 import { generateLinehaulPretripPDF } from './linehaulPretripPdfTemplate.js'
 
@@ -106,12 +105,22 @@ function pickEtaLine(extras, td) {
     'reportingTime',
     'estimatedArrival',
   ]
+  // First check linehaulExtras
   for (const k of preferredKeys) {
     if (extras[k]) return extras[k]
   }
   for (const [k, v] of Object.entries(extras)) {
     if (/arriv|eta|sched|due|est.*time|trip.*time/i.test(k) && v.length < 140) return v
   }
+  // Check top-level td fields (raw API may store ETA directly)
+  for (const k of preferredKeys) {
+    const v = td[k]
+    if (v != null && typeof v !== 'object') {
+      const s = String(v).trim()
+      if (s) return s
+    }
+  }
+  // Check mileage sub-object
   const mil = td.mileage && typeof td.mileage === 'object' && !Array.isArray(td.mileage)
     ? /** @type {Record<string, unknown>} */ (td.mileage)
     : null
@@ -337,8 +346,13 @@ function buildTripFormJsPdf(opts) {
   const destDir = dirGet(opts.directory, opts.destLocationId)
   const originDir = dirGet(opts.directory, opts.originLocationId)
 
+  // Prefer tripDest from linehaulExtras (full name like "BETHPAGE - HD - HOME DELIVERY")
+  // Fall back to directory locationName, then dispatch header destination
   const destNameLine = ascii(
-    destDir?.locationName || str(dh.destination).replace(/^[\d\s]+·\s*/, '').trim() || '-',
+    extras.tripDest ||
+    destDir?.locationName ||
+    str(dh.destination).replace(/^[\d\s]+·\s*/, '').trim() ||
+    '-',
   )
 
   const paidMi =
@@ -358,17 +372,19 @@ function buildTripFormJsPdf(opts) {
 
   const legSeq = str(e.dailyTripLegSequence)
 
-  const cards = buildEnhancedTrailerCards(td)
+  // td.trailers is already pre-processed by buildHistoryTripDetailsFromBody with summaryRows
+  const storedTrailers = Array.isArray(td.trailers) ? td.trailers : []
   /** @type {{ order: string, trlr: string, seal: string, load: string, weight: string }[]} */
   const trailerSlots = []
   for (let i = 0; i < 3; i++) {
-    const c = cards[i]
-    if (c) {
-      const sealRow = c.summaryRows.find((r) => r.label === 'Seal')
-      const destRow = c.summaryRows.find((r) => r.label === 'Destination')
-      const wtRow = c.summaryRows.find((r) => r.label === 'Weight')
+    const c = storedTrailers[i]
+    if (c && typeof c === 'object') {
+      const rows = Array.isArray(c.summaryRows) ? c.summaryRows : []
+      const sealRow = rows.find((r) => r.label === 'Seal')
+      const destRow = rows.find((r) => r.label === 'Destination')
+      const wtRow = rows.find((r) => r.label === 'Weight')
       trailerSlots.push({
-        order: String(c.order),
+        order: String(c.order ?? i + 1),
         trlr: ascii(str(c.trlrNbr)),
         seal: ascii(sealRow?.value && sealRow.value !== '—' ? String(sealRow.value) : ''),
         load: ascii(destRow?.value && destRow.value !== '—' ? String(destRow.value) : ''),

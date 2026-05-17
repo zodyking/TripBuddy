@@ -16,6 +16,7 @@ function pickLinehaulExtrasForTripForm(body) {
   /** @type {Record<string, string>} */
   const out = {}
   const prefer = [
+    'tripDest',
     'tripDestAbbrv',
     'currentLocationAbbrv',
     'tmsRefNbr',
