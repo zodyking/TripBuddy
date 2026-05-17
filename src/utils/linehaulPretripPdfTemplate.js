@@ -3,6 +3,11 @@
 // Vite/plain JS: import { jsPDF } from "jspdf";
 
 import { jsPDF } from 'jspdf'
+import {
+  registerHandwritingFonts,
+  FONT_SIGNATURE,
+  FONT_HANDWRITING,
+} from '../fonts/handwritingFonts.js'
 
 export function generateLinehaulPretripPDF(input = {}) {
   const data = {
@@ -54,6 +59,9 @@ export function generateLinehaulPretripPDF(input = {}) {
   doc.setTextColor(0, 0, 0)
   doc.setDrawColor(0, 0, 0)
 
+  // Register custom handwriting fonts
+  registerHandwritingFonts(doc)
+
   const font = (size = 8, style = 'normal', family = 'helvetica') => {
     doc.setFont(family, style)
     doc.setFontSize(size)
@@ -80,15 +88,26 @@ export function generateLinehaulPretripPDF(input = {}) {
 
   const checkbox = (x, y) => box(x, y, 9.5, 9.5, 1.0)
 
-  // Handwriting-style text for driver-filled fields (italic Times for cursive look)
-  const handwriting = (value, x, y, size = 9) => {
+  // Handwriting-style text for general driver-filled fields (Indie Flower - realistic handwriting)
+  const handwriting = (value, x, y, size = 11) => {
     if (!value) return
-    doc.setFont('times', 'italic')
+    doc.setFont(FONT_HANDWRITING, 'normal')
     doc.setFontSize(size)
-    // Slight blue-black color to simulate ballpoint pen
-    doc.setTextColor(15, 15, 80)
+    // Blue-black color to simulate ballpoint pen
+    doc.setTextColor(10, 10, 90)
     doc.text(String(value), x, y)
-    doc.setTextColor(0, 0, 0) // Reset to black
+    doc.setTextColor(0, 0, 0)
+  }
+
+  // Cursive signature style (Caveat - flowing cursive for signatures)
+  const signature = (value, x, y, size = 14) => {
+    if (!value) return
+    doc.setFont(FONT_SIGNATURE, 'normal')
+    doc.setFontSize(size)
+    // Blue-black color to simulate ballpoint pen
+    doc.setTextColor(10, 10, 90)
+    doc.text(String(value), x, y)
+    doc.setTextColor(0, 0, 0)
   }
 
   // Header
@@ -252,18 +271,18 @@ export function generateLinehaulPretripPDF(input = {}) {
 
   text('Driver Signature', 29, 727, 7.0)
   line(102, 727, 347, 727)
-  // Driver signature in handwriting style
-  if (data.driverSignature) handwriting(data.driverSignature, 110, 724, 10)
+  // Driver signature in cursive style (Caveat font)
+  if (data.driverSignature) signature(data.driverSignature, 110, 724, 14)
 
   text('Date', 365, 727, 7.0)
   line(398, 727, 554, 727)
-  // Date in handwriting style
-  if (data.signatureDate) handwriting(data.signatureDate, 405, 724, 9)
+  // Date in handwriting style (Indie Flower font)
+  if (data.signatureDate) handwriting(data.signatureDate, 405, 722, 11)
 
   text('Driver ID Number:', 29, 744, 7.0)
   line(122, 744, 347, 744)
-  // Driver ID in handwriting style
-  if (data.driverId) handwriting(data.driverId, 130, 741, 9)
+  // Driver ID in handwriting style (Indie Flower font)
+  if (data.driverId) handwriting(data.driverId, 130, 740, 11)
 
   // Kept at the crop edge like the scanned original.
   text('Printed Time:', 348, 766, 7.0, 'bold')
