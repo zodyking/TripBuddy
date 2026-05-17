@@ -13,6 +13,55 @@ function ascii(s) {
     .replace(/[\u2018\u2019]/g, "'")
 }
 
+/**
+ * Canonical FedEx Ground linehaul trip sheet wording (printed reference).
+ * Keep literals aligned with `public/trip sheet.png` when present in the repo.
+ */
+const FEDEX_FORM = {
+  headerTractorLab: 'Tractor: ',
+  headerDestLab: 'Destination ',
+  headerDriverLab: 'DRIVER ',
+  headerDriverSub: 'DRIVER',
+  instrLinehaulDriverTitle: 'Linehaul Driver',
+  instrLinehaulDriverBullets:
+    '- Trailer seal numbers, Dolly IDs, and Pre-Trip Inspection\n- Return completed form to Linehaul Office',
+  instrLinehaulRespTitle: 'Linehaul Responsibilities:',
+  instrLinehaulRespBullets:
+    '- Seals provided match TLCRs, the proper FedEx ID and dolly numbers are correct in TMS',
+  safetyLights: 'LIGHTS AND SEAT BELTS ON FOR SAFETY?',
+  safetyCoupling: 'ALL COUPLING DEVICES SECURE?',
+  tripDestinationLab: 'TRIP DESTINATION:',
+  etaOfTripLegLab: 'ETA OF TRIP LEG:',
+  paidLab: 'PAID',
+  standardRouteNote: 'STANDARD ROUTE DETAILS PROVIDED UPON REQUEST',
+  avrLab: 'AUTOMATED DISPATCH / ARRIVAL (AVR):',
+  avrPhone: '1-888-867-1142',
+  gpsCoordinatesLab: 'GPS COORDINATES:',
+  purchasedCarrierInvoice: 'PURCHASED CARRIER INVOICE',
+  referenceLab: 'REFERENCE #:',
+  dotTitle: 'DOT REQUIRED PRE-TRIP',
+  dotCol1: ['LIGHTS / REFLECTORS', 'TIRES / WHEELS', 'BRAKES', 'SUSPENSION'],
+  dotCol2: ['AIR LINES / AIR SYSTEMS', 'DOOR / DOOR LATCHES', 'LANDING GEAR', 'FRAME'],
+  dotCol3: [
+    'COUPLING DEVICES (e.g., FIFTH WHEEL, PINTLE HOOK)',
+    'SAFETY CHAIN',
+    'BODY: ________________',
+    'OTHER: _____________',
+  ],
+  dotDeclaration:
+    'I have inspected all of the above components on the above vehicles/equipment as required by 49 CFR Part 396 and declare that all are compliant with DOT standards.',
+  dotDriverSig: 'Driver Signature ________________________',
+  dotDate: 'Date __________________',
+  dotDriverId: 'Driver ID Number: ________________________',
+  tripLegOriginLab: 'TRIP LEG ORIGIN:',
+  sealLab: 'SEAL:',
+  loadLab: 'LOAD',
+  packageWeightLab: 'PACKAGE WEIGHT:',
+  originPhoneLab: 'Phone: ',
+  dolly1Lab: 'DOLLY 1',
+  dolly2Lab: 'DOLLY 2',
+}
+
 const BLACK = [0, 0, 0]
 const GRAY = [110, 110, 110]
 
@@ -167,7 +216,7 @@ function formatDriverFedex(name) {
 /** Strip " lbs" etc. so the form shows numeric weight like the FedEx sheet (e.g. 11701.88). */
 function packageWeightFedexDisplay(raw) {
   const t = String(raw ?? '').trim()
-  if (!t || t === '—') return '—'
+  if (!t || t === '—' || t === '-') return '-'
   const m = t.match(/^([\d,.]+)\s*(?:lbs?)?/i)
   return m ? m[1].replace(/,/g, '') : ascii(t)
 }
@@ -271,7 +320,7 @@ function splitUsAddressFedex(raw) {
 /** Printed footer time like FedEx scan: `May 16 2026 22:55 EDT` (Eastern). */
 function formatPrintedTimeFedexLine(ms) {
   const d = new Date(ms)
-  if (isNaN(d.getTime())) return 'Printed Time: —'
+  if (isNaN(d.getTime())) return 'Printed Time: -'
   const tz = 'America/New_York'
   const parts = new Intl.DateTimeFormat('en-US', {
     timeZone: tz,
@@ -312,7 +361,8 @@ function buildTripFormJsPdf(opts) {
     : /** @type {Record<string, unknown>} */ ({})
 
   const extras = linehaulExtrasFromTripDetails(td)
-  const tractor = ascii(str(td.tractorNumber) || '-')
+  const tractorRaw = ascii(str(td.tractorNumber) || '').trim()
+  const tractor = tractorRaw || '-'
   const destId = padLocationId(opts.destLocationId)
   const originId = padLocationId(opts.originLocationId)
 
@@ -330,17 +380,15 @@ function buildTripFormJsPdf(opts) {
   const tripDestHeaderShort =
     destId && destAbbr
       ? `${destId} / ${ascii(destAbbr).toUpperCase()}`
-      : destId || ascii(str(dh.destination)).toUpperCase() || '—'
+      : destId || ascii(str(dh.destination)).toUpperCase() || '-'
 
-  const driverFedex = formatDriverFedex(
-    (opts.driverName || '').trim() || 'DRIVER NAME NOT ON FILE',
-  )
+  const driverFedex = formatDriverFedex((opts.driverName || '').trim())
 
   const destDir = dirGet(opts.directory, opts.destLocationId)
   const originDir = dirGet(opts.directory, opts.originLocationId)
 
   const destNameLine = ascii(
-    destDir?.locationName || str(dh.destination).replace(/^[\d\s]+·\s*/, '').trim() || '—',
+    destDir?.locationName || str(dh.destination).replace(/^[\d\s]+·\s*/, '').trim() || '-',
   )
 
   const paidMi =
@@ -407,7 +455,7 @@ function buildTripFormJsPdf(opts) {
   const originHeader =
     originId && originAbbr
       ? `${originId} / ${ascii(originAbbr).toUpperCase()}`
-      : originId || ascii(str(dh.origin)).toUpperCase() || '—'
+      : originId || ascii(str(dh.origin)).toUpperCase() || '-'
   const originAddrRaw = originDir?.address ? originDir.address : str(dh.origin)
   const originAddr = ascii(originAddrRaw)
   const originAddrParsed = splitUsAddressFedex(originAddr)
@@ -474,16 +522,21 @@ function buildTripFormJsPdf(opts) {
     doc.setTextColor(...BLACK)
   }
 
-  /** ---------- Header: Tractor: **n** | Destination **id/abbr** | DRIVER **NAME** (FedEx weights) ---------- */
+  /** ---------- Header ---------- */
   const headerY = y
   setF('normal', FS_HEAD)
-  const labTr = 'Tractor: '
-  doc.text(labTr, M, headerY)
-  let xAfter = M + doc.getTextWidth(labTr)
+  doc.text(FEDEX_FORM.headerTractorLab, M, headerY)
+  const xTractorVal = M + doc.getTextWidth(FEDEX_FORM.headerTractorLab)
   setF('bold', FS_HEAD)
-  doc.text(tractor, xAfter, headerY)
+  const tractorDisp = tractor === '-' ? '' : tractor
+  if (tractorDisp) {
+    doc.text(tractorDisp, xTractorVal, headerY)
+  } else {
+    setF('normal', FS_HEAD)
+    doc.text('____________', xTractorVal, headerY)
+  }
 
-  const labDest = 'Destination '
+  const labDest = FEDEX_FORM.headerDestLab
   const destVal = tripDestHeaderShort
   setF('normal', FS_HEAD)
   const wDestLab = doc.getTextWidth(labDest)
@@ -495,23 +548,28 @@ function buildTripFormJsPdf(opts) {
   setF('bold', FS_HEAD)
   doc.text(destVal, xDest0 + wDestLab, headerY)
 
-  const labDrv = 'DRIVER '
+  const labDrv = FEDEX_FORM.headerDriverLab
   setF('normal', FS_HEAD)
   const wDrvLab = doc.getTextWidth(labDrv)
   setF('bold', FS_HEAD)
-  const wDrvName = doc.getTextWidth(driverFedex)
+  const wDrvName = driverFedex ? doc.getTextWidth(driverFedex) : doc.getTextWidth('____________________________')
   const xDrv0 = W - M - wDrvLab - wDrvName
   setF('normal', FS_HEAD)
   doc.text(labDrv, xDrv0, headerY)
   setF('bold', FS_HEAD)
-  doc.text(driverFedex, xDrv0 + wDrvLab, headerY)
+  if (driverFedex) {
+    doc.text(driverFedex, xDrv0 + wDrvLab, headerY)
+  } else {
+    setF('normal', FS_HEAD)
+    doc.text('____________________________', xDrv0 + wDrvLab, headerY)
+  }
 
   y += 4.2
   setF('bold', FS_SMALL)
-  doc.text('DRIVER', W - M, y, { align: 'right' })
+  doc.text(FEDEX_FORM.headerDriverSub, W - M, y, { align: 'right' })
   y += 5.5
 
-  /** ---------- Linehaul instructions (thin outer, thin vertical) — titles match FedEx sheet ---------- */
+  /** ---------- Linehaul instructions ---------- */
   const instrH = 17.5
   strokeRect(M, y, IW, instrH, BW_THIN)
   doc.setDrawColor(...BLACK)
@@ -519,20 +577,14 @@ function buildTripFormJsPdf(opts) {
   doc.line(M + IW * 0.5, y, M + IW * 0.5, y + instrH)
 
   setF('bold', FS_BODY)
-  doc.text('Linehaul Driver', M + 2, y + 4)
+  doc.text(FEDEX_FORM.instrLinehaulDriverTitle, M + 2, y + 4)
   setF('normal', FS_SMALL)
-  const leftInstr = ascii(
-    '- Trailer seal numbers, Dolly IDs, and Pre-Trip Inspection\n- Return completed form to Linehaul Office',
-  )
-  doc.text(doc.splitTextToSize(leftInstr, IW * 0.46 - 2), M + 2, y + 7.5)
+  doc.text(doc.splitTextToSize(ascii(FEDEX_FORM.instrLinehaulDriverBullets), IW * 0.46 - 2), M + 2, y + 7.5)
 
   setF('bold', FS_BODY)
-  doc.text('Linehaul Responsibilities:', M + IW * 0.5 + 2, y + 4)
+  doc.text(FEDEX_FORM.instrLinehaulRespTitle, M + IW * 0.5 + 2, y + 4)
   setF('normal', FS_SMALL)
-  const rightInstr = ascii(
-    '- Seals provided match TLCRs, the proper FedEx ID and dolly numbers are correct in TMS',
-  )
-  doc.text(doc.splitTextToSize(rightInstr, IW * 0.48 - 2), M + IW * 0.5 + 2, y + 7.5)
+  doc.text(doc.splitTextToSize(ascii(FEDEX_FORM.instrLinehaulRespBullets), IW * 0.48 - 2), M + IW * 0.5 + 2, y + 7.5)
   y += instrH + 2.2
 
   /** ---------- Safety (thick top/bottom, thin sides; prompts left/right aligned) ---------- */
@@ -545,11 +597,11 @@ function buildTripFormJsPdf(opts) {
   const safetyPad = 2.5
   const safetyMidY = y + safetyH / 2 + 1.2
   setF('bold', FS_BODY - 0.2)
-  doc.text('LIGHTS AND SEAT BELTS ON FOR SAFETY?', M + safetyPad, safetyMidY, {
+  doc.text(FEDEX_FORM.safetyLights, M + safetyPad, safetyMidY, {
     align: 'left',
     maxWidth: halfW - safetyPad * 2,
   })
-  doc.text('ALL COUPLING DEVICES SECURE?', W - M - safetyPad, safetyMidY, {
+  doc.text(FEDEX_FORM.safetyCoupling, W - M - safetyPad, safetyMidY, {
     align: 'right',
     maxWidth: halfW - safetyPad * 2,
   })
@@ -616,13 +668,13 @@ function buildTripFormJsPdf(opts) {
   const leftColR = M + leftW - 2
   let ly = midTop + 3.5
   const lx0 = M + 2
-  const labTripDest = 'TRIP DESTINATION:'
+  const labTripDest = FEDEX_FORM.tripDestinationLab
   setF('bold', FS_BODY)
   doc.text(labTripDest, lx0, ly)
   doc.text(tripDestHeaderShort, lx0 + doc.getTextWidth(labTripDest) + 1, ly)
   ly += 4.8
 
-  const labEta = 'ETA OF TRIP LEG:'
+  const labEta = FEDEX_FORM.etaOfTripLegLab
   setF('bold', FS_BODY)
   doc.text(labEta, lx0, ly)
   ly += 4.6
@@ -675,7 +727,7 @@ function buildTripFormJsPdf(opts) {
   }
   ly += 1.5
 
-  const labPaid = 'PAID'
+  const labPaid = FEDEX_FORM.paidLab
   setF('bold', FS_BODY)
   doc.text(labPaid, lx0, ly)
   setF('bold', FS_BODY)
@@ -685,22 +737,21 @@ function buildTripFormJsPdf(opts) {
 
   setF('normal', FS_SMALL)
   doc.setTextColor(...GRAY)
-  doc.text('STANDARD ROUTE DETAILS PROVIDED UPON REQUEST', lx0, ly)
+  doc.text(FEDEX_FORM.standardRouteNote, lx0, ly)
   doc.setTextColor(...BLACK)
   ly += 3.8
 
-  const labAvr = 'AUTOMATED DISPATCH / ARRIVAL (AVR):'
+  const labAvr = FEDEX_FORM.avrLab
   setF('bold', FS_BODY)
   doc.text(labAvr, lx0, ly)
   setF('normal', FS_BODY)
-  const avrPhone = '1-888-867-1142'
-  doc.text(avrPhone, lx0 + doc.getTextWidth(labAvr) + 1.2, ly)
+  doc.text(FEDEX_FORM.avrPhone, lx0 + doc.getTextWidth(labAvr) + 1.2, ly)
   ly += 5
 
   const gpsRightX = leftColR
   if (latStr && lngStr) {
     setF('bold', FS_BODY)
-    const gpsLab = 'GPS COORDINATES: '
+    const gpsLab = `${FEDEX_FORM.gpsCoordinatesLab} `
     doc.text(gpsLab, lx0, ly)
     setF('normal', FS_BODY)
     const latX = lx0 + doc.getTextWidth(gpsLab)
@@ -710,7 +761,7 @@ function buildTripFormJsPdf(opts) {
     ly += 1.2
   } else {
     setF('bold', FS_BODY)
-    doc.text('GPS COORDINATES:', lx0, ly)
+    doc.text(FEDEX_FORM.gpsCoordinatesLab, lx0, ly)
     ly += 3.6
     setF('normal', FS_BODY)
     doc.setLineWidth(BW_THIN)
@@ -743,7 +794,7 @@ function buildTripFormJsPdf(opts) {
     }
 
     setF('bold', FS_SMALL)
-    const sealLab = 'SEAL:'
+    const sealLab = FEDEX_FORM.sealLab
     doc.text(sealLab, ix, ry + 8.8)
     doc.setDrawColor(...BLACK)
     doc.setLineWidth(BW_THIN)
@@ -755,7 +806,7 @@ function buildTripFormJsPdf(opts) {
     }
 
     const loadRowY = ry + 13.2
-    const loadLab = 'LOAD'
+    const loadLab = FEDEX_FORM.loadLab
     setF('bold', FS_SMALL)
     doc.text(loadLab, ix, loadRowY)
     setF('normal', FS_SMALL)
@@ -767,12 +818,12 @@ function buildTripFormJsPdf(opts) {
     })
 
     const pwY = ry + 20.5
-    const pwLab = 'PACKAGE WEIGHT:'
+    const pwLab = FEDEX_FORM.packageWeightLab
     setF('bold', FS_SMALL)
     doc.text(pwLab, ix, pwY)
     setF('normal', FS_SMALL)
     const wTxt = String(slot.weight || '-').trim()
-    doc.text(wTxt === '—' ? '-' : wTxt, rightInnerR, pwY, { align: 'right' })
+    doc.text(wTxt, rightInnerR, pwY, { align: 'right' })
     ry += trailerBoxH + gapBox
   }
 
@@ -798,18 +849,19 @@ function buildTripFormJsPdf(opts) {
 
   /** FedEx image 2 order: T1, D1, T2, D2, T3, trip leg origin. */
   drawTrailerBox(trailerSlots[0], 1)
-  drawDollyBox('DOLLY 1', dolly1)
+  drawDollyBox(FEDEX_FORM.dolly1Lab, dolly1)
   drawTrailerBox(trailerSlots[1], 2)
-  drawDollyBox('DOLLY 2', dolly2)
+  drawDollyBox(FEDEX_FORM.dolly2Lab, dolly2)
   drawTrailerBox(trailerSlots[2], 3)
 
   /** Trip leg origin — right stack after trailers/dollies (FedEx image 2). */
   strokeRect(rx, ry, rightW, originBoxH, BW_MED)
   const ox = rx + 1.8
   let oy2 = ry + 4
-  const labTripLegOrigin = 'TRIP LEG ORIGIN:'
+  const labTripLegOrigin = FEDEX_FORM.tripLegOriginLab
   setF('bold', FS_BODY)
   doc.text(labTripLegOrigin, ox, oy2)
+  setF('bold', FS_BODY)
   doc.text(originHeader, ox + doc.getTextWidth(labTripLegOrigin) + 1, oy2)
   oy2 += 4.5
   setF('normal', FS_SMALL)
@@ -830,7 +882,7 @@ function buildTripFormJsPdf(opts) {
     oy2 += 3.35
   }
   if (originPhone) {
-    doc.text(`Phone: ${originPhone}`, ox, oy2)
+    doc.text(`${FEDEX_FORM.originPhoneLab}${originPhone}`, ox, oy2)
   }
   ry += originBoxH + 2
 
@@ -840,9 +892,9 @@ function buildTripFormJsPdf(opts) {
   const invH = 16
   strokeRect(M, y, IW, invH, BW_THIN)
   setF('bold', FS_BODY)
-  doc.text('PURCHASED CARRIER INVOICE', M + 2, y + 4.5)
+  doc.text(FEDEX_FORM.purchasedCarrierInvoice, M + 2, y + 4.5)
   setF('bold', FS_SMALL)
-  const refLab = 'REFERENCE #:'
+  const refLab = FEDEX_FORM.referenceLab
   doc.text(refLab, M + 2, y + 10)
   doc.setDrawColor(...BLACK)
   doc.setLineWidth(BW_THIN)
@@ -867,7 +919,7 @@ function buildTripFormJsPdf(opts) {
   doc.line(M, y, M + IW, y)
 
   setF('bold', FS_HEAD + 0.5)
-  doc.text('DOT REQUIRED PRE-TRIP', W / 2, y + 5.2, { align: 'center' })
+  doc.text(FEDEX_FORM.dotTitle, W / 2, y + 5.2, { align: 'center' })
 
   const chkFs = 5.55
   setF('bold', chkFs)
@@ -879,14 +931,9 @@ function buildTripFormJsPdf(opts) {
   const c3x = c2x + c2w + 1
   const cb = 2.35
   let cy = y + 10.8
-  const col1 = ['LIGHTS / REFLECTORS', 'TIRES / WHEELS', 'BRAKES', 'SUSPENSION']
-  const col2 = ['AIR LINES / AIR SYSTEMS', 'DOOR / DOOR LATCHES', 'LANDING GEAR', 'FRAME']
-  const col3 = [
-    'COUPLING DEVICES (e.g., FIFTH WHEEL, PINTLE HOOK)',
-    'SAFETY CHAIN',
-    'BODY: ________________',
-    'OTHER: _____________',
-  ]
+  const col1 = FEDEX_FORM.dotCol1
+  const col2 = FEDEX_FORM.dotCol2
+  const col3 = FEDEX_FORM.dotCol3
   for (let i = 0; i < 4; i++) {
     doc.setLineWidth(BW_THIN)
     doc.rect(c1x, cy - 2.2, cb, cb)
@@ -900,17 +947,15 @@ function buildTripFormJsPdf(opts) {
 
   cy += 1.2
   setF('normal', 6.15)
-  const stmt = ascii(
-    'I have inspected all of the above components on the above vehicles/equipment as required by 49 CFR Part 396 and declare that all are compliant with DOT standards.',
-  )
+  const stmt = ascii(FEDEX_FORM.dotDeclaration)
   doc.text(doc.splitTextToSize(stmt, IW - 5), M + 2.5, cy)
   cy += 11.5
 
   setF('normal', FS_SMALL)
-  doc.text('Driver Signature ________________________', M + 2.5, cy)
-  doc.text('Date __________________', M + IW * 0.5, cy)
+  doc.text(FEDEX_FORM.dotDriverSig, M + 2.5, cy)
+  doc.text(FEDEX_FORM.dotDate, M + IW * 0.5, cy)
   cy += 4.8
-  doc.text('Driver ID Number: ________________________', M + 2.5, cy)
+  doc.text(FEDEX_FORM.dotDriverId, M + 2.5, cy)
 
   y += dotH + 2.5
 
