@@ -279,7 +279,6 @@ function formatBasedUponDepartur(tsMs) {
  *   directory: Map<string, { locationName: string, abbreviation: string, address: string, phone: string, lat: number | null, lng: number | null }>,
  *   originLocationId: string,
  *   destLocationId: string,
- *   generatedAtMs?: number,
  * }} TripFormPdfOpts
  */
 
@@ -317,43 +316,11 @@ function splitUsAddressFedex(raw) {
   return { streetPart: '', city: parts[0].toUpperCase(), stateZip }
 }
 
-/** Printed footer time like FedEx scan: `May 16 2026 22:55 EDT` (Eastern). */
-function formatPrintedTimeFedexLine(ms) {
-  const d = new Date(ms)
-  if (isNaN(d.getTime())) return 'Printed Time: -'
-  const tz = 'America/New_York'
-  const parts = new Intl.DateTimeFormat('en-US', {
-    timeZone: tz,
-    month: 'short',
-    day: 'numeric',
-    year: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-    hour12: false,
-  }).formatToParts(d)
-  /** @param {string} t */
-  const get = (t) => parts.find((p) => p.type === t)?.value ?? ''
-  const mon = (get('month') || '').charAt(0).toUpperCase() + (get('month') || '').slice(1).toLowerCase()
-  const day = get('day')
-  const yr = get('year')
-  const hr = get('hour')
-  const min = get('minute')
-  const tzParts = new Intl.DateTimeFormat('en-US', { timeZone: tz, timeZoneName: 'short' }).formatToParts(d)
-  const tzRaw = tzParts.find((p) => p.type === 'timeZoneName')?.value?.trim() ?? ''
-  const tzAbbr = /^(EST|EDT)$/i.test(tzRaw) ? tzRaw.toUpperCase() : 'EDT'
-  return `Printed Time: ${mon} ${day} ${yr} ${hr}:${min} ${tzAbbr}`
-}
-
 /**
  * @param {TripFormPdfOpts} opts
  * @returns {{ doc: import('jspdf').jsPDF, fileName: string }}
  */
 function buildTripFormJsPdf(opts) {
-  const genAt =
-    typeof opts.generatedAtMs === 'number' && Number.isFinite(opts.generatedAtMs)
-      ? new Date(opts.generatedAtMs)
-      : new Date()
-
   const e = opts.entry
   const dh = e.dispatchHeader && typeof e.dispatchHeader === 'object' ? e.dispatchHeader : {}
   const td = e.tripDetails && typeof e.tripDetails === 'object' && !Array.isArray(e.tripDetails)
@@ -531,9 +498,6 @@ function buildTripFormJsPdf(opts) {
   const tractorDisp = tractor === '-' ? '' : tractor
   if (tractorDisp) {
     doc.text(tractorDisp, xTractorVal, headerY)
-  } else {
-    setF('normal', FS_HEAD)
-    doc.text('____________', xTractorVal, headerY)
   }
 
   const labDest = FEDEX_FORM.headerDestLab
@@ -552,16 +516,13 @@ function buildTripFormJsPdf(opts) {
   setF('normal', FS_HEAD)
   const wDrvLab = doc.getTextWidth(labDrv)
   setF('bold', FS_HEAD)
-  const wDrvName = driverFedex ? doc.getTextWidth(driverFedex) : doc.getTextWidth('____________________________')
+  const wDrvName = driverFedex ? doc.getTextWidth(driverFedex) : 0
   const xDrv0 = W - M - wDrvLab - wDrvName
   setF('normal', FS_HEAD)
   doc.text(labDrv, xDrv0, headerY)
   setF('bold', FS_HEAD)
   if (driverFedex) {
     doc.text(driverFedex, xDrv0 + wDrvLab, headerY)
-  } else {
-    setF('normal', FS_HEAD)
-    doc.text('____________________________', xDrv0 + wDrvLab, headerY)
   }
 
   y += 4.2
@@ -960,17 +921,6 @@ function buildTripFormJsPdf(opts) {
   doc.text(FEDEX_FORM.dotDriverId, M + 2.5, cy)
 
   y += dotH + 2.5
-
-  /** Footer: printed time bottom-right (FedEx image 2); disclaimer second line. */
-  setF('normal', 6)
-  doc.setTextColor(...GRAY)
-  doc.text(formatPrintedTimeFedexLine(genAt.getTime()), W - M, H - 8.2, { align: 'right' })
-  doc.text(
-    `Leg #${legSeq || '-'}   |   FedExTool trip reference (not an official FedEx document)`,
-    M,
-    H - 5.4,
-    { maxWidth: IW },
-  )
 
   const slug =
     legSeq && /^\d+$/.test(legSeq)
