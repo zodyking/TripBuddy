@@ -21,6 +21,10 @@ import {
 } from '../stores/linehaulSnapshotStore.js'
 import { getHistoryWeekTotalsPdfBlob } from '../utils/historyWeekTotalsPdf.js'
 import {
+  getHistoryTripFormPdfBlob,
+  buildDirectoryTripFormLookup,
+} from '../utils/historyTripFormPdf.js'
+import {
   buildDirectoryLocationMap,
   directoryLookup,
 } from '../utils/directoryLocationLookup.js'
@@ -94,6 +98,8 @@ const pdfCredMeta = ref(
   /** @type {{ employeeNumber?: string, driverName?: string }} */ ({}),
 )
 const pdfWeekBusyKey = ref('')
+/** Trip form PDF generation (per ledger row id) */
+const tripFormPdfBusyId = ref('')
 
 /** Full-screen PDF preview for week mileage report */
 const pdfWeekViewerOpen = ref(false)
@@ -1305,6 +1311,70 @@ async function onDownloadWeekTotalsPdf(wg) {
   }
 }
 
+/**
+ * @param {LedgerEntry} e
+ */
+function tripDetailsRecordForPdf(e) {
+  const td = e?.tripDetails
+  if (td && typeof td === 'object' && !Array.isArray(td)) {
+    return /** @type {Record<string, unknown>} */ (td)
+  }
+  return {}
+}
+
+/**
+ * Open FedEx-style trip form PDF for one history row (directory enriches addresses / GPS / phone).
+ * @param {LedgerEntry} e
+ */
+async function onOpenTripFormPdf(e) {
+  const id = String(e?.id ?? '')
+  if (!id || tripFormPdfBusyId.value === id) return
+  tripFormPdfBusyId.value = id
+  try {
+    /** @type {Map<string, { locationName: string, abbreviation: string, address: string, phone: string, lat: number | null, lng: number | null }>} */
+    let dirMap = new Map()
+    try {
+      const dr = await fetchDirectory()
+      if (dr?.ok && Array.isArray(dr.locations)) dirMap = buildDirectoryTripFormLookup(dr.locations)
+    } catch {
+      /* directory optional */
+    }
+
+    const oId = leadingLocationId(e.dispatchHeader?.origin)
+    const dId = leadingLocationId(e.dispatchHeader?.destination)
+    closeWeekPdfViewer()
+    const { blob, filename } = getHistoryTripFormPdfBlob({
+      entry: {
+        id: e.id,
+        displayDate: e.displayDate,
+        dailyTripLegSequence: e.dailyTripLegSequence,
+        dispatchHeader:
+          e.dispatchHeader && typeof e.dispatchHeader === 'object'
+            ? /** @type {Record<string, unknown>} */ (e.dispatchHeader)
+            : {},
+        tripDetails: tripDetailsRecordForPdf(e),
+        source: e.source,
+      },
+      driverName: String(pdfCredMeta.value.driverName ?? '').trim(),
+      employeeNumber: String(pdfCredMeta.value.employeeNumber ?? '').trim(),
+      directory: dirMap,
+      originLocationId: oId,
+      destLocationId: dId,
+      generatedAtMs: Date.now(),
+    })
+    pdfViewerObjectUrl.value = URL.createObjectURL(blob)
+    pdfViewerFilename.value = filename
+    const leg = String(e.dailyTripLegSequence ?? '').trim()
+    pdfViewerTitle.value = leg ? `Trip form · Leg #${leg}` : 'Trip form'
+    pdfWeekViewerOpen.value = true
+  } catch (err) {
+    console.error('[tripFormPdf]', err)
+    window.alert(err instanceof Error ? err.message : 'Could not generate trip form PDF. Try again.')
+  } finally {
+    tripFormPdfBusyId.value = ''
+  }
+}
+
 /** Expand week/day `<details>` when user picks a calendar shift day. */
 const wwDetailsElByKey = /** @type {Record<string, HTMLDetailsElement | undefined>} */ ({})
 const dayDetailsElByKey = /** @type {Record<string, HTMLDetailsElement | undefined>} */ ({})
@@ -2178,13 +2248,22 @@ onUnmounted(() => {
                               >{{ formatWhen(e.displayDate) }}</time
                             >
                             <span class="history-trip-meta-strip__sep" aria-hidden="true">·</span>
-                            <button
-                              type="button"
-                              class="history-link tap history-audit-day-btn"
-                              @click.stop="openAuditDayModal(e)"
-                            >
-                              Audit day…
-                            </button>
+            <button
+              type="button"
+              class="history-link tap history-audit-day-btn"
+              @click.stop="openAuditDayModal(e)"
+            >
+              Audit day…
+            </button>
+            <button
+              type="button"
+              class="history-trip-form-pdf-btn tap"
+              :disabled="tripFormPdfBusyId === e.id"
+              title="Open a FedEx-style trip form PDF for this leg (preview and download)"
+              @click.stop="onOpenTripFormPdf(e)"
+            >
+              {{ tripFormPdfBusyId === e.id ? 'PDF…' : 'View PDF' }}
+            </button>
                             <template v-if="e.dailyTripLegSequence">
                               <span class="history-trip-meta-strip__sep" aria-hidden="true">·</span>
                               <span class="history-trip-meta-strip__leg">Leg #{{ e.dailyTripLegSequence }}</span>
@@ -2605,7 +2684,7 @@ onUnmounted(() => {
           <iframe
             v-if="pdfViewerObjectUrl"
             class="history-pdf-viewer-frame"
-            title="Week mileage PDF preview"
+            title="PDF preview (week mileage or trip form)"
             :src="pdfViewerObjectUrl"
           />
         </div>
@@ -3139,6 +3218,35 @@ onUnmounted(() => {
 }
 
 .history-week-pdf-btn:disabled {
+  opacity: 0.55;
+  cursor: wait;
+}
+
+.history-trip-form-pdf-btn {
+  flex-shrink: 0;
+  margin-left: 0.15rem;
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  padding: 0.22rem 0.5rem;
+  border-radius: 8px;
+  border: 1px solid rgba(56, 189, 248, 0.55);
+  background: rgba(56, 189, 248, 0.12);
+  color: #dff6ff;
+  cursor: pointer;
+}
+
+.history-trip-form-pdf-btn:hover:not(:disabled) {
+  background: rgba(56, 189, 248, 0.22);
+  border-color: rgba(125, 211, 252, 0.85);
+}
+
+.history-trip-form-pdf-btn:focus-visible {
+  outline: 2px solid rgba(125, 211, 252, 0.9);
+  outline-offset: 2px;
+}
+
+.history-trip-form-pdf-btn:disabled {
   opacity: 0.55;
   cursor: wait;
 }

@@ -6,6 +6,46 @@ import {
 } from './tripDetailsDisplay.js'
 
 /**
+ * Persist a small key/value bag from raw Linehaul trip JSON for trip-form PDF and future UI.
+ * @param {unknown} body
+ * @returns {Record<string, string>}
+ */
+function pickLinehaulExtrasForTripForm(body) {
+  if (!body || typeof body !== 'object' || Array.isArray(body)) return {}
+  const b = /** @type {Record<string, unknown>} */ (body)
+  /** @type {Record<string, string>} */
+  const out = {}
+  const prefer = [
+    'tripDestAbbrv',
+    'currentLocationAbbrv',
+    'tmsRefNbr',
+    'tripConfig',
+    'estimatedTripArrivalDateTime',
+    'tripArrivalTime',
+    'scheduledArrivalTime',
+    'etaAtDest',
+    'tripEta',
+    'etaOfTripLeg',
+  ]
+  for (const k of prefer) {
+    const v = b[k]
+    if (v != null && typeof v !== 'object') {
+      const s = String(v).trim()
+      if (s) out[k] = s
+    }
+  }
+  for (const k of Object.keys(b)) {
+    if (out[k]) continue
+    if (!/(eta|arriv|sched|due|depart|report|est|trip.*time)/i.test(k)) continue
+    const v = b[k]
+    if (v == null || typeof v === 'object') continue
+    const s = String(v).trim()
+    if (s.length > 0 && s.length < 160) out[k] = s
+  }
+  return out
+}
+
+/**
  * Build a dispatch-style header object for the trip history ledger.
  * @param {unknown} body Linehaul trip body
  * @param {object} opts
@@ -62,5 +102,6 @@ export function buildHistoryTripDetailsFromBody(body) {
     tripStatus = b.tripStatus != null ? String(b.tripStatus) : ''
     tractorNumber = b.tractorNumber != null ? String(b.tractorNumber) : ''
   }
-  return { trailers, dolly, tripStatus, tractorNumber }
+  const linehaulExtras = pickLinehaulExtrasForTripForm(body)
+  return { trailers, dolly, tripStatus, tractorNumber, linehaulExtras }
 }

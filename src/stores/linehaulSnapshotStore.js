@@ -256,7 +256,12 @@ function gateRoute(incoming, prev) {
     }
   } else if (!prev.origin.name && incOriginName && prev.origin.number) {
     result.updateOrigin = true
-    result.origin = { ...prev.origin, name: incOriginName, display: `${prev.origin.number} · ${incOriginName}` }
+    result.origin = {
+      ...prev.origin,
+      name: incOriginName,
+      abbrv: String(inc.currentLocationAbbrv ?? '').trim() || prev.origin.abbrv,
+      display: `${prev.origin.number} · ${incOriginName}`,
+    }
   }
 
   if (incDestNum && incDestNum !== prev.destination.number) {
@@ -269,7 +274,12 @@ function gateRoute(incoming, prev) {
     }
   } else if (!prev.destination.name && incDestName && prev.destination.number) {
     result.updateDestination = true
-    result.destination = { ...prev.destination, name: incDestName, display: `${prev.destination.number} · ${incDestName}` }
+    result.destination = {
+      ...prev.destination,
+      name: incDestName,
+      abbrv: String(inc.tripDestAbbrv ?? '').trim() || prev.destination.abbrv,
+      display: `${prev.destination.number} · ${incDestName}`,
+    }
   }
 
   return result
@@ -509,6 +519,53 @@ function scheduleHistoryUpsert(tripState, assignmentInstructions) {
 }
 
 /**
+ * Merge the live Linehaul trip JSON (when the active leg matches) with gated stable fields
+ * so history snapshots retain TMS-style fields (abbrv., TMS ref, ETA-like keys) for trip-form PDFs.
+ * @param {typeof stableTripState.value} tripState
+ * @returns {Record<string, unknown>}
+ */
+function buildLedgerSnapBodyForHistoryUpsert(tripState) {
+  const seq = String(tripState.dailyTripLegSequence ?? '').trim()
+  const raw = linehaulTripsBody.value
+  if (raw && typeof raw === 'object' && !Array.isArray(raw) && _tripBodyDailySeq(raw) === seq) {
+    const merged = { .../** @type {Record<string, unknown>} */ (raw) }
+    if (Array.isArray(tripState.trailers) && tripState.trailers.length > 0) {
+      merged.trailers = tripState.trailers
+    }
+    merged.dollyNumber1 = tripState.dolly?.number1 ?? merged.dollyNumber1
+    merged.dollyNumber2 = tripState.dolly?.number2 ?? merged.dollyNumber2
+    merged.dollyEquipmentSequence1 = tripState.dolly?.seq1 ?? merged.dollyEquipmentSequence1
+    merged.dollyEquipmentSequence2 = tripState.dolly?.seq2 ?? merged.dollyEquipmentSequence2
+    merged.tractorNumber = tripState.tractorNumber || merged.tractorNumber
+    merged.tripStatus = tripState.tripStatus || merged.tripStatus
+    merged.currentLocationNumber = tripState.origin?.number || merged.currentLocationNumber
+    merged.currentLocationName = tripState.origin?.name || merged.currentLocationName
+    merged.currentLocationAbbrv = tripState.origin?.abbrv || merged.currentLocationAbbrv
+    merged.tripDestNumber = tripState.destination?.number || merged.tripDestNumber
+    merged.tripDest = tripState.destination?.name || merged.tripDest
+    merged.tripDestAbbrv = tripState.destination?.abbrv || merged.tripDestAbbrv
+    merged.dailyTripLegSequence = seq
+    return merged
+  }
+  return {
+    dailyTripLegSequence: seq,
+    tripStatus: tripState.tripStatus,
+    trailers: tripState.trailers,
+    dollyNumber1: tripState.dolly?.number1,
+    dollyNumber2: tripState.dolly?.number2,
+    dollyEquipmentSequence1: tripState.dolly?.seq1,
+    dollyEquipmentSequence2: tripState.dolly?.seq2,
+    currentLocationNumber: tripState.origin?.number,
+    currentLocationName: tripState.origin?.name,
+    currentLocationAbbrv: tripState.origin?.abbrv,
+    tripDestNumber: tripState.destination?.number,
+    tripDest: tripState.destination?.name,
+    tripDestAbbrv: tripState.destination?.abbrv,
+    tractorNumber: tripState.tractorNumber,
+  }
+}
+
+/**
  * Execute history upsert
  * @param {typeof stableTripState.value} tripState
  * @param {string} fingerprint
@@ -520,20 +577,7 @@ async function executeHistoryUpsert(tripState, fingerprint, assignmentInstructio
   const seq = tripState.dailyTripLegSequence
   if (!seq) return
 
-  const snapBody = {
-    dailyTripLegSequence: seq,
-    tripStatus: tripState.tripStatus,
-    trailers: tripState.trailers,
-    dollyNumber1: tripState.dolly?.number1,
-    dollyNumber2: tripState.dolly?.number2,
-    dollyEquipmentSequence1: tripState.dolly?.seq1,
-    dollyEquipmentSequence2: tripState.dolly?.seq2,
-    currentLocationNumber: tripState.origin?.number,
-    currentLocationName: tripState.origin?.name,
-    tripDestNumber: tripState.destination?.number,
-    tripDest: tripState.destination?.name,
-    tractorNumber: tripState.tractorNumber,
-  }
+  const snapBody = buildLedgerSnapBodyForHistoryUpsert(tripState)
 
   try {
     await putAssignment({
