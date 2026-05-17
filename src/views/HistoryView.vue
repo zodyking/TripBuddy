@@ -109,6 +109,21 @@ const pdfViewerObjectUrl = ref(/** @type {string | null} */ (null))
 const pdfViewerFilename = ref('')
 const pdfViewerTitle = ref('')
 
+/** Zoom for pdf.js viewer (1 = fit width). Reset when dialog closes. */
+const pdfViewerZoom = ref(1)
+const PDF_VIEWER_ZOOM_MIN = 0.55
+const PDF_VIEWER_ZOOM_MAX = 2.6
+
+function bumpPdfViewerZoom(/** @type {number} */ delta) {
+  pdfViewerZoom.value = Math.min(
+    PDF_VIEWER_ZOOM_MAX,
+    Math.max(
+      PDF_VIEWER_ZOOM_MIN,
+      Math.round((pdfViewerZoom.value + delta) * 100) / 100,
+    ),
+  )
+}
+
 function closeWeekPdfViewer() {
   pdfWeekViewerOpen.value = false
   const u = pdfViewerObjectUrl.value
@@ -118,6 +133,7 @@ function closeWeekPdfViewer() {
   }
   pdfViewerFilename.value = ''
   pdfViewerTitle.value = ''
+  pdfViewerZoom.value = 1
 }
 
 /** Mobile: stacked toolbar + larger tap targets in the PDF dialog header. */
@@ -128,20 +144,12 @@ function updatePdfViewerLayoutNarrow() {
     typeof window !== 'undefined' && window.matchMedia('(max-width: 640px)').matches
 }
 
-function openPdfInNewTab() {
-  const url = pdfViewerObjectUrl.value
-  if (!url) return
-  const w = window.open(url, '_blank', 'noopener,noreferrer')
-  if (!w) {
-    window.alert('Allow pop-ups for this site to open the PDF in a new tab (better pinch-zoom on phones).')
-  }
-}
-
 watch(
   () => !!(pdfWeekViewerOpen.value && pdfViewerObjectUrl.value),
   (active) => {
     if (active) {
       updatePdfViewerLayoutNarrow()
+      pdfViewerZoom.value = 1
     }
   },
   { flush: 'sync' },
@@ -2708,17 +2716,31 @@ onUnmounted(() => {
           >
             <h3 id="history-pdf-viewer-title" class="history-pdf-viewer-title">{{ pdfViewerTitle }}</h3>
             <div
-              class="history-pdf-viewer-actions"
-              :class="{ 'history-pdf-viewer-actions--narrow': pdfViewerLayoutNarrow }"
+              class="history-pdf-viewer-controls"
+              :class="{ 'history-pdf-viewer-controls--narrow': pdfViewerLayoutNarrow }"
             >
-              <button
-                v-if="pdfViewerObjectUrl"
-                type="button"
-                class="history-pdf-viewer-open-tab tap"
-                @click="openPdfInNewTab"
-              >
-                Open in tab
-              </button>
+              <div class="history-pdf-viewer-zoom" role="toolbar" aria-label="PDF zoom">
+                <button
+                  type="button"
+                  class="history-pdf-viewer-zbtn tap"
+                  aria-label="Zoom out"
+                  @click="bumpPdfViewerZoom(-0.15)"
+                >
+                  −
+                </button>
+                <span class="history-pdf-viewer-zpct">{{ Math.round(pdfViewerZoom * 100) }}%</span>
+                <button
+                  type="button"
+                  class="history-pdf-viewer-zbtn tap"
+                  aria-label="Zoom in"
+                  @click="bumpPdfViewerZoom(0.15)"
+                >
+                  +
+                </button>
+                <button type="button" class="history-pdf-viewer-zfit tap" @click="pdfViewerZoom = 1">
+                  Fit width
+                </button>
+              </div>
               <a
                 v-if="pdfViewerObjectUrl"
                 class="history-pdf-viewer-download tap"
@@ -2730,15 +2752,13 @@ onUnmounted(() => {
               </button>
             </div>
           </header>
-          <p v-if="pdfViewerLayoutNarrow && pdfViewerObjectUrl" class="history-pdf-viewer-hint">
-            Tap a thumbnail to jump pages. Open in tab uses your browser’s PDF tools (pinch-zoom, search).
-          </p>
           <div class="history-pdf-viewer-frame-scroll">
             <Suspense>
               <template #default>
                 <HistoryPdfJsViewer
                   v-if="pdfViewerObjectUrl"
                   :pdf-url="pdfViewerObjectUrl"
+                  v-model:zoom-mult="pdfViewerZoom"
                 />
               </template>
               <template #fallback>
@@ -4567,85 +4587,124 @@ onUnmounted(() => {
 
 .history-pdf-viewer-head {
   display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 0.75rem;
   flex-wrap: wrap;
-  padding: 0.65rem 0.75rem;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.45rem 0.65rem;
+  padding: 0.5rem 0.65rem;
   border-bottom: 1px solid rgba(255, 255, 255, 0.08);
   background: linear-gradient(180deg, #1a1a26 0%, #14141c 100%);
 }
 
 .history-pdf-viewer-head--narrow {
-  flex-direction: column;
   align-items: stretch;
-  gap: 0.5rem;
-  padding: 0.55rem 0.65rem;
+}
+
+.history-pdf-viewer-head--narrow .history-pdf-viewer-title {
+  flex-basis: 100%;
 }
 
 .history-pdf-viewer-title {
   margin: 0;
-  flex: 1;
+  flex: 1 1 10rem;
   min-width: 0;
-  font-size: 0.85rem;
+  font-size: 0.82rem;
   font-weight: 700;
   line-height: 1.35;
   color: #f4f4fb;
 }
 
-.history-pdf-viewer-actions {
+.history-pdf-viewer-controls {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 0.5rem;
-  flex-shrink: 0;
+  justify-content: flex-end;
+  gap: 0.35rem 0.45rem;
+  flex: 0 1 auto;
 }
 
-.history-pdf-viewer-actions--narrow {
-  display: grid;
-  grid-template-columns: 1fr 1fr 1fr;
-  gap: 0.45rem;
+.history-pdf-viewer-controls--narrow {
   width: 100%;
+  justify-content: space-between;
 }
 
-.history-pdf-viewer-actions--narrow .history-pdf-viewer-open-tab,
-.history-pdf-viewer-actions--narrow .history-pdf-viewer-download,
-.history-pdf-viewer-actions--narrow .history-pdf-viewer-close {
-  justify-content: center;
-  min-height: 44px;
-  font-size: 0.78rem;
-}
-
-.history-pdf-viewer-open-tab {
+.history-pdf-viewer-zoom {
   display: inline-flex;
   align-items: center;
-  justify-content: center;
-  padding: 0.38rem 0.6rem;
+  flex-wrap: wrap;
+  gap: 0.2rem;
+}
+
+.history-pdf-viewer-zbtn {
+  min-width: 40px;
+  min-height: 40px;
+  padding: 0;
   border-radius: 8px;
-  font-size: 0.72rem;
+  font-size: 1.1rem;
   font-weight: 700;
-  border: 1px solid rgba(167, 139, 250, 0.5);
-  background: rgba(167, 139, 250, 0.14);
-  color: #ede9fe;
+  line-height: 1;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(255, 255, 255, 0.07);
+  color: #f4f4fb;
   cursor: pointer;
   touch-action: manipulation;
 }
 
-.history-pdf-viewer-open-tab:hover {
-  background: rgba(167, 139, 250, 0.22);
+.history-pdf-viewer-zbtn:hover {
+  background: rgba(255, 255, 255, 0.11);
 }
 
-.history-pdf-viewer-open-tab:focus-visible {
+.history-pdf-viewer-zbtn:focus-visible {
   outline: 2px solid rgba(167, 139, 250, 0.75);
   outline-offset: 2px;
 }
 
-.history-pdf-viewer-hint {
-  margin: 0;
-  padding: 0.35rem 0.75rem 0.5rem;
-  font-size: 0.68rem;
-  line-height: 1.4;
-  color: rgba(200, 200, 220, 0.55);
-  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+.history-pdf-viewer-zfit {
+  min-height: 40px;
+  padding: 0 0.55rem;
+  border-radius: 8px;
+  font-size: 0.7rem;
+  font-weight: 650;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(255, 255, 255, 0.07);
+  color: #e4e4ee;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+.history-pdf-viewer-zfit:hover {
+  background: rgba(255, 255, 255, 0.11);
+}
+
+.history-pdf-viewer-zfit:focus-visible {
+  outline: 2px solid rgba(167, 139, 250, 0.75);
+  outline-offset: 2px;
+}
+
+.history-pdf-viewer-zpct {
+  min-width: 2.65rem;
+  text-align: center;
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: rgba(244, 244, 251, 0.82);
+}
+
+@media (max-width: 640px) {
+  .history-pdf-viewer-zbtn,
+  .history-pdf-viewer-zfit {
+    min-width: 44px;
+    min-height: 44px;
+  }
+
+  .history-pdf-viewer-zfit {
+    padding: 0 0.5rem;
+  }
+
+  .history-pdf-viewer-controls--narrow .history-pdf-viewer-download,
+  .history-pdf-viewer-controls--narrow .history-pdf-viewer-close {
+    min-height: 44px;
+    font-size: 0.78rem;
+  }
 }
 
 .history-pdf-viewer-download {

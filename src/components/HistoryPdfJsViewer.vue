@@ -5,6 +5,7 @@ import {
   watch,
   onUnmounted,
   nextTick,
+  defineModel,
 } from 'vue'
 import * as pdfjsLib from 'pdfjs-dist'
 import pdfjsWorker from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
@@ -18,20 +19,23 @@ const props = defineProps({
 
 const emit = defineEmits(['load-error'])
 
+/** Parent-controlled zoom (1 = fit width). */
+const zoomMult = defineModel('zoomMult', { type: Number, default: 1 })
+
 const loading = ref(true)
 const loadError = ref('')
 const numPages = ref(0)
 const pdf = shallowRef(/** @type {import('pdfjs-dist').PDFDocumentProxy | null} */ (null))
 
 const mainWrapRef = ref(/** @type {HTMLElement | null} */ (null))
-/** CSS pixels: fit-width scale for page 1 at zoom 100%. */
-const fitScale = ref(1)
-/** User zoom multiplier (1 = fit width). */
-const zoomMult = ref(1)
-const activePage = ref(1)
+const mainCanvasRef = ref(/** @type {HTMLCanvasElement | null} */ (null))
 
-/** @type {Map<number, HTMLCanvasElement>} */
-const mainCanvasByPage = new Map()
+/** Page shown in the main canvas (thumbnails switch this). */
+const currentPage = ref(1)
+
+/** CSS pixels: fit-width scale for the active page at zoom 100%. */
+const fitScale = ref(1)
+
 /** @type {Map<number, HTMLCanvasElement>} */
 const thumbCanvasByPage = new Map()
 
@@ -39,42 +43,11 @@ const thumbCanvasByPage = new Map()
 let fetchAbort = null
 /** @type {ResizeObserver | null} */
 let resizeObs = null
-/** @type {IntersectionObserver | null} */
-let pageVisObs = null
 
-function teardownResizeObserver() {
-  resizeObs?.disconnect()
-  resizeObs = null
-}
-
-function teardownPageVisibilityObserver() {
-  pageVisObs?.disconnect()
-  pageVisObs = null
-}
-
-const ZOOM_MIN = 0.55
-const ZOOM_MAX = 2.6
 const THUMB_MAX_W = 72
-
-function bumpZoom(delta) {
-  zoomMult.value = Math.min(
-    ZOOM_MAX,
-    Math.max(ZOOM_MIN, Math.round((zoomMult.value + delta) * 100) / 100),
-  )
-}
-
-function resetZoom() {
-  zoomMult.value = 1
-}
 
 function effectiveMainScale() {
   return fitScale.value * zoomMult.value
-}
-
-function setMainCanvas(pageNum, el) {
-  const n = Number(pageNum)
-  if (el instanceof HTMLCanvasElement) mainCanvasByPage.set(n, el)
-  else mainCanvasByPage.delete(n)
 }
 
 function setThumbCanvas(pageNum, el) {
@@ -83,14 +56,14 @@ function setThumbCanvas(pageNum, el) {
   else thumbCanvasByPage.delete(n)
 }
 
-function scrollToPage(n) {
-  const id = `history-pdfjs-page-${n}`
-  const el = typeof document !== 'undefined' ? document.getElementById(id) : null
-  el?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+async function selectThumbPage(/** @type {number} */ p) {
+  if (p < 1 || p > numPages.value) return
+  currentPage.value = p
+  await measureFitScale()
+  await renderCurrentPage()
 }
 
-/** Wait until the scroll area is mounted (it lives in `v-else`, hidden while `loading` is true). */
-async function waitForMainWrap(/** @type {number} */ maxTries = 40) {
+async function waitForMainWrap(/** @type {number} */ maxTries = 48) {
   for (let i = 0; i < maxTries; i++) {
     const wrap = mainWrapRef.value
     if (wrap && wrap.clientWidth > 0) return wrap
@@ -104,11 +77,12 @@ async function measureFitScale() {
   const doc = pdf.value
   const wrap = (await waitForMainWrap()) || mainWrapRef.value
   if (!doc || !wrap || wrap.clientWidth <= 0) return
-  const p1 = await doc.getPage(1)
-  const vp1 = p1.getViewport({ scale: 1 })
+  const p = Math.min(Math.max(1, currentPage.value), doc.numPages)
+  const page = await doc.getPage(p)
+  const vp = page.getViewport({ scale: 1 })
   const pad = 12
   const w = Math.max(120, wrap.clientWidth - pad)
-  fitScale.value = Math.max(0.2, Math.min(4, w / vp1.width))
+  fitScale.value = Math.max(0.2, Math.min(4, w / vp.width))
 }
 
 /**
@@ -119,7 +93,7 @@ async function measureFitScale() {
  */
 async function renderPageToCanvas(page, canvas, scale, hiDpi = true) {
   const viewport = page.getViewport({ scale })
-  const ctx = canvas.getContext('2d')
+  const ctx = canvas.getContext('2d', { alpha: false }) || canvas.getContext('2d')
   if (!ctx) return
 
   const dpr = hiDpi && typeof window !== 'undefined' ? Math.min(2.5, window.devicePixelRatio || 1) : 1
@@ -131,6 +105,8 @@ async function renderPageToCanvas(page, canvas, scale, hiDpi = true) {
   canvas.style.height = `${viewport.height}px`
   ctx.setTransform(1, 0, 0, 1, 0, 0)
   if (dpr !== 1) ctx.scale(dpr, dpr)
+  ctx.fillStyle = '#ffffff'
+  ctx.fillRect(0, 0, viewport.width, viewport.height)
 
   const task = page.render({
     canvasContext: ctx,
@@ -141,21 +117,17 @@ async function renderPageToCanvas(page, canvas, scale, hiDpi = true) {
 }
 
 let renderToken = 0
-async function renderAllPages() {
+
+async function renderCurrentPage() {
   const doc = pdf.value
-  const n = numPages.value
-  if (!doc || n < 1) return
+  const canvas = mainCanvasRef.value
+  const p = currentPage.value
+  if (!doc || !canvas || numPages.value < 1 || p < 1 || p > numPages.value) return
   const token = ++renderToken
   const scale = effectiveMainScale()
-
-  for (let i = 1; i <= n; i++) {
-    if (token !== renderToken) return
-    const canvas = mainCanvasByPage.get(i)
-    if (!canvas) continue
-    const page = await doc.getPage(i)
-    if (token !== renderToken) return
-    await renderPageToCanvas(page, canvas, scale, true)
-  }
+  const page = await doc.getPage(p)
+  if (token !== renderToken) return
+  await renderPageToCanvas(page, canvas, scale, true)
 }
 
 async function renderThumbnails() {
@@ -172,9 +144,9 @@ async function renderThumbnails() {
   }
 }
 
-function teardownObservers() {
-  teardownResizeObserver()
-  teardownPageVisibilityObserver()
+function teardownResizeObserver() {
+  resizeObs?.disconnect()
+  resizeObs = null
 }
 
 function setupResizeObserver() {
@@ -186,42 +158,14 @@ function setupResizeObserver() {
     window.clearTimeout(t)
     t = window.setTimeout(async () => {
       await measureFitScale()
-      await renderAllPages()
+      await renderCurrentPage()
     }, 120)
   })
   resizeObs.observe(wrap)
 }
 
-function setupPageVisibilityObserver() {
-  pageVisObs?.disconnect()
-  const wrap = mainWrapRef.value
-  if (!wrap || typeof IntersectionObserver === 'undefined') return
-  pageVisObs = new IntersectionObserver(
-    (entries) => {
-      let best = 0
-      let bestPage = activePage.value
-      for (const en of entries) {
-        const id = en.target.id || ''
-        const m = /^history-pdfjs-page-(\d+)$/.exec(id)
-        if (!m) continue
-        const p = Number(m[1])
-        if (en.intersectionRatio > best) {
-          best = en.intersectionRatio
-          bestPage = p
-        }
-      }
-      if (best > 0.08) activePage.value = bestPage
-    },
-    { root: wrap, rootMargin: '-32% 0px -38% 0px', threshold: [0, 0.12, 0.25, 0.5, 1] },
-  )
-  for (let i = 1; i <= numPages.value; i++) {
-    const el = typeof document !== 'undefined' ? document.getElementById(`history-pdfjs-page-${i}`) : null
-    if (el) pageVisObs.observe(el)
-  }
-}
-
 function cleanupDoc() {
-  teardownObservers()
+  teardownResizeObserver()
   if (pdf.value) {
     try {
       pdf.value.destroy()
@@ -231,7 +175,7 @@ function cleanupDoc() {
     pdf.value = null
   }
   numPages.value = 0
-  mainCanvasByPage.clear()
+  currentPage.value = 1
   thumbCanvasByPage.clear()
   renderToken++
 }
@@ -240,8 +184,8 @@ async function loadFromUrl(url) {
   fetchAbort?.abort()
   fetchAbort = new AbortController()
   cleanupDoc()
-  loading.value = true
   loadError.value = ''
+  loading.value = true
   try {
     const res = await fetch(url, { signal: fetchAbort.signal })
     if (!res.ok) throw new Error(`Could not load PDF (${res.status})`)
@@ -250,6 +194,7 @@ async function loadFromUrl(url) {
     const doc = await task.promise
     pdf.value = doc
     numPages.value = doc.numPages
+    currentPage.value = 1
   } catch (e) {
     if (/** @type {Error} */ (e)?.name === 'AbortError') {
       loading.value = false
@@ -263,10 +208,6 @@ async function loadFromUrl(url) {
     return
   }
 
-  /**
-   * Canvases live in the same `v-else` branch as the toolbar. While `loading` is true, that branch
-   * is not mounted, so we must flip `loading` off before measure/render or all pages stay blank.
-   */
   loading.value = false
   await nextTick()
   await new Promise((r) => requestAnimationFrame(() => r(undefined)))
@@ -276,11 +217,10 @@ async function loadFromUrl(url) {
   try {
     await measureFitScale()
     setupResizeObserver()
-    await renderAllPages()
     await nextTick()
     await renderThumbnails()
     await nextTick()
-    setupPageVisibilityObserver()
+    await renderCurrentPage()
   } catch (e) {
     const msg = e instanceof Error ? e.message : 'Could not render PDF'
     loadError.value = msg
@@ -305,7 +245,8 @@ watch(
 
 watch(zoomMult, async () => {
   if (!pdf.value || numPages.value < 1) return
-  await renderAllPages()
+  await measureFitScale()
+  await renderCurrentPage()
 })
 
 onUnmounted(() => {
@@ -316,56 +257,31 @@ onUnmounted(() => {
 
 <template>
   <div class="history-pdfjs">
-    <div v-if="loading" class="history-pdfjs-state" role="status" aria-live="polite">
-      Loading PDF…
-    </div>
-    <div v-else-if="loadError" class="history-pdfjs-state history-pdfjs-state--err">
+    <div v-if="loadError" class="history-pdfjs-state history-pdfjs-state--err">
       {{ loadError }}
     </div>
     <template v-else>
-      <div class="history-pdfjs-toolbar" role="toolbar" aria-label="PDF zoom">
-        <button
-          type="button"
-          class="history-pdfjs-tbtn tap"
-          aria-label="Zoom out"
-          @click="bumpZoom(-0.15)"
-        >
-          −
-        </button>
-        <span class="history-pdfjs-zpct">{{ Math.round(zoomMult * 100) }}%</span>
-        <button
-          type="button"
-          class="history-pdfjs-tbtn tap"
-          aria-label="Zoom in"
-          @click="bumpZoom(0.15)"
-        >
-          +
-        </button>
-        <button type="button" class="history-pdfjs-tbtn history-pdfjs-tbtn--txt tap" @click="resetZoom">
-          Fit width
-        </button>
-      </div>
       <div ref="mainWrapRef" class="history-pdfjs-main">
-        <div
-          v-for="p in numPages"
-          :id="'history-pdfjs-page-' + p"
-          :key="'pg-' + p"
-          class="history-pdfjs-page"
-        >
-          <canvas :ref="(el) => setMainCanvas(p, el)" class="history-pdfjs-canvas" />
+        <div v-if="loading" class="history-pdfjs-loading" role="status" aria-live="polite">
+          Loading PDF…
         </div>
+        <template v-else-if="numPages > 0">
+          <div class="history-pdfjs-page-shell">
+            <canvas ref="mainCanvasRef" class="history-pdfjs-canvas" />
+          </div>
+        </template>
       </div>
-      <div v-if="numPages > 1" class="history-pdfjs-thumbs" role="tablist" aria-label="Page thumbnails">
+      <div v-if="!loading && numPages > 1" class="history-pdfjs-thumbs" role="tablist" aria-label="Pages">
         <button
           v-for="p in numPages"
           :key="'th-' + p"
           type="button"
           role="tab"
-          :aria-selected="p === activePage"
+          :aria-selected="p === currentPage"
           class="history-pdfjs-thumb tap"
-          :class="{ 'history-pdfjs-thumb--on': p === activePage }"
+          :class="{ 'history-pdfjs-thumb--on': p === currentPage }"
           :title="'Page ' + p"
-          @click="scrollToPage(p)"
+          @click="selectThumbPage(p)"
         >
           <span class="history-pdfjs-thumb-num">{{ p }}</span>
           <canvas :ref="(el) => setThumbCanvas(p, el)" class="history-pdfjs-thumb-cv" />
@@ -400,77 +316,40 @@ onUnmounted(() => {
   text-align: center;
 }
 
-.history-pdfjs-toolbar {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex-wrap: wrap;
-  gap: 0.45rem;
-  padding: 0.35rem 0.5rem;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-  background: rgba(0, 0, 0, 0.25);
-  flex-shrink: 0;
-}
-
-.history-pdfjs-tbtn {
-  min-width: 44px;
-  min-height: 44px;
-  padding: 0;
-  border-radius: 10px;
-  font-size: 1.2rem;
-  font-weight: 700;
-  line-height: 1;
-  border: 1px solid rgba(255, 255, 255, 0.14);
-  background: rgba(255, 255, 255, 0.07);
-  color: #f4f4fb;
-  cursor: pointer;
-  touch-action: manipulation;
-}
-
-.history-pdfjs-tbtn--txt {
-  min-width: auto;
-  padding: 0 0.75rem;
-  font-size: 0.76rem;
-  font-weight: 650;
-}
-
-.history-pdfjs-tbtn:hover {
-  background: rgba(255, 255, 255, 0.11);
-}
-
-.history-pdfjs-tbtn:focus-visible {
-  outline: 2px solid rgba(167, 139, 250, 0.75);
-  outline-offset: 2px;
-}
-
-.history-pdfjs-zpct {
-  min-width: 3.25rem;
-  text-align: center;
-  font-size: 0.76rem;
-  font-weight: 700;
-  color: rgba(255, 255, 255, 0.72);
-}
-
 .history-pdfjs-main {
   flex: 1 1 0;
   min-height: 0;
+  position: relative;
   overflow: auto;
   -webkit-overflow-scrolling: touch;
   overscroll-behavior: contain;
   touch-action: pan-x pan-y;
-  padding: 0.5rem 0.35rem 0.65rem;
+  padding: 0.35rem 0.3rem 0.45rem;
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 0.65rem;
+  justify-content: flex-start;
 }
 
-.history-pdfjs-page {
-  scroll-margin-top: 6px;
+.history-pdfjs-loading {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 2;
+  font-size: 0.85rem;
+  color: rgba(228, 228, 238, 0.78);
+  background: rgba(10, 10, 16, 0.55);
+  pointer-events: none;
+}
+
+.history-pdfjs-page-shell {
   box-shadow: 0 4px 24px rgba(0, 0, 0, 0.45);
   border-radius: 2px;
   overflow: hidden;
   line-height: 0;
+  flex-shrink: 0;
 }
 
 .history-pdfjs-canvas {
@@ -482,7 +361,7 @@ onUnmounted(() => {
   display: flex;
   flex-direction: row;
   gap: 0.4rem;
-  padding: 0.4rem 0.45rem calc(0.45rem + env(safe-area-inset-bottom, 0));
+  padding: 0.35rem 0.4rem calc(0.4rem + env(safe-area-inset-bottom, 0));
   overflow-x: auto;
   -webkit-overflow-scrolling: touch;
   border-top: 1px solid rgba(255, 255, 255, 0.08);
