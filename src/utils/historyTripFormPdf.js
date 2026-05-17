@@ -513,39 +513,46 @@ function buildTripFormJsPdf(opts) {
   doc.text(destVal, xDest0 + wDestLab, headerY)
 
   const labDrv = FEDEX_FORM.headerDriverLab
+  const driverBlockRight = W - M
   setF('normal', FS_HEAD)
   const wDrvLab = doc.getTextWidth(labDrv)
   setF('bold', FS_HEAD)
   const wDrvName = driverFedex ? doc.getTextWidth(driverFedex) : 0
-  const xDrv0 = W - M - wDrvLab - wDrvName
+  const driverLineWidth = wDrvLab + wDrvName
   setF('normal', FS_HEAD)
-  doc.text(labDrv, xDrv0, headerY)
-  setF('bold', FS_HEAD)
+  doc.text(labDrv, driverBlockRight - driverLineWidth, headerY)
   if (driverFedex) {
-    doc.text(driverFedex, xDrv0 + wDrvLab, headerY)
+    setF('bold', FS_HEAD)
+    doc.text(driverFedex, driverBlockRight - wDrvName, headerY)
   }
 
-  y += 4.2
+  y += 3.85
   setF('bold', FS_SMALL)
-  doc.text(FEDEX_FORM.headerDriverSub, W - M, y, { align: 'right' })
+  doc.text(FEDEX_FORM.headerDriverSub, driverBlockRight, y, { align: 'right' })
   y += 5.5
+
+  /** FedEx scan: body ~56% / 44%; verticals align with that split (not 50% page center). */
+  const LEFT_COL_FRAC = 0.56
+  const colSplitX = M + IW * LEFT_COL_FRAC
 
   /** ---------- Linehaul instructions ---------- */
   const instrH = 17.5
   strokeRect(M, y, IW, instrH, BW_THIN)
   doc.setDrawColor(...BLACK)
   doc.setLineWidth(BW_THIN)
-  doc.line(M + IW * 0.5, y, M + IW * 0.5, y + instrH)
+  doc.line(colSplitX, y, colSplitX, y + instrH)
 
+  const instrLeftTextW = IW * LEFT_COL_FRAC - 4
+  const instrRightTextW = IW * (1 - LEFT_COL_FRAC) - 4
   setF('bold', FS_BODY)
   doc.text(FEDEX_FORM.instrLinehaulDriverTitle, M + 2, y + 4)
   setF('normal', FS_SMALL)
-  doc.text(doc.splitTextToSize(ascii(FEDEX_FORM.instrLinehaulDriverBullets), IW * 0.46 - 2), M + 2, y + 7.5)
+  doc.text(doc.splitTextToSize(ascii(FEDEX_FORM.instrLinehaulDriverBullets), instrLeftTextW), M + 2, y + 7.5)
 
   setF('bold', FS_BODY)
-  doc.text(FEDEX_FORM.instrLinehaulRespTitle, M + IW * 0.5 + 2, y + 4)
+  doc.text(FEDEX_FORM.instrLinehaulRespTitle, colSplitX + 2, y + 4)
   setF('normal', FS_SMALL)
-  doc.text(doc.splitTextToSize(ascii(FEDEX_FORM.instrLinehaulRespBullets), IW * 0.48 - 2), M + IW * 0.5 + 2, y + 7.5)
+  doc.text(doc.splitTextToSize(ascii(FEDEX_FORM.instrLinehaulRespBullets), instrRightTextW), colSplitX + 2, y + 7.5)
   y += instrH + 2.2
 
   /** ---------- Safety (thick top/bottom, thin sides; single-line prompts like FedEx scan) ---------- */
@@ -553,29 +560,30 @@ function buildTripFormJsPdf(opts) {
   strokeRectThickHorizontalEnds(M, y, IW, safetyH)
   doc.setDrawColor(...BLACK)
   doc.setLineWidth(BW_THIN)
-  doc.line(W / 2, y, W / 2, y + safetyH)
-  const halfW = IW / 2
+  doc.line(colSplitX, y, colSplitX, y + safetyH)
+  const safetyLeftW = IW * LEFT_COL_FRAC
+  const safetyRightW = IW * (1 - LEFT_COL_FRAC)
   const safetyPad = 2.5
   const safetyMidY = y + safetyH / 2 + 1.35
   const safetyFs = 5.85
   setF('bold', safetyFs)
   doc.text(FEDEX_FORM.safetyLights, M + safetyPad, safetyMidY, {
     align: 'left',
-    maxWidth: halfW - safetyPad * 2,
+    maxWidth: safetyLeftW - safetyPad * 2,
   })
   doc.text(FEDEX_FORM.safetyCoupling, W - M - safetyPad, safetyMidY, {
     align: 'right',
-    maxWidth: halfW - safetyPad * 2,
+    maxWidth: safetyRightW - safetyPad * 2,
   })
   y += safetyH + 2.2
 
-  /** ---------- Two-column body (FedEx scan ~56% left / remainder right) ---------- */
+  /** ---------- Two-column body (FedEx: single vertical between columns — no gap strip) ---------- */
   const midTop = y
-  const colGap = 2
-  const leftW = IW * 0.56
+  const colGap = 0
+  const leftW = IW * LEFT_COL_FRAC
   const rightW = IW - leftW - colGap
   const rx = M + leftW + colGap
-  const splitX = M + leftW
+  const splitX = rx
 
   const trailerBoxH = 24
   const dollyBoxH = 9.5
@@ -616,8 +624,8 @@ function buildTripFormJsPdf(opts) {
   lh += 4.5
   lh += 3.5
   lh += 4.5
-  /** GPS: blank coords use two ruled lines (~12mm); lat/lng use two text lines (~8.5mm). */
-  lh += latStr && lngStr ? 8.5 : 12.5
+  /** GPS: blank coords use one ruled line like FedEx scan (~9mm); lat/lng use two text lines (~8.5mm). */
+  lh += latStr && lngStr ? 8.5 : 9.5
   const leftInnerH = lh + 8
   const midH = Math.max(leftInnerH, rightStackH + 6)
 
@@ -729,7 +737,6 @@ function buildTripFormJsPdf(opts) {
     doc.setLineWidth(BW_THIN)
     doc.line(lx0, ly - 0.8, gpsRightX, ly - 0.8)
     ly += 3.5
-    doc.line(lx0, ly - 0.8, gpsRightX, ly - 0.8)
     ly += 1.2
   }
 
@@ -870,14 +877,18 @@ function buildTripFormJsPdf(opts) {
   }
   y += invH + 2.5
 
-  /** ---------- DOT (thin box + heavy top rule; checklist labels match FedEx form) ---------- */
+  /** ---------- DOT (thin sides/bottom + heavy top; checklist labels match FedEx form) ---------- */
   const dotH = 56
   if (y + dotH > H - 12) {
     doc.addPage()
     y = M
   }
-  strokeRect(M, y, IW, dotH, BW_THIN)
+  /** Thin L/R/B only so the heavy top rule is not doubled against a thin rect top (FedEx scan). */
   doc.setDrawColor(...BLACK)
+  doc.setLineWidth(BW_THIN)
+  doc.line(M, y, M, y + dotH)
+  doc.line(M + IW, y, M + IW, y + dotH)
+  doc.line(M, y + dotH, M + IW, y + dotH)
   doc.setLineWidth(BW_THICK)
   doc.line(M, y, M + IW, y)
 
