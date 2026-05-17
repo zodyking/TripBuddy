@@ -1,6 +1,6 @@
-import { jsPDF } from 'jspdf'
 import { buildEnhancedTrailerCards } from './tripDetailsDisplay.js'
 import { normalizeDirectoryLocationId } from './directoryLocationLookup.js'
+import { generateLinehaulPretripPDF } from './linehaulPretripPdfTemplate.js'
 
 /** @param {string} s */
 function ascii(s) {
@@ -12,66 +12,6 @@ function ascii(s) {
     .replace(/[\u201c\u201d]/g, '"')
     .replace(/[\u2018\u2019]/g, "'")
 }
-
-/**
- * Canonical FedEx Ground linehaul trip sheet wording (printed reference).
- * Keep literals aligned with the printed FedEx linehaul sheet (Adobe scan reference).
- */
-const FEDEX_FORM = {
-  headerTractorLab: 'Tractor: ',
-  headerDestLab: 'Destination ',
-  headerDriverLab: 'DRIVER ',
-  headerDriverSub: 'DRIVER',
-  instrLinehaulDriverTitle: 'Linehaul Driver',
-  instrLinehaulDriverBullets:
-    '- Trailer seal numbers, Dolly IDs, and Pre-Trip Inspection\n- Return completed form to Linehaul Office',
-  instrLinehaulRespTitle: 'Linehaul Responsibilities:',
-  instrLinehaulRespBullets:
-    '- Seals provided match TLCRs, the proper FedEx ID and dolly numbers are correct in TMS',
-  safetyLights: 'LIGHTS AND SEAT BELTS ON FOR SAFETY?',
-  safetyCoupling: 'ALL COUPLING DEVICES SECURE?',
-  tripDestinationLab: 'TRIP DESTINATION:',
-  etaOfTripLegLab: 'ETA OF TRIP LEG:',
-  paidLab: 'PAID',
-  standardRouteNote: 'STANDARD ROUTE DETAILS PROVIDED UPON REQUEST',
-  avrLab: 'AUTOMATED DISPATCH / ARRIVAL (AVR):',
-  avrPhone: '1-888-867-1142',
-  gpsCoordinatesLab: 'GPS COORDINATES:',
-  purchasedCarrierInvoice: 'PURCHASED CARRIER INVOICE',
-  referenceLab: 'REFERENCE #:',
-  dotTitle: 'DOT REQUIRED PRE-TRIP',
-  dotCol1: ['LIGHTS / REFLECTORS', 'TIRES / WHEELS', 'BRAKES', 'SUSPENSION'],
-  dotCol2: ['AIR LINES / AIR SYSTEMS', 'DOOR / DOOR LATCHES', 'LANDING GEAR', 'FRAME'],
-  dotCol3: [
-    'COUPLING DEVICES (e.g., FIFTH WHEEL, PINTLE HOOK)',
-    'SAFETY CHAIN',
-    'BODY: ________________',
-    'OTHER: _____________',
-  ],
-  dotDeclaration:
-    'I have inspected all of the above components on the above vehicles/equipment as required by 49 CFR Part 396 and declare that all are compliant with DOT standards.',
-  dotDriverSig: 'Driver Signature ________________________',
-  dotDate: 'Date __________________',
-  dotDriverId: 'Driver ID Number: ________________________',
-  tripLegOriginLab: 'TRIP LEG ORIGIN:',
-  sealLab: 'SEAL:',
-  loadLab: 'LOAD',
-  packageWeightLab: 'PACKAGE WEIGHT:',
-  originPhoneLab: 'Phone: ',
-  dolly1Lab: 'DOLLY 1',
-  dolly2Lab: 'DOLLY 2',
-}
-
-const BLACK = [0, 0, 0]
-const GRAY = [110, 110, 110]
-
-/** Border weights (mm) — FedEx scan: thin rules, medium equipment cells, heavy safety + DOT band */
-const BW_THIN = 0.15
-const BW_MED = 0.45
-const BW_THICK = 1.05
-
-/** ~0.5" side margins on Letter (FedEx print) */
-const MARGIN_MM = 12.7
 
 /**
  * @param {unknown} id
@@ -283,17 +223,6 @@ function formatBasedUponDepartur(tsMs) {
  */
 
 /**
- * @param {import('jspdf').jsPDF} doc
- * @param {string} text
- * @param {number} maxW
- */
-function splitToWidth(doc, text, maxW) {
-  const t = String(text || '').trim()
-  if (!t) return []
-  return doc.splitTextToSize(ascii(t), maxW).map((/** @type {string} */ s) => String(s).trim())
-}
-
-/**
  * FedEx-style address: `Street..., City, ST ZIP` → street + `CITY` / `ST ZIP` row.
  * @param {string} raw
  * @returns {{ streetPart: string, city: string, stateZip: string } | null}
@@ -314,6 +243,60 @@ function splitUsAddressFedex(raw) {
     return { streetPart: streetPart.toUpperCase(), city, stateZip }
   }
   return { streetPart: '', city: parts[0].toUpperCase(), stateZip }
+}
+
+/** @param {string} stateZip e.g. `NY 11714` */
+function stateZipParts(stateZip) {
+  const m = String(stateZip ?? '').match(/^([A-Za-z]{2})\s+(\d{5})(?:-\d{4})?$/)
+  if (!m) return { state: '', zip: '' }
+  return { state: m[1].toUpperCase(), zip: m[2] }
+}
+
+/** Split ETA string for two-field template layout (main + trailing TZ). */
+function splitEtaDisplay(etaAscii) {
+  const s = String(etaAscii || '').trim()
+  if (!s) return { eta: '', timezone: '' }
+  const m = s.match(
+    /^(.+?)\s+(EST|EDT|CST|CDT|MST|MDT|PST|PDT|AKST|AKDT|HST|AST|UTC|GMT)$/i,
+  )
+  if (m) return { eta: m[1].trim(), timezone: m[2].toUpperCase() }
+  return { eta: s, timezone: '' }
+}
+
+/** Template prints the "BASED UPON" label separately; value column is the rest of the FedEx line. */
+function basedUponValueOnly(fullLine) {
+  return String(fullLine || '')
+    .trim()
+    .replace(/^BASED\s+UPON\s+/i, '')
+    .trim()
+}
+
+/** Footer printed time (Eastern), e.g. `May 16 2026 23:55 EDT`. */
+function formatPrintedTimeFedex(tsMs = Date.now()) {
+  const d = new Date(tsMs)
+  if (isNaN(d.getTime())) return ''
+  const tz = 'America/New_York'
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: tz,
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  }).formatToParts(d)
+  /** @param {string} t */
+  const get = (t) => parts.find((p) => p.type === t)?.value ?? ''
+  const monRaw = get('month')
+  const mon = monRaw ? monRaw.charAt(0).toUpperCase() + monRaw.slice(1).toLowerCase() : ''
+  const day = get('day')
+  const yr = get('year')
+  const hr = get('hour')
+  const min = get('minute')
+  const tzParts = new Intl.DateTimeFormat('en-US', { timeZone: tz, timeZoneName: 'short' }).formatToParts(d)
+  const tzRaw = tzParts.find((p) => p.type === 'timeZoneName')?.value?.trim() ?? ''
+  const tzAbbr = /^(EST|EDT|CST|CDT|MST|MDT|PST|PDT)$/i.test(tzRaw) ? tzRaw.toUpperCase() : 'EDT'
+  return `${mon} ${day} ${yr} ${hr}:${min} ${tzAbbr}`
 }
 
 /**
@@ -441,498 +424,74 @@ function buildTripFormJsPdf(opts) {
     if (destDir.lng >= 0) lngStr = `${Math.abs(destDir.lng).toFixed(6)} EAST`
   }
 
-  const doc = new jsPDF({ unit: 'mm', format: 'letter', orientation: 'portrait', compress: true })
-  const W = doc.internal.pageSize.getWidth()
-  const H = doc.internal.pageSize.getHeight()
-  const M = MARGIN_MM
-  const IW = W - M * 2
-  let y = M
+  const { eta: etaField, timezone: tzField } = splitEtaDisplay(etaDisplay)
+  const basedUponField = basedUponValueOnly(basedUponFedexExact)
 
-  /** FedEx printed sheet uses monospaced type (Courier-class), not proportional sans. */
-  const FONT = 'courier'
-  const FS_HEAD = 9
-  const FS_BODY = 7.2
-  const FS_SMALL = 6.5
-  const FS_ETA = 10.5
-
-  /**
-   * @param {number} x0
-   * @param {number} y0
-   * @param {number} w
-   * @param {number} h
-   * @param {number} lw
-   */
-  function strokeRect(x0, y0, w, h, lw) {
-    doc.setDrawColor(...BLACK)
-    doc.setLineWidth(lw)
-    doc.rect(x0, y0, w, h)
-  }
-
-  /** FedEx safety band: heavy top + bottom rules, thin verticals (image 2). */
-  function strokeRectThickHorizontalEnds(x0, y0, w, h) {
-    doc.setDrawColor(...BLACK)
-    doc.setLineWidth(BW_THICK)
-    doc.line(x0, y0, x0 + w, y0)
-    doc.line(x0, y0 + h, x0 + w, y0 + h)
-    doc.setLineWidth(BW_THIN)
-    doc.line(x0, y0, x0, y0 + h)
-    doc.line(x0 + w, y0, x0 + w, y0 + h)
-  }
-
-  /**
-   * @param {'normal' | 'bold'} weight
-   * @param {number} sz
-   */
-  function setF(weight, sz) {
-    doc.setFont(FONT, weight)
-    doc.setFontSize(sz)
-    doc.setTextColor(...BLACK)
-  }
-
-  /** ---------- Header ---------- */
-  const headerY = y
-  setF('normal', FS_HEAD)
-  doc.text(FEDEX_FORM.headerTractorLab, M, headerY)
-  const xTractorVal = M + doc.getTextWidth(FEDEX_FORM.headerTractorLab)
-  setF('bold', FS_HEAD)
-  const tractorDisp = tractor === '-' ? '' : tractor
-  if (tractorDisp) {
-    doc.text(tractorDisp, xTractorVal, headerY)
-  }
-
-  const labDest = FEDEX_FORM.headerDestLab
-  const destVal = tripDestHeaderShort
-  setF('normal', FS_HEAD)
-  const wDestLab = doc.getTextWidth(labDest)
-  setF('bold', FS_HEAD)
-  const wDestVal = doc.getTextWidth(destVal)
-  const xDest0 = W / 2 - (wDestLab + wDestVal) / 2
-  setF('normal', FS_HEAD)
-  doc.text(labDest, xDest0, headerY)
-  setF('bold', FS_HEAD)
-  doc.text(destVal, xDest0 + wDestLab, headerY)
-
-  const labDrv = FEDEX_FORM.headerDriverLab
-  const driverBlockRight = W - M
-  setF('normal', FS_HEAD)
-  const wDrvLab = doc.getTextWidth(labDrv)
-  setF('bold', FS_HEAD)
-  const wDrvName = driverFedex ? doc.getTextWidth(driverFedex) : 0
-  const driverLineWidth = wDrvLab + wDrvName
-  setF('normal', FS_HEAD)
-  doc.text(labDrv, driverBlockRight - driverLineWidth, headerY)
-  if (driverFedex) {
-    setF('bold', FS_HEAD)
-    doc.text(driverFedex, driverBlockRight - wDrvName, headerY)
-  }
-
-  y += 3.85
-  setF('bold', FS_SMALL)
-  doc.text(FEDEX_FORM.headerDriverSub, driverBlockRight, y, { align: 'right' })
-  y += 5.5
-
-  /** FedEx scan: body ~56% / 44%; verticals align with that split (not 50% page center). */
-  const LEFT_COL_FRAC = 0.56
-  const colSplitX = M + IW * LEFT_COL_FRAC
-
-  /** ---------- Linehaul instructions ---------- */
-  const instrH = 17.5
-  strokeRect(M, y, IW, instrH, BW_THIN)
-  doc.setDrawColor(...BLACK)
-  doc.setLineWidth(BW_THIN)
-  doc.line(colSplitX, y, colSplitX, y + instrH)
-
-  const instrLeftTextW = IW * LEFT_COL_FRAC - 4
-  const instrRightTextW = IW * (1 - LEFT_COL_FRAC) - 4
-  setF('bold', FS_BODY)
-  doc.text(FEDEX_FORM.instrLinehaulDriverTitle, M + 2, y + 4)
-  setF('normal', FS_SMALL)
-  doc.text(doc.splitTextToSize(ascii(FEDEX_FORM.instrLinehaulDriverBullets), instrLeftTextW), M + 2, y + 7.5)
-
-  setF('bold', FS_BODY)
-  doc.text(FEDEX_FORM.instrLinehaulRespTitle, colSplitX + 2, y + 4)
-  setF('normal', FS_SMALL)
-  doc.text(doc.splitTextToSize(ascii(FEDEX_FORM.instrLinehaulRespBullets), instrRightTextW), colSplitX + 2, y + 7.5)
-  y += instrH + 2.2
-
-  /** ---------- Safety (thick top/bottom, thin sides; single-line prompts like FedEx scan) ---------- */
-  const safetyH = 10.5
-  strokeRectThickHorizontalEnds(M, y, IW, safetyH)
-  doc.setDrawColor(...BLACK)
-  doc.setLineWidth(BW_THIN)
-  doc.line(colSplitX, y, colSplitX, y + safetyH)
-  const safetyLeftW = IW * LEFT_COL_FRAC
-  const safetyRightW = IW * (1 - LEFT_COL_FRAC)
-  const safetyPad = 2.5
-  const safetyMidY = y + safetyH / 2 + 1.35
-  const safetyFs = 5.85
-  setF('bold', safetyFs)
-  doc.text(FEDEX_FORM.safetyLights, M + safetyPad, safetyMidY, {
-    align: 'left',
-    maxWidth: safetyLeftW - safetyPad * 2,
-  })
-  doc.text(FEDEX_FORM.safetyCoupling, W - M - safetyPad, safetyMidY, {
-    align: 'right',
-    maxWidth: safetyRightW - safetyPad * 2,
-  })
-  y += safetyH + 2.2
-
-  /** ---------- Two-column body (FedEx: single vertical between columns — no gap strip) ---------- */
-  const midTop = y
-  const colGap = 0
-  const leftW = IW * LEFT_COL_FRAC
-  const rightW = IW - leftW - colGap
-  const rx = M + leftW + colGap
-  const splitX = rx
-
-  const trailerBoxH = 24
-  const dollyBoxH = 9.5
-  const originBoxH = 27
-  const gapBox = 1.2
-  const rightPadTop = 2.5
-  const rightStackH =
-    rightPadTop +
-    3 * (trailerBoxH + gapBox) +
-    2 * (dollyBoxH + gapBox) +
-    originBoxH +
-    5
-
-  /** Measure left column content height */
-  setF('normal', FS_BODY)
-  let lh = 0
-  lh += 4.5
-  lh += 4.5
-  lh += etaDisplay ? 6.5 : 4.2
-  lh += 4
-  lh += 4
-  /** Destination block: bold name (up to 2 lines) + street / city row (FedEx image 2). */
-  const destNameLineCount = Math.min(splitToWidth(doc, ascii(destNameLine).toUpperCase(), leftW - 4).length, 2)
-  lh += Math.max(destNameLineCount, 1) * 3.55
+  let destAddress = ''
+  let destCity = ''
+  let destState = ''
+  let destZip = ''
   if (destAddrParsed) {
-    const sl = destAddrParsed.streetPart
-      ? splitToWidth(doc, destAddrParsed.streetPart, leftW - 4)
-      : []
-    lh += Math.min(Math.max(sl.length, 0), 4) * 3.5
-    if (destAddrParsed.city) lh += 3.5
-    else if (destAddrParsed.stateZip && !destAddrParsed.streetPart) lh += 3.5
+    destAddress = destAddrParsed.streetPart || ''
+    destCity = destAddrParsed.city || ''
+    const sz = stateZipParts(destAddrParsed.stateZip)
+    destState = sz.state
+    destZip = sz.zip
   } else if (destAddrRawForParse) {
-    const fallback = splitToWidth(doc, destAddrRawForParse, leftW - 4)
-    lh += Math.min(fallback.length, 5) * 3.5
+    destAddress = destAddrRawForParse
   }
-  if (destPhone) lh += 3.5
-  lh += 2
-  lh += 4.5
-  lh += 3.5
-  lh += 4.5
-  /** GPS: blank coords use one ruled line like FedEx scan (~9mm); lat/lng use two text lines (~8.5mm). */
-  lh += latStr && lngStr ? 8.5 : 9.5
-  const leftInnerH = lh + 8
-  const midH = Math.max(leftInnerH, rightStackH + 6)
 
-  strokeRect(M, midTop, IW, midH, BW_THIN)
-  doc.setDrawColor(...BLACK)
-  doc.setLineWidth(BW_THIN)
-  doc.line(splitX, midTop, splitX, midTop + midH)
-
-  /** ----- Left column (FedEx: label + value spacing from measured label width) ----- */
-  const leftColR = M + leftW - 2
-  let ly = midTop + 3.5
-  const lx0 = M + 2
-  const labTripDest = FEDEX_FORM.tripDestinationLab
-  setF('bold', FS_BODY)
-  doc.text(labTripDest, lx0, ly)
-  doc.text(tripDestHeaderShort, lx0 + doc.getTextWidth(labTripDest) + 1, ly)
-  ly += 4.8
-
-  const labEta = FEDEX_FORM.etaOfTripLegLab
-  setF('bold', FS_BODY)
-  doc.text(labEta, lx0, ly)
-  ly += 4.6
-  setF('bold', FS_ETA)
-  if (etaDisplay) {
-    doc.text(etaDisplay, lx0, ly)
+  let originStreet = ''
+  let originCity = ''
+  let originState = ''
+  let originZip = ''
+  if (originAddrParsed) {
+    originStreet = originAddrParsed.streetPart || originAddr
+    originCity = originAddrParsed.city || ''
+    const oz = stateZipParts(originAddrParsed.stateZip)
+    originState = oz.state
+    originZip = oz.zip
   } else {
-    doc.setLineWidth(BW_THIN)
-    doc.line(lx0, ly - 0.35, leftColR, ly - 0.35)
-  }
-  ly += 7
-
-  setF('normal', FS_SMALL)
-  doc.text(ascii(basedUponFedexExact), lx0, ly)
-  ly += 4.5
-
-  /** Destination name + address (no "DESTINATION ADDRESS:" label on FedEx sheet). */
-  const destNameUpper = ascii(destNameLine).toUpperCase()
-  setF('bold', FS_BODY)
-  for (const nl of splitToWidth(doc, destNameUpper, leftW - 4).slice(0, 2)) {
-    doc.text(nl, lx0, ly)
-    ly += 3.55
-  }
-  setF('normal', FS_BODY)
-  if (destAddrParsed) {
-    if (destAddrParsed.streetPart) {
-      for (const ln of splitToWidth(doc, destAddrParsed.streetPart, leftW - 4).slice(0, 4)) {
-        doc.text(ln, lx0, ly)
-        ly += 3.45
-      }
-    }
-    if (destAddrParsed.city) {
-      setF('normal', FS_BODY)
-      doc.text(destAddrParsed.city, lx0, ly)
-      doc.text(destAddrParsed.stateZip, leftColR, ly, { align: 'right' })
-      ly += 3.5
-    } else if (destAddrParsed.stateZip) {
-      doc.text(destAddrParsed.stateZip, lx0, ly)
-      ly += 3.45
-    }
-  } else if (destAddrRawForParse) {
-    for (const ln of splitToWidth(doc, destAddrRawForParse, leftW - 4).slice(0, 5)) {
-      doc.text(ln, lx0, ly)
-      ly += 3.45
-    }
-  }
-  if (destPhone) {
-    doc.text(destPhone, lx0, ly)
-    ly += 3.45
-  }
-  ly += 1.5
-
-  const labPaid = FEDEX_FORM.paidLab
-  setF('bold', FS_BODY)
-  doc.text(labPaid, lx0, ly)
-  setF('bold', FS_BODY)
-  const paidTxt = paidMi || '-'
-  doc.text(paidTxt, leftColR, ly, { align: 'right' })
-  ly += 4.8
-
-  setF('normal', FS_SMALL)
-  doc.setTextColor(...GRAY)
-  doc.text(FEDEX_FORM.standardRouteNote, lx0, ly)
-  doc.setTextColor(...BLACK)
-  ly += 3.8
-
-  const labAvr = FEDEX_FORM.avrLab
-  setF('bold', FS_BODY)
-  doc.text(labAvr, lx0, ly)
-  setF('normal', FS_BODY)
-  doc.text(FEDEX_FORM.avrPhone, lx0 + doc.getTextWidth(labAvr) + 1.2, ly)
-  ly += 5
-
-  const gpsRightX = leftColR
-  if (latStr && lngStr) {
-    setF('bold', FS_BODY)
-    const gpsLab = `${FEDEX_FORM.gpsCoordinatesLab} `
-    doc.text(gpsLab, lx0, ly)
-    setF('normal', FS_BODY)
-    const latX = lx0 + doc.getTextWidth(gpsLab)
-    doc.text(latStr, latX, ly)
-    ly += 3.6
-    doc.text(lngStr, latX, ly)
-    ly += 1.2
-  } else {
-    setF('bold', FS_BODY)
-    doc.text(FEDEX_FORM.gpsCoordinatesLab, lx0, ly)
-    ly += 3.6
-    setF('normal', FS_BODY)
-    doc.setLineWidth(BW_THIN)
-    doc.line(lx0, ly - 0.8, gpsRightX, ly - 0.8)
-    ly += 3.5
-    ly += 1.2
+    originStreet = originAddr
   }
 
-  /** ----- Right column: T1, D1, T2, D2, T3, Trip leg origin (FedEx order) ----- */
-  const rightInnerR = rx + rightW - 2
-  let ry = midTop + 2.5
+  const tractorField = tractor === '-' ? '' : tractor
 
-  /**
-   * @param {{ order: string, trlr: string, seal: string, load: string, weight: string }} slot
-   * @param {number} idx
-   */
-  function drawTrailerBox(slot, idx) {
-    strokeRect(rx, ry, rightW, trailerBoxH, BW_MED)
-    const ix = rx + 1.8
-    const iy0 = ry + 3.8
-    const hasNbr = Boolean(String(slot.trlr ?? '').trim())
-    setF('bold', FS_BODY)
-    if (hasNbr) {
-      const labWithSpace = `TRAILER ${idx}: `
-      doc.text(labWithSpace, ix, iy0)
-      doc.text(String(slot.trlr), ix + doc.getTextWidth(labWithSpace), iy0)
-    } else {
-      doc.text(`TRAILER ${idx}:`, ix, iy0)
-    }
-
-    setF('bold', FS_SMALL)
-    const sealLab = FEDEX_FORM.sealLab
-    doc.text(sealLab, ix, ry + 8.8)
-    doc.setDrawColor(...BLACK)
-    doc.setLineWidth(BW_THIN)
-    const sealLabW = doc.getTextWidth(sealLab)
-    doc.line(ix + sealLabW + 0.6, ry + 8.1, rightInnerR, ry + 8.1)
-    if (slot.seal) {
-      setF('normal', FS_SMALL)
-      doc.text(slot.seal, ix + sealLabW + 1.2, ry + 8.9)
-    }
-
-    const loadRowY = ry + 13.2
-    const loadLab = FEDEX_FORM.loadLab
-    setF('bold', FS_SMALL)
-    doc.text(loadLab, ix, loadRowY)
-    setF('normal', FS_SMALL)
-    const loadDisp = String(slot.load || '-').trim() || '-'
-    const loadLabW = doc.getTextWidth(loadLab) + 2
-    doc.text(loadDisp, rightInnerR, loadRowY, {
-      align: 'right',
-      maxWidth: Math.max(8, rightInnerR - ix - loadLabW),
-    })
-
-    const pwY = ry + 20.5
-    const pwLab = FEDEX_FORM.packageWeightLab
-    setF('bold', FS_SMALL)
-    doc.text(pwLab, ix, pwY)
-    setF('normal', FS_SMALL)
-    const wTxt = String(slot.weight || '-').trim()
-    doc.text(wTxt, rightInnerR, pwY, { align: 'right' })
-    ry += trailerBoxH + gapBox
-  }
-
-  /**
-   * @param {string} label
-   * @param {string} val
-   */
-  function drawDollyBox(label, val) {
-    strokeRect(rx, ry, rightW, dollyBoxH, BW_MED)
-    const ix = rx + 1.8
-    setF('bold', FS_BODY)
-    const dollyLab = `${label}:`
-    doc.text(dollyLab, ix, ry + 6)
-    doc.setDrawColor(...BLACK)
-    doc.setLineWidth(BW_THIN)
-    doc.line(ix + doc.getTextWidth(dollyLab) + 0.8, ry + 5.2, rightInnerR, ry + 5.2)
-    if (val) {
-      setF('normal', FS_BODY)
-      doc.text(val, ix + doc.getTextWidth(dollyLab) + 1.2, ry + 6.1)
-    }
-    ry += dollyBoxH + gapBox
-  }
-
-  /** FedEx image 2 order: T1, D1, T2, D2, T3, trip leg origin. */
-  drawTrailerBox(trailerSlots[0], 1)
-  drawDollyBox(FEDEX_FORM.dolly1Lab, dolly1)
-  drawTrailerBox(trailerSlots[1], 2)
-  drawDollyBox(FEDEX_FORM.dolly2Lab, dolly2)
-  drawTrailerBox(trailerSlots[2], 3)
-
-  /** Trip leg origin — right stack after trailers/dollies (FedEx image 2). */
-  strokeRect(rx, ry, rightW, originBoxH, BW_MED)
-  const ox = rx + 1.8
-  let oy2 = ry + 4
-  const labTripLegOrigin = FEDEX_FORM.tripLegOriginLab
-  setF('bold', FS_BODY)
-  doc.text(labTripLegOrigin, ox, oy2)
-  setF('bold', FS_BODY)
-  doc.text(originHeader, ox + doc.getTextWidth(labTripLegOrigin) + 1, oy2)
-  oy2 += 4.5
-  setF('normal', FS_SMALL)
-  if (originAddrParsed?.streetPart) {
-    for (const ln of splitToWidth(doc, originAddrParsed.streetPart, rightW - 4).slice(0, 2)) {
-      doc.text(ln, ox, oy2)
-      oy2 += 3.35
-    }
-  } else {
-    for (const ln of splitToWidth(doc, originAddr, rightW - 4).slice(0, 3)) {
-      doc.text(ln, ox, oy2)
-      oy2 += 3.35
-    }
-  }
-  if (originAddrParsed?.city) {
-    doc.text(originAddrParsed.city, ox, oy2)
-    doc.text(originAddrParsed.stateZip, rightInnerR, oy2, { align: 'right' })
-    oy2 += 3.35
-  }
-  if (originPhone) {
-    doc.text(`${FEDEX_FORM.originPhoneLab}${originPhone}`, ox, oy2)
-  }
-  ry += originBoxH + 2
-
-  y = midTop + midH + 2.5
-
-  /** ---------- Purchased carrier invoice — left column width only (matches FedEx scan) ---------- */
-  const invH = 16
-  strokeRect(M, y, leftW, invH, BW_THIN)
-  setF('bold', FS_BODY)
-  doc.text(FEDEX_FORM.purchasedCarrierInvoice, M + 2, y + 4.5)
-  setF('bold', FS_SMALL)
-  const refLab = FEDEX_FORM.referenceLab
-  doc.text(refLab, M + 2, y + 10)
-  doc.setDrawColor(...BLACK)
-  doc.setLineWidth(BW_THIN)
-  const refLabW = doc.getTextWidth(refLab)
-  const refLineX0 = M + 2 + refLabW + 1.2
-  const invInnerR = M + leftW - 2
-  doc.line(refLineX0, y + 9.3, invInnerR, y + 9.3)
-  if (tmsRef) {
-    setF('normal', FS_SMALL)
-    doc.text(tmsRef, refLineX0 + 0.6, y + 10.1)
-  }
-  y += invH + 2.5
-
-  /** ---------- DOT (thin sides/bottom + heavy top; checklist labels match FedEx form) ---------- */
-  const dotH = 56
-  if (y + dotH > H - 12) {
-    doc.addPage()
-    y = M
-  }
-  /** Thin L/R/B only so the heavy top rule is not doubled against a thin rect top (FedEx scan). */
-  doc.setDrawColor(...BLACK)
-  doc.setLineWidth(BW_THIN)
-  doc.line(M, y, M, y + dotH)
-  doc.line(M + IW, y, M + IW, y + dotH)
-  doc.line(M, y + dotH, M + IW, y + dotH)
-  doc.setLineWidth(BW_THICK)
-  doc.line(M, y, M + IW, y)
-
-  setF('bold', FS_HEAD + 0.5)
-  doc.text(FEDEX_FORM.dotTitle, W / 2, y + 5.2, { align: 'center' })
-
-  const chkFs = 5.55
-  setF('bold', chkFs)
-  const c1w = IW * 0.24
-  const c2w = IW * 0.26
-  const c3w = IW - c1w - c2w - 5.5
-  const c1x = M + 2.5
-  const c2x = c1x + c1w + 1
-  const c3x = c2x + c2w + 1
-  const cb = 2.35
-  let cy = y + 10.8
-  const col1 = FEDEX_FORM.dotCol1
-  const col2 = FEDEX_FORM.dotCol2
-  const col3 = FEDEX_FORM.dotCol3
-  for (let i = 0; i < 4; i++) {
-    doc.setLineWidth(BW_THIN)
-    doc.rect(c1x, cy - 2.2, cb, cb)
-    doc.text(col1[i] || '', c1x + cb + 0.85, cy, { maxWidth: c1w - cb - 1.2, baseline: 'middle' })
-    doc.rect(c2x, cy - 2.2, cb, cb)
-    doc.text(col2[i] || '', c2x + cb + 0.85, cy, { maxWidth: c2w - cb - 1.2, baseline: 'middle' })
-    doc.rect(c3x, cy - 2.2, cb, cb)
-    doc.text(col3[i] || '', c3x + cb + 0.85, cy, { maxWidth: c3w - cb - 1.5, baseline: 'middle' })
-    cy += 5.15
-  }
-
-  cy += 1.2
-  setF('normal', 6.15)
-  const stmt = ascii(FEDEX_FORM.dotDeclaration)
-  doc.text(doc.splitTextToSize(stmt, IW - 5), M + 2.5, cy)
-  cy += 11.5
-
-  setF('normal', FS_SMALL)
-  doc.text(FEDEX_FORM.dotDriverSig, M + 2.5, cy)
-  doc.text(FEDEX_FORM.dotDate, M + IW * 0.5, cy)
-  cy += 4.8
-  doc.text(FEDEX_FORM.dotDriverId, M + 2.5, cy)
-
-  y += dotH + 2.5
-
+  const doc = generateLinehaulPretripPDF({
+    tractor: tractorField,
+    destination: tripDestHeaderShort,
+    tripDestination: tripDestHeaderShort,
+    driver: driverFedex,
+    eta: etaField,
+    timezone: tzField,
+    basedUpon: basedUponField,
+    facilityName: ascii(destNameLine).toUpperCase(),
+    address: destAddress,
+    city: destCity,
+    state: destState,
+    zip: destZip,
+    phone: destPhone,
+    paid: paidMi || '-',
+    avr: '1-888-867-1142',
+    invoiceRef: tmsRef,
+    gpsNorth: latStr,
+    gpsWest: lngStr,
+    originCode: originHeader,
+    originAddress: originStreet,
+    originCity,
+    originState,
+    originZip,
+    originPhone,
+    printedTime: formatPrintedTimeFedex(),
+    trailers: trailerSlots.map((s) => ({
+      number: s.trlr,
+      seal: s.seal,
+      load: s.load || 'N/A',
+      weight: s.weight || 'N/A',
+    })),
+    dollies: [dolly1, dolly2],
+    driverId: ascii(String(opts.employeeNumber ?? '').trim()),
+  })
   const slug =
     legSeq && /^\d+$/.test(legSeq)
       ? legSeq
