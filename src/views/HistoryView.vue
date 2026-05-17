@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed, watch, onMounted, onUnmounted, nextTick, Teleport } from 'vue'
+import { ref, computed, watch, onMounted, onUnmounted, nextTick, Teleport, defineAsyncComponent } from 'vue'
 import {
   getAssignment,
   getCredentials,
@@ -39,6 +39,8 @@ import {
   formatTripEquipmentPdfBlock,
   resolveHistoryTrailerLoadBadge,
 } from '../utils/tripDetailsDisplay.js'
+
+const HistoryPdfJsViewer = defineAsyncComponent(() => import('../components/HistoryPdfJsViewer.vue'))
 
 /**
  * @typedef {object} LedgerEntry
@@ -116,30 +118,14 @@ function closeWeekPdfViewer() {
   }
   pdfViewerFilename.value = ''
   pdfViewerTitle.value = ''
-  pdfFrameZoom.value = 1
 }
 
-/** Mobile PDF preview: wider layout + zoom so text stays readable (iframe blob PDF is tiny if squeezed to viewport width). */
+/** Mobile: stacked toolbar + larger tap targets in the PDF dialog header. */
 const pdfViewerLayoutNarrow = ref(false)
-/** Multiplier on base mobile PDF column width (see `PDF_VIEWER_MOBILE_BASE_W`). */
-const pdfFrameZoom = ref(1)
-const PDF_VIEWER_MOBILE_BASE_W = 920
 
 function updatePdfViewerLayoutNarrow() {
   pdfViewerLayoutNarrow.value =
     typeof window !== 'undefined' && window.matchMedia('(max-width: 640px)').matches
-}
-
-/** @param {number} delta */
-function bumpPdfFrameZoom(delta) {
-  pdfFrameZoom.value = Math.min(
-    2.35,
-    Math.max(0.65, Math.round((pdfFrameZoom.value + delta) * 100) / 100),
-  )
-}
-
-function resetPdfFrameZoom() {
-  pdfFrameZoom.value = 1
 }
 
 function openPdfInNewTab() {
@@ -151,24 +137,11 @@ function openPdfInNewTab() {
   }
 }
 
-const pdfViewerIframeStyle = computed(() => {
-  if (!pdfViewerLayoutNarrow.value) return /** @type {Record<string, string>} */ ({})
-  const w = Math.round(PDF_VIEWER_MOBILE_BASE_W * pdfFrameZoom.value)
-  return {
-    width: `${w}px`,
-    maxWidth: 'none',
-    flex: 'none',
-    height: 'auto',
-    minHeight: 'min(88dvh, 1200px)',
-  }
-})
-
 watch(
   () => !!(pdfWeekViewerOpen.value && pdfViewerObjectUrl.value),
   (active) => {
     if (active) {
       updatePdfViewerLayoutNarrow()
-      pdfFrameZoom.value = 1
     }
   },
   { flush: 'sync' },
@@ -2739,7 +2712,7 @@ onUnmounted(() => {
               :class="{ 'history-pdf-viewer-actions--narrow': pdfViewerLayoutNarrow }"
             >
               <button
-                v-if="pdfViewerObjectUrl && pdfViewerLayoutNarrow"
+                v-if="pdfViewerObjectUrl"
                 type="button"
                 class="history-pdf-viewer-open-tab tap"
                 @click="openPdfInNewTab"
@@ -2757,52 +2730,21 @@ onUnmounted(() => {
               </button>
             </div>
           </header>
-          <div
-            v-if="pdfViewerLayoutNarrow"
-            class="history-pdf-viewer-zoombar"
-            role="toolbar"
-            aria-label="PDF zoom"
-          >
-            <button
-              type="button"
-              class="history-pdf-viewer-zoombtn tap"
-              aria-label="Zoom out"
-              @click="bumpPdfFrameZoom(-0.12)"
-            >
-              −
-            </button>
-            <span class="history-pdf-viewer-zoompct">{{ Math.round(pdfFrameZoom * 100) }}%</span>
-            <button
-              type="button"
-              class="history-pdf-viewer-zoombtn tap"
-              aria-label="Zoom in"
-              @click="bumpPdfFrameZoom(0.12)"
-            >
-              +
-            </button>
-            <button
-              type="button"
-              class="history-pdf-viewer-zoombtn history-pdf-viewer-zoombtn--text tap"
-              @click="resetPdfFrameZoom"
-            >
-              Reset
-            </button>
-          </div>
-          <p v-if="pdfViewerLayoutNarrow" class="history-pdf-viewer-hint">
-            Drag to pan when zoomed. Use Open in tab for pinch-zoom in your browser viewer.
+          <p v-if="pdfViewerLayoutNarrow && pdfViewerObjectUrl" class="history-pdf-viewer-hint">
+            Tap a thumbnail to jump pages. Open in tab uses your browser’s PDF tools (pinch-zoom, search).
           </p>
-          <div
-            class="history-pdf-viewer-frame-scroll"
-            :class="{ 'history-pdf-viewer-frame-scroll--narrow': pdfViewerLayoutNarrow }"
-          >
-            <iframe
-              v-if="pdfViewerObjectUrl"
-              class="history-pdf-viewer-frame"
-              :class="{ 'history-pdf-viewer-frame--narrow': pdfViewerLayoutNarrow }"
-              title="PDF preview (week mileage or trip form)"
-              :src="pdfViewerObjectUrl"
-              :style="pdfViewerIframeStyle"
-            />
+          <div class="history-pdf-viewer-frame-scroll">
+            <Suspense>
+              <template #default>
+                <HistoryPdfJsViewer
+                  v-if="pdfViewerObjectUrl"
+                  :pdf-url="pdfViewerObjectUrl"
+                />
+              </template>
+              <template #fallback>
+                <p class="history-pdf-viewer-async-fallback" role="status">Loading PDF viewer…</p>
+              </template>
+            </Suspense>
           </div>
         </div>
       </div>
@@ -4697,56 +4639,6 @@ onUnmounted(() => {
   outline-offset: 2px;
 }
 
-.history-pdf-viewer-zoombar {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex-wrap: wrap;
-  gap: 0.45rem;
-  padding: 0.3rem 0.65rem 0.45rem;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.07);
-  background: rgba(0, 0, 0, 0.22);
-}
-
-.history-pdf-viewer-zoombtn {
-  min-width: 44px;
-  min-height: 44px;
-  padding: 0;
-  border-radius: 10px;
-  font-size: 1.25rem;
-  font-weight: 700;
-  line-height: 1;
-  border: 1px solid rgba(255, 255, 255, 0.14);
-  background: rgba(255, 255, 255, 0.07);
-  color: #f4f4fb;
-  cursor: pointer;
-  touch-action: manipulation;
-}
-
-.history-pdf-viewer-zoombtn--text {
-  min-width: auto;
-  padding: 0 0.85rem;
-  font-size: 0.76rem;
-  font-weight: 650;
-}
-
-.history-pdf-viewer-zoombtn:hover {
-  background: rgba(255, 255, 255, 0.11);
-}
-
-.history-pdf-viewer-zoombtn:focus-visible {
-  outline: 2px solid rgba(167, 139, 250, 0.75);
-  outline-offset: 2px;
-}
-
-.history-pdf-viewer-zoompct {
-  min-width: 3.25rem;
-  text-align: center;
-  font-size: 0.76rem;
-  font-weight: 700;
-  color: rgba(255, 255, 255, 0.72);
-}
-
 .history-pdf-viewer-hint {
   margin: 0;
   padding: 0.35rem 0.75rem 0.5rem;
@@ -4799,23 +4691,16 @@ onUnmounted(() => {
   overflow: hidden;
 }
 
-.history-pdf-viewer-frame-scroll--narrow {
-  overflow: auto;
-  -webkit-overflow-scrolling: touch;
-  overscroll-behavior: contain;
-  touch-action: pan-x pan-y;
-}
-
-.history-pdf-viewer-frame {
-  flex: 1 1 0;
-  min-height: 0;
-  width: 100%;
-  border: 0;
+.history-pdf-viewer-async-fallback {
+  flex: 1;
+  margin: 0;
+  padding: 1rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.85rem;
+  color: rgba(228, 228, 238, 0.72);
   background: #0a0a10;
-}
-
-.history-pdf-viewer-frame--narrow {
-  flex: none;
 }
 
 .history-modal-field {
