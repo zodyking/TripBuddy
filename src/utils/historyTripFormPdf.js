@@ -246,6 +246,56 @@ function splitToWidth(doc, text, maxW) {
 }
 
 /**
+ * FedEx-style address: `Street..., City, ST ZIP` → street + `CITY` / `ST ZIP` row.
+ * @param {string} raw
+ * @returns {{ streetPart: string, city: string, stateZip: string } | null}
+ */
+function splitUsAddressFedex(raw) {
+  const t = ascii(String(raw ?? '').trim())
+  if (!t) return null
+  const parts = t.split(',').map((p) => p.trim()).filter(Boolean)
+  if (parts.length < 2) return null
+  const last = parts[parts.length - 1]
+  const m = last.match(/^([A-Za-z]{2})\s+(\d{5})(?:-\d{4})?$/)
+  if (!m) return null
+  const stateZip = `${m[1].toUpperCase()} ${m[2]}`
+  if (parts.length >= 3) {
+    const city = parts[parts.length - 2].toUpperCase()
+    const streetPart = parts.slice(0, -2).join(', ').trim()
+    if (!streetPart) return null
+    return { streetPart: streetPart.toUpperCase(), city, stateZip }
+  }
+  return { streetPart: '', city: parts[0].toUpperCase(), stateZip }
+}
+
+/** Printed footer time like FedEx scan: `May 16 2026 22:55 EDT` (Eastern). */
+function formatPrintedTimeFedexLine(ms) {
+  const d = new Date(ms)
+  if (isNaN(d.getTime())) return 'Printed Time: —'
+  const tz = 'America/New_York'
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: tz,
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  }).formatToParts(d)
+  /** @param {string} t */
+  const get = (t) => parts.find((p) => p.type === t)?.value ?? ''
+  const mon = (get('month') || '').charAt(0).toUpperCase() + (get('month') || '').slice(1).toLowerCase()
+  const day = get('day')
+  const yr = get('year')
+  const hr = get('hour')
+  const min = get('minute')
+  const tzParts = new Intl.DateTimeFormat('en-US', { timeZone: tz, timeZoneName: 'short' }).formatToParts(d)
+  const tzRaw = tzParts.find((p) => p.type === 'timeZoneName')?.value?.trim() ?? ''
+  const tzAbbr = /^(EST|EDT)$/i.test(tzRaw) ? tzRaw.toUpperCase() : 'EDT'
+  return `Printed Time: ${mon} ${day} ${yr} ${hr}:${min} ${tzAbbr}`
+}
+
+/**
  * @param {TripFormPdfOpts} opts
  * @returns {{ doc: import('jspdf').jsPDF, fileName: string }}
  */
@@ -254,7 +304,6 @@ function buildTripFormJsPdf(opts) {
     typeof opts.generatedAtMs === 'number' && Number.isFinite(opts.generatedAtMs)
       ? new Date(opts.generatedAtMs)
       : new Date()
-  const genLabel = genAt.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })
 
   const e = opts.entry
   const dh = e.dispatchHeader && typeof e.dispatchHeader === 'object' ? e.dispatchHeader : {}
@@ -361,9 +410,13 @@ function buildTripFormJsPdf(opts) {
       : originId || ascii(str(dh.origin)).toUpperCase() || '—'
   const originAddrRaw = originDir?.address ? originDir.address : str(dh.origin)
   const originAddr = ascii(originAddrRaw)
+  const originAddrParsed = splitUsAddressFedex(originAddr)
   const originPhone = formatPhoneFedex(originDir?.phone || '')
 
   const destPhone = formatPhoneFedex(destDir?.phone || '')
+  const destAddrRawForParse = destDir?.address ? ascii(destDir.address) : ''
+  const destAddrParsed = splitUsAddressFedex(destAddrRawForParse)
+
   let latStr = ''
   let lngStr = ''
   if (destDir?.lat != null && destDir?.lng != null) {
@@ -380,7 +433,8 @@ function buildTripFormJsPdf(opts) {
   const IW = W - M * 2
   let y = M
 
-  const FONT = 'courier'
+  /** FedEx scan (image 2): sans-serif / Helvetica, not monospace. */
+  const FONT = 'helvetica'
   const FS_HEAD = 9
   const FS_BODY = 7.2
   const FS_SMALL = 6.5
@@ -397,6 +451,17 @@ function buildTripFormJsPdf(opts) {
     doc.setDrawColor(...BLACK)
     doc.setLineWidth(lw)
     doc.rect(x0, y0, w, h)
+  }
+
+  /** FedEx safety band: heavy top + bottom rules, thin verticals (image 2). */
+  function strokeRectThickHorizontalEnds(x0, y0, w, h) {
+    doc.setDrawColor(...BLACK)
+    doc.setLineWidth(BW_THICK)
+    doc.line(x0, y0, x0 + w, y0)
+    doc.line(x0, y0 + h, x0 + w, y0 + h)
+    doc.setLineWidth(BW_THIN)
+    doc.line(x0, y0, x0, y0 + h)
+    doc.line(x0 + w, y0, x0 + w, y0 + h)
   }
 
   /**
@@ -470,23 +535,23 @@ function buildTripFormJsPdf(opts) {
   doc.text(doc.splitTextToSize(rightInstr, IW * 0.48 - 2), M + IW * 0.5 + 2, y + 7.5)
   y += instrH + 2.2
 
-  /** ---------- Safety (thick border, centered halves) ---------- */
+  /** ---------- Safety (thick top/bottom, thin sides; prompts left/right aligned) ---------- */
   const safetyH = 9.2
-  strokeRect(M, y, IW, safetyH, BW_THICK)
+  strokeRectThickHorizontalEnds(M, y, IW, safetyH)
   doc.setDrawColor(...BLACK)
   doc.setLineWidth(BW_THIN)
   doc.line(W / 2, y, W / 2, y + safetyH)
-  const midX = W / 2
   const halfW = IW / 2
-  setF('bold', FS_BODY - 0.2)
+  const safetyPad = 2.5
   const safetyMidY = y + safetyH / 2 + 1.2
-  doc.text('LIGHTS AND SEAT BELTS ON FOR SAFETY?', midX - halfW / 2, safetyMidY, {
-    align: 'center',
-    maxWidth: halfW - 3,
+  setF('bold', FS_BODY - 0.2)
+  doc.text('LIGHTS AND SEAT BELTS ON FOR SAFETY?', M + safetyPad, safetyMidY, {
+    align: 'left',
+    maxWidth: halfW - safetyPad * 2,
   })
-  doc.text('ALL COUPLING DEVICES SECURE?', midX + halfW / 2, safetyMidY, {
-    align: 'center',
-    maxWidth: halfW - 3,
+  doc.text('ALL COUPLING DEVICES SECURE?', W - M - safetyPad, safetyMidY, {
+    align: 'right',
+    maxWidth: halfW - safetyPad * 2,
   })
   y += safetyH + 2.2
 
@@ -518,10 +583,20 @@ function buildTripFormJsPdf(opts) {
   lh += 6.5
   lh += 4
   lh += 4
-  const addrLines = destDir?.address
-    ? [destNameLine, ...splitToWidth(doc, ascii(destDir.address), leftW - 4)]
-    : splitToWidth(doc, destNameLine, leftW - 4)
-  lh += Math.min(addrLines.length, 5) * 3.5
+  /** Destination block: bold name (up to 2 lines) + street / city row (FedEx image 2). */
+  const destNameLineCount = Math.min(splitToWidth(doc, ascii(destNameLine).toUpperCase(), leftW - 4).length, 2)
+  lh += Math.max(destNameLineCount, 1) * 3.55
+  if (destAddrParsed) {
+    const sl = destAddrParsed.streetPart
+      ? splitToWidth(doc, destAddrParsed.streetPart, leftW - 4)
+      : []
+    lh += Math.min(Math.max(sl.length, 0), 4) * 3.5
+    if (destAddrParsed.city) lh += 3.5
+    else if (destAddrParsed.stateZip && !destAddrParsed.streetPart) lh += 3.5
+  } else if (destAddrRawForParse) {
+    const fallback = splitToWidth(doc, destAddrRawForParse, leftW - 4)
+    lh += Math.min(fallback.length, 5) * 3.5
+  }
   if (destPhone) lh += 3.5
   lh += 2
   lh += 4.5
@@ -563,13 +638,35 @@ function buildTripFormJsPdf(opts) {
   doc.text(ascii(basedUponFedexExact), lx0, ly)
   ly += 4.5
 
+  /** Destination name + address (no "DESTINATION ADDRESS:" label on FedEx sheet). */
+  const destNameUpper = ascii(destNameLine).toUpperCase()
   setF('bold', FS_BODY)
-  doc.text('DESTINATION ADDRESS:', lx0, ly)
-  ly += 4
+  for (const nl of splitToWidth(doc, destNameUpper, leftW - 4).slice(0, 2)) {
+    doc.text(nl, lx0, ly)
+    ly += 3.55
+  }
   setF('normal', FS_BODY)
-  for (const ln of addrLines.slice(0, 5)) {
-    doc.text(ln, lx0, ly)
-    ly += 3.45
+  if (destAddrParsed) {
+    if (destAddrParsed.streetPart) {
+      for (const ln of splitToWidth(doc, destAddrParsed.streetPart, leftW - 4).slice(0, 4)) {
+        doc.text(ln, lx0, ly)
+        ly += 3.45
+      }
+    }
+    if (destAddrParsed.city) {
+      setF('normal', FS_BODY)
+      doc.text(destAddrParsed.city, lx0, ly)
+      doc.text(destAddrParsed.stateZip, M + leftW - 3, ly, { align: 'right' })
+      ly += 3.5
+    } else if (destAddrParsed.stateZip) {
+      doc.text(destAddrParsed.stateZip, lx0, ly)
+      ly += 3.45
+    }
+  } else if (destAddrRawForParse) {
+    for (const ln of splitToWidth(doc, destAddrRawForParse, leftW - 4).slice(0, 5)) {
+      doc.text(ln, lx0, ly)
+      ly += 3.45
+    }
   }
   if (destPhone) {
     doc.text(destPhone, lx0, ly)
@@ -580,7 +677,7 @@ function buildTripFormJsPdf(opts) {
   setF('bold', FS_BODY)
   doc.text('PAID', lx0, ly)
   setF('bold', FS_BODY)
-  const paidTxt = paidMi || '—'
+  const paidTxt = paidMi || '-'
   doc.text(paidTxt, M + leftW - 3, ly, { align: 'right' })
   ly += 4.8
 
@@ -602,9 +699,10 @@ function buildTripFormJsPdf(opts) {
     const gpsLab = 'GPS COORDINATES: '
     doc.text(gpsLab, lx0, ly)
     setF('normal', FS_BODY)
-    doc.text(latStr, lx0 + doc.getTextWidth(gpsLab), ly)
+    const latX = lx0 + doc.getTextWidth(gpsLab)
+    doc.text(latStr, latX, ly)
     ly += 3.6
-    doc.text(lngStr, gpsRightX, ly, { align: 'right' })
+    doc.text(lngStr, latX, ly)
     ly += 1.2
   } else {
     setF('bold', FS_BODY)
@@ -651,29 +749,23 @@ function buildTripFormJsPdf(opts) {
       doc.text(slot.seal, ix + sealLabW + 1.2, ry + 8.9)
     }
 
+    const loadRowY = ry + 13.2
     setF('bold', FS_SMALL)
-    const loadBr = 'LOAD '
-    doc.text(loadBr, ix, ry + 13.2)
-    const loadLabW = doc.getTextWidth(loadBr)
+    doc.text('LOAD', ix, loadRowY)
     setF('normal', FS_SMALL)
-    const loadTxt = slot.load || '-'
-    const loadAvail = rightW - (ix - rx) - loadLabW - 2
-    const loadLines = splitToWidth(doc, loadTxt, loadAvail)
-    doc.text(loadLines[0] || '-', ix + loadLabW, ry + 13.2)
-    if (loadLines.length > 1) {
-      doc.text(loadLines[1], ix, ry + 16.35)
-    }
+    const loadDisp = String(slot.load || '-').trim() || '-'
+    doc.text(loadDisp, rx + rightW - 2, loadRowY, {
+      align: 'right',
+      maxWidth: rightW - (ix - rx) - 14,
+    })
 
+    const pwY = ry + 20.5
     setF('bold', FS_SMALL)
-    const pwLab = 'PACKAGE WEIGHT:'
-    doc.text(pwLab, ix, ry + 20.5)
+    doc.text('PACKAGE WEIGHT:', ix, pwY)
     setF('normal', FS_SMALL)
-    doc.text(slot.weight || '—', ix + doc.getTextWidth(pwLab) + 0.8, ry + 20.5)
+    const wTxt = String(slot.weight || '-').trim()
+    doc.text(wTxt === '—' ? '-' : wTxt, rx + rightW - 2, pwY, { align: 'right' })
     ry += trailerBoxH + gapBox
-  }
-
-  for (let i = 0; i < 3; i++) {
-    drawTrailerBox(trailerSlots[i], i + 1)
   }
 
   /**
@@ -696,10 +788,14 @@ function buildTripFormJsPdf(opts) {
     ry += dollyBoxH + gapBox
   }
 
+  /** FedEx image 2 order: T1, D1, T2, D2, T3, trip leg origin. */
+  drawTrailerBox(trailerSlots[0], 1)
   drawDollyBox('DOLLY 1', dolly1)
+  drawTrailerBox(trailerSlots[1], 2)
   drawDollyBox('DOLLY 2', dolly2)
+  drawTrailerBox(trailerSlots[2], 3)
 
-  /** Trip leg origin — inside right stack (FedEx original placement) */
+  /** Trip leg origin — right stack after trailers/dollies (FedEx image 2). */
   strokeRect(rx, ry, rightW, originBoxH, BW_MED)
   const ox = rx + 1.8
   let oy2 = ry + 4
@@ -707,20 +803,32 @@ function buildTripFormJsPdf(opts) {
   doc.text(`TRIP LEG ORIGIN: ${originHeader}`, ox, oy2)
   oy2 += 4.5
   setF('normal', FS_SMALL)
-  for (const ln of splitToWidth(doc, originAddr, rightW - 4).slice(0, 3)) {
-    doc.text(ln, ox, oy2)
+  if (originAddrParsed?.streetPart) {
+    for (const ln of splitToWidth(doc, originAddrParsed.streetPart, rightW - 4).slice(0, 2)) {
+      doc.text(ln, ox, oy2)
+      oy2 += 3.35
+    }
+  } else {
+    for (const ln of splitToWidth(doc, originAddr, rightW - 4).slice(0, 3)) {
+      doc.text(ln, ox, oy2)
+      oy2 += 3.35
+    }
+  }
+  if (originAddrParsed?.city) {
+    doc.text(originAddrParsed.city, ox, oy2)
+    doc.text(originAddrParsed.stateZip, rx + rightW - 2, oy2, { align: 'right' })
     oy2 += 3.35
   }
   if (originPhone) {
-    doc.text(originPhone, ox, oy2)
+    doc.text(`Phone: ${originPhone}`, ox, oy2)
   }
   ry += originBoxH + 2
 
   y = midTop + midH + 2.5
 
-  /** ---------- Purchased carrier invoice — only under left column ---------- */
+  /** ---------- Purchased carrier invoice — full width (FedEx image 2) ---------- */
   const invH = 16
-  strokeRect(M, y, leftW, invH, BW_THIN)
+  strokeRect(M, y, IW, invH, BW_THIN)
   setF('bold', FS_BODY)
   doc.text('PURCHASED CARRIER INVOICE', M + 2, y + 4.5)
   setF('bold', FS_SMALL)
@@ -730,7 +838,7 @@ function buildTripFormJsPdf(opts) {
   doc.setLineWidth(BW_THIN)
   const refLabW = doc.getTextWidth(refLab)
   const refLineX0 = M + 2 + refLabW + 1.2
-  doc.line(refLineX0, y + 9.3, M + leftW - 2, y + 9.3)
+  doc.line(refLineX0, y + 9.3, M + IW - 2, y + 9.3)
   if (tmsRef) {
     setF('normal', FS_SMALL)
     doc.text(tmsRef, refLineX0 + 0.6, y + 10.1)
@@ -743,7 +851,10 @@ function buildTripFormJsPdf(opts) {
     doc.addPage()
     y = M
   }
-  strokeRect(M, y, IW, dotH, BW_THICK)
+  strokeRect(M, y, IW, dotH, BW_THIN)
+  doc.setDrawColor(...BLACK)
+  doc.setLineWidth(BW_THICK)
+  doc.line(M, y, M + IW, y)
 
   setF('bold', FS_HEAD + 0.5)
   doc.text('DOT REQUIRED PRE-TRIP', W / 2, y + 5.2, { align: 'center' })
@@ -786,18 +897,23 @@ function buildTripFormJsPdf(opts) {
   cy += 11.5
 
   setF('normal', FS_SMALL)
-  doc.text('Driver Signature ________________________________', M + 2.5, cy)
-  doc.text('Date ______________', M + IW * 0.52, cy)
+  doc.text('Driver Signature ________________________', M + 2.5, cy)
+  doc.text('Date __________________', M + IW * 0.5, cy)
   cy += 4.8
-  doc.text('Driver ID Number: ____________________________', M + 2.5, cy)
+  doc.text('Driver ID Number: ________________________', M + 2.5, cy)
 
   y += dotH + 2.5
 
-  /** Footer — FedEx sheet: small muted line at bottom margin (left-aligned like scan) */
+  /** Footer: printed time bottom-right (FedEx image 2); disclaimer second line. */
   setF('normal', 6)
   doc.setTextColor(...GRAY)
-  const foot = `Printed Time: ${ascii(genLabel)}   |   Leg #${legSeq || '—'}   |   FedExTool trip reference (not an official FedEx document)`
-  doc.text(foot, M, H - 7.2, { maxWidth: IW })
+  doc.text(formatPrintedTimeFedexLine(genAt.getTime()), W - M, H - 8.2, { align: 'right' })
+  doc.text(
+    `Leg #${legSeq || '—'}   |   FedExTool trip reference (not an official FedEx document)`,
+    M,
+    H - 5.4,
+    { maxWidth: IW },
+  )
 
   const slug =
     legSeq && /^\d+$/.test(legSeq)
