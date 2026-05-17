@@ -580,7 +580,7 @@ function buildTripFormJsPdf(opts) {
   let lh = 0
   lh += 4.5
   lh += 4.5
-  lh += 6.5
+  lh += etaDisplay ? 6.5 : 4.2
   lh += 4
   lh += 4
   /** Destination block: bold name (up to 2 lines) + street / city row (FedEx image 2). */
@@ -612,25 +612,26 @@ function buildTripFormJsPdf(opts) {
   doc.setLineWidth(BW_THIN)
   doc.line(splitX, midTop, splitX, midTop + midH)
 
-  /** ----- Left column ----- */
+  /** ----- Left column (FedEx: label + value spacing from measured label width) ----- */
+  const leftColR = M + leftW - 2
   let ly = midTop + 3.5
   const lx0 = M + 2
+  const labTripDest = 'TRIP DESTINATION:'
   setF('bold', FS_BODY)
-  doc.text('TRIP DESTINATION:', lx0, ly)
-  setF('bold', FS_BODY)
-  doc.text(tripDestHeaderShort, lx0 + 38, ly)
+  doc.text(labTripDest, lx0, ly)
+  doc.text(tripDestHeaderShort, lx0 + doc.getTextWidth(labTripDest) + 1, ly)
   ly += 4.8
 
+  const labEta = 'ETA OF TRIP LEG:'
   setF('bold', FS_BODY)
-  doc.text('ETA OF TRIP LEG:', lx0, ly)
+  doc.text(labEta, lx0, ly)
   ly += 4.6
   setF('bold', FS_ETA)
   if (etaDisplay) {
     doc.text(etaDisplay, lx0, ly)
   } else {
     doc.setLineWidth(BW_THIN)
-    doc.line(lx0, ly - 1.1, M + leftW - 2, ly - 1.1)
-    doc.line(lx0, ly + 0.8, M + leftW - 2, ly + 0.8)
+    doc.line(lx0, ly - 0.35, leftColR, ly - 0.35)
   }
   ly += 7
 
@@ -656,7 +657,7 @@ function buildTripFormJsPdf(opts) {
     if (destAddrParsed.city) {
       setF('normal', FS_BODY)
       doc.text(destAddrParsed.city, lx0, ly)
-      doc.text(destAddrParsed.stateZip, M + leftW - 3, ly, { align: 'right' })
+      doc.text(destAddrParsed.stateZip, leftColR, ly, { align: 'right' })
       ly += 3.5
     } else if (destAddrParsed.stateZip) {
       doc.text(destAddrParsed.stateZip, lx0, ly)
@@ -674,11 +675,12 @@ function buildTripFormJsPdf(opts) {
   }
   ly += 1.5
 
+  const labPaid = 'PAID'
   setF('bold', FS_BODY)
-  doc.text('PAID', lx0, ly)
+  doc.text(labPaid, lx0, ly)
   setF('bold', FS_BODY)
   const paidTxt = paidMi || '-'
-  doc.text(paidTxt, M + leftW - 3, ly, { align: 'right' })
+  doc.text(paidTxt, leftColR, ly, { align: 'right' })
   ly += 4.8
 
   setF('normal', FS_SMALL)
@@ -687,13 +689,15 @@ function buildTripFormJsPdf(opts) {
   doc.setTextColor(...BLACK)
   ly += 3.8
 
+  const labAvr = 'AUTOMATED DISPATCH / ARRIVAL (AVR):'
   setF('bold', FS_BODY)
-  doc.text('AUTOMATED DISPATCH / ARRIVAL (AVR):', lx0, ly)
+  doc.text(labAvr, lx0, ly)
   setF('normal', FS_BODY)
-  doc.text('1-888-867-1142', lx0 + 62, ly)
+  const avrPhone = '1-888-867-1142'
+  doc.text(avrPhone, lx0 + doc.getTextWidth(labAvr) + 1.2, ly)
   ly += 5
 
-  const gpsRightX = M + leftW - 2.5
+  const gpsRightX = leftColR
   if (latStr && lngStr) {
     setF('bold', FS_BODY)
     const gpsLab = 'GPS COORDINATES: '
@@ -717,6 +721,7 @@ function buildTripFormJsPdf(opts) {
   }
 
   /** ----- Right column: T1, D1, T2, D2, T3, Trip leg origin (FedEx order) ----- */
+  const rightInnerR = rx + rightW - 2
   let ry = midTop + 2.5
 
   /**
@@ -728,13 +733,13 @@ function buildTripFormJsPdf(opts) {
     const ix = rx + 1.8
     const iy0 = ry + 3.8
     const hasNbr = Boolean(String(slot.trlr ?? '').trim())
-    const lab = hasNbr ? `TRAILER ${idx}: ` : `TRAILER ${idx}:`
     setF('bold', FS_BODY)
-    doc.text(lab, ix, iy0)
     if (hasNbr) {
-      const labW = doc.getTextWidth(lab)
-      setF('bold', FS_BODY)
-      doc.text(String(slot.trlr), ix + labW, iy0)
+      const labWithSpace = `TRAILER ${idx}: `
+      doc.text(labWithSpace, ix, iy0)
+      doc.text(String(slot.trlr), ix + doc.getTextWidth(labWithSpace), iy0)
+    } else {
+      doc.text(`TRAILER ${idx}:`, ix, iy0)
     }
 
     setF('bold', FS_SMALL)
@@ -743,28 +748,31 @@ function buildTripFormJsPdf(opts) {
     doc.setDrawColor(...BLACK)
     doc.setLineWidth(BW_THIN)
     const sealLabW = doc.getTextWidth(sealLab)
-    doc.line(ix + sealLabW + 0.6, ry + 8.1, rx + rightW - 2, ry + 8.1)
+    doc.line(ix + sealLabW + 0.6, ry + 8.1, rightInnerR, ry + 8.1)
     if (slot.seal) {
       setF('normal', FS_SMALL)
       doc.text(slot.seal, ix + sealLabW + 1.2, ry + 8.9)
     }
 
     const loadRowY = ry + 13.2
+    const loadLab = 'LOAD'
     setF('bold', FS_SMALL)
-    doc.text('LOAD', ix, loadRowY)
+    doc.text(loadLab, ix, loadRowY)
     setF('normal', FS_SMALL)
     const loadDisp = String(slot.load || '-').trim() || '-'
-    doc.text(loadDisp, rx + rightW - 2, loadRowY, {
+    const loadLabW = doc.getTextWidth(loadLab) + 2
+    doc.text(loadDisp, rightInnerR, loadRowY, {
       align: 'right',
-      maxWidth: rightW - (ix - rx) - 14,
+      maxWidth: Math.max(8, rightInnerR - ix - loadLabW),
     })
 
     const pwY = ry + 20.5
+    const pwLab = 'PACKAGE WEIGHT:'
     setF('bold', FS_SMALL)
-    doc.text('PACKAGE WEIGHT:', ix, pwY)
+    doc.text(pwLab, ix, pwY)
     setF('normal', FS_SMALL)
     const wTxt = String(slot.weight || '-').trim()
-    doc.text(wTxt === '—' ? '-' : wTxt, rx + rightW - 2, pwY, { align: 'right' })
+    doc.text(wTxt === '—' ? '-' : wTxt, rightInnerR, pwY, { align: 'right' })
     ry += trailerBoxH + gapBox
   }
 
@@ -780,7 +788,7 @@ function buildTripFormJsPdf(opts) {
     doc.text(dollyLab, ix, ry + 6)
     doc.setDrawColor(...BLACK)
     doc.setLineWidth(BW_THIN)
-    doc.line(ix + doc.getTextWidth(dollyLab) + 0.8, ry + 5.2, rx + rightW - 2, ry + 5.2)
+    doc.line(ix + doc.getTextWidth(dollyLab) + 0.8, ry + 5.2, rightInnerR, ry + 5.2)
     if (val) {
       setF('normal', FS_BODY)
       doc.text(val, ix + doc.getTextWidth(dollyLab) + 1.2, ry + 6.1)
@@ -799,8 +807,10 @@ function buildTripFormJsPdf(opts) {
   strokeRect(rx, ry, rightW, originBoxH, BW_MED)
   const ox = rx + 1.8
   let oy2 = ry + 4
+  const labTripLegOrigin = 'TRIP LEG ORIGIN:'
   setF('bold', FS_BODY)
-  doc.text(`TRIP LEG ORIGIN: ${originHeader}`, ox, oy2)
+  doc.text(labTripLegOrigin, ox, oy2)
+  doc.text(originHeader, ox + doc.getTextWidth(labTripLegOrigin) + 1, oy2)
   oy2 += 4.5
   setF('normal', FS_SMALL)
   if (originAddrParsed?.streetPart) {
@@ -816,7 +826,7 @@ function buildTripFormJsPdf(opts) {
   }
   if (originAddrParsed?.city) {
     doc.text(originAddrParsed.city, ox, oy2)
-    doc.text(originAddrParsed.stateZip, rx + rightW - 2, oy2, { align: 'right' })
+    doc.text(originAddrParsed.stateZip, rightInnerR, oy2, { align: 'right' })
     oy2 += 3.35
   }
   if (originPhone) {
@@ -845,7 +855,7 @@ function buildTripFormJsPdf(opts) {
   }
   y += invH + 2.5
 
-  /** ---------- DOT (thick outer) ---------- */
+  /** ---------- DOT (thin box + heavy top rule; checklist labels match FedEx form) ---------- */
   const dotH = 56
   if (y + dotH > H - 12) {
     doc.addPage()
@@ -875,7 +885,7 @@ function buildTripFormJsPdf(opts) {
     'COUPLING DEVICES (e.g., FIFTH WHEEL, PINTLE HOOK)',
     'SAFETY CHAIN',
     'BODY: ________________',
-    'OTHER: ________________',
+    'OTHER: _____________',
   ]
   for (let i = 0; i < 4; i++) {
     doc.setLineWidth(BW_THIN)
@@ -909,7 +919,7 @@ function buildTripFormJsPdf(opts) {
   doc.setTextColor(...GRAY)
   doc.text(formatPrintedTimeFedexLine(genAt.getTime()), W - M, H - 8.2, { align: 'right' })
   doc.text(
-    `Leg #${legSeq || '—'}   |   FedExTool trip reference (not an official FedEx document)`,
+    `Leg #${legSeq || '-'}   |   FedExTool trip reference (not an official FedEx document)`,
     M,
     H - 5.4,
     { maxWidth: IW },
