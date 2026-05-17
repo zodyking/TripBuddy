@@ -89,10 +89,21 @@ function scrollToPage(n) {
   el?.scrollIntoView({ behavior: 'smooth', block: 'start' })
 }
 
+/** Wait until the scroll area is mounted (it lives in `v-else`, hidden while `loading` is true). */
+async function waitForMainWrap(/** @type {number} */ maxTries = 40) {
+  for (let i = 0; i < maxTries; i++) {
+    const wrap = mainWrapRef.value
+    if (wrap && wrap.clientWidth > 0) return wrap
+    await nextTick()
+    await new Promise((r) => requestAnimationFrame(() => r(undefined)))
+  }
+  return mainWrapRef.value
+}
+
 async function measureFitScale() {
   const doc = pdf.value
-  const wrap = mainWrapRef.value
-  if (!doc || !wrap) return
+  const wrap = (await waitForMainWrap()) || mainWrapRef.value
+  if (!doc || !wrap || wrap.clientWidth <= 0) return
   const p1 = await doc.getPage(1)
   const vp1 = p1.getViewport({ scale: 1 })
   const pad = 12
@@ -239,8 +250,30 @@ async function loadFromUrl(url) {
     const doc = await task.promise
     pdf.value = doc
     numPages.value = doc.numPages
-    await nextTick()
-    await new Promise((r) => requestAnimationFrame(() => r(undefined)))
+  } catch (e) {
+    if (/** @type {Error} */ (e)?.name === 'AbortError') {
+      loading.value = false
+      return
+    }
+    const msg = e instanceof Error ? e.message : 'Could not load PDF'
+    loadError.value = msg
+    emit('load-error', e)
+    cleanupDoc()
+    loading.value = false
+    return
+  }
+
+  /**
+   * Canvases live in the same `v-else` branch as the toolbar. While `loading` is true, that branch
+   * is not mounted, so we must flip `loading` off before measure/render or all pages stay blank.
+   */
+  loading.value = false
+  await nextTick()
+  await new Promise((r) => requestAnimationFrame(() => r(undefined)))
+
+  if (!pdf.value || numPages.value < 1) return
+
+  try {
     await measureFitScale()
     setupResizeObserver()
     await renderAllPages()
@@ -249,13 +282,10 @@ async function loadFromUrl(url) {
     await nextTick()
     setupPageVisibilityObserver()
   } catch (e) {
-    if (/** @type {Error} */ (e)?.name === 'AbortError') return
-    const msg = e instanceof Error ? e.message : 'Could not load PDF'
+    const msg = e instanceof Error ? e.message : 'Could not render PDF'
     loadError.value = msg
     emit('load-error', e)
     cleanupDoc()
-  } finally {
-    loading.value = false
   }
 }
 
