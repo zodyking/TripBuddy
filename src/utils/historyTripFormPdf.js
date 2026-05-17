@@ -330,34 +330,6 @@ function basedUponValueOnly(fullLine) {
     .trim()
 }
 
-/** Footer printed time (Eastern), e.g. `May 16 2026 23:55 EDT`. */
-function formatPrintedTimeFedex(tsMs = Date.now()) {
-  const d = new Date(tsMs)
-  if (isNaN(d.getTime())) return ''
-  const tz = 'America/New_York'
-  const parts = new Intl.DateTimeFormat('en-US', {
-    timeZone: tz,
-    month: 'short',
-    day: 'numeric',
-    year: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-    hour12: false,
-  }).formatToParts(d)
-  /** @param {string} t */
-  const get = (t) => parts.find((p) => p.type === t)?.value ?? ''
-  const monRaw = get('month')
-  const mon = monRaw ? monRaw.charAt(0).toUpperCase() + monRaw.slice(1).toLowerCase() : ''
-  const day = get('day')
-  const yr = get('year')
-  const hr = get('hour')
-  const min = get('minute')
-  const tzParts = new Intl.DateTimeFormat('en-US', { timeZone: tz, timeZoneName: 'short' }).formatToParts(d)
-  const tzRaw = tzParts.find((p) => p.type === 'timeZoneName')?.value?.trim() ?? ''
-  const tzAbbr = /^(EST|EDT|CST|CDT|MST|MDT|PST|PDT)$/i.test(tzRaw) ? tzRaw.toUpperCase() : 'EDT'
-  return `${mon} ${day} ${yr} ${hr}:${min} ${tzAbbr}`
-}
-
 /** Signature date format (MM/DD/YY style for handwritten look). */
 function formatSignatureDateFedex(tsMs = Date.now()) {
   const d = new Date(tsMs)
@@ -570,7 +542,6 @@ async function buildTripFormJsPdf(opts) {
     originState,
     originZip,
     originPhone,
-    printedTime: formatPrintedTimeFedex(),
     trailers: trailerSlots.map((s) => ({
       number: s.trlr,
       seal: s.seal,

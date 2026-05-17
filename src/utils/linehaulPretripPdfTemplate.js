@@ -35,7 +35,6 @@ export async function generateLinehaulPretripPDF(input = {}) {
     originState: '',
     originZip: '',
     originPhone: '',
-    printedTime: '',
     trailers: [
       { number: '', seal: '', load: '', weight: '' },
       { number: '', seal: '', load: '', weight: '' },
@@ -109,6 +108,11 @@ export async function generateLinehaulPretripPDF(input = {}) {
     doc.setTextColor(PEN_INK[0], PEN_INK[1], PEN_INK[2])
     doc.text(String(value), x, y)
     doc.setTextColor(0, 0, 0)
+  }
+
+  /** Checkmark inside DOT checkbox (handwriting font, same ink as seals). */
+  const checkboxHandCheck = (boxLeft, boxTop) => {
+    handwriting('\u2713', boxLeft + 0.5, boxTop + 8.0, 11.5)
   }
 
   // Header
@@ -275,8 +279,7 @@ export async function generateLinehaulPretripPDF(input = {}) {
     items.forEach((item, index) => {
       const y = base + index * 14
       checkbox(x, y - 9)
-      // Add checkmark inside the checkbox to simulate filled form
-      text('X', x + 2.5, y - 1, 7.5, 'bold')
+      checkboxHandCheck(x, y - 9)
       text(item, x + 18, y, 6.5, 'bold')
     })
   }
@@ -289,7 +292,7 @@ export async function generateLinehaulPretripPDF(input = {}) {
   items3First.forEach((item, index) => {
     const y = base + index * 14
     checkbox(322, y - 9)
-    text('X', 324.5, y - 1, 7.5, 'bold')
+    checkboxHandCheck(322, y - 9)
     text(item, 340, y, 6.5, 'bold')
   })
   items3Last.forEach((item, index) => {
@@ -321,10 +324,6 @@ export async function generateLinehaulPretripPDF(input = {}) {
   line(122, 744, 347, 744)
   // Driver ID in handwriting style (Indie Flower font)
   if (data.driverId) handwriting(data.driverId, 130, 740, 11)
-
-  // Kept at the crop edge like the scanned original.
-  text('Printed Time:', 348, 766, 7.0, 'bold')
-  text(data.printedTime, 412, 766, 7.0)
 
   return doc
 }
