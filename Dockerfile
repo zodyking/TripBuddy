@@ -36,8 +36,8 @@ WORKDIR /app
 # Copy built UI from stage 1
 COPY --from=ui /app/dist ./dist
 
-# Server imports `../src/utils/youtubeVideoId.js` — runtime image must include it (not bundled into dist).
-COPY --from=ui /app/src/utils/youtubeVideoId.js ./src/utils/youtubeVideoId.js
+# Server imports from `../src/utils/*` (e.g. youtubeVideoId, ny511ImpactFootnote) — not bundled into dist; copy the folder.
+COPY --from=ui /app/src/utils ./src/utils
 
 # Environment defaults for containers
 ENV FEDEX_TOOL_API_HOST=0.0.0.0
