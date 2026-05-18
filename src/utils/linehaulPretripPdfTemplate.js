@@ -156,17 +156,10 @@ export async function generateLinehaulPretripPDF(input = {}) {
   text('- Seals provided match TLCRs, the proper FedEx ID and dolly', rightX + 9, 84, 7.2)
   text('  numbers are correct in TMS', rightX + 9, 95, 7.2)
 
-  // Safety strip — checkboxes inset from column edges; marks drawn after labels
+  // Safety strip (original form: questions only, no checkboxes)
   box(MARGIN, 107, CONTENT_W, 24)
-  const safetyCheckY = 114
-  const safetyCheckLeftX = MARGIN + 5
-  const safetyCheckRightX = contentRight - 9.5 - 5
-  checkbox(safetyCheckLeftX, safetyCheckY)
   center('LIGHTS AND SEAT BELTS ON FOR SAFETY?', MARGIN, 125, leftW, 10.2, 'bold')
-  checkboxRegularMark(safetyCheckLeftX, safetyCheckY)
-  checkbox(safetyCheckRightX, safetyCheckY)
   center('ALL COUPLING DEVICES SECURE?', rightX, 125, rightW, 10.2, 'bold')
-  checkboxRegularMark(safetyCheckRightX, safetyCheckY)
 
   /** Right column stack bottoms at this y (origin / trip-leg block). */
   const RIGHT_ORIGIN_Y = 519
@@ -216,11 +209,10 @@ export async function generateLinehaulPretripPDF(input = {}) {
   text(data.gpsNorth, 160, 522, 9.0)
   text(data.gpsWest, 160, 542, 9.0)
 
-  // Purchased carrier invoice
+  // Purchased carrier invoice (original: no underline after REFERENCE #)
   text('PURCHASED CARRIER INVOICE', leftX + 5, 585, 9.0)
   text('REFERENCE #:', leftX + 5, 604, 9.0)
-  line(leftX + 77, 604, leftX + leftW - 7, 604)
-  if (data.invoiceRef) text(data.invoiceRef, leftX + 83, 601, 8.5, 'bold')
+  if (data.invoiceRef) text(String(data.invoiceRef), leftX + 88, 604, 8.5, 'bold')
 
   /**
    * Empty trailer move: no real load/weight in TMS — mimic driver handwriting the trailer # (not system Courier).
