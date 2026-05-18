@@ -11,6 +11,7 @@ import {
 } from '../utils/mapMarkers.js'
 import { bridgeDelayTier } from '../utils/bridgeDelayTier.js'
 import { useMapVehicleId } from '../composables/useMapVehicleId.js'
+import { sanitizeNy511ImpactFootnote } from '../utils/ny511ImpactFootnote.js'
 
 defineOptions({ name: 'TrafficCrossingsContent' })
 
@@ -915,11 +916,11 @@ function ny511EventTypeOrder(key) {
 function ny511ImpactLine(it) {
   if (it == null || typeof it !== 'object') return ''
   const o = /** @type {Record<string, unknown>} */ (it)
-  const imp = String(o.impactSummary || '').trim()
+  const imp = sanitizeNy511ImpactFootnote(String(o.impactSummary || ''))
   if (imp) return imp
-  const sev = String(o.severity || '').trim()
+  const sev = sanitizeNy511ImpactFootnote(String(o.severity || ''))
   if (sev && !/^unknown$/i.test(sev)) return sev
-  const sub = String(o.eventSubType || '').trim()
+  const sub = sanitizeNy511ImpactFootnote(String(o.eventSubType || ''))
   if (sub && !/^unknown$/i.test(sub)) return sub
   return ''
 }

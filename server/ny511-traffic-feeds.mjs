@@ -11,6 +11,7 @@
  */
 
 import { createHash } from 'node:crypto'
+import { sanitizeNy511ImpactFootnote } from '../src/utils/ny511ImpactFootnote.js'
 
 /** NYC metro bounding box (approx): NYC + NJ approaches / SI. */
 export const NYC_TRUCK_BBOX = Object.freeze({
@@ -249,29 +250,81 @@ function readScheduleObject(r) {
 }
 
 /**
+ * @param {Record<string, unknown>} o
+ */
+function extractImpactFrom511LaneObject(o) {
+  if (!o || typeof o !== 'object') return ''
+  for (const k of ['LanesStatus', 'lanesStatus', 'LanesAffected', 'lanesAffected', 'LanesDetail', 'lanesDetail']) {
+    const v = /** @type {Record<string, unknown>} */ (o)[k]
+    if (typeof v === 'string' && v.trim()) {
+      const s = v.trim()
+      const sl = s.toLowerCase()
+      if (sl !== 'unknown' && sl !== 'no data') return s
+    }
+  }
+  return ''
+}
+
+/**
+ * @param {Record<string, unknown>} r
+ * @param {string[]} names
+ */
+function pick511LaneOrDirectionRaw(r, names) {
+  for (const n of names) {
+    if (!(n in r)) continue
+    const v = r[n]
+    if (v == null) continue
+    if (typeof v === 'string' && v.trim()) return v.trim()
+    if (typeof v === 'number' && Number.isFinite(v)) return String(v)
+    if (typeof v === 'object' && !Array.isArray(v)) {
+      const line = extractImpactFrom511LaneObject(/** @type {Record<string, unknown>} */ (v))
+      if (line) return line
+    }
+  }
+  return ''
+}
+
+/**
+ * @param {string} s
+ */
+function isNoise511Fragment(s) {
+  const t = String(s || '')
+    .trim()
+    .toLowerCase()
+  return t === '' || t === 'no data' || t === '-' || t === '—'
+}
+
+/**
  * Prefer concrete operational fields over `Severity`, which 511NY documents as defaulting to Unknown.
  * @param {Record<string, unknown>} r
  * @param {string} eventSubType
  */
 function build511ImpactSummary(r, eventSubType) {
   const sch = readScheduleObject(r)
-  const scheduleImpact = sch ? pickStr(sch, ['Impact', 'impact']) : ''
-  const lanesStatus = pickStr(r, ['LanesStatus', 'lanesStatus'])
-  const lanesAffected = pickStr(r, ['LanesAffected', 'lanesAffected'])
-  const directionOfTravel = pickStr(r, ['DirectionOfTravel', 'directionOfTravel'])
-  const location = pickStr(r, ['Location', 'location'])
+  const scheduleImpact = sanitizeNy511ImpactFootnote(sch ? pickStr(sch, ['Impact', 'impact']) : '')
+  const lanesStatus = sanitizeNy511ImpactFootnote(
+    pick511LaneOrDirectionRaw(r, ['LanesStatus', 'lanesStatus']),
+  )
+  const lanesAffected = sanitizeNy511ImpactFootnote(
+    pick511LaneOrDirectionRaw(r, ['LanesAffected', 'lanesAffected']),
+  )
+  const directionOfTravel = sanitizeNy511ImpactFootnote(
+    pick511LaneOrDirectionRaw(r, ['DirectionOfTravel', 'directionOfTravel']),
+  )
+  const locationLine = sanitizeNy511ImpactFootnote(pick511LaneOrDirectionRaw(r, ['Location', 'location']))
 
   const parts = [scheduleImpact, lanesStatus, lanesAffected, directionOfTravel]
     .map((x) => String(x || '').trim())
-    .filter((x) => x && !isUnknownish511Text(x))
+    .filter((x) => x && !isUnknownish511Text(x) && !isNoise511Fragment(x))
 
   if (parts.length) return parts.join(' · ')
 
-  const sub = String(eventSubType || '').trim()
-  if (sub && !isUnknownish511Text(sub)) return sub
+  const sub = sanitizeNy511ImpactFootnote(String(eventSubType || '').trim())
+  if (sub && !isUnknownish511Text(sub) && !isNoise511Fragment(sub)) return sub
 
-  const loc = String(location || '').trim()
-  if (loc && !isUnknownish511Text(loc)) return loc
+  if (locationLine && !isUnknownish511Text(locationLine) && !isNoise511Fragment(locationLine)) {
+    return locationLine
+  }
 
   return ''
 }

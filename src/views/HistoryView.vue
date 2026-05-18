@@ -39,6 +39,7 @@ import { shiftDateKeyForEventMs } from '../utils/shiftCalendar.js'
 import {
   formatTripEquipmentPdfBlock,
   resolveHistoryTrailerLoadBadge,
+  tripHasAnyLoadedTrailer,
 } from '../utils/tripDetailsDisplay.js'
 
 const HistoryPdfJsViewer = defineAsyncComponent(() => import('../components/HistoryPdfJsViewer.vue'))
@@ -1334,12 +1335,26 @@ async function onDownloadWeekTotalsPdf(wg) {
     /** @type {Set<string>} */
     const proofKeysNeedingTripPdf = new Set()
     for (const r of allRows) {
-      if (Array.isArray(r.proofScreenshots) && r.proofScreenshots.length > 0 && r.proofDedupeKey) {
-        proofKeysNeedingTripPdf.add(r.proofDedupeKey)
+      if (!Array.isArray(r.proofScreenshots) || !r.proofScreenshots.length || !r.proofDedupeKey) {
+        continue
       }
+      const e = r.ledgerEntry
+      const td =
+        e?.tripDetails && typeof e.tripDetails === 'object' && !Array.isArray(e.tripDetails)
+          ? /** @type {Record<string, unknown>} */ (e.tripDetails)
+          : {}
+      if (tripHasAnyLoadedTrailer(td)) proofKeysNeedingTripPdf.add(r.proofDedupeKey)
     }
     for (const pk of proofKeysNeedingTripPdf) {
-      const row = allRows.find((x) => x.proofDedupeKey === pk && x.ledgerEntry)
+      const row = allRows.find((x) => {
+        if (x.proofDedupeKey !== pk || !x.ledgerEntry) return false
+        const le = x.ledgerEntry
+        const tdx =
+          le.tripDetails && typeof le.tripDetails === 'object' && !Array.isArray(le.tripDetails)
+            ? /** @type {Record<string, unknown>} */ (le.tripDetails)
+            : {}
+        return tripHasAnyLoadedTrailer(tdx)
+      })
       const e = row?.ledgerEntry
       if (!e) continue
       try {

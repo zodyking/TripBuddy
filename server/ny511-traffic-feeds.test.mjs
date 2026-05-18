@@ -15,6 +15,7 @@ import {
   passesAllowedTruckEventType,
   passesMetroAlertRelevance,
 } from './ny511-traffic-feeds.mjs'
+import { sanitizeNy511ImpactFootnote } from '../src/utils/ny511ImpactFootnote.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const FIXTURE = path.join(__dirname, 'test-fixtures', 'ny511-traffic-sample.json')
@@ -75,6 +76,12 @@ test('isNy511ItemActiveInTimeWindow excludes not-yet-started events', () => {
   assert.equal(isNy511ItemActiveInTimeWindow(/** @type {any} */ (row), /** @type {number} */ (may)), false)
 })
 
+test('sanitizeNy511ImpactFootnote strips null lane JSON and keeps direction tail', () => {
+  const s =
+    '{"LanesAffectedCount":null,"LanesTotalCount":null,"LanesDetail":null,"LanesStatus":null} - No Data - Southbound'
+  assert.equal(sanitizeNy511ImpactFootnote(s), 'Southbound')
+})
+
 test('normalize maps LanesStatus into impactSummary when Severity is Unknown', () => {
   const row = normalize511RowToItem(
     {
@@ -94,6 +101,27 @@ test('normalize maps LanesStatus into impactSummary when Severity is Unknown', (
   assert.ok(row)
   assert.equal(row?.impactSummary, 'All lanes closed')
   assert.equal(row?.severity, undefined)
+})
+
+test('normalize impactSummary uses direction tail when lane JSON is null-only', () => {
+  const blob =
+    '{"LanesAffectedCount":null,"LanesTotalCount":null,"LanesDetail":null,"LanesStatus":null} - No Data - Southbound'
+  const row = normalize511RowToItem(
+    {
+      ID: 'lane-json-tail',
+      EventType: 'closures',
+      RoadwayName: '9th Avenue',
+      Latitude: 40.76,
+      Longitude: -73.99,
+      DirectionOfTravel: blob,
+      StartDate: '01/01/2026 00:00:00',
+      PlannedEndDate: '31/12/2026 23:59:00',
+    },
+    'getevents',
+    'event',
+  )
+  assert.ok(row)
+  assert.equal(row?.impactSummary, 'Southbound')
 })
 
 test('isNy511ItemActiveInTimeWindow drops ended work', () => {
