@@ -83,15 +83,88 @@ import {
   testDriverChangeAlert,
   testSuccessAlert,
 } from '../utils/alertAudioQueue.js'
+import {
+  getHelpersAutoArriveNearDestEnabled,
+  setHelpersAutoArriveNearDestEnabled,
+  getHelpersAutoArriveRadiusNm,
+  setHelpersAutoArriveRadiusNm,
+  HELPERS_RADIUS_NM_MIN,
+  HELPERS_RADIUS_NM_MAX,
+} from '../utils/helpersLocationPrefs.js'
+import {
+  appGeoLat,
+  appGeoLng,
+  appGeoAccuracyM,
+  appGeoPermission,
+  appGeoError,
+  requestAppGeolocationOnceFromGesture,
+} from '../composables/useAppGeolocationWatch.js'
 
 /** Shown when a secret is on file but the user has not typed a new value (password inputs stay masked). */
 const SECRET_SAVED_MASK = '••••••••••••••••'
 
-/** @type {import('vue').Ref<'general' | 'automation' | 'audio' | 'security' | 'directory'>} */
 const router = useRouter()
 const route = useRoute()
 
+/** @type {import('vue').Ref<'general' | 'automation' | 'audio' | 'security' | 'directory' | 'helpers'>} */
 const settingsTab = ref('general')
+
+const helpersAutoArriveEnabled = ref(getHelpersAutoArriveNearDestEnabled())
+const helpersRadiusNm = ref(getHelpersAutoArriveRadiusNm())
+const helpersLocationBusy = ref(false)
+
+function syncHelpersPrefsFromStorage() {
+  helpersAutoArriveEnabled.value = getHelpersAutoArriveNearDestEnabled()
+  helpersRadiusNm.value = getHelpersAutoArriveRadiusNm()
+}
+
+function onHelpersAutoToggle() {
+  setHelpersAutoArriveNearDestEnabled(helpersAutoArriveEnabled.value)
+}
+
+function onHelpersRadiusBlur() {
+  const n = Number.parseFloat(String(helpersRadiusNm.value))
+  if (!Number.isFinite(n)) {
+    helpersRadiusNm.value = getHelpersAutoArriveRadiusNm()
+    return
+  }
+  setHelpersAutoArriveRadiusNm(n)
+  helpersRadiusNm.value = getHelpersAutoArriveRadiusNm()
+}
+
+const helpersPermissionLabel = computed(() => {
+  switch (appGeoPermission.value) {
+    case 'unsupported':
+      return 'Geolocation is not supported in this browser.'
+    case 'denied':
+      return 'Location permission denied. Enable it in the browser or OS settings.'
+    case 'prompt':
+      return 'Location permission not decided yet — use “Request location fix” below (iOS may require a tap).'
+    case 'granted':
+      return 'Location permission granted.'
+    default:
+      return 'Location permission status unknown.'
+  }
+})
+
+const helpersCoordsLine = computed(() => {
+  const la = appGeoLat.value
+  const lo = appGeoLng.value
+  if (la == null || lo == null || !Number.isFinite(la) || !Number.isFinite(lo)) return '—'
+  const acc = appGeoAccuracyM.value
+  const accStr =
+    acc != null && Number.isFinite(acc) ? ` ±${Math.round(acc)} m` : ''
+  return `${la.toFixed(5)}, ${lo.toFixed(5)}${accStr}`
+})
+
+async function onHelpersRequestLocationTap() {
+  helpersLocationBusy.value = true
+  try {
+    await requestAppGeolocationOnceFromGesture()
+  } finally {
+    helpersLocationBusy.value = false
+  }
+}
 
 /** @type {import('vue').Ref<Array<{
  *   id: string,
@@ -1108,6 +1181,9 @@ watch(settingsTab, (tab) => {
   if (tab === 'directory') {
     void loadDirectoryStats()
   }
+  if (tab === 'helpers') {
+    syncHelpersPrefsFromStorage()
+  }
 })
 
 onUnmounted(() => {
@@ -1128,6 +1204,16 @@ onUnmounted(() => {
         @click="settingsTab = 'general'"
       >
         General
+      </button>
+      <button
+        type="button"
+        class="tab-btn tap"
+        role="tab"
+        :aria-selected="settingsTab === 'helpers'"
+        :class="{ active: settingsTab === 'helpers' }"
+        @click="settingsTab = 'helpers'"
+      >
+        Helpers
       </button>
       <button
         type="button"
@@ -1616,6 +1702,56 @@ onUnmounted(() => {
             </div>
           </div>
         </Teleport>
+      </SettingsSection>
+    </main>
+
+    <main v-show="settingsTab === 'helpers'" class="stack helpers-panel">
+      <SettingsSection title="Location (live)">
+        <p class="helpers-lead">{{ helpersPermissionLabel }}</p>
+        <p class="helpers-coords">{{ helpersCoordsLine }}</p>
+        <p v-if="appGeoError" class="helpers-err">{{ appGeoError }}</p>
+        <button
+          type="button"
+          class="btn tap"
+          :disabled="helpersLocationBusy"
+          @click="onHelpersRequestLocationTap"
+        >
+          {{ helpersLocationBusy ? 'Requesting…' : 'Request location fix' }}
+        </button>
+        <p class="helpers-hint">
+          While signed in, the app keeps a GPS watch in the background for Dispatch and this screen.
+          High accuracy uses more battery. On iOS you may need a tap here once to unlock fixes.
+        </p>
+      </SettingsSection>
+
+      <SettingsSection title="Auto arrive and check-in near destination">
+        <p class="helpers-lead">
+          When your driver status is <strong>ENRT</strong> and you move within the set distance of the
+          <strong>current trip destination</strong> (Linehaul facility coordinates), the app announces
+          <em>Auto arrive and check in running</em> and runs your Home <strong>Arrive</strong> quick action,
+          then your <strong>Check-in</strong> quick action (same pairing as the late-night prompt).
+        </p>
+        <label class="helpers-row tap">
+          <input v-model="helpersAutoArriveEnabled" type="checkbox" @change="onHelpersAutoToggle" />
+          <span>Enable proximity auto Arrive and Check-in</span>
+        </label>
+        <div class="helpers-field">
+          <label class="lbl" for="helpers-radius-nm">Trigger distance (nautical miles)</label>
+          <input
+            id="helpers-radius-nm"
+            v-model.number="helpersRadiusNm"
+            class="inp tap"
+            type="number"
+            :min="HELPERS_RADIUS_NM_MIN"
+            :max="HELPERS_RADIUS_NM_MAX"
+            step="0.25"
+            inputmode="decimal"
+            @blur="onHelpersRadiusBlur"
+          />
+          <p class="helpers-hint">
+            Range {{ HELPERS_RADIUS_NM_MIN }}–{{ HELPERS_RADIUS_NM_MAX }} NM (1 NM = 1852 m). Default is 2 NM if unset.
+          </p>
+        </div>
       </SettingsSection>
     </main>
 
@@ -2239,6 +2375,48 @@ onUnmounted(() => {
   padding: var(--space-4, 1rem);
   font-size: var(--text-sm, 0.8125rem);
   color: var(--color-text-tertiary, #6e6e7e);
+}
+
+.helpers-panel {
+  gap: 1rem;
+}
+.helpers-lead {
+  margin: 0 0 0.65rem;
+  font-size: 0.8rem;
+  line-height: 1.45;
+  color: var(--color-text-secondary, #a8a8b8);
+}
+.helpers-coords {
+  margin: 0 0 0.5rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.78rem;
+  color: var(--color-text-primary, #f4f4f8);
+  word-break: break-all;
+}
+.helpers-err {
+  margin: 0 0 0.5rem;
+  font-size: 0.72rem;
+  color: #f97373;
+}
+.helpers-hint {
+  margin: 0.55rem 0 0;
+  font-size: 0.68rem;
+  line-height: 1.35;
+  color: #7a7a8c;
+}
+.helpers-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  margin: 0.5rem 0 0.75rem;
+  font-size: 0.82rem;
+  color: var(--color-text-primary, #f4f4f8);
+}
+.helpers-row input {
+  margin-top: 0.15rem;
+}
+.helpers-field {
+  margin-top: 0.35rem;
 }
 
 .audio-panel {

@@ -627,9 +627,10 @@ async function buildWeekTotalsJsPdf(opts) {
       columnStyles: {
         0: { cellWidth: 6, halign: 'center' },
         1: { cellWidth: 'auto' },
-        2: { cellWidth: 12 },
+        /* Wider than before so weekday + `h:mm AM/PM` stay one line; Route stays `auto` and absorbs the shrink. */
+        2: { cellWidth: 20 },
         3: { cellWidth: 16 },
-        4: { cellWidth: 12, halign: 'center' },
+        4: { cellWidth: 16, halign: 'center' },
         5: { cellWidth: 20, halign: 'center', overflow: 'linebreak' },
         6: { cellWidth: 14, halign: 'center' },
         7: { cellWidth: 11, halign: 'right' },

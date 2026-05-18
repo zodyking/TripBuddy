@@ -891,6 +891,73 @@ const ny511RoadItems = computed(() => {
   return Array.isArray(items) ? items : []
 })
 
+/** Sort: closure → incident → roadwork → winter, then title. */
+const NY511_TYPE_ORDER = ['closures', 'accidentsandincidents', 'roadwork', 'winterdrivingindex']
+
+/** @type {import('vue').Ref<string>} */
+const ny511KindFilter = ref('')
+
+/**
+ * @param {unknown} key
+ */
+function ny511EventTypeOrder(key) {
+  const k = String(key || '')
+    .toLowerCase()
+    .replace(/\s+/g, '')
+  const i = NY511_TYPE_ORDER.indexOf(k)
+  return i === -1 ? 100 : i
+}
+
+/**
+ * Prefer `impactSummary` from server; otherwise meaningful subtype / severity (511NY defaults Severity to Unknown).
+ * @param {unknown} it
+ */
+function ny511ImpactLine(it) {
+  if (it == null || typeof it !== 'object') return ''
+  const o = /** @type {Record<string, unknown>} */ (it)
+  const imp = String(o.impactSummary || '').trim()
+  if (imp) return imp
+  const sev = String(o.severity || '').trim()
+  if (sev && !/^unknown$/i.test(sev)) return sev
+  const sub = String(o.eventSubType || '').trim()
+  if (sub && !/^unknown$/i.test(sub)) return sub
+  return ''
+}
+
+const ny511RoadItemsView = computed(() => {
+  const items = ny511RoadItems.value.slice()
+  const fil = String(ny511KindFilter.value || '')
+    .toLowerCase()
+    .replace(/\s+/g, '')
+  const filtered = fil
+    ? items.filter((x) => {
+        if (x == null || typeof x !== 'object') return false
+        const k = String(/** @type {any} */ (x).eventTypeKey || '')
+          .toLowerCase()
+          .replace(/\s+/g, '')
+        return k === fil
+      })
+    : items
+  filtered.sort((a, b) => {
+    const ak = a && typeof a === 'object' ? /** @type {any} */ (a).eventTypeKey : ''
+    const bk = b && typeof b === 'object' ? /** @type {any} */ (b).eventTypeKey : ''
+    const oa = ny511EventTypeOrder(ak)
+    const ob = ny511EventTypeOrder(bk)
+    if (oa !== ob) return oa - ob
+    const ta = a && typeof a === 'object' ? String(/** @type {any} */ (a).title || '') : ''
+    const tb = b && typeof b === 'object' ? String(/** @type {any} */ (b).title || '') : ''
+    return ta.localeCompare(tb)
+  })
+  return filtered
+})
+
+const ny511RoadFilterEmpty = computed(
+  () =>
+    !ny511Loading.value &&
+    ny511RoadItems.value.length > 0 &&
+    ny511RoadItemsView.value.length === 0,
+)
+
 const ny511AlertItems = computed(() => {
   const a = ny511Payload.value?.alerts
   return Array.isArray(a) ? a : []
@@ -902,7 +969,7 @@ const ny511HasAnyListings = computed(
 
 const ny511MarkersForMap = computed(() => {
   if (viewMode.value !== 'ny511') return []
-  return ny511RoadItems.value
+  return ny511RoadItemsView.value
     .filter(
       (it) =>
         it &&
@@ -919,6 +986,7 @@ const ny511MarkersForMap = computed(() => {
       kindLabel: String(/** @type {any} */ (it).kind || ''),
       eventTypeKey: String(/** @type {any} */ (it).eventTypeKey || ''),
       severity: String(/** @type {any} */ (it).severity || ''),
+      impactSummary: String(/** @type {any} */ (it).impactSummary || ''),
       roads: Array.isArray(/** @type {any} */ (it).roads) ? /** @type {any} */ (it).roads : [],
     }))
 })
@@ -1288,9 +1356,20 @@ onUnmounted(() => {
           >
             <h2 id="ny511-roads-h" class="ny511-section-h2">Incidents &amp; work zones</h2>
             <p class="ny511-section-sub">Major highways &amp; crossings only · excludes transit detours</p>
+            <div class="ny511-road-controls">
+              <label class="ny511-road-controls__label" for="ny511-kind-filter">Type</label>
+              <select id="ny511-kind-filter" v-model="ny511KindFilter" class="ny511-road-controls__select">
+                <option value="">All types</option>
+                <option value="closures">Closure</option>
+                <option value="roadwork">Roadwork</option>
+                <option value="accidentsandincidents">Incident</option>
+                <option value="winterdrivingindex">Winter</option>
+              </select>
+            </div>
+            <p v-if="ny511RoadFilterEmpty" class="ny511-filter-empty">No events match this type filter.</p>
             <ul class="bridge-grid ny511-road-list" aria-label="511NY road events">
               <li
-                v-for="(it, idx) in ny511RoadItems"
+                v-for="(it, idx) in ny511RoadItemsView"
                 :key="`${String(it.id || 'item')}-${idx}`"
                 class="bridge-tile bridge-tile--ny511"
               >
@@ -1314,7 +1393,7 @@ onUnmounted(() => {
                       <span v-if="it.startsAt || it.endsAt" class="ny511-times">
                         {{ it.startsAt || '—' }} → {{ it.endsAt || '—' }}
                       </span>
-                      <span v-if="it.severity" class="ny511-severity">{{ it.severity }}</span>
+                      <span v-if="ny511ImpactLine(it)" class="ny511-impact">{{ ny511ImpactLine(it) }}</span>
                     </div>
                   </div>
                 </div>
@@ -2062,6 +2141,46 @@ onUnmounted(() => {
   line-height: 1.35;
   color: #6b6b7a;
   max-width: 40rem;
+}
+
+.ny511-road-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem 0.5rem;
+  margin: 0 0 0.4rem 0.15rem;
+}
+
+.ny511-road-controls__label {
+  font-size: 0.58rem;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: #7a7a8c;
+}
+
+.ny511-road-controls__select {
+  font: inherit;
+  font-size: 0.68rem;
+  font-weight: 600;
+  color: #ececf4;
+  background: rgba(0, 0, 0, 0.45);
+  border: 1px solid rgba(167, 139, 250, 0.35);
+  border-radius: 8px;
+  padding: 0.28rem 0.45rem;
+  min-height: 2rem;
+}
+
+.ny511-filter-empty {
+  margin: 0 0 0.45rem 0.15rem;
+  font-size: 0.62rem;
+  color: #8b8b9a;
+}
+
+.ny511-impact {
+  font-size: 0.6rem;
+  color: #9a9ab0;
+  line-height: 1.35;
 }
 
 .ny511-alert-list {

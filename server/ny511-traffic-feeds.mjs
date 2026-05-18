@@ -6,8 +6,8 @@
  *
  * Response payload splits **alerts** (getalerts) vs **items** (getevents: incidents,
  * roadwork, closures, winter index) so the client can show two sections. Transit /
- * parade / general-info noise is dropped; date windows use 511NY `dd/MM/yyyy HH:mm:ss`
- * interpreted as US Eastern (approximate DST).
+ * parade / general-info noise is dropped; active window uses StartDate/PlannedEndDate
+ * (`dd/MM/yyyy HH:mm:ss`, US Eastern approximate DST): events outside [start, end] are omitted.
  */
 
 import { createHash } from 'node:crypto'
@@ -227,6 +227,56 @@ function pickNum(r, names) {
 }
 
 /**
+ * @param {unknown} s
+ */
+function isUnknownish511Text(s) {
+  const t = String(s ?? '')
+    .trim()
+    .toLowerCase()
+  return !t || t === 'unknown' || t === 'n/a' || t === 'none' || t === 'not applicable'
+}
+
+/**
+ * @param {Record<string, unknown>} r
+ */
+function readScheduleObject(r) {
+  const s = r.Schedule ?? r.schedule
+  if (Array.isArray(s) && s.length && s[0] != null && typeof s[0] === 'object') {
+    return /** @type {Record<string, unknown>} */ (s[0])
+  }
+  if (s && typeof s === 'object') return /** @type {Record<string, unknown>} */ (s)
+  return null
+}
+
+/**
+ * Prefer concrete operational fields over `Severity`, which 511NY documents as defaulting to Unknown.
+ * @param {Record<string, unknown>} r
+ * @param {string} eventSubType
+ */
+function build511ImpactSummary(r, eventSubType) {
+  const sch = readScheduleObject(r)
+  const scheduleImpact = sch ? pickStr(sch, ['Impact', 'impact']) : ''
+  const lanesStatus = pickStr(r, ['LanesStatus', 'lanesStatus'])
+  const lanesAffected = pickStr(r, ['LanesAffected', 'lanesAffected'])
+  const directionOfTravel = pickStr(r, ['DirectionOfTravel', 'directionOfTravel'])
+  const location = pickStr(r, ['Location', 'location'])
+
+  const parts = [scheduleImpact, lanesStatus, lanesAffected, directionOfTravel]
+    .map((x) => String(x || '').trim())
+    .filter((x) => x && !isUnknownish511Text(x))
+
+  if (parts.length) return parts.join(' · ')
+
+  const sub = String(eventSubType || '').trim()
+  if (sub && !isUnknownish511Text(sub)) return sub
+
+  const loc = String(location || '').trim()
+  if (loc && !isUnknownish511Text(loc)) return loc
+
+  return ''
+}
+
+/**
  * Parse 511NY `dd/MM/yyyy HH:mm:ss` as US Eastern wall clock (UTC via approximate DST).
  * @param {string} s
  * @returns {number | null} epoch ms
@@ -305,9 +355,8 @@ export function passesAllowedTruckEventType(item) {
 export function isNy511ItemActiveInTimeWindow(item, nowMs = Date.now()) {
   const endMs = item.endsAt ? parseNy511DateMs(String(item.endsAt)) : null
   const startMs = item.startsAt ? parseNy511DateMs(String(item.startsAt)) : null
-  const hour = 60 * 60 * 1000
-  if (endMs != null && endMs < nowMs - hour) return false
-  if (startMs != null && startMs > nowMs + 48 * hour) return false
+  if (startMs != null && nowMs < startMs) return false
+  if (endMs != null && nowMs > endMs) return false
   return true
 }
 
@@ -382,7 +431,8 @@ export function normalize511RowToItem(raw, sourceFeed, _defaultKind) {
 
   const region = pickStr(r, ['RegionName', 'Region', 'region'])
   const county = pickStr(r, ['CountyName', 'County', 'county'])
-  const severity = pickStr(r, ['Severity', 'severity', 'Impact', 'impact'])
+  const severityRaw = pickStr(r, ['Severity', 'severity'])
+  const severity = !isUnknownish511Text(severityRaw) ? severityRaw : undefined
 
   const lat = pickNum(r, ['Latitude', 'Lat', 'lat'])
   const lng = pickNum(r, ['Longitude', 'Lng', 'lng', 'lon'])
@@ -400,6 +450,8 @@ export function normalize511RowToItem(raw, sourceFeed, _defaultKind) {
       ? `${roadway} · ${eventSubType}`
       : roadway || eventSubType || eventType || (description ? description.slice(0, 88) : '') || '511NY event'
 
+  const impactSummary = build511ImpactSummary(r, eventSubType)
+
   const blob = [
     displayTitle,
     description,
@@ -409,6 +461,7 @@ export function normalize511RowToItem(raw, sourceFeed, _defaultKind) {
     eventType,
     eventSubType,
     sourceFeed,
+    impactSummary,
   ]
     .join(' ')
     .toUpperCase()
@@ -419,6 +472,8 @@ export function normalize511RowToItem(raw, sourceFeed, _defaultKind) {
     eventTypeKey,
     kind: humanize511KindLabel(eventTypeKey),
     severity: severity || undefined,
+    eventSubType: eventSubType || undefined,
+    impactSummary: impactSummary || undefined,
     title: displayTitle,
     description: description || undefined,
     roads: roadway ? [roadway] : [],

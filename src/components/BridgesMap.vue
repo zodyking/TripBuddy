@@ -651,9 +651,16 @@ function syncNy511Markers() {
     const color = ny511MarkerFill(m)
     const title = esc(String(m.title || id))
     const kind = esc(String(m.kindLabel || m.kind || ''))
-    const sev = esc(String(m.severity || ''))
+    const detailRaw = String(m.impactSummary || '').trim()
+    const sevRaw = String(m.severity || '').trim()
+    const secondLine =
+      detailRaw && !/^unknown$/i.test(detailRaw)
+        ? esc(detailRaw)
+        : sevRaw && !/^unknown$/i.test(sevRaw)
+          ? esc(sevRaw)
+          : ''
     const road0 = Array.isArray(m.roads) && m.roads[0] != null ? esc(String(m.roads[0])) : ''
-    const meta = [kind, sev].filter(Boolean).join(' · ')
+    const meta = [kind, secondLine].filter(Boolean).join(' · ')
     const roadLine = road0
       ? `<div class="ny511-leaflet-popup__road">${road0}</div>`
       : ''
@@ -1280,8 +1287,8 @@ watch([geoTracking, compassModeActive], () => {
 </style>
 
 <style>
-/* NY511: Leaflet mounts popups on the map container — unscoped + wrapper class for contrast */
-.leaflet-container .leaflet-popup-content-wrapper.ny511-map-popup {
+/* NY511: `bindPopup({ className })` is on `.leaflet-popup`, not the content wrapper */
+.leaflet-container .leaflet-popup.ny511-map-popup .leaflet-popup-content-wrapper {
   background: #16161f;
   color: #ececf4;
   border-radius: 12px;
@@ -1289,24 +1296,24 @@ watch([geoTracking, compassModeActive], () => {
   box-shadow: 0 10px 32px rgba(0, 0, 0, 0.55);
   padding: 0;
 }
-.leaflet-container .leaflet-popup-content-wrapper.ny511-map-popup .leaflet-popup-content {
+.leaflet-container .leaflet-popup.ny511-map-popup .leaflet-popup-content {
   margin: 10px 12px 12px;
   min-width: 0;
   max-width: 16rem;
 }
-.leaflet-container .leaflet-popup-tip.ny511-map-popup {
+.leaflet-container .leaflet-popup.ny511-map-popup .leaflet-popup-tip {
   background: #16161f;
   border: 1px solid rgba(167, 139, 250, 0.45);
   box-shadow: none;
 }
-.leaflet-container .leaflet-popup-content-wrapper.ny511-map-popup .leaflet-popup-close-button {
+.leaflet-container .leaflet-popup.ny511-map-popup a.leaflet-popup-close-button {
   color: #d4d4e8;
   font-weight: 700;
   width: 1.5rem;
   height: 1.5rem;
   padding: 0.35rem 0.35rem 0 0;
 }
-.leaflet-container .leaflet-popup-content-wrapper.ny511-map-popup .leaflet-popup-close-button:hover {
+.leaflet-container .leaflet-popup.ny511-map-popup a.leaflet-popup-close-button:hover {
   color: #fff;
 }
 </style>
