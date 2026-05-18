@@ -260,6 +260,59 @@ function formatBasedUponDepartur(tsMs) {
 }
 
 /**
+ * Trip-leg ETA for the PDF: `May 16, 2026 23:06 EDT` (comma after day, 24h clock, Eastern TZ).
+ * Same Eastern interpretation as {@link formatBasedUponDepartur}.
+ * @param {number} tsMs
+ */
+function formatEtaOfTripLegLine(tsMs) {
+  const d = new Date(tsMs)
+  if (isNaN(d.getTime())) return ''
+  const tz = 'America/New_York'
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: tz,
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  }).formatToParts(d)
+  /** @param {string} t */
+  const get = (t) => parts.find((p) => p.type === t)?.value ?? ''
+  const monRaw = get('month')
+  const mon = monRaw ? monRaw.charAt(0).toUpperCase() + monRaw.slice(1).toLowerCase() : ''
+  const day = get('day')
+  const yr = get('year')
+  const hr24 = get('hour')
+  const min = get('minute')
+  const tzParts = new Intl.DateTimeFormat('en-US', { timeZone: tz, timeZoneName: 'short' }).formatToParts(d)
+  const tzRaw = tzParts.find((p) => p.type === 'timeZoneName')?.value?.trim() ?? ''
+  const tzAbbr = /^(EST|EDT)$/i.test(tzRaw) ? tzRaw.toUpperCase() : 'EDT'
+  return `${mon} ${day}, ${yr} ${hr24}:${min} ${tzAbbr}`
+}
+
+/**
+ * Paid run length in hours from `tripDetails.mileage` (History card "1h 18m" / ~1.3 h run).
+ * @param {Record<string, unknown>} td
+ * @returns {number | null}
+ */
+function runTimeHoursFromTripDetails(td) {
+  const mil = td?.mileage && typeof td.mileage === 'object' && !Array.isArray(td.mileage)
+    ? /** @type {Record<string, unknown>} */ (td.mileage)
+    : null
+  if (!mil) return null
+  const raw = mil.runTimeHours
+  const n =
+    typeof raw === 'number'
+      ? raw
+      : typeof raw === 'string'
+        ? Number.parseFloat(String(raw).replace(/,/g, '').trim())
+        : NaN
+  if (!Number.isFinite(n) || n <= 0) return null
+  return n
+}
+
+/**
  * @typedef {{
  *   displayDate: number,
  *   dailyTripLegSequence?: string,
@@ -404,13 +457,22 @@ async function buildTripFormJsPdf(opts) {
       ? String(/** @type {Record<string, unknown>} */ (td.mileage).totalMiles ?? '').trim()
       : ''
 
-  const etaBold = pickEtaLine(extras, td)
-  const etaDisplay = etaBold ? ascii(etaBold) : ''
-
   const dispatchTs =
     typeof e.displayDate === 'number' && Number.isFinite(e.displayDate) && e.displayDate > 0
       ? e.displayDate
       : null
+
+  const runH = runTimeHoursFromTripDetails(td)
+  let etaDisplay = ''
+  if (dispatchTs != null && runH != null) {
+    const line = formatEtaOfTripLegLine(dispatchTs + runH * 3600000)
+    if (line) etaDisplay = line
+  }
+  if (!etaDisplay) {
+    const etaBold = pickEtaLine(extras, td)
+    etaDisplay = etaBold ? ascii(etaBold) : ''
+  }
+
   const basedUponFedexExact =
     dispatchTs != null ? formatBasedUponDepartur(dispatchTs) : 'BASED UPON ________________________________ EDT DEPARTUR'
 
