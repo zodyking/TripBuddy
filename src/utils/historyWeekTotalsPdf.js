@@ -779,7 +779,8 @@ async function buildWeekTotalsJsPdf(opts) {
             const x = MX + Math.max(0, (maxW - widthMm) / 2)
             const y = contentTop + Math.max(0, (maxH - heightMm) / 2)
             doc.addImage(dataUrl, 'JPEG', x, y, widthMm, heightMm, undefined, 'FAST')
-          } catch {
+          } catch (e) {
+            console.warn('[weekTotalsPdf] trip form page render failed', { page: pi, err: e })
             doc.setFont('helvetica', 'italic')
             doc.setFontSize(8)
             doc.setTextColor(...MGRAY)
