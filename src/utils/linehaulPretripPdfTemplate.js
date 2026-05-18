@@ -61,6 +61,16 @@ export async function generateLinehaulPretripPDF(input = {}) {
   // Register custom handwriting fonts (TTF via Vite asset URL + fetch)
   await registerHandwritingFonts(doc)
 
+  /** Shared horizontal grid: full-width sections and both columns align to these edges. */
+  const MARGIN = 17
+  const CONTENT_W = 578
+  const GUTTER = 5
+  const leftW = Math.floor((CONTENT_W - GUTTER) / 2)
+  const rightW = CONTENT_W - GUTTER - leftW
+  const leftX = MARGIN
+  const rightX = leftX + leftW + GUTTER
+  const contentRight = MARGIN + CONTENT_W
+
   const font = (size = 8, style = 'normal', family = 'helvetica') => {
     doc.setFont(family, style)
     doc.setFontSize(size)
@@ -71,9 +81,10 @@ export async function generateLinehaulPretripPDF(input = {}) {
     doc.text(String(value ?? ''), x, y, options)
   }
 
+  /** Stroke-only rect (explicit `'S'` — avoids any default fill hiding ink). */
   const box = (x, y, w, h, lw = 1.35) => {
     doc.setLineWidth(lw)
-    doc.rect(x, y, w, h)
+    doc.rect(x, y, w, h, 'S')
   }
 
   const line = (x1, y1, x2, y2, lw = 0.95) => {
@@ -89,6 +100,23 @@ export async function generateLinehaulPretripPDF(input = {}) {
 
   // Subtle blue-black ink (ballpoint on white paper — not purple screen tint)
   const PEN_INK = [26, 32, 42]
+
+  /** Plain form checkmark: bold black tick (two strokes), not handwriting-style. */
+  const checkboxRegularMark = (boxLeft, boxTop) => {
+    doc.setDrawColor(0, 0, 0)
+    doc.setLineWidth(1.35)
+    doc.setLineCap('butt')
+    doc.setLineJoin('miter')
+    const x1 = boxLeft + 2.15
+    const y1 = boxTop + 5.35
+    const xm = boxLeft + 4.45
+    const ym = boxTop + 8.05
+    const x2 = boxLeft + 8.05
+    const y2 = boxTop + 2.45
+    doc.line(x1, y1, xm, ym, 'S')
+    doc.line(xm, ym, x2, y2, 'S')
+    doc.setLineWidth(0.2)
+  }
 
   // Handwriting-style text for general driver-filled fields (Indie Flower)
   const handwriting = (value, x, y, size = 11) => {
@@ -110,11 +138,6 @@ export async function generateLinehaulPretripPDF(input = {}) {
     doc.setTextColor(0, 0, 0)
   }
 
-  /** Checkmark inside DOT checkbox (handwriting font, same ink as seals). */
-  const checkboxHandCheck = (boxLeft, boxTop) => {
-    handwriting('\u2713', boxLeft + 0.5, boxTop + 8.0, 11.5)
-  }
-
   // Header
   text('Tractor:', 22, 24, 9.2, 'bold')
   text(data.tractor, 70, 24, 12.0, 'bold', { family: 'courier' })
@@ -125,34 +148,43 @@ export async function generateLinehaulPretripPDF(input = {}) {
   text('DRIVER', 332, 42, 9.2, 'bold')
 
   // Linehaul responsibilities box. The original scan has no divider here.
-  box(17, 55, 578, 45)
-  text('Linehaul Driver', 23, 70, 8.4, 'bold')
-  text('- Trailer seal numbers, Dolly IDs, and Pre-Trip Inspection', 23, 84, 7.2)
-  text('- Return completed form to Linehaul Office', 23, 95, 7.2)
-  text('Linehaul Responsibilities:', 318, 70, 8.4, 'bold')
-  text('- Seals provided match TLCRs, the proper FedEx ID and dolly', 318, 84, 7.2)
-  text('  numbers are correct in TMS', 318, 95, 7.2)
+  box(MARGIN, 55, CONTENT_W, 45)
+  text('Linehaul Driver', leftX + 6, 70, 8.4, 'bold')
+  text('- Trailer seal numbers, Dolly IDs, and Pre-Trip Inspection', leftX + 6, 84, 7.2)
+  text('- Return completed form to Linehaul Office', leftX + 6, 95, 7.2)
+  text('Linehaul Responsibilities:', rightX + 9, 70, 8.4, 'bold')
+  text('- Seals provided match TLCRs, the proper FedEx ID and dolly', rightX + 9, 84, 7.2)
+  text('  numbers are correct in TMS', rightX + 9, 95, 7.2)
 
-  // Safety strip
-  box(17, 107, 578, 24)
-  center('LIGHTS AND SEAT BELTS ON FOR SAFETY?', 17, 125, 286, 10.2, 'bold')
-  center('ALL COUPLING DEVICES SECURE?', 309, 125, 286, 10.2, 'bold')
+  // Safety strip — checkboxes inset from column edges; marks drawn after labels
+  box(MARGIN, 107, CONTENT_W, 24)
+  const safetyCheckY = 114
+  const safetyCheckLeftX = MARGIN + 5
+  const safetyCheckRightX = contentRight - 9.5 - 5
+  checkbox(safetyCheckLeftX, safetyCheckY)
+  center('LIGHTS AND SEAT BELTS ON FOR SAFETY?', MARGIN, 125, leftW, 10.2, 'bold')
+  checkboxRegularMark(safetyCheckLeftX, safetyCheckY)
+  checkbox(safetyCheckRightX, safetyCheckY)
+  center('ALL COUPLING DEVICES SECURE?', rightX, 125, rightW, 10.2, 'bold')
+  checkboxRegularMark(safetyCheckRightX, safetyCheckY)
 
-  const leftX = 15
-  const leftW = 289
-  const rightX = 309
-  const rightW = 281
+  /** Right column stack bottoms at this y (origin / trip-leg block). */
+  const RIGHT_ORIGIN_Y = 519
+  const RIGHT_ORIGIN_H = 88
+  const rightColumnBottom = RIGHT_ORIGIN_Y + RIGHT_ORIGIN_H
+  const LEFT_BOTTOM_H = 43
+  const LEFT_BOTTOM_Y = rightColumnBottom - LEFT_BOTTOM_H
 
-  // Main boxes
+  // Main boxes (left tall panel + bottom invoice strip align with right column bottom)
   box(leftX, 137, leftW, 419)
-  box(leftX, 570, leftW, 43)
+  box(leftX, LEFT_BOTTOM_Y, leftW, LEFT_BOTTOM_H)
 
   box(rightX, 137, rightW, 83)
   box(rightX, 232, rightW, 39)
   box(rightX, 284, rightW, 80)
   box(rightX, 377, rightW, 37)
   box(rightX, 427, rightW, 80)
-  box(rightX, 519, rightW, 88)
+  box(rightX, RIGHT_ORIGIN_Y, rightW, RIGHT_ORIGIN_H)
 
   // Left panel content
   text('TRIP DESTINATION:', 24, 168, 10.0, 'bold')
@@ -185,10 +217,10 @@ export async function generateLinehaulPretripPDF(input = {}) {
   text(data.gpsWest, 160, 542, 9.0)
 
   // Purchased carrier invoice
-  text('PURCHASED CARRIER INVOICE', 22, 585, 9.0)
-  text('REFERENCE #:', 22, 604, 9.0)
-  line(94, 604, 296, 604)
-  if (data.invoiceRef) text(data.invoiceRef, 100, 601, 8.5, 'bold')
+  text('PURCHASED CARRIER INVOICE', leftX + 5, 585, 9.0)
+  text('REFERENCE #:', leftX + 5, 604, 9.0)
+  line(leftX + 77, 604, leftX + leftW - 7, 604)
+  if (data.invoiceRef) text(data.invoiceRef, leftX + 83, 601, 8.5, 'bold')
 
   /**
    * Empty trailer move: no real load/weight in TMS — mimic driver handwriting the trailer # (not system Courier).
@@ -246,31 +278,35 @@ export async function generateLinehaulPretripPDF(input = {}) {
   trailerBlock(1, data.trailers?.[0], 150, 168, 188, 209)
 
   text('DOLLY 1:', rightX + 6, 254, 8.8)
-  line(371, 254, 582, 254, 0.9)
-  if (data.dollies?.[0]) handwriting(data.dollies[0], 376, 251, 9)
+  line(rightX + 63, 254, contentRight - 13, 254, 0.9)
+  if (data.dollies?.[0]) handwriting(data.dollies[0], rightX + 68, 251, 9)
 
   trailerBlock(2, data.trailers?.[1], 297, 316, 337, 356)
 
   text('DOLLY 2:', rightX + 6, 398, 8.8)
-  line(371, 398, 582, 398, 0.9)
-  if (data.dollies?.[1]) handwriting(data.dollies[1], 376, 395, 9)
+  line(rightX + 63, 398, contentRight - 13, 398, 0.9)
+  if (data.dollies?.[1]) handwriting(data.dollies[1], rightX + 68, 395, 9)
 
   trailerBlock(3, data.trailers?.[2], 439, 458, 478, 497)
 
   // Origin box
   text('TRIP LEG ORIGIN:', rightX + 6, 532, 8.8, 'bold')
-  text(data.originCode, 397, 532, 8.5, 'bold', { family: 'courier' })
+  text(data.originCode, rightX + 89, 532, 8.5, 'bold', { family: 'courier' })
   text(data.originAddress, rightX + 6, 551, 8.0, 'bold')
   text(data.originCity, rightX + 6, 588, 8.0, 'bold')
-  text(data.originState, 485, 588, 7.8, 'bold')
-  text(data.originZip, 529, 588, 7.8, 'bold', { family: 'courier' })
+  text(data.originState, rightX + 177, 588, 7.8, 'bold')
+  text(data.originZip, rightX + 221, 588, 7.8, 'bold', { family: 'courier' })
   text(data.originPhone, rightX + 6, 599, 8.0, 'bold')
 
   // DOT section
-  box(17, 621, 578, 133)
-  center('DOT REQUIRED PRE-TRIP', 17, 634, 578, 10.8, 'bold')
+  box(MARGIN, 621, CONTENT_W, 133)
+  center('DOT REQUIRED PRE-TRIP', MARGIN, 634, CONTENT_W, 10.8, 'bold')
 
   const base = 656
+  const dotCol1 = leftX + 10
+  const dotCol2 = leftX + 149
+  const dotCol3 = rightX + 14
+  const dotCol3LabelX = rightX + 32
   const items1 = ['LIGHTS / REFLECTORS', 'TIRES / WHEELS', 'BRAKES', 'SUSPENSION']
   const items2 = ['AIR LINES / AIR SYSTEMS', 'DOOR / DOOR LATCHES', 'LANDING GEAR', 'FRAME']
   const items3 = ['COUPLING DEVICES (e.g., FIFTH WHEEL, PINTLE HOOK)', 'SAFETY CHAIN', 'BODY:', 'OTHER:']
@@ -279,29 +315,29 @@ export async function generateLinehaulPretripPDF(input = {}) {
     items.forEach((item, index) => {
       const y = base + index * 14
       checkbox(x, y - 9)
-      checkboxHandCheck(x, y - 9)
       text(item, x + 18, y, 6.5, 'bold')
+      checkboxRegularMark(x, y - 9)
     })
   }
 
-  checklistColumn(27, items1)
-  checklistColumn(166, items2)
+  checklistColumn(dotCol1, items1)
+  checklistColumn(dotCol2, items2)
   // Third column - only check first two items (COUPLING DEVICES, SAFETY CHAIN), leave BODY and OTHER unchecked
   const items3First = items3.slice(0, 2)
   const items3Last = items3.slice(2)
   items3First.forEach((item, index) => {
     const y = base + index * 14
-    checkbox(322, y - 9)
-    checkboxHandCheck(322, y - 9)
-    text(item, 340, y, 6.5, 'bold')
+    checkbox(dotCol3, y - 9)
+    text(item, dotCol3LabelX, y, 6.5, 'bold')
+    checkboxRegularMark(dotCol3, y - 9)
   })
   items3Last.forEach((item, index) => {
     const y = base + (index + 2) * 14
-    checkbox(322, y - 9)
-    text(item, 340, y, 6.5, 'bold')
+    checkbox(dotCol3, y - 9)
+    text(item, dotCol3LabelX, y, 6.5, 'bold')
   })
-  line(373, 684, 554, 684)
-  line(373, 698, 554, 698)
+  line(MARGIN + 356, 684, contentRight - 41, 684)
+  line(MARGIN + 356, 698, contentRight - 41, 698)
 
   text(
     'I have inspected all of the above components on the above vehicles/equipment as required by 49 CFR Part 396 and declare that all are compliant with DOT standards',

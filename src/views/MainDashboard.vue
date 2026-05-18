@@ -58,6 +58,7 @@ import {
   registerApiRecover,
   ensureFedexApiReady,
 } from '../composables/useApiHealth.js'
+import { useLateNightArriveCheckPrompt } from '../composables/useLateNightArriveCheckPrompt.js'
 import {
   liveLogEntries,
   registerAssignmentListener,
@@ -935,8 +936,12 @@ function notifyQuickActionInApp(message, kind = 'info') {
   })
 }
 
+/**
+ * @returns {Promise<{ ok: boolean, skipped?: boolean }>}
+ * `skipped` means another automation was already running.
+ */
 async function runQuickAction(auto) {
-  if (runningAutomationId.value) return
+  if (runningAutomationId.value) return { ok: false, skipped: true }
   runningAutomationId.value = auto.id
   runStartTs.value = Date.now()
   streamBannerHandledKey.value = null
@@ -948,7 +953,7 @@ async function runQuickAction(auto) {
         'API is not running on port 3847. With vite-only dev, wait a few seconds for autostart, or run npm run dev from the project root.',
         'error',
       )
-      return
+      return { ok: false }
     }
     // Same equipment JSON as Trip Details cards on the home page
     const slideBody = tripDetailsBodyForSlide.value
@@ -975,41 +980,45 @@ async function runQuickAction(auto) {
       announceInspectCheckoutNewTripDetails()
       notifyQuickActionInApp('Inspect failed: new trip details. Running check-in…', 'warning')
       setTimeout(() => void autoRunCheckInQuickAction(), 2000)
-    } else if (result.ok) {
+      return { ok: true }
+    }
+    if (result.ok) {
       if (result.variables?._inspectCheckoutCancelled === true) {
         notifyQuickActionInApp('No trip to inspect', 'info')
         announceInspectCheckoutCancelled()
-      } else {
-        const arrivePayload = result.variables?._arrivePayload
-        if (arrivePayload && typeof arrivePayload === 'object') {
-          if (arrivePayload.alreadyArrivedByGeofence === true) {
-            announceGeofenceArrival()
-          } else {
-            announceArrivalSuccess()
-          }
-        }
-        const checkInPayload = result.variables?._checkInPayload
-        if (checkInPayload && typeof checkInPayload === 'object') {
-          if (checkInPayload.checkInNewTripFound === true) {
-            announceCheckInNewTrip()
-          } else if (checkInPayload.tripReadyAcknowledged === true) {
-            announceCheckInTripReady()
-          } else if (
-            checkInPayload.missionComplete === true ||
-            checkInPayload.signedOut === true
-          ) {
-            announceCheckInSuccess()
-          } else if (checkInPayload.success === false) {
-            announceCheckInFail()
-          }
-        }
-        notifyQuickActionInApp(`${auto.manualButtonLabel || auto.name} completed`, 'success')
+        return { ok: true }
       }
-    } else {
-      notifyQuickActionInApp(result.error || 'Failed', 'error')
+      const arrivePayload = result.variables?._arrivePayload
+      if (arrivePayload && typeof arrivePayload === 'object') {
+        if (arrivePayload.alreadyArrivedByGeofence === true) {
+          announceGeofenceArrival()
+        } else {
+          announceArrivalSuccess()
+        }
+      }
+      const checkInPayload = result.variables?._checkInPayload
+      if (checkInPayload && typeof checkInPayload === 'object') {
+        if (checkInPayload.checkInNewTripFound === true) {
+          announceCheckInNewTrip()
+        } else if (checkInPayload.tripReadyAcknowledged === true) {
+          announceCheckInTripReady()
+        } else if (
+          checkInPayload.missionComplete === true ||
+          checkInPayload.signedOut === true
+        ) {
+          announceCheckInSuccess()
+        } else if (checkInPayload.success === false) {
+          announceCheckInFail()
+        }
+      }
+      notifyQuickActionInApp(`${auto.manualButtonLabel || auto.name} completed`, 'success')
+      return { ok: true }
     }
+    notifyQuickActionInApp(result.error || 'Failed', 'error')
+    return { ok: false }
   } catch (e) {
     notifyQuickActionInApp(e instanceof Error ? e.message : String(e), 'error')
+    return { ok: false }
   } finally {
     runningAutomationId.value = null
     runStartTs.value = null
@@ -1031,6 +1040,54 @@ async function autoRunCheckInQuickAction() {
   notifyQuickActionInApp(`Auto-running ${checkInAuto.manualButtonLabel || checkInAuto.name}…`, 'info')
   await runQuickAction(checkInAuto)
 }
+
+function findArriveQuickAction() {
+  return quickActionAutomations.value.find(
+    (a) =>
+      /arrive/i.test(a.name || '') ||
+      /arrive/i.test(a.manualButtonLabel || '') ||
+      (a.actions &&
+        a.actions.some(
+          (act) => act.action === 'arriveEndToEnd' || act.action === 'arrive',
+        )),
+  )
+}
+
+async function runLateNightArriveThenCheckIn() {
+  const arrive = findArriveQuickAction()
+  if (!arrive) {
+    notifyQuickActionInApp(
+      'No arrive quick action found. Enable an automation with a manual trigger and Arrive (arriveEndToEnd).',
+      'warning',
+    )
+    return
+  }
+  const r1 = await runQuickAction(arrive)
+  if (r1?.skipped) return
+  if (!r1?.ok) return
+  await autoRunCheckInQuickAction()
+}
+
+const {
+  lateNightArriveCheckOpen,
+  lateNightArriveCheckBusy,
+  confirmLateNightArriveCheckYes,
+  confirmLateNightArriveCheckNo,
+} = useLateNightArriveCheckPrompt({
+  isEligible: () => {
+    if (suppressHomeLinehaulErrors.value) return false
+    const ds = String(linehaulDriverBody.value?.driverAvlStat ?? '')
+      .trim()
+      .toUpperCase()
+    if (ds !== 'ENRT') return false
+    if (linehaulTripsNoActive.value) return false
+    const b = linehaulTripsBody.value
+    if (!b || typeof b !== 'object' || Array.isArray(b)) return false
+    return true
+  },
+  isAutomationRunning: () => runningAutomationId.value != null,
+  onYes: runLateNightArriveThenCheckIn,
+})
 
 function clearAutomationPreviewNow() {
   lastPreviewBusy.value = false
@@ -1882,6 +1939,42 @@ onUnmounted(() => {
               @click="confirmTripCompleted"
             >
               {{ tripCompleteBusy ? 'Saving…' : 'Remove from home' }}
+            </button>
+          </div>
+        </div>
+      </div>
+    </Teleport>
+    <Teleport to="body">
+      <div
+        v-if="lateNightArriveCheckOpen"
+        class="trip-complete-backdrop late-night-arrive-check-backdrop"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="late-night-arrive-check-title"
+        aria-describedby="late-night-arrive-check-desc"
+      >
+        <div class="trip-complete-card" @click.stop>
+          <h3 id="late-night-arrive-check-title" class="trip-complete-title">Arrive and check in?</h3>
+          <p id="late-night-arrive-check-desc" class="trip-complete-body">
+            Do you want to arrive and check? Yes runs your Arrive quick action, then your check-in
+            quick action.
+          </p>
+          <div class="trip-complete-actions">
+            <button
+              type="button"
+              class="btn tap"
+              :disabled="lateNightArriveCheckBusy"
+              @click="confirmLateNightArriveCheckNo"
+            >
+              No
+            </button>
+            <button
+              type="button"
+              class="btn primary tap"
+              :disabled="lateNightArriveCheckBusy"
+              @click="confirmLateNightArriveCheckYes"
+            >
+              {{ lateNightArriveCheckBusy ? 'Running…' : 'Yes' }}
             </button>
           </div>
         </div>
@@ -3829,6 +3922,9 @@ button.trailer-nbr.copyable-inline {
   padding: 1rem;
   background: rgba(0, 0, 0, 0.65);
   backdrop-filter: blur(4px);
+}
+.late-night-arrive-check-backdrop {
+  z-index: 2147483001;
 }
 .trip-complete-card {
   max-width: 22rem;
