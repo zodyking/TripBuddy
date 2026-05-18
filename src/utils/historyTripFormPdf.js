@@ -227,7 +227,20 @@ function formatPhoneFedex(raw) {
 }
 
 /**
+ * Zero-pad a numeric time part for 24h display (`hour` max 23, `minute` max 59).
+ * @param {string} part
+ * @param {number} max
+ */
+function twoDigitTimePart(part, max) {
+  const n = Number.parseInt(String(part ?? '').trim(), 10)
+  if (!Number.isFinite(n)) return '00'
+  const c = Math.max(0, Math.min(max, n))
+  return String(c).padStart(2, '0')
+}
+
+/**
  * FedEx printed "BASED UPON … EDT DEPARTUR" (original misspelling on the linehaul form).
+ * Original form shows **hour only** after the colon (minutes scrubbed), e.g. `May 16 2026 21: EDT`.
  * Clock + zone match the Eastern dispatch print (EST/EDT), not the viewer's local zone.
  * @param {number} tsMs
  */
@@ -250,17 +263,17 @@ function formatBasedUponDepartur(tsMs) {
   const mon = monRaw ? monRaw.charAt(0).toUpperCase() + monRaw.slice(1).toLowerCase() : ''
   const day = get('day')
   const yr = get('year')
-  const hr24 = get('hour')
-  const min = get('minute')
+  const hrRaw = get('hour')
+  const hour24 = twoDigitTimePart(hrRaw, 23)
   const tzParts = new Intl.DateTimeFormat('en-US', { timeZone: tz, timeZoneName: 'short' }).formatToParts(d)
   const tzRaw = tzParts.find((p) => p.type === 'timeZoneName')?.value?.trim() ?? ''
   const tzAbbr = /^(EST|EDT)$/i.test(tzRaw) ? tzRaw.toUpperCase() : 'EDT'
-  /** FedEx linehaul sheet uses 24h clock + `DEPARTUR` (printed typo on the paper form). */
-  return `BASED UPON ${mon} ${day} ${yr} ${hr24}:${min} ${tzAbbr} DEPARTUR`
+  /** FedEx original: 24h hour + colon only, then space + zone + printed typo `DEPARTUR`. */
+  return `BASED UPON ${mon} ${day} ${yr} ${hour24}: ${tzAbbr} DEPARTUR`
 }
 
 /**
- * Trip-leg ETA for the PDF: `May 16, 2026 23:06 EDT` (comma after day, 24h clock, Eastern TZ).
+ * Trip-leg ETA for the PDF: `May 16, 2026 23:06 EDT` (comma after day, 24h clock with minutes, Eastern TZ).
  * Same Eastern interpretation as {@link formatBasedUponDepartur}.
  * @param {number} tsMs
  */
@@ -283,12 +296,12 @@ function formatEtaOfTripLegLine(tsMs) {
   const mon = monRaw ? monRaw.charAt(0).toUpperCase() + monRaw.slice(1).toLowerCase() : ''
   const day = get('day')
   const yr = get('year')
-  const hr24 = get('hour')
-  const min = get('minute')
+  const hour24 = twoDigitTimePart(get('hour'), 23)
+  const min24 = twoDigitTimePart(get('minute'), 59)
   const tzParts = new Intl.DateTimeFormat('en-US', { timeZone: tz, timeZoneName: 'short' }).formatToParts(d)
   const tzRaw = tzParts.find((p) => p.type === 'timeZoneName')?.value?.trim() ?? ''
   const tzAbbr = /^(EST|EDT)$/i.test(tzRaw) ? tzRaw.toUpperCase() : 'EDT'
-  return `${mon} ${day}, ${yr} ${hr24}:${min} ${tzAbbr}`
+  return `${mon} ${day}, ${yr} ${hour24}:${min24} ${tzAbbr}`
 }
 
 /**
