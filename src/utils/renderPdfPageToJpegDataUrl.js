@@ -3,6 +3,16 @@ import pdfjsWorker from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
 
 let workerConfigured = false
 
+/**
+ * PDF.js may transfer the underlying buffer to the worker; always pass a fresh copy.
+ * @param {ArrayBuffer | Uint8Array} pdfBytes
+ * @returns {Uint8Array}
+ */
+function clonePdfBytes(pdfBytes) {
+  const view = pdfBytes instanceof Uint8Array ? pdfBytes : new Uint8Array(pdfBytes)
+  return view.slice()
+}
+
 function ensurePdfWorker() {
   if (!workerConfigured) {
     pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsWorker
@@ -19,7 +29,7 @@ function ensurePdfWorker() {
  */
 export async function renderPdfPageToJpegDataUrl(pdfBytes, pageNumber, box) {
   ensurePdfWorker()
-  const u8 = pdfBytes instanceof Uint8Array ? pdfBytes : new Uint8Array(pdfBytes)
+  const u8 = clonePdfBytes(pdfBytes)
   const task = pdfjsLib.getDocument({ data: u8 })
   const pdf = await task.promise
   const page = await pdf.getPage(pageNumber)
@@ -67,7 +77,7 @@ export async function renderPdfPageToJpegDataUrl(pdfBytes, pageNumber, box) {
  */
 export async function getPdfPageCount(pdfBytes) {
   ensurePdfWorker()
-  const u8 = pdfBytes instanceof Uint8Array ? pdfBytes : new Uint8Array(pdfBytes)
+  const u8 = clonePdfBytes(pdfBytes)
   const task = pdfjsLib.getDocument({ data: u8 })
   const pdf = await task.promise
   try {
