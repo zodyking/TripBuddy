@@ -13,6 +13,7 @@ import {
   centerMapOnLatLng,
   applyUserTruckMarkerDomRotation,
 } from '../composables/useMapFollowControls.js'
+import { sanitizeNy511ImpactFootnote } from '../utils/ny511ImpactFootnote.js'
 
 const DEFAULT_CENTER = Object.freeze([40.64, -74.18])
 const DEFAULT_ZOOM = 9
@@ -651,7 +652,7 @@ function syncNy511Markers() {
     const color = ny511MarkerFill(m)
     const title = esc(String(m.title || id))
     const kind = esc(String(m.kindLabel || m.kind || ''))
-    const detailRaw = String(m.impactSummary || '').trim()
+    const detailRaw = sanitizeNy511ImpactFootnote(String(m.impactSummary || '')).trim()
     const sevRaw = String(m.severity || '').trim()
     const secondLine =
       detailRaw && !/^unknown$/i.test(detailRaw)

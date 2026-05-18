@@ -294,6 +294,104 @@ export function resolveHistoryTrailerLoadBadge(card) {
 }
 
 /**
+ * @param {string} raw
+ */
+function weightSummaryValueLooksLoaded(raw) {
+  const t = String(raw ?? '').trim()
+  if (!t || /^n\/?a$/i.test(t) || t === '—') return false
+  const m = t.match(/([\d.,]+)\s*lbs?\b/i)
+  if (m) {
+    const n = parseFloat(m[1].replace(/,/g, ''))
+    return Number.isFinite(n) && n > 0
+  }
+  if (/^[\d.,]+$/.test(t.replace(/\s/g, ''))) {
+    const n = parseFloat(t.replace(/,/g, ''))
+    return Number.isFinite(n) && n > 0
+  }
+  return false
+}
+
+/**
+ * @param {string} raw
+ */
+function loadSummaryValueLooksLoaded(raw) {
+  const t = String(raw ?? '').trim()
+  return Boolean(t && !/^n\/?a$/i.test(t) && t !== '—' && t.toLowerCase() !== 'none')
+}
+
+/**
+ * One trailer slot (enhanced card or history snapshot row) is “loaded” for week-PDF appendix rules.
+ * @param {{
+ *   loadType?: string,
+ *   loadTypeClass?: string,
+ *   pkgWeightLbs?: number | null,
+ *   summaryRows?: { label: string, value: string }[],
+ *   detailRows?: { label: string, value: string }[],
+ * }} c
+ */
+function trailerSlotLooksLoaded(c) {
+  if (typeof c?.pkgWeightLbs === 'number' && Number.isFinite(c.pkgWeightLbs) && c.pkgWeightLbs > 0) {
+    return true
+  }
+  const badge = resolveHistoryTrailerLoadBadge(c)
+  if (badge.variant === 'full') return true
+  if (badge.variant === 'empty') return false
+  const lt = String(c?.loadType ?? '').trim().toUpperCase()
+  if (lt === 'LOAD') return true
+  if (lt === 'EMPTY') return false
+  const ltc = String(c?.loadTypeClass ?? '').trim()
+  if (ltc === 'load-full') return true
+  if (ltc === 'load-empty') return false
+
+  const rows = [...(c.summaryRows || []), ...(c.detailRows || [])]
+  const wRow = rows.find((r) => String(r?.label ?? '').trim().toLowerCase() === 'weight')
+  if (wRow && weightSummaryValueLooksLoaded(String(wRow.value ?? ''))) return true
+
+  const loadRow = rows.find((r) => /^load( number)?$/i.test(String(r?.label ?? '').trim()))
+  if (loadRow && loadSummaryValueLooksLoaded(String(loadRow.value ?? ''))) return true
+
+  return false
+}
+
+/**
+ * True when any trailer on the trip is loaded (FedEx payload or persisted history snapshot).
+ * Used to omit trip-form PDF embeds from the work week / pay schedule mileage PDF for empty-only legs.
+ * @param {unknown} body `tripDetails` or Linehaul trip `body`
+ */
+export function tripHasAnyLoadedTrailer(body) {
+  if (body == null || typeof body !== 'object' || Array.isArray(body)) return false
+  const o = /** @type {Record<string, unknown>} */ (body)
+  const arr = o.trailers
+  if (Array.isArray(arr) && arr.length) {
+    const multi = arr.length >= 2
+    for (const t of arr) {
+      if (!t || typeof t !== 'object' || Array.isArray(t)) continue
+      const tr = /** @type {Record<string, unknown>} */ (t)
+      if (Array.isArray(tr.summaryRows)) {
+        const snapCard = {
+          loadType: String(tr.loadType ?? ''),
+          loadTypeClass: String(tr.loadTypeClass ?? ''),
+          pkgWeightLbs: typeof tr.pkgWeightLbs === 'number' ? tr.pkgWeightLbs : null,
+          summaryRows: /** @type {{ label: string, value: string }[]} */ (tr.summaryRows),
+          detailRows: Array.isArray(tr.detailRows)
+            ? /** @type {{ label: string, value: string }[]} */ (tr.detailRows)
+            : [],
+        }
+        if (trailerSlotLooksLoaded(snapCard)) return true
+      }
+      const meta = parseTrailerMeta(tr, { force20ft: multi })
+      if (meta.loadType === 'LOAD') return true
+    }
+  }
+
+  const cards = buildEnhancedTrailerCards(body)
+  for (const c of cards) {
+    if (trailerSlotLooksLoaded(c)) return true
+  }
+  return false
+}
+
+/**
  * Stable order: API `trlrOrder` is not always ordered; prefer `dailyTripLegConfigSeq` when present.
  * @param {Record<string, unknown>} tr
  * @param {number} index
