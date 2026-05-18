@@ -19,7 +19,8 @@ import {
   linehaulTractorBody,
   hiddenDailyTripLegSequences,
 } from '../stores/linehaulSnapshotStore.js'
-import { getHistoryWeekTotalsPdfBlob } from '../utils/historyWeekTotalsPdf.js'
+import { getHistoryWeekTotalsPdfBlob, proofDedupeKey } from '../utils/historyWeekTotalsPdf.js'
+import { getPdfPageCount } from '../utils/renderPdfPageToJpegDataUrl.js'
 import {
   getHistoryTripFormPdfBlob,
   buildDirectoryTripFormLookup,
@@ -1247,9 +1248,14 @@ async function onDownloadWeekTotalsPdf(wg) {
   try {
     /** @type {Map<string, { locationName: string, address: string }>} */
     let dirMap = new Map()
+    /** @type {Map<string, { locationName: string, abbreviation: string, address: string, phone: string, lat: number | null, lng: number | null }>} */
+    let dirTripLookup = new Map()
     try {
       const dr = await fetchDirectory()
-      if (dr?.ok && Array.isArray(dr.locations)) dirMap = buildDirectoryLocationMap(dr.locations)
+      if (dr?.ok && Array.isArray(dr.locations)) {
+        dirMap = buildDirectoryLocationMap(dr.locations)
+        dirTripLookup = buildDirectoryTripFormLookup(dr.locations)
+      }
     } catch {
       /* directory optional for PDF */
     }
@@ -1265,6 +1271,11 @@ async function onDownloadWeekTotalsPdf(wg) {
         const td = e?.tripDetails && typeof e.tripDetails === 'object' ? e.tripDetails : {}
         const oDir = directoryLookup(dirMap, r.originId)
         const dDir = directoryLookup(dirMap, r.destId)
+        const o = String(r.originId ?? '-').trim()
+        const dest = String(r.destId ?? '-').trim()
+        const leg = String(r.legLabel ?? '-').trim()
+        const dispatchDate = String(r.dispatchDate ?? '-').trim()
+        const pk = proofDedupeKey(r.dailyTripLegSequence || '', o, dest, dispatchDate, leg)
         return {
           od: r.od,
           when: r.when,
@@ -1286,6 +1297,8 @@ async function onDownloadWeekTotalsPdf(wg) {
           }),
           outcomeReasonRight: e ? outcomePdfReasonLine(e) : '',
           dailyTripLegSequence: r.dailyTripLegSequence || '',
+          proofDedupeKey: pk,
+          ledgerEntry: e,
           proofScreenshots: /** @type {{ label: string, jpeg: string, ts: number }[] | undefined} */ (
             undefined
           ),
@@ -1314,6 +1327,51 @@ async function onDownloadWeekTotalsPdf(wg) {
       }
     }
 
+    /** @type {Map<string, ArrayBuffer>} */
+    const tripFormPdfByProofKey = new Map()
+    /** @type {Map<string, number>} */
+    const tripFormPageCountByProofKey = new Map()
+    /** @type {Set<string>} */
+    const proofKeysNeedingTripPdf = new Set()
+    for (const r of allRows) {
+      if (Array.isArray(r.proofScreenshots) && r.proofScreenshots.length > 0 && r.proofDedupeKey) {
+        proofKeysNeedingTripPdf.add(r.proofDedupeKey)
+      }
+    }
+    for (const pk of proofKeysNeedingTripPdf) {
+      const row = allRows.find((x) => x.proofDedupeKey === pk && x.ledgerEntry)
+      const e = row?.ledgerEntry
+      if (!e) continue
+      try {
+        const oId = leadingLocationId(e.dispatchHeader?.origin)
+        const dId = leadingLocationId(e.dispatchHeader?.destination)
+        const { blob } = await getHistoryTripFormPdfBlob({
+          entry: {
+            id: e.id,
+            displayDate: e.displayDate,
+            dailyTripLegSequence: e.dailyTripLegSequence,
+            dispatchHeader:
+              e.dispatchHeader && typeof e.dispatchHeader === 'object'
+                ? /** @type {Record<string, unknown>} */ (e.dispatchHeader)
+                : {},
+            tripDetails: tripDetailsRecordForPdf(e),
+            source: e.source,
+          },
+          driverName: String(pdfCredMeta.value.driverName ?? '').trim(),
+          employeeNumber: String(pdfCredMeta.value.employeeNumber ?? '').trim(),
+          username: storedUsername.value.trim(),
+          directory: dirTripLookup,
+          originLocationId: oId,
+          destLocationId: dId,
+        })
+        const ab = await blob.arrayBuffer()
+        tripFormPdfByProofKey.set(pk, ab)
+        tripFormPageCountByProofKey.set(pk, await getPdfPageCount(ab))
+      } catch (err) {
+        console.warn('[weekTotalsPdf] trip form embed skipped for proof key', pk, err)
+      }
+    }
+
     const cal = viewMonthInfo.value.groupLabel || 'Calendar view'
     const estWeek =
       weekPayEstimateByKey.value[key] || {
@@ -1321,7 +1379,7 @@ async function onDownloadWeekTotalsPdf(wg) {
         rows: [],
       }
     closeWeekPdfViewer()
-    const { blob, filename } = getHistoryWeekTotalsPdfBlob({
+    const { blob, filename } = await getHistoryWeekTotalsPdfBlob({
       documentTitle:
         historyWeekViewMode.value === 'paySchedule'
           ? 'FedEx pay schedule mileage report'
@@ -1337,6 +1395,8 @@ async function onDownloadWeekTotalsPdf(wg) {
       roundingToMi: PAY_ROUND_TO_MI,
       days,
       sumBillable: estWeek.sumBillable,
+      tripFormPdfByProofKey,
+      tripFormPageCountByProofKey,
     })
     pdfViewerObjectUrl.value = URL.createObjectURL(blob)
     pdfViewerFilename.value = filename

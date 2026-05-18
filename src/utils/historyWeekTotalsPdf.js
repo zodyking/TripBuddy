@@ -1,5 +1,6 @@
 import { jsPDF } from 'jspdf'
 import autoTable from 'jspdf-autotable'
+import { renderPdfPageToJpegDataUrl } from './renderPdfPageToJpegDataUrl.js'
 
 /** @param {string} s */
 function ascii(s) {
@@ -41,10 +42,20 @@ function fmtMi(n) {
  * @param {string} dispatchDate
  * @param {string} leg
  */
-function proofDedupeKey(seq, o, dest, dispatchDate, leg) {
+export function proofDedupeKey(seq, o, dest, dispatchDate, leg) {
   const s = String(seq ?? '').trim()
   if (s) return `seq:${s}`
   return `leg:${o}|${dest}|${dispatchDate}|${leg}`
+}
+
+/**
+ * Screenshot labels used only for automation context (omit from dispatch proof title line).
+ * @param {string} label
+ */
+function isDispatchProofTitleNoiseLabel(label) {
+  const s = String(label ?? '').trim().toLowerCase()
+  if (!s) return false
+  return /\b(dolly|inspect|inspection|checklist|validated|validation)\b/i.test(s)
 }
 
 /**
@@ -88,6 +99,8 @@ function proofDedupeKey(seq, o, dest, dispatchDate, leg) {
  *   roundingToMi: number,
  *   days: WeekTotalsPdfDaySection[],
  *   sumBillable: number,
+ *   tripFormPdfByProofKey?: Map<string, ArrayBuffer | Uint8Array>,
+ *   tripFormPageCountByProofKey?: Map<string, number>,
  * }} WeekTotalsPdfOpts
  */
 
@@ -225,7 +238,7 @@ function drawRouteCellWithArrow(doc, cell, parts) {
 
 const COLS = 8
 
-/** @typedef {{ key: string, originId: string, destId: string, dispatchDate: string, dispatchTime: string, legLabel: string, dailyTripLegSequence?: string, tractorNumber: string, when: string, od: string, screenshots: { label: string, jpeg: string }[] }} ProofTripAppendix */
+/** @typedef {{ key: string, originId: string, destId: string, dispatchDate: string, dispatchTime: string, legLabel: string, dailyTripLegSequence?: string, tractorNumber: string, when: string, od: string, tripFormPageCount: number, screenshots: { label: string, jpeg: string }[] }} ProofTripAppendix */
 
 /**
  * @param {WeekTotalsPdfOpts} opts
@@ -276,6 +289,7 @@ function buildTableBody(opts, proofRangeByKey) {
 
       if (hasProof && !proofKeySeen.has(pk)) {
         proofKeySeen.add(pk)
+        const tripFormPageCount = opts.tripFormPageCountByProofKey?.get(pk) ?? 0
         proofTrips.push({
           key: pk,
           originId: o || '-',
@@ -287,6 +301,7 @@ function buildTableBody(opts, proofRangeByKey) {
           tractorNumber: String(r.tractorNumber ?? '-').trim() || '-',
           when: String(r.when ?? '-').trim() || '-',
           od: String(r.od ?? '-').trim() || '-',
+          tripFormPageCount,
           screenshots: r.proofScreenshots.map((s) => ({ label: s.label, jpeg: s.jpeg })),
         })
       }
@@ -373,7 +388,8 @@ function computeProofPageRanges(proofTrips, appendixStartPage) {
   let p = appendixStartPage
   for (const trip of proofTrips) {
     const blockStart = p
-    p += 1 + trip.screenshots.length
+    const tripPages = typeof trip.tripFormPageCount === 'number' ? trip.tripFormPageCount : 0
+    p += 1 + tripPages + trip.screenshots.length
     const blockEnd = p - 1
     map.set(trip.key, `${blockStart}-${blockEnd}`)
   }
@@ -391,7 +407,8 @@ function appendixDispatchDarkTitlePageSet(appendixStartPage, proofTrips) {
   let p = appendixStartPage
   for (const trip of proofTrips) {
     s.add(p)
-    p += 1 + trip.screenshots.length
+    const tripPages = typeof trip.tripFormPageCount === 'number' ? trip.tripFormPageCount : 0
+    p += 1 + tripPages + trip.screenshots.length
   }
   return s
 }
@@ -399,9 +416,9 @@ function appendixDispatchDarkTitlePageSet(appendixStartPage, proofTrips) {
 /**
  * Build the week mileage PDF (caller may `save` or `output('blob')`).
  * @param {WeekTotalsPdfOpts} opts
- * @returns {{ doc: import('jspdf').jsPDF, fileName: string }}
+ * @returns {Promise<{ doc: import('jspdf').jsPDF, fileName: string }>}
  */
-function buildWeekTotalsJsPdf(opts) {
+async function buildWeekTotalsJsPdf(opts) {
   const title = ascii(opts.documentTitle?.trim() || 'Weekly Mileage Report')
   const genAt =
     typeof opts.generatedAtMs === 'number' && Number.isFinite(opts.generatedAtMs)
@@ -698,10 +715,11 @@ function buildWeekTotalsJsPdf(opts) {
    * @param {import('jspdf').jsPDF} doc
    * @param {ProofTripAppendix[]} proofTrips
    */
-  function drawAppendix(doc, proofTrips) {
+  async function drawAppendix(doc, proofTrips) {
     const W = doc.internal.pageSize.getWidth()
     const H = doc.internal.pageSize.getHeight()
     const IW = W - MX * 2
+    const contentTop = MX + 4
 
     /** One full-bleed black slide per trip leg: title + single wrapped detail line (no duplicate leg/date/OD). */
     function drawDispatchProofTitlePage(trip) {
@@ -726,7 +744,7 @@ function buildWeekTotalsJsPdf(opts) {
 
       /** @type {string[]} */
       const segs = []
-      if (firstLabel) segs.push(ascii(firstLabel))
+      if (firstLabel && !isDispatchProofTitleNoiseLabel(firstLabel)) segs.push(ascii(firstLabel))
       segs.push(leg, dispatch, route, tractor, images)
       const detailLine = segs.join(' · ')
 
@@ -742,11 +760,54 @@ function buildWeekTotalsJsPdf(opts) {
       drawDispatchProofTitlePage(trip)
       paintPdfFooter(doc, 'dark')
 
-      for (const shot of trip.screenshots) {
+      const pdfBytes = opts.tripFormPdfByProofKey?.get(trip.key)
+      const nTripPages =
+        pdfBytes && typeof trip.tripFormPageCount === 'number' && trip.tripFormPageCount > 0
+          ? trip.tripFormPageCount
+          : 0
+      if (nTripPages > 0 && pdfBytes) {
+        const maxW = IW
+        const maxH = H - contentTop - MB - 2
+        for (let pi = 1; pi <= nTripPages; pi++) {
+          doc.addPage()
+          paintPdfFooter(doc, 'light')
+          try {
+            const { dataUrl, widthMm, heightMm } = await renderPdfPageToJpegDataUrl(pdfBytes, pi, {
+              maxWidthMm: maxW,
+              maxHeightMm: maxH,
+            })
+            const x = MX + Math.max(0, (maxW - widthMm) / 2)
+            const y = contentTop + Math.max(0, (maxH - heightMm) / 2)
+            doc.addImage(dataUrl, 'JPEG', x, y, widthMm, heightMm, undefined, 'FAST')
+          } catch {
+            doc.setFont('helvetica', 'italic')
+            doc.setFontSize(8)
+            doc.setTextColor(...MGRAY)
+            doc.text('Trip form PDF page could not be rendered.', MX, contentTop + 4)
+          }
+        }
+      }
+
+      const nShots = trip.screenshots.length
+      for (let si = 0; si < nShots; si++) {
+        const shot = trip.screenshots[si]
         doc.addPage()
         paintPdfFooter(doc, 'light')
-        const yp = MX + 4
 
+        doc.setFont('helvetica', 'bold')
+        doc.setFontSize(7)
+        const legTxt = `Leg #${ascii(trip.legLabel)}`
+        const dateTxt = ascii(trip.dispatchDate)
+        const idxTxt = `Proof image ${si + 1}/${nShots}`
+        const headerLine = `${legTxt} · ${dateTxt} · ${idxTxt}`
+        const headerLines = doc.splitTextToSize(headerLine, IW)
+        const bandH = Math.min(20, Math.max(9, 5 + headerLines.length * 3.5))
+        doc.setFillColor(...BLACK)
+        doc.rect(0, 0, W, bandH, 'F')
+        doc.setTextColor(...WHITE)
+        doc.text(headerLines, MX, 6.2)
+
+        const yp = bandH + 2
         try {
           const imgData = `data:image/jpeg;base64,${shot.jpeg}`
           const imgW = IW
@@ -790,7 +851,7 @@ function buildWeekTotalsJsPdf(opts) {
 
   const doc = new jsPDF({ unit: 'mm', format: 'letter', orientation: 'portrait', compress: true })
   drawMain(doc, finalBody)
-  if (proofTrips.length) drawAppendix(doc, proofTrips)
+  if (proofTrips.length) await drawAppendix(doc, proofTrips)
   const appendixDarkTitles =
     proofTrips.length > 0 ? appendixDispatchDarkTitlePageSet(appendixStartPage, proofTrips) : null
   stampPageNumbers(doc, appendixDarkTitles)
@@ -800,16 +861,16 @@ function buildWeekTotalsJsPdf(opts) {
 }
 
 /** @param {WeekTotalsPdfOpts} opts */
-export function downloadHistoryWeekTotalsPdf(opts) {
-  const { doc, fileName } = buildWeekTotalsJsPdf(opts)
+export async function downloadHistoryWeekTotalsPdf(opts) {
+  const { doc, fileName } = await buildWeekTotalsJsPdf(opts)
   doc.save(fileName)
 }
 
 /**
  * @param {WeekTotalsPdfOpts} opts
- * @returns {{ blob: Blob, filename: string }}
+ * @returns {Promise<{ blob: Blob, filename: string }>}
  */
-export function getHistoryWeekTotalsPdfBlob(opts) {
-  const { doc, fileName } = buildWeekTotalsJsPdf(opts)
+export async function getHistoryWeekTotalsPdfBlob(opts) {
+  const { doc, fileName } = await buildWeekTotalsJsPdf(opts)
   return { blob: doc.output('blob'), filename: fileName }
 }
