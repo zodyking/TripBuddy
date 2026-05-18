@@ -59,6 +59,7 @@ import {
   ensureFedexApiReady,
 } from '../composables/useApiHealth.js'
 import { useLateNightArriveCheckPrompt } from '../composables/useLateNightArriveCheckPrompt.js'
+import { useDestinationAutoArriveCheckIn } from '../composables/useDestinationAutoArriveCheckIn.js'
 import {
   liveLogEntries,
   registerAssignmentListener,
@@ -1053,6 +1054,29 @@ function findArriveQuickAction() {
   )
 }
 
+async function helpersProxRunArriveChain() {
+  const arrive = findArriveQuickAction()
+  if (!arrive) {
+    notifyQuickActionInApp(
+      'Proximity helper: no Arrive quick action found. Add a manual-trigger automation with Arrive (arriveEndToEnd).',
+      'warning',
+    )
+    const e = new Error('HELPERS_SKIP')
+    /** @type {Error & { code?: string }} */ (e).code = 'HELPERS_SKIP'
+    throw e
+  }
+  const r1 = await runQuickAction(arrive)
+  if (r1?.skipped) {
+    const e = new Error('HELPERS_SKIP')
+    /** @type {Error & { code?: string }} */ (e).code = 'HELPERS_SKIP'
+    throw e
+  }
+  if (!r1?.ok) {
+    throw new Error(String(r1?.error || 'Arrive quick action failed'))
+  }
+  await autoRunCheckInQuickAction()
+}
+
 async function runLateNightArriveThenCheckIn() {
   const arrive = findArriveQuickAction()
   if (!arrive) {
@@ -1087,6 +1111,25 @@ const {
   },
   isAutomationRunning: () => runningAutomationId.value != null,
   onYes: runLateNightArriveThenCheckIn,
+})
+
+useDestinationAutoArriveCheckIn({
+  suppressHomeLinehaulErrors,
+  tripDestLocationId,
+  linehaulOriginIdForApi,
+  currentTripLegSeq,
+  isEnrtEligible: () => {
+    if (suppressHomeLinehaulErrors.value) return false
+    const ds = String(linehaulDriverBody.value?.driverAvlStat ?? '').trim().toUpperCase()
+    if (ds !== 'ENRT') return false
+    if (linehaulTripsNoActive.value) return false
+    const b = linehaulTripsBody.value
+    if (!b || typeof b !== 'object' || Array.isArray(b)) return false
+    return true
+  },
+  isAutomationRunning: () => runningAutomationId.value != null,
+  runArriveThenCheckIn: helpersProxRunArriveChain,
+  notifyInApp: (msg, kind) => notifyQuickActionInApp(msg, kind || 'info'),
 })
 
 function clearAutomationPreviewNow() {

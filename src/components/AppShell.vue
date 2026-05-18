@@ -1,6 +1,10 @@
 <script setup>
 import { onMounted, onUnmounted, watch, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import {
+  startAppGeolocationWatch,
+  stopAppGeolocationWatch,
+} from '../composables/useAppGeolocationWatch.js'
 import { postAuthLogout } from '../api.js'
 import { resetLinehaulSession } from '../stores/linehaulSnapshotStore.js'
 import { useApiHealth } from '../composables/useApiHealth.js'
@@ -79,6 +83,7 @@ async function logoutApp() {
 const headerAriaLabel = 'FedExTool — Linehaul'
 
 onMounted(() => {
+  startAppGeolocationWatch()
   connectLiveLogStream()
   void fetchInAppInbox()
   for (const ms of [500, 1500, 3500]) {
@@ -91,6 +96,7 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
+  stopAppGeolocationWatch()
   if (docClickClose) {
     document.removeEventListener('click', docClickClose)
     docClickClose = null

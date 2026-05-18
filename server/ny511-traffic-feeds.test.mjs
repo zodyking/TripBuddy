@@ -55,6 +55,47 @@ test('passesMetroAlertRelevance: NYC area vs upstate', () => {
   assert.equal(passesMetroAlertRelevance(buf._blob || ''), false)
 })
 
+test('isNy511ItemActiveInTimeWindow excludes not-yet-started events', () => {
+  const row = normalize511RowToItem(
+    {
+      ID: 'future',
+      EventType: 'roadwork',
+      RoadwayName: 'I-678 North',
+      Latitude: 40.75,
+      Longitude: -73.82,
+      StartDate: '20/08/2026 00:00:00',
+      PlannedEndDate: '21/08/2026 23:59:00',
+    },
+    'getevents',
+    'event',
+  )
+  assert.ok(row)
+  const may = parseNy511DateMs('14/05/2026 12:00:00')
+  assert.ok(may != null)
+  assert.equal(isNy511ItemActiveInTimeWindow(/** @type {any} */ (row), /** @type {number} */ (may)), false)
+})
+
+test('normalize maps LanesStatus into impactSummary when Severity is Unknown', () => {
+  const row = normalize511RowToItem(
+    {
+      ID: 'lanes-1',
+      EventType: 'roadwork',
+      RoadwayName: 'I-278 West',
+      Latitude: 40.7,
+      Longitude: -73.98,
+      Severity: 'Unknown',
+      LanesStatus: 'All lanes closed',
+      StartDate: '01/01/2026 00:00:00',
+      PlannedEndDate: '31/12/2026 23:59:00',
+    },
+    'getevents',
+    'event',
+  )
+  assert.ok(row)
+  assert.equal(row?.impactSummary, 'All lanes closed')
+  assert.equal(row?.severity, undefined)
+})
+
 test('isNy511ItemActiveInTimeWindow drops ended work', () => {
   const row = normalize511RowToItem(
     {
