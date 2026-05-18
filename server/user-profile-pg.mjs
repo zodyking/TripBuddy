@@ -68,6 +68,9 @@ export async function ensureUserProfileTable() {
     await client.query(`
       ALTER TABLE ${TABLE} ADD COLUMN IF NOT EXISTS api_quota_state JSONB
     `)
+    await client.query(`
+      ALTER TABLE ${TABLE} ADD COLUMN IF NOT EXISTS gwb_upper_cam_youtube_url TEXT
+    `)
   } finally {
     client.release()
   }
@@ -205,5 +208,48 @@ export async function setNy511ApiKeyForAccount(accountKey, rawKey) {
        ny511_api_key_enc = EXCLUDED.ny511_api_key_enc,
        updated_at = now()`,
     [ak, enc ? JSON.stringify(enc) : null],
+  )
+}
+
+const GWB_YT_URL_MAX = 512
+
+/**
+ * @param {string} accountKey
+ * @returns {Promise<string>} trimmed URL or ''
+ */
+export async function getGwbUpperCamYoutubeUrlForAccount(accountKey) {
+  const ak = String(accountKey || '').trim()
+  if (!ak) return ''
+  const p = await getPostgresPool()
+  if (!p) return ''
+  await ensureUserProfileTable()
+  const { rows } = await p.query(
+    `SELECT gwb_upper_cam_youtube_url FROM ${TABLE} WHERE account_key = $1`,
+    [ak],
+  )
+  const u = rows[0]?.gwb_upper_cam_youtube_url
+  return typeof u === 'string' ? u.trim().slice(0, GWB_YT_URL_MAX) : ''
+}
+
+/**
+ * @param {string} accountKey
+ * @param {string} rawUrl full watch/embed/shorts URL or empty to clear
+ */
+export async function setGwbUpperCamYoutubeUrlForAccount(accountKey, rawUrl) {
+  const ak = String(accountKey || '').trim()
+  if (!ak) throw new Error('account_key required')
+  const p = await getPostgresPool()
+  if (!p) throw new Error('Database not available')
+  await ensureUserProfileTable()
+  const v = String(rawUrl ?? '')
+    .trim()
+    .slice(0, GWB_YT_URL_MAX)
+  await p.query(
+    `INSERT INTO ${TABLE} (account_key, gwb_upper_cam_youtube_url, updated_at)
+     VALUES ($1, $2, now())
+     ON CONFLICT (account_key) DO UPDATE SET
+       gwb_upper_cam_youtube_url = EXCLUDED.gwb_upper_cam_youtube_url,
+       updated_at = now()`,
+    [ak, v || null],
   )
 }

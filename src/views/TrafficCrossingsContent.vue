@@ -1,6 +1,6 @@
 <script setup>
 import { ref, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
-import { getBridgesPanynj, getNy511Cameras, getVerrazzanoTraffic, getGwbYoutubeLive, apiFetch } from '../api.js'
+import { getBridgesPanynj, getNy511Cameras, getVerrazzanoTraffic, getCredentials, apiFetch } from '../api.js'
 import { getBridgeAnchorForRouteId } from '../bridges/bridgeRouteAnchors.js'
 import { findVerrazzanoCamera, resolveBridgeCameraFeed } from '../bridges/bridgeCameraMapping.js'
 import BridgesMap from '../components/BridgesMap.vue'
@@ -724,6 +724,10 @@ function onSplitMqlChange() {
   updateLandscapeSplit()
 }
 
+function onGwbUpperCamUrlUpdated() {
+  void loadGwbUpperCamYoutubeUrl()
+}
+
 /**
  * @param {string} id routeId
  */
@@ -768,44 +772,35 @@ watch(viewMode, (mode) => {
   }
 })
 
-/** @type {import('vue').Ref<Record<string, unknown> | null>} */
-const gwbYoutubePayload = ref(null)
+/** Saved YouTube URL for GWB upper deck (PostgreSQL profile); video id derived client-side. */
+const gwbUpperCamYoutubeUrl = ref('')
 
 const gwbYoutubeFeedOpts = computed(() => {
-  const p = gwbYoutubePayload.value
-  if (!p) {
+  const url = String(gwbUpperCamYoutubeUrl.value || '').trim()
+  const id = url ? extractYoutubeVideoIdFromInput(url) : null
+  if (id) {
+    return { gwbYoutubeVideoId: id, gwbNoFeedMessage: '' }
+  }
+  if (url) {
     return {
       gwbYoutubeVideoId: null,
-      gwbNoFeedMessage: 'Loading GWB live stream…',
+      gwbNoFeedMessage:
+        'Could not read a YouTube video id from that link. Fix it under Settings → GWB upper camera.',
     }
   }
-  if (p.ok === true && p.live === true && typeof p.videoId === 'string' && p.videoId.trim()) {
-    return { gwbYoutubeVideoId: p.videoId.trim(), gwbNoFeedMessage: '' }
+  return {
+    gwbYoutubeVideoId: null,
+    gwbNoFeedMessage: 'Add your GWB upper camera YouTube link in Settings (GWB upper camera section).',
   }
-  const r = typeof p.reason === 'string' ? p.reason : ''
-  let msg = 'GWB live stream unavailable'
-  if (r === 'missing_api_key') {
-    msg =
-      typeof p.hint === 'string' && p.hint.trim()
-        ? p.hint.trim()
-        : 'Set YOUTUBE_DATA_API_KEY on the TripBuddy API server for GWB live video.'
-  } else if (r === 'not_broadcasting') {
-    msg = 'No live GWB stream on YouTube right now.'
-  } else if (r === 'channel_not_found') {
-    msg = 'GWB YouTube channel was not found.'
-  } else if (r === 'youtube_error' || r === 'fetch_failed') {
-    const d = typeof p.detail === 'string' ? p.detail.trim() : ''
-    msg = d ? `GWB live: ${d.slice(0, 100)}` : 'Could not load GWB live stream.'
-  }
-  return { gwbYoutubeVideoId: null, gwbNoFeedMessage: msg }
 })
 
-async function loadGwbYoutube() {
+async function loadGwbUpperCamYoutubeUrl() {
   try {
-    const res = await getGwbYoutubeLive()
-    gwbYoutubePayload.value = res && typeof res === 'object' ? /** @type {Record<string, unknown>} */ (res) : { ok: false, reason: 'bad_response' }
+    const d = await getCredentials()
+    gwbUpperCamYoutubeUrl.value =
+      typeof d.gwbUpperCamYoutubeUrl === 'string' ? d.gwbUpperCamYoutubeUrl.trim() : ''
   } catch {
-    gwbYoutubePayload.value = { ok: false, reason: 'fetch_failed', detail: 'Network error' }
+    gwbUpperCamYoutubeUrl.value = ''
   }
 }
 
@@ -1036,11 +1031,14 @@ onMounted(() => {
   void loadCameras()
   void loadVerrazzano()
   void loadNy511Traffic()
-  void loadGwbYoutube()
+  void loadGwbUpperCamYoutubeUrl()
+  if (typeof window !== 'undefined') {
+    window.addEventListener('tripbuddy-gwb-upper-cam-url-updated', onGwbUpperCamUrlUpdated)
+  }
   intervalId = setInterval(() => {
     void load()
     void loadVerrazzano()
-    void loadGwbYoutube()
+    void loadGwbUpperCamYoutubeUrl()
     if (viewMode.value === 'ny511') {
       void loadNy511Traffic()
     }
@@ -1048,6 +1046,9 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
+  if (typeof window !== 'undefined') {
+    window.removeEventListener('tripbuddy-gwb-upper-cam-url-updated', onGwbUpperCamUrlUpdated)
+  }
   if (splitMql) {
     splitMql.removeEventListener('change', onSplitMqlChange)
   }

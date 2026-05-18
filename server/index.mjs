@@ -17,9 +17,12 @@ import {
   setHereApiKeyForAccount,
   getNy511ApiKeyForAccount,
   setNy511ApiKeyForAccount,
+  getGwbUpperCamYoutubeUrlForAccount,
+  setGwbUpperCamYoutubeUrlForAccount,
 } from './user-profile-pg.mjs'
 import { sanitizeTomtomApiKey } from './tomtom-key.mjs'
 import { sanitizeHereApiKey } from './here-traffic-api.mjs'
+import { extractYoutubeVideoIdFromInput } from '../src/utils/youtubeVideoId.js'
 import {
   isAuthEnabled,
   createSession,
@@ -165,7 +168,6 @@ import {
   startPanynjBridgePoll,
 } from './bridge-panynj.mjs'
 import { getVerrazzanoResponsePayload } from './bridge-verrazzano-traffic.mjs'
-import { getGwbYoutubeLivePayload } from './gwb-youtube-live.mjs'
 import { getNy511TruckNycPayload } from './ny511-traffic-feeds.mjs'
 import { registerTrafficMonitoredRoutes } from './traffic-monitored-routes-routes.mjs'
 import {
@@ -440,9 +442,6 @@ app.get('/api/bridges/verrazzano', async (req) => {
     : ''
   return getVerrazzanoResponsePayload(ak)
 })
-
-/** GWB @gwblivetrafficcam — current live video id (requires YOUTUBE_DATA_API_KEY on server). */
-app.get('/api/bridges/gwb-youtube-live', async () => getGwbYoutubeLivePayload())
 
 /** 511NY: NYC-region truck-relevant events, construction, incidents, road conditions (cached). */
 app.get('/api/511ny/traffic', async (req, reply) => {
@@ -771,12 +770,17 @@ app.get('/api/settings/credentials', async (req) => {
   if (includeNy511 && typeof ak === 'string' && ak.trim()) {
     ny511ApiKey = (await getNy511ApiKeyForAccount(ak)) || ''
   }
+  let gwbUpperCamYoutubeUrl = ''
+  if (typeof ak === 'string' && ak.trim()) {
+    gwbUpperCamYoutubeUrl = (await getGwbUpperCamYoutubeUrlForAccount(ak)) || ''
+  }
   return {
     ...meta,
     ...(includeBearer ? { fedexLinehaulBearer } : {}),
     ...(includeTomtom ? { tomtomApiKey } : {}),
     ...(includeHere ? { hereApiKey } : {}),
     ...(includeNy511 ? { ny511ApiKey } : {}),
+    gwbUpperCamYoutubeUrl,
     secretHint: process.env.FEDEX_TOOL_SECRET ? null : TOOL_SECRET_HINT,
   }
 })
@@ -860,6 +864,31 @@ app.put('/api/settings/ny511-api-key', async (req, reply) => {
     }
     await setNy511ApiKeyForAccount(ak, sanitized)
     return { ok: true, hasNy511ApiKey: Boolean(sanitized) }
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e)
+    return reply.code(400).send({ error: msg })
+  }
+})
+
+app.put('/api/settings/gwb-upper-cam-youtube-url', async (req, reply) => {
+  try {
+    const ak = req.credentialAccountKey
+    if (typeof ak !== 'string' || !ak.trim()) {
+      return reply.code(400).send({ error: 'No account in session.' })
+    }
+    const body = req.body ?? {}
+    const raw = typeof body.url === 'string' ? body.url.trim() : ''
+    if (raw.length > 512) {
+      return reply.code(400).send({ error: 'URL is too long (max 512 characters).' })
+    }
+    if (raw && !extractYoutubeVideoIdFromInput(raw)) {
+      return reply.code(400).send({
+        error:
+          'Paste a valid YouTube link (watch, youtu.be, embed, live, or shorts) or clear the field.',
+      })
+    }
+    await setGwbUpperCamYoutubeUrlForAccount(ak.trim(), raw)
+    return { ok: true, gwbUpperCamYoutubeUrl: raw }
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e)
     return reply.code(400).send({ error: msg })

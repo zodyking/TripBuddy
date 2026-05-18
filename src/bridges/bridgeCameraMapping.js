@@ -131,7 +131,7 @@ export function findVerrazzanoCamera(direction, cameras) {
  * @param {unknown} row
  * @param {'ToNY' | 'ToNJ'} direction
  * @param {Array<{ bridge: string, videoUrl: string | null, imageUrl: string | null, status: string }>} cameras
- * @param {{ gwbYoutubeVideoId?: string | null, gwbNoFeedMessage?: string }} [opts] Live video id from GET /api/bridges/gwb-youtube-live; placeholder copy when not live.
+ * @param {{ gwbYoutubeVideoId?: string | null, gwbNoFeedMessage?: string }} [opts] GWB upper deck: video id from saved Settings URL; placeholder when unset or invalid.
  * @returns {{
  *   youtubeVideoId: string | null,
  *   videoUrl: string | null,

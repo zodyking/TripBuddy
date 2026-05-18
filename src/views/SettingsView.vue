@@ -8,6 +8,7 @@ import {
   putTomtomApiKey,
   putHereApiKey,
   putNy511ApiKey,
+  putGwbUpperCamYoutubeUrl,
   deleteCredentials,
   putAssignment,
   getHealth,
@@ -482,6 +483,29 @@ async function saveNy511ApiKey() {
   }
 }
 
+/** GWB upper deck camera: full YouTube URL saved on server (no YouTube API key required). */
+const gwbUpperCamYoutubeDraft = ref('')
+const gwbUpperCamYoutubeMsg = ref('')
+const gwbUpperCamYoutubeBusy = ref(false)
+
+async function saveGwbUpperCamYoutubeUrl() {
+  if (!(await requireApi())) return
+  gwbUpperCamYoutubeBusy.value = true
+  gwbUpperCamYoutubeMsg.value = ''
+  try {
+    await putGwbUpperCamYoutubeUrl({ url: gwbUpperCamYoutubeDraft.value })
+    gwbUpperCamYoutubeMsg.value = 'GWB upper camera link saved on the server.'
+    await loadCredentials()
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('tripbuddy-gwb-upper-cam-url-updated'))
+    }
+  } catch (e) {
+    gwbUpperCamYoutubeMsg.value = e instanceof Error ? e.message : String(e)
+  } finally {
+    gwbUpperCamYoutubeBusy.value = false
+  }
+}
+
 /** Server-tracked outbound API usage (per UTC day). */
 const apiQuotaRows = ref(
   /** @type {Array<{ id: string, label: string, countToday: number, limitDay: number, defaultLimitDay: number, perMinuteLimit: number, callsLastMinute: number, countMonth?: number, limitMonth?: number, defaultLimitMonth?: number, monthKey?: string }>} */ ([]),
@@ -683,6 +707,10 @@ async function loadCredentials() {
       typeof credMeta.value.ny511ApiKey === 'string' ? credMeta.value.ny511ApiKey.trim() : ''
     if (nk) setNy511ApiKey(nk)
     ny511ApiDraft.value = ny511ApiKeyOverride.value
+    gwbUpperCamYoutubeDraft.value =
+      typeof credMeta.value.gwbUpperCamYoutubeUrl === 'string'
+        ? credMeta.value.gwbUpperCamYoutubeUrl
+        : ''
     await refreshApiQuota()
   } catch (e) {
     pushLiveLog({
@@ -758,6 +786,7 @@ async function clearCredentials() {
     hereApiDraft.value = ''
     setNy511ApiKey('')
     ny511ApiDraft.value = ''
+    gwbUpperCamYoutubeDraft.value = ''
     await loadCredentials()
     pushLiveLog({ type: 'info', message: 'Credentials cleared', ts: Date.now() })
   } catch (e) {
@@ -1656,6 +1685,33 @@ onUnmounted(() => {
             @click="saveNy511ApiKey"
           >
             {{ ny511ApiBusy ? 'Saving…' : 'Save 511NY key' }}
+          </button>
+        </div>
+      </SettingsSection>
+
+      <SettingsSection title="GWB upper camera (YouTube)" section-id="settings-gwb-youtube">
+        <p class="cred-hint">
+          <strong>Traffic → Crossings</strong> uses this for the George Washington Bridge <strong>upper deck</strong> live view.
+          Paste any standard YouTube link (watch, Shorts, embed, or youtu.be). Leave empty to hide the embed.
+        </p>
+        <label class="lbl" for="gwb-upper-cam-youtube-url">YouTube URL</label>
+        <input
+          id="gwb-upper-cam-youtube-url"
+          v-model="gwbUpperCamYoutubeDraft"
+          class="inp tap"
+          type="url"
+          autocomplete="off"
+          placeholder="https://www.youtube.com/watch?v=…"
+        />
+        <p v-if="gwbUpperCamYoutubeMsg" class="cred-msg">{{ gwbUpperCamYoutubeMsg }}</p>
+        <div class="btn-row">
+          <button
+            type="button"
+            class="btn primary tap"
+            :disabled="gwbUpperCamYoutubeBusy"
+            @click="saveGwbUpperCamYoutubeUrl"
+          >
+            {{ gwbUpperCamYoutubeBusy ? 'Saving…' : 'Save GWB camera link' }}
           </button>
         </div>
       </SettingsSection>
