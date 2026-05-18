@@ -164,12 +164,6 @@ export async function getVerrazzanoTraffic() {
   return handleJson(r)
 }
 
-/** GWB @gwblivetrafficcam — active live YouTube video id (server uses YouTube Data API v3). */
-export async function getGwbYoutubeLive() {
-  const r = await apiFetch('/api/bridges/gwb-youtube-live')
-  return handleJson(r)
-}
-
 /** 511NY: NYC-region truck-relevant traffic items (events, construction, incidents, road conditions). */
 export async function getNy511Traffic() {
   const r = await apiFetch('/api/511ny/traffic')
@@ -433,6 +427,7 @@ export async function getPublicGeoFenceCheck() {
  * When includeTomtomApiKey, response includes decrypted TomTom key for Settings only.
  * When includeHereApiKey, response includes decrypted HERE key for Settings only.
  * When includeNy511ApiKey, response includes decrypted 511NY key for Settings only.
+ * Response always includes `gwbUpperCamYoutubeUrl` when signed in (PostgreSQL profile).
  */
 export async function getCredentials(opts = {}) {
   const q = new URLSearchParams()
@@ -477,6 +472,19 @@ export async function putHereApiKey(body) {
  */
 export async function putNy511ApiKey(body) {
   const r = await apiFetch('/api/settings/ny511-api-key', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body ?? {}),
+  })
+  return handleJson(r)
+}
+
+/**
+ * Persist GWB upper deck camera YouTube URL for the signed-in user (PostgreSQL).
+ * @param {{ url?: string }} body Empty string clears; must be a valid YouTube watch/embed/shorts URL when non-empty.
+ */
+export async function putGwbUpperCamYoutubeUrl(body) {
+  const r = await apiFetch('/api/settings/gwb-upper-cam-youtube-url', {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body ?? {}),
