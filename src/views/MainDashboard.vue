@@ -947,14 +947,13 @@ async function runQuickAction(auto) {
   quickActionRunGeneration.value += 1
   const myGen = quickActionRunGeneration.value
 
-  if (runningAutomationId.value != null) {
-    try {
-      await postCancelRun()
-    } catch {
-      /* no active run or server already idle */
-    }
-    clearAutomationPreviewNow()
+  /* Server allows one Playwright run at a time — cancel any in-flight run (prior quick action or run started elsewhere) before this one. */
+  try {
+    await postCancelRun()
+  } catch {
+    /* no active run or server already idle */
   }
+  clearAutomationPreviewNow()
 
   runningAutomationId.value = auto.id
   runStartTs.value = Date.now()
