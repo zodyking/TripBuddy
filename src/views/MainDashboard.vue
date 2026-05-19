@@ -121,6 +121,8 @@ const PORTAL_Z_LOCATION_MODAL = 2_147_483_002
 const loadError = ref(null)
 const runErrorBanner = ref(null)
 const runStartTs = ref(null)
+/** Bumped on every quick-action tap so a prior `runAutomation` cannot apply after a newer run starts. */
+const quickActionRunGeneration = ref(0)
 
 const locationRetryOpen = ref(false)
 const locationRetryFedexMessage = ref('')
@@ -939,10 +941,21 @@ function notifyQuickActionInApp(message, kind = 'info') {
 
 /**
  * @returns {Promise<{ ok: boolean, skipped?: boolean }>}
- * `skipped` means another automation was already running.
+ * `skipped` means this invocation was superseded (user started another quick action) or is otherwise benign to ignore.
  */
 async function runQuickAction(auto) {
-  if (runningAutomationId.value) return { ok: false, skipped: true }
+  quickActionRunGeneration.value += 1
+  const myGen = quickActionRunGeneration.value
+
+  if (runningAutomationId.value != null) {
+    try {
+      await postCancelRun()
+    } catch {
+      /* no active run or server already idle */
+    }
+    clearAutomationPreviewNow()
+  }
+
   runningAutomationId.value = auto.id
   runStartTs.value = Date.now()
   streamBannerHandledKey.value = null
@@ -950,6 +963,7 @@ async function runQuickAction(auto) {
   automationPreviewHidden.value = false
   try {
     if (!(await ensureFedexApiReady())) {
+      if (quickActionRunGeneration.value !== myGen) return { ok: false, skipped: true }
       notifyQuickActionInApp(
         'API is not running on port 3847. With vite-only dev, wait a few seconds for autostart, or run npm run dev from the project root.',
         'error',
@@ -976,11 +990,16 @@ async function runQuickAction(auto) {
     const legSeq = currentTripLegSeq.value
     if (legSeq) tripData.dailyTripLegSequence = String(legSeq)
     const result = await runAutomation(auto.id, { headless: true, tripData })
+    if (quickActionRunGeneration.value !== myGen) return { ok: false, skipped: true }
     const inspectReCheckin = result.variables?._inspectCheckoutContinue
     if (inspectReCheckin?.requiresReCheckin === true) {
       announceInspectCheckoutNewTripDetails()
       notifyQuickActionInApp('Inspect failed: new trip details. Running check-in…', 'warning')
-      setTimeout(() => void autoRunCheckInQuickAction(), 2000)
+      const scheduleGen = myGen
+      setTimeout(() => {
+        if (quickActionRunGeneration.value !== scheduleGen) return
+        void autoRunCheckInQuickAction()
+      }, 2000)
       return { ok: true }
     }
     if (result.ok) {
@@ -1018,12 +1037,17 @@ async function runQuickAction(auto) {
     notifyQuickActionInApp(result.error || 'Failed', 'error')
     return { ok: false }
   } catch (e) {
-    notifyQuickActionInApp(e instanceof Error ? e.message : String(e), 'error')
-    return { ok: false }
+    if (quickActionRunGeneration.value === myGen) {
+      notifyQuickActionInApp(e instanceof Error ? e.message : String(e), 'error')
+      return { ok: false }
+    }
+    return { ok: false, skipped: true }
   } finally {
-    runningAutomationId.value = null
-    runStartTs.value = null
-    setTimeout(() => void refreshLinehaulApis(), 1500)
+    if (quickActionRunGeneration.value === myGen) {
+      runningAutomationId.value = null
+      runStartTs.value = null
+      setTimeout(() => void refreshLinehaulApis(), 1500)
+    }
   }
 }
 
@@ -3022,7 +3046,6 @@ onUnmounted(() => {
           :key="auto.id"
           type="button"
           class="btn primary tap quick-action-btn"
-          :disabled="runningAutomationId !== null"
           @click="runQuickAction(auto)"
         >
           {{ runningAutomationId === auto.id ? 'Running…' : (auto.manualButtonLabel || auto.name) }}
