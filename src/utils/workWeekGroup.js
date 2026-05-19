@@ -65,7 +65,7 @@ export function workWeekInclusiveDayCount(startDay, endDay) {
  *   shiftStartMins?: number,
  *   shiftEndMins?: number,
  *   groupLabelMode?: 'default' | 'fedexPaySchedule'
- * }} [opts] groupLabelMode `fedexPaySchedule` uses FedEx payout wording (Sun–Sat calendar week).
+ * }} [opts] groupLabelMode `fedexPaySchedule`: Sun–Sat by local wall-clock date of the trip (shift-day remap skipped).
  * @returns {{ key: string, endMs: number, groupLabel: string, weekStart: number, spanDays: number } | null}
  */
 export function workWeekGroupMeta(
@@ -79,17 +79,22 @@ export function workWeekGroupMeta(
   const en = Math.min(6, Math.max(0, Math.floor(Number(opts?.workWeekEndDay) || 6)))
   const sM = Math.max(0, Math.min(1439, Math.floor(Number(opts?.shiftStartMins) || 0)))
   const eM = Math.max(0, Math.min(1439, Math.floor(Number(opts?.shiftEndMins) || 1439)))
-  const shiftYmd = shiftDateKeyForEventMs(tsMs, sM, eM)
-  const dAnchor = (() => {
-    if (shiftYmd) {
-      const [yy, mo, day] = shiftYmd.split('-').map((x) => parseInt(x, 10))
-      if (yy && mo && day) {
-        const t2 = new Date(yy, mo - 1, day, 12, 0, 0, 0)
-        if (!isNaN(t2.getTime())) return t2
-      }
-    }
-    return d
-  })()
+  const labelMode = opts?.groupLabelMode === 'fedexPaySchedule' ? 'fedexPaySchedule' : 'default'
+  /** FedEx pay week = local Sun–Sat from the trip instant's calendar date (not overnight shift-day keys). */
+  const dAnchor =
+    labelMode === 'fedexPaySchedule'
+      ? d
+      : (() => {
+          const shiftYmd = shiftDateKeyForEventMs(tsMs, sM, eM)
+          if (shiftYmd) {
+            const [yy, mo, day] = shiftYmd.split('-').map((x) => parseInt(x, 10))
+            if (yy && mo && day) {
+              const t2 = new Date(yy, mo - 1, day, 12, 0, 0, 0)
+              if (!isNaN(t2.getTime())) return t2
+            }
+          }
+          return d
+        })()
   const wStart = startOfWorkWeek(dAnchor, st)
   const spanDays = workWeekInclusiveDayCount(st, en)
   const wEnd = new Date(wStart.getTime() + spanDays * 24 * 60 * 60 * 1000 - 1)
@@ -99,7 +104,6 @@ export function workWeekGroupMeta(
   const ymd = (t) => `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, '0')}-${String(t.getDate()).padStart(2, '0')}`
   const key = `ww-${ymd(wStart)}`
   const dowL = workWeekDowLabel(st, en)
-  const labelMode = opts?.groupLabelMode === 'fedexPaySchedule' ? 'fedexPaySchedule' : 'default'
   const weekTitle =
     labelMode === 'fedexPaySchedule' ? 'FedEx pay schedule' : 'Work week'
   const groupLabel = `${weekTitle} (${dowL}) — ${fmt(wStart)} – ${fmt(wEnd)}`

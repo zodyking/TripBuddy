@@ -30,6 +30,7 @@ import {
   directoryLookup,
 } from '../utils/directoryLocationLookup.js'
 import {
+  localDateKey,
   monthGridForCalendarMonth,
   workWeekGroupMeta,
   workWeekInclusiveDayCount,
@@ -65,7 +66,7 @@ const workWeekFromCred = ref({
   shiftEndMins: 1439,
 })
 
-/** `workWeek`: Settings work week. `paySchedule`: Sun–Sat (FedEx-style payout window), same shift boundaries. */
+/** `workWeek`: Settings work week. `paySchedule`: Sun–Sat FedEx payout window by local dispatch time (week/day rows ignore shift-day remap). */
 const historyWeekViewMode = ref(/** @type {'workWeek' | 'paySchedule'} */ ('workWeek'))
 
 const historyGroupingOpts = computed(() => {
@@ -425,6 +426,35 @@ function billableMilesForPayEstimate(paidMi) {
   if (!Number.isFinite(paidMi)) return 0
   if (paidMi >= PAY_ROUND_BAND_MIN && paidMi <= PAY_ROUND_BAND_MAX) return PAY_ROUND_TO_MI
   return paidMi
+}
+
+/**
+ * Shift-day key for grouping, or local calendar day for FedEx pay schedule (Sun–Sat window).
+ * @param {number} tMs
+ */
+function historyTripDayGroupKey(tMs) {
+  if (historyGroupingOpts.value.groupLabelMode === 'fedexPaySchedule') {
+    return localDateKey(tMs)
+  }
+  return shiftDateKeyForEventMs(
+    tMs,
+    historyGroupingOpts.value.shiftStartMins,
+    historyGroupingOpts.value.shiftEndMins,
+  )
+}
+
+/**
+ * Miles for week/month summary headers: matches PDF billable rule in pay schedule mode.
+ * @param {LedgerEntry} e
+ * @returns {number | null}
+ */
+function tripMilesForHistoryTotals(e) {
+  const raw = tripPaidMiles(e)
+  if (raw == null) return null
+  if (historyGroupingOpts.value.groupLabelMode === 'fedexPaySchedule') {
+    return billableMilesForPayEstimate(raw)
+  }
+  return raw
 }
 
 /**
@@ -926,11 +956,7 @@ const weekFilteredItems = computed(() => {
   return w.items.filter((e) => {
     if (!e.displayDate) return false
     const t = /** @type {number} */(e.displayDate)
-    const k2 = shiftDateKeyForEventMs(
-      t,
-      historyGroupingOpts.value.shiftStartMins,
-      historyGroupingOpts.value.shiftEndMins,
-    )
+    const k2 = historyTripDayGroupKey(t)
     return k2 === filterDayKey.value
   })
 })
@@ -960,7 +986,7 @@ const weekFilteredItems = computed(() => {
  * }} HistoryWeekGroup
  */
 
-/** Month list grouped by configured work week → shift days; newest week first. */
+/** Month list grouped by work week (or FedEx Sun–Sat pay week); sub-rows use shift days or calendar days in pay mode. */
 const tripsByWorkWeek = computed(() => {
   /** @type {HistoryWeekGroup[]} */
   const out = []
@@ -998,13 +1024,7 @@ const tripsByWorkWeek = computed(() => {
     for (const e of g.items) {
       const t = e.displayDate
       const dk =
-        typeof t === 'number' && Number.isFinite(t) && t > 0
-          ? shiftDateKeyForEventMs(
-              t,
-              historyGroupingOpts.value.shiftStartMins,
-              historyGroupingOpts.value.shiftEndMins,
-            )
-          : ''
+        typeof t === 'number' && Number.isFinite(t) && t > 0 ? historyTripDayGroupKey(t) : ''
       const dayKey = dk || '_unknown'
       const arr = byDay.get(dayKey) || []
       arr.push(e)
@@ -1030,7 +1050,7 @@ const tripsByWorkWeek = computed(() => {
       let dSum = 0
       let dWith = 0
       for (const e of dayItems) {
-        const mi = tripPaidMiles(e)
+        const mi = tripMilesForHistoryTotals(e)
         if (mi != null) {
           dSum += mi
           dWith += 1
@@ -1540,20 +1560,24 @@ const viewMonthGrid = computed(() => {
   if (g == null) {
     return { year: 0, monthIndex0: 0, monthLabel: '', headers: ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'], cells: [] }
   }
+  const payCal = historyGroupingOpts.value.groupLabelMode === 'fedexPaySchedule'
   const counts = {}
   for (const e of g.items) {
     if (!e.displayDate) continue
-    const k = shiftDateKeyForEventMs(
-      /** @type {number} */(e.displayDate),
-      historyGroupingOpts.value.shiftStartMins,
-      historyGroupingOpts.value.shiftEndMins,
-    )
+    const t = /** @type {number} */(e.displayDate)
+    const k = payCal
+      ? localDateKey(t)
+      : shiftDateKeyForEventMs(
+          t,
+          historyGroupingOpts.value.shiftStartMins,
+          historyGroupingOpts.value.shiftEndMins,
+        )
     if (!k) continue
     counts[k] = (counts[k] || 0) + 1
   }
   return monthGridForCalendarMonth(/** @type {number} */(g.y), g.m0, counts, {
-    shiftStartMins: historyGroupingOpts.value.shiftStartMins,
-    shiftEndMins: historyGroupingOpts.value.shiftEndMins,
+    shiftStartMins: payCal ? 0 : historyGroupingOpts.value.shiftStartMins,
+    shiftEndMins: payCal ? 1439 : historyGroupingOpts.value.shiftEndMins,
   })
 })
 
@@ -2219,9 +2243,16 @@ onUnmounted(() => {
         v-if="weekFilteredItems.length && !filterDayKey"
         class="history-month-mile-sum"
       >
-        Paid miles this month ({{ monthPaidMilesTotal.count }}
-        {{ monthPaidMilesTotal.count === 1 ? 'trip' : 'trips' }} with data):
-        <strong>{{ formatMilesSum(monthPaidMilesTotal.sum) }} mi</strong>
+        <template v-if="historyWeekViewMode === 'paySchedule'">
+          Billable miles this month ({{ monthPaidMilesTotal.count }}
+          {{ monthPaidMilesTotal.count === 1 ? 'trip' : 'trips' }} with data, same rule as PDF):
+          <strong>{{ formatMilesSum(monthPaidMilesTotal.sum) }} mi</strong>
+        </template>
+        <template v-else>
+          Paid miles this month ({{ monthPaidMilesTotal.count }}
+          {{ monthPaidMilesTotal.count === 1 ? 'trip' : 'trips' }} with data):
+          <strong>{{ formatMilesSum(monthPaidMilesTotal.sum) }} mi</strong>
+        </template>
       </p>
       <p v-else-if="filterDayKey && !weekFilteredItems.length" class="history-no-month">
         No trips on this shift day.
