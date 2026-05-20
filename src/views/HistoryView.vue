@@ -53,6 +53,7 @@ const HistoryPdfJsViewer = defineAsyncComponent(() => import('../components/Hist
  * @property {number} ledgerEventMs FedEx/story time anchor for same-leg dedup (not overridden by audit bucket)
  * @property {number} [recordedAt] First-seen ledger instant (assignment); pay "Assigned" column
  * @property {number} [dispatchedAtMs] First ENRT/DSPCH instant for this leg (server-persisted)
+ * @property {number} [outcomeTouchedAt] When outcome/dispatch-header outcome was explicitly set (patch or mark-complete)
  * @property {number} [historyAuditBucketMs]
  * @property {number} completedAt
  * @property {string} dailyTripLegSequence
@@ -554,7 +555,35 @@ function ledgerArrivedAtMs(e) {
     .toLowerCase()
   if (out !== 'delivered') return null
   const at = o.historyOutcomeAt
-  return typeof at === 'number' && Number.isFinite(at) && at > 0 ? at : null
+  if (!(typeof at === 'number' && Number.isFinite(at) && at > 0)) return null
+  const rec =
+    typeof e.recordedAt === 'number' && Number.isFinite(e.recordedAt) && e.recordedAt > 0
+      ? e.recordedAt
+      : null
+  if (rec != null && at > rec) return at
+  const touched =
+    typeof e.outcomeTouchedAt === 'number' &&
+    Number.isFinite(e.outcomeTouchedAt) &&
+    e.outcomeTouchedAt > 0
+  if (touched) return at
+  return null
+}
+
+/**
+ * Pay PDF / estimate: only show dispatched clock when it is strictly after first-seen assignment
+ * (avoids showing the same instant as "dispatched" before we tracked dispatch edges).
+ * @param {LedgerEntry} e
+ * @returns {number | null}
+ */
+function ledgerDispatchedAtMsForPay(e) {
+  const d = e.dispatchedAtMs
+  if (!(typeof d === 'number' && Number.isFinite(d) && d > 0)) return null
+  const rec =
+    typeof e.recordedAt === 'number' && Number.isFinite(e.recordedAt) && e.recordedAt > 0
+      ? e.recordedAt
+      : null
+  if (rec != null && d <= rec) return null
+  return d
 }
 
 /**
@@ -622,10 +651,7 @@ function computeWeekPayEstimate(items) {
     const billableMi = billableMilesForPayEstimate(base)
     sumBillable += billableMi
     const dispatchCols = tripPdfDispatchColumns(e)
-    const dispatchedMs =
-      typeof e.dispatchedAtMs === 'number' && Number.isFinite(e.dispatchedAtMs) && e.dispatchedAtMs > 0
-        ? e.dispatchedAtMs
-        : null
+    const dispatchedMs = ledgerDispatchedAtMsForPay(e)
     rows.push({
       id: e.id,
       dailyTripLegSequence: e.dailyTripLegSequence || '',
@@ -840,6 +866,10 @@ async function load() {
         const dispMs = oRaw.dispatchedAtMs
         if (typeof dispMs === 'number' && Number.isFinite(dispMs) && dispMs > 0) {
           e.dispatchedAtMs = dispMs
+        }
+        const otRaw = oRaw.outcomeTouchedAt
+        if (typeof otRaw === 'number' && Number.isFinite(otRaw) && otRaw > 0) {
+          e.outcomeTouchedAt = otRaw
         }
         if (auditMs > 0) {
           e.historyAuditBucketMs = auditMs
@@ -1479,8 +1509,8 @@ async function onDownloadWeekTotalsPdf(wg) {
     const { blob, filename } = await getHistoryWeekTotalsPdfBlob({
       documentTitle:
         historyWeekViewMode.value === 'paySchedule'
-          ? 'Pay week mileage'
-          : 'Weekly mileage',
+          ? 'FedEx Pay Week Mileage'
+          : 'Weekly Mileage',
       driverBlock: pdfDriverInfoBlock.value,
       truckBlock: pdfTruckInfoBlock.value,
       weekRangeLabel: wg.groupLabel,

@@ -725,6 +725,13 @@ export async function writeAssignment(body) {
     ) {
       entry.dispatchedAtMs = e.dispatchedAtMs
     }
+    if (
+      typeof e.outcomeTouchedAt === 'number' &&
+      Number.isFinite(e.outcomeTouchedAt) &&
+      e.outcomeTouchedAt > 0
+    ) {
+      entry.outcomeTouchedAt = e.outcomeTouchedAt
+    }
     if (source === 'linehaul' || source === 'complete') {
       if (/^\d+$/.test(seq)) {
         tripHistoryLedger = tripHistoryLedger.filter(
@@ -801,6 +808,12 @@ export async function writeAssignment(body) {
           e.dispatchedAtMs > 0
             ? e.dispatchedAtMs
             : null
+        const forkIncomingOutcomeTouched =
+          typeof e.outcomeTouchedAt === 'number' &&
+          Number.isFinite(e.outcomeTouchedAt) &&
+          e.outcomeTouchedAt > 0
+            ? e.outcomeTouchedAt
+            : null
         const nextFork = {
           id: forkId,
           source: incomingSource,
@@ -811,6 +824,7 @@ export async function writeAssignment(body) {
           tripDetails: { ...newTd },
           ...(incomingAudit != null ? { historyAuditBucketMs: incomingAudit } : {}),
           ...(forkIncomingDispatched != null ? { dispatchedAtMs: forkIncomingDispatched } : {}),
+          ...(forkIncomingOutcomeTouched != null ? { outcomeTouchedAt: forkIncomingOutcomeTouched } : {}),
         }
         const rest = tripHistoryLedger.filter(
           (x) => !x || String(x.dailyTripLegSequence) !== seq,
@@ -874,6 +888,20 @@ export async function writeAssignment(body) {
             ? e.dispatchedAtMs
             : null
         const mergedDispatchedMs = priorDispatchedMs ?? incomingDispatchedMs
+        const priorOutcomeTouched =
+          prior &&
+          typeof prior.outcomeTouchedAt === 'number' &&
+          Number.isFinite(prior.outcomeTouchedAt) &&
+          prior.outcomeTouchedAt > 0
+            ? prior.outcomeTouchedAt
+            : null
+        const incomingOutcomeTouched =
+          typeof e.outcomeTouchedAt === 'number' &&
+          Number.isFinite(e.outcomeTouchedAt) &&
+          e.outcomeTouchedAt > 0
+            ? e.outcomeTouchedAt
+            : null
+        const mergedOutcomeTouchedAt = priorOutcomeTouched ?? incomingOutcomeTouched
         const nextEntry = {
           id: resolvedId,
           source: incomingSource,
@@ -889,6 +917,7 @@ export async function writeAssignment(body) {
               ? { historyAuditBucketMs: priorAudit }
               : {}),
           ...(mergedDispatchedMs != null ? { dispatchedAtMs: mergedDispatchedMs } : {}),
+          ...(mergedOutcomeTouchedAt != null ? { outcomeTouchedAt: mergedOutcomeTouchedAt } : {}),
         }
         const rest = tripHistoryLedger.filter(
           (x) =>
