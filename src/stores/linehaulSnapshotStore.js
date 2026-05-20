@@ -11,6 +11,7 @@ import {
   syncDollyFromLinehaul,
   fetchFedexLinehaulViewTripInfoDetails,
 } from '../api.js'
+import { applyHelpersLocationPrefsFromCredentials } from '../utils/helpersLocationPrefs.js'
 import { pushLiveLog } from './liveLogStore.js'
 import {
   buildHistoryDispatchHeaderFromBody,
@@ -492,6 +493,25 @@ let _historyUpsertPending = null
 let _historyUpsertTimer = null
 const HISTORY_UPSERT_DEBOUNCE_MS = 1500
 
+/** Prior poll: `tripPhase === 'dispatched'` per leg seq (first false→true sets pendingDispatchedAtMsBySeq). */
+const prevDispatchSignalBySeq = new Map()
+/** First dispatch instant (ms) to send on next successful history upsert for that leg. */
+const pendingDispatchedAtMsBySeq = new Map()
+
+/**
+ * After Linehaul poll updates stable state, record first transition to dispatched for pay mileage.
+ */
+function noteFirstDispatchEdgeForActiveLeg() {
+  const seqD = String(stableTripState.value.dailyTripLegSequence ?? '').trim()
+  if (!/^\d+$/.test(seqD)) return
+  const cur = tripPhase.value === 'dispatched'
+  const prev = prevDispatchSignalBySeq.get(seqD) === true
+  prevDispatchSignalBySeq.set(seqD, cur)
+  if (cur && !prev) {
+    pendingDispatchedAtMsBySeq.set(seqD, Date.now())
+  }
+}
+
 /**
  * Schedule a history upsert (debounced, serialized)
  * @param {typeof stableTripState.value} tripState
@@ -574,27 +594,35 @@ function buildLedgerSnapBodyForHistoryUpsert(tripState) {
 async function executeHistoryUpsert(tripState, fingerprint, assignmentInstructions) {
   if (fingerprint === lastHistoryUpsertOkFingerprint) return
 
-  const seq = tripState.dailyTripLegSequence
-  if (!seq) return
+  const seqStr = String(seq).trim()
+  if (!/^\d+$/.test(seqStr)) return
 
   const snapBody = buildLedgerSnapBodyForHistoryUpsert(tripState)
 
+  const pendingD = pendingDispatchedAtMsBySeq.get(seqStr)
+  /** @type {Record<string, unknown>} */
+  const upsert = {
+    id: `h-${seqStr}`,
+    source: 'linehaul',
+    dailyTripLegSequence: seqStr,
+    recordedAt: Date.now(),
+    dispatchHeader: buildHistoryDispatchHeaderFromBody(snapBody, {
+      source: 'linehaul',
+      instructions: tripState.instructions,
+      instructionsFinal: true,
+    }),
+    tripDetails: buildHistoryTripDetailsFromBody(snapBody),
+  }
+  if (pendingD != null && Number.isFinite(pendingD) && pendingD > 0) {
+    upsert.dispatchedAtMs = pendingD
+  }
+
   try {
     await putAssignment({
-      upsertTripHistoryEntry: {
-        id: `h-${seq}`,
-        source: 'linehaul',
-        dailyTripLegSequence: seq,
-        recordedAt: Date.now(),
-        dispatchHeader: buildHistoryDispatchHeaderFromBody(snapBody, {
-          source: 'linehaul',
-          instructions: tripState.instructions,
-          instructionsFinal: true,
-        }),
-        tripDetails: buildHistoryTripDetailsFromBody(snapBody),
-      },
+      upsertTripHistoryEntry: upsert,
     })
     lastHistoryUpsertOkFingerprint = fingerprint
+    pendingDispatchedAtMsBySeq.delete(seqStr)
   } catch {
     /* offline / 401: retry on next refresh */
   }
@@ -656,6 +684,8 @@ export function resetLinehaulSession() {
   lastHistoryUpsertOkFingerprint = null
   prevDriverAvlStat = null
   lastTripMileageOkKey = ''
+  prevDispatchSignalBySeq.clear()
+  pendingDispatchedAtMsBySeq.clear()
   resetStableTripState()
   if (_historyUpsertTimer) {
     clearTimeout(_historyUpsertTimer)
@@ -1402,6 +1432,8 @@ function applyLinehaulFedexPollSnapshot(p) {
     },
   )
 
+  noteFirstDispatchEdgeForActiveLeg()
+
   if (stateChanged) {
     const historyGate = shouldUpsertToHistory(stableTripState.value, {
       prePlanSnapshot: prePlanTripSnapshot.value,
@@ -1496,6 +1528,7 @@ async function refreshLinehaulApisImpl(attempt) {
   let cred = {}
   try {
     cred = await getCredentials()
+    applyHelpersLocationPrefsFromCredentials(cred)
   } catch {
     cred = {}
   }

@@ -3,8 +3,8 @@ import { fetchFedexLinehaulLocation } from '../api.js'
 import { extractLocationForDirectory } from '../utils/linehaulLocationDisplay.js'
 import { haversineM } from '../utils/polylineSnap.js'
 import {
-  getHelpersAutoArriveNearDestEnabled,
-  helpersTriggerRadiusMeters,
+  helpersAutoArriveNearDestEnabledRef,
+  helpersAutoArriveRadiusNmRef,
 } from '../utils/helpersLocationPrefs.js'
 import { enqueueAnnouncement } from '../utils/alertAudioQueue.js'
 import { appGeoLat, appGeoLng } from './useAppGeolocationWatch.js'
@@ -84,9 +84,11 @@ export function useDestinationAutoArriveCheckIn(opts) {
       opts.tripDestLocationId,
       opts.currentTripLegSeq,
       opts.suppressHomeLinehaulErrors,
+      helpersAutoArriveNearDestEnabledRef,
+      helpersAutoArriveRadiusNmRef,
     ],
     () => {
-      if (!getHelpersAutoArriveNearDestEnabled()) return
+      if (!helpersAutoArriveNearDestEnabledRef.value) return
       if (opts.suppressHomeLinehaulErrors.value) return
       if (!opts.isEnrtEligible()) return
       if (opts.isAutomationRunning()) return
@@ -114,7 +116,7 @@ export function useDestinationAutoArriveCheckIn(opts) {
         return
       }
 
-      const maxM = helpersTriggerRadiusMeters()
+      const maxM = helpersAutoArriveRadiusNmRef.value * 1852
       const d = haversineM(ulat, ulng, dlat, dlng)
       const inside = d <= maxM
 

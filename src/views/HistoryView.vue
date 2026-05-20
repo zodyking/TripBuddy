@@ -50,6 +50,8 @@ const HistoryPdfJsViewer = defineAsyncComponent(() => import('../components/Hist
  * @property {string} [source]
  * @property {number} displayDate (grouping/sorting; audit bucket overrides FedEx times when set)
  * @property {number} ledgerEventMs FedEx/story time anchor for same-leg dedup (not overridden by audit bucket)
+ * @property {number} [recordedAt] First-seen ledger instant (assignment); pay "Assigned" column
+ * @property {number} [dispatchedAtMs] First ENRT/DSPCH instant for this leg (server-persisted)
  * @property {number} [historyAuditBucketMs]
  * @property {number} completedAt
  * @property {string} dailyTripLegSequence
@@ -499,6 +501,50 @@ function tripPdfDispatchColumns(e) {
 }
 
 /**
+ * @param {number | null | undefined} ms
+ * @returns {string}
+ */
+function formatPayClockOrNa(ms) {
+  if (typeof ms !== 'number' || !Number.isFinite(ms) || ms <= 0) return 'n/a'
+  const d = new Date(ms)
+  if (isNaN(d.getTime())) return 'n/a'
+  return d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })
+}
+
+/**
+ * @param {LedgerEntry} e
+ * @returns {number | null}
+ */
+function ledgerArrivedAtMs(e) {
+  const dh = e.dispatchHeader
+  if (!dh || typeof dh !== 'object') return null
+  const o = /** @type {Record<string, unknown>} */ (dh)
+  const out = String(o.historyOutcome ?? '')
+    .trim()
+    .toLowerCase()
+  if (out !== 'delivered') return null
+  const at = o.historyOutcomeAt
+  return typeof at === 'number' && Number.isFinite(at) && at > 0 ? at : null
+}
+
+/**
+ * @param {LedgerEntry} e
+ * @returns {number | null}
+ */
+function ledgerAssignedAtMs(e) {
+  const ra =
+    typeof e.recordedAt === 'number' && Number.isFinite(e.recordedAt) && e.recordedAt > 0
+      ? e.recordedAt
+      : null
+  if (ra != null) return ra
+  const le =
+    typeof e.ledgerEventMs === 'number' && Number.isFinite(e.ledgerEventMs) && e.ledgerEventMs > 0
+      ? e.ledgerEventMs
+      : null
+  return le
+}
+
+/**
  * Tractor saved on ledger `tripDetails` (from Linehaul trip snapshot).
  * @param {LedgerEntry} e
  */
@@ -529,6 +575,9 @@ function computeWeekPayEstimate(items) {
    *   weekday: string,
    *   dispatchDate: string,
    *   dispatchTime: string,
+   *   assignedTime: string,
+   *   dispatchedTime: string,
+   *   arrivedTime: string,
    *   legLabel: string,
    *   tractorNumber: string,
    *   paidMi: number | null,
@@ -543,6 +592,10 @@ function computeWeekPayEstimate(items) {
     const billableMi = billableMilesForPayEstimate(base)
     sumBillable += billableMi
     const dispatchCols = tripPdfDispatchColumns(e)
+    const dispatchedMs =
+      typeof e.dispatchedAtMs === 'number' && Number.isFinite(e.dispatchedAtMs) && e.dispatchedAtMs > 0
+        ? e.dispatchedAtMs
+        : null
     rows.push({
       id: e.id,
       dailyTripLegSequence: e.dailyTripLegSequence || '',
@@ -558,6 +611,9 @@ function computeWeekPayEstimate(items) {
       weekday: dispatchCols.weekday,
       dispatchDate: dispatchCols.dispatchDate,
       dispatchTime: dispatchCols.dispatchTime,
+      assignedTime: formatPayClockOrNa(ledgerAssignedAtMs(e)),
+      dispatchedTime: formatPayClockOrNa(dispatchedMs),
+      arrivedTime: formatPayClockOrNa(ledgerArrivedAtMs(e)),
       legLabel: dispatchCols.legLabel,
       tractorNumber: tripPdfTractor(e),
       paidMi,
@@ -747,6 +803,13 @@ async function load() {
             x.tripDetails && typeof x.tripDetails === 'object'
               ? /** @type {Record<string, unknown>} */ (x.tripDetails)
               : {},
+        }
+        if (rec > 0) {
+          e.recordedAt = rec
+        }
+        const dispMs = oRaw.dispatchedAtMs
+        if (typeof dispMs === 'number' && Number.isFinite(dispMs) && dispMs > 0) {
+          e.dispatchedAtMs = dispMs
         }
         if (auditMs > 0) {
           e.historyAuditBucketMs = auditMs
@@ -1289,7 +1352,10 @@ async function onDownloadWeekTotalsPdf(wg) {
           routeOd: r.routeOd,
           weekday: r.weekday,
           dispatchDate: r.dispatchDate,
-          dispatchTime: r.dispatchTime,
+          dispatchTime: r.assignedTime,
+          assignedTime: r.assignedTime,
+          dispatchedTime: r.dispatchedTime,
+          arrivedTime: r.arrivedTime,
           legLabel: r.legLabel,
           tractorNumber: r.tractorNumber,
           equipmentBlock: formatTripEquipmentPdfBlock(td, {
@@ -2520,6 +2586,10 @@ onUnmounted(() => {
                     <span class="history-pay-row__main">
                       <span class="history-pay-row__od">{{ row.od }}</span>
                       <span class="history-pay-row__when">{{ row.when }}</span>
+                      <span class="history-pay-row__clocks"
+                        >Assigned {{ row.assignedTime }} · Dispatched {{ row.dispatchedTime }} · Arrived
+                        {{ row.arrivedTime }}</span
+                      >
                     </span>
                     <span class="history-pay-row__nums history-pay-row__nums--week-mi">
                       <span class="history-od-lab">Miles:</span>
@@ -2573,6 +2643,10 @@ onUnmounted(() => {
                         <span class="history-pay-row__main">
                           <span class="history-pay-row__od">{{ row.od }}</span>
                           <span class="history-pay-row__when">{{ row.when }}</span>
+                          <span class="history-pay-row__clocks"
+                            >Assigned {{ row.assignedTime }} · Dispatched {{ row.dispatchedTime }} · Arrived
+                            {{ row.arrivedTime }}</span
+                          >
                         </span>
                         <span class="history-pay-row__nums">
                           <span class="history-pay-row__bill">{{ row.billableMi }} mi → {{ formatUsdWhole(row.billableMi) }}</span>
@@ -3568,6 +3642,13 @@ onUnmounted(() => {
   font-size: 0.58rem;
   font-variant-numeric: tabular-nums;
   color: #7c7c8c;
+}
+
+.history-pay-row__clocks {
+  font-size: 0.55rem;
+  font-variant-numeric: tabular-nums;
+  color: #6a6a7a;
+  line-height: 1.3;
 }
 
 .history-pay-row__nums {

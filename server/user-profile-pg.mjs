@@ -71,6 +71,12 @@ export async function ensureUserProfileTable() {
     await client.query(`
       ALTER TABLE ${TABLE} ADD COLUMN IF NOT EXISTS gwb_upper_cam_youtube_url TEXT
     `)
+    await client.query(`
+      ALTER TABLE ${TABLE} ADD COLUMN IF NOT EXISTS helpers_auto_arrive_near_dest_enabled BOOLEAN
+    `)
+    await client.query(`
+      ALTER TABLE ${TABLE} ADD COLUMN IF NOT EXISTS helpers_auto_arrive_radius_nm DOUBLE PRECISION
+    `)
   } finally {
     client.release()
   }
@@ -212,6 +218,68 @@ export async function setNy511ApiKeyForAccount(accountKey, rawKey) {
 }
 
 const GWB_YT_URL_MAX = 512
+
+const HELPERS_RADIUS_NM_MIN = 0.25
+const HELPERS_RADIUS_NM_MAX = 25
+const HELPERS_RADIUS_NM_DEFAULT = 2
+
+function clampHelpersRadiusNm(n) {
+  const x = Number(n)
+  if (!Number.isFinite(x)) return HELPERS_RADIUS_NM_DEFAULT
+  return Math.min(HELPERS_RADIUS_NM_MAX, Math.max(HELPERS_RADIUS_NM_MIN, x))
+}
+
+/**
+ * @param {string} accountKey
+ * @returns {Promise<{ enabled: boolean, radiusNm: number }>}
+ */
+export async function getHelpersAutoArrivePrefsForAccount(accountKey) {
+  const ak = String(accountKey || '').trim()
+  if (!ak) {
+    return { enabled: false, radiusNm: HELPERS_RADIUS_NM_DEFAULT }
+  }
+  const p = await getPostgresPool()
+  if (!p) {
+    return { enabled: false, radiusNm: HELPERS_RADIUS_NM_DEFAULT }
+  }
+  await ensureUserProfileTable()
+  const { rows } = await p.query(
+    `SELECT helpers_auto_arrive_near_dest_enabled, helpers_auto_arrive_radius_nm
+     FROM ${TABLE} WHERE account_key = $1`,
+    [ak],
+  )
+  const row = rows[0]
+  const enabled = row?.helpers_auto_arrive_near_dest_enabled === true
+  const rawNm = row?.helpers_auto_arrive_radius_nm
+  const nm =
+    rawNm != null && Number.isFinite(Number(rawNm))
+      ? clampHelpersRadiusNm(Number(rawNm))
+      : HELPERS_RADIUS_NM_DEFAULT
+  return { enabled, radiusNm: nm }
+}
+
+/**
+ * @param {string} accountKey
+ * @param {{ enabled: boolean, radiusNm: number }} prefs
+ */
+export async function setHelpersAutoArrivePrefsForAccount(accountKey, prefs) {
+  const ak = String(accountKey || '').trim()
+  if (!ak) throw new Error('account_key required')
+  const p = await getPostgresPool()
+  if (!p) throw new Error('Database not available')
+  await ensureUserProfileTable()
+  const enabled = Boolean(prefs?.enabled)
+  const radiusNm = clampHelpersRadiusNm(prefs?.radiusNm)
+  await p.query(
+    `INSERT INTO ${TABLE} (account_key, helpers_auto_arrive_near_dest_enabled, helpers_auto_arrive_radius_nm, updated_at)
+     VALUES ($1, $2, $3, now())
+     ON CONFLICT (account_key) DO UPDATE SET
+       helpers_auto_arrive_near_dest_enabled = EXCLUDED.helpers_auto_arrive_near_dest_enabled,
+       helpers_auto_arrive_radius_nm = EXCLUDED.helpers_auto_arrive_radius_nm,
+       updated_at = now()`,
+    [ak, enabled, radiusNm],
+  )
+}
 
 /**
  * @param {string} accountKey

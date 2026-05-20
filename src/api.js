@@ -427,7 +427,8 @@ export async function getPublicGeoFenceCheck() {
  * When includeTomtomApiKey, response includes decrypted TomTom key for Settings only.
  * When includeHereApiKey, response includes decrypted HERE key for Settings only.
  * When includeNy511ApiKey, response includes decrypted 511NY key for Settings only.
- * Response always includes `gwbUpperCamYoutubeUrl` when signed in (PostgreSQL profile).
+ * Response includes `gwbUpperCamYoutubeUrl` when signed in (PostgreSQL profile).
+ * Response includes `helpersAutoArriveNearDestEnabled` and `helpersAutoArriveRadiusNm` when signed in (PostgreSQL profile).
  */
 export async function getCredentials(opts = {}) {
   const q = new URLSearchParams()
@@ -485,6 +486,19 @@ export async function putNy511ApiKey(body) {
  */
 export async function putGwbUpperCamYoutubeUrl(body) {
   const r = await apiFetch('/api/settings/gwb-upper-cam-youtube-url', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body ?? {}),
+  })
+  return handleJson(r)
+}
+
+/**
+ * Persist Helpers proximity auto arrive + trigger radius (PostgreSQL, per account).
+ * @param {{ enabled: boolean, radiusNm: number }} body
+ */
+export async function putHelpersAutoArrivePrefs(body) {
+  const r = await apiFetch('/api/settings/helpers-auto-arrive', {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body ?? {}),

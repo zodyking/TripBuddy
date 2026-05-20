@@ -9,6 +9,7 @@ import {
   putHereApiKey,
   putNy511ApiKey,
   putGwbUpperCamYoutubeUrl,
+  putHelpersAutoArrivePrefs,
   deleteCredentials,
   putAssignment,
   getHealth,
@@ -91,6 +92,8 @@ import {
   setHelpersAutoArriveRadiusNm,
   HELPERS_RADIUS_NM_MIN,
   HELPERS_RADIUS_NM_MAX,
+  HELPERS_RADIUS_NM_DEFAULT,
+  applyHelpersLocationPrefsFromCredentials,
 } from '../utils/helpersLocationPrefs.js'
 import {
   appGeoLat,
@@ -113,24 +116,68 @@ const settingsTab = ref('general')
 const helpersAutoArriveEnabled = ref(getHelpersAutoArriveNearDestEnabled())
 const helpersRadiusNm = ref(getHelpersAutoArriveRadiusNm())
 const helpersLocationBusy = ref(false)
+const helpersProximityBusy = ref(false)
+const helpersProximityMsg = ref('')
 
 function syncHelpersPrefsFromStorage() {
   helpersAutoArriveEnabled.value = getHelpersAutoArriveNearDestEnabled()
   helpersRadiusNm.value = getHelpersAutoArriveRadiusNm()
 }
 
-function onHelpersAutoToggle() {
-  setHelpersAutoArriveNearDestEnabled(helpersAutoArriveEnabled.value)
+async function onHelpersProximityToggle(enabled) {
+  if (!(await requireApi())) {
+    syncHelpersPrefsFromStorage()
+    return
+  }
+  helpersProximityBusy.value = true
+  helpersProximityMsg.value = ''
+  const radius = Math.min(
+    HELPERS_RADIUS_NM_MAX,
+    Math.max(
+      HELPERS_RADIUS_NM_MIN,
+      Number.isFinite(Number(helpersRadiusNm.value)) ? Number(helpersRadiusNm.value) : HELPERS_RADIUS_NM_DEFAULT,
+    ),
+  )
+  try {
+    await putHelpersAutoArrivePrefs({ enabled, radiusNm: radius })
+    setHelpersAutoArriveNearDestEnabled(enabled)
+    setHelpersAutoArriveRadiusNm(radius)
+    syncHelpersPrefsFromStorage()
+  } catch (e) {
+    helpersProximityMsg.value = e instanceof Error ? e.message : String(e)
+    syncHelpersPrefsFromStorage()
+  } finally {
+    helpersProximityBusy.value = false
+  }
 }
 
-function onHelpersRadiusBlur() {
+async function onHelpersRadiusBlur() {
   const n = Number.parseFloat(String(helpersRadiusNm.value))
   if (!Number.isFinite(n)) {
     helpersRadiusNm.value = getHelpersAutoArriveRadiusNm()
     return
   }
-  setHelpersAutoArriveRadiusNm(n)
-  helpersRadiusNm.value = getHelpersAutoArriveRadiusNm()
+  const clamped = Math.min(HELPERS_RADIUS_NM_MAX, Math.max(HELPERS_RADIUS_NM_MIN, n))
+  if (!(await requireApi())) {
+    helpersRadiusNm.value = getHelpersAutoArriveRadiusNm()
+    return
+  }
+  helpersProximityBusy.value = true
+  helpersProximityMsg.value = ''
+  try {
+    await putHelpersAutoArrivePrefs({
+      enabled: helpersAutoArriveEnabled.value,
+      radiusNm: clamped,
+    })
+    setHelpersAutoArriveNearDestEnabled(helpersAutoArriveEnabled.value)
+    setHelpersAutoArriveRadiusNm(clamped)
+    syncHelpersPrefsFromStorage()
+  } catch (e) {
+    helpersProximityMsg.value = e instanceof Error ? e.message : String(e)
+    syncHelpersPrefsFromStorage()
+  } finally {
+    helpersProximityBusy.value = false
+  }
 }
 
 const helpersPermissionLabel = computed(() => {
@@ -711,6 +758,8 @@ async function loadCredentials() {
       typeof credMeta.value.gwbUpperCamYoutubeUrl === 'string'
         ? credMeta.value.gwbUpperCamYoutubeUrl
         : ''
+    applyHelpersLocationPrefsFromCredentials(credMeta.value)
+    syncHelpersPrefsFromStorage()
     await refreshApiQuota()
   } catch (e) {
     pushLiveLog({
@@ -1211,6 +1260,7 @@ watch(settingsTab, (tab) => {
     void loadDirectoryStats()
   }
   if (tab === 'helpers') {
+    helpersProximityMsg.value = ''
     syncHelpersPrefsFromStorage()
   }
 })
@@ -1787,10 +1837,19 @@ onUnmounted(() => {
           <em>Auto arrive and check in running</em> and runs your Home <strong>Arrive</strong> quick action,
           then your <strong>Check-in</strong> quick action (same pairing as the late-night prompt).
         </p>
-        <label class="helpers-row tap">
-          <input v-model="helpersAutoArriveEnabled" type="checkbox" @change="onHelpersAutoToggle" />
-          <span>Enable proximity auto Arrive and Check-in</span>
-        </label>
+        <p v-if="helpersProximityMsg" class="cred-msg cred-msg--error">{{ helpersProximityMsg }}</p>
+        <div class="audio-row">
+          <label class="toggle-switch">
+            <input
+              type="checkbox"
+              :checked="helpersAutoArriveEnabled"
+              :disabled="helpersProximityBusy"
+              @change="onHelpersProximityToggle($event.target.checked)"
+            />
+            <span class="toggle-slider"></span>
+          </label>
+          <span class="audio-row-label">Enable proximity auto Arrive and Check-in</span>
+        </div>
         <div class="helpers-field">
           <label class="lbl" for="helpers-radius-nm">Trigger distance (nautical miles)</label>
           <input
@@ -1802,6 +1861,7 @@ onUnmounted(() => {
             :max="HELPERS_RADIUS_NM_MAX"
             step="0.25"
             inputmode="decimal"
+            :disabled="helpersProximityBusy"
             @blur="onHelpersRadiusBlur"
           />
           <p class="helpers-hint">
@@ -2460,16 +2520,8 @@ onUnmounted(() => {
   line-height: 1.35;
   color: #7a7a8c;
 }
-.helpers-row {
-  display: flex;
-  align-items: flex-start;
-  gap: 0.5rem;
+.helpers-panel .audio-row {
   margin: 0.5rem 0 0.75rem;
-  font-size: 0.82rem;
-  color: var(--color-text-primary, #f4f4f8);
-}
-.helpers-row input {
-  margin-top: 0.15rem;
 }
 .helpers-field {
   margin-top: 0.35rem;
