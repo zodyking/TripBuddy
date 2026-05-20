@@ -289,7 +289,6 @@ function buildTableBody(opts, proofRangeByKey) {
   }
 
   for (const day of opts.days) {
-    body.push(mileageLedgerHeaderBodyRow())
     body.push([
       {
         content: `${ascii(String(day.dayLabel || 'Day').trim())}  ·  Day total ${fmtMi(day.sumBillable)} mi`,
@@ -303,6 +302,7 @@ function buildTableBody(opts, proofRangeByKey) {
         },
       },
     ])
+    body.push(mileageLedgerHeaderBodyRow())
 
     day.rows.forEach((r, i) => {
       const hasProof = Array.isArray(r.proofScreenshots) && r.proofScreenshots.length > 0
@@ -583,8 +583,8 @@ async function buildWeekTotalsJsPdf(opts) {
       tableWidth: IW,
       margin: { left: MX, right: MX, bottom: MB },
       showFoot: 'lastPage',
-
-      head: [['#', 'Route', 'Day', 'Date', 'Assigned', 'Dispatched', 'Arrived', 'Leg #', 'Tractor', 'Miles']],
+      showHead: 'never',
+      head: [],
       body,
       foot: [
         [
