@@ -65,7 +65,7 @@ export function workWeekInclusiveDayCount(startDay, endDay) {
  *   shiftStartMins?: number,
  *   shiftEndMins?: number,
  *   groupLabelMode?: 'default' | 'fedexPaySchedule'
- * }} [opts] groupLabelMode `fedexPaySchedule`: Sun–Sat by local wall-clock date of the trip (shift-day remap skipped).
+ * }} [opts] groupLabelMode `fedexPaySchedule`: Sun–Sat by local wall-clock date of the **placement** instant passed as `tsMs` (caller should use arrived time or audit+assigned fallback).
  * @returns {{ key: string, endMs: number, groupLabel: string, weekStart: number, spanDays: number } | null}
  */
 export function workWeekGroupMeta(
@@ -80,7 +80,7 @@ export function workWeekGroupMeta(
   const sM = Math.max(0, Math.min(1439, Math.floor(Number(opts?.shiftStartMins) || 0)))
   const eM = Math.max(0, Math.min(1439, Math.floor(Number(opts?.shiftEndMins) || 1439)))
   const labelMode = opts?.groupLabelMode === 'fedexPaySchedule' ? 'fedexPaySchedule' : 'default'
-  /** FedEx pay week = local Sun–Sat from the trip instant's calendar date (not overnight shift-day keys). */
+  /** FedEx pay week = local Sun–Sat from `tsMs` calendar date (not overnight shift-day keys). */
   const dAnchor =
     labelMode === 'fedexPaySchedule'
       ? d
