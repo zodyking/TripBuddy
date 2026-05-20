@@ -1,9 +1,41 @@
+import { ref } from 'vue'
+
 const ENABLED_KEY = 'fedextool-helpers-auto-arrive-nm-enabled'
 const RADIUS_NM_KEY = 'fedextool-helpers-auto-arrive-radius-nm'
 
 export const HELPERS_RADIUS_NM_MIN = 0.25
 export const HELPERS_RADIUS_NM_MAX = 25
 export const HELPERS_RADIUS_NM_DEFAULT = 2
+
+/** Mirrors localStorage for Vue watchers (e.g. proximity auto arrive). */
+export const helpersAutoArriveNearDestEnabledRef = ref(false)
+export const helpersAutoArriveRadiusNmRef = ref(HELPERS_RADIUS_NM_DEFAULT)
+
+function syncRefsFromStorage() {
+  if (typeof window === 'undefined') return
+  helpersAutoArriveNearDestEnabledRef.value = getHelpersAutoArriveNearDestEnabled()
+  helpersAutoArriveRadiusNmRef.value = getHelpersAutoArriveRadiusNm()
+}
+
+/**
+ * Apply values returned from `GET /api/settings/credentials` (PostgreSQL-backed).
+ * @param {unknown} meta
+ */
+export function applyHelpersLocationPrefsFromCredentials(meta) {
+  if (!meta || typeof meta !== 'object') {
+    syncRefsFromStorage()
+    return
+  }
+  const m = /** @type {Record<string, unknown>} */ (meta)
+  if (typeof m.helpersAutoArriveNearDestEnabled === 'boolean') {
+    setHelpersAutoArriveNearDestEnabled(m.helpersAutoArriveNearDestEnabled)
+  }
+  if (typeof m.helpersAutoArriveRadiusNm === 'number' && Number.isFinite(m.helpersAutoArriveRadiusNm)) {
+    setHelpersAutoArriveRadiusNm(m.helpersAutoArriveRadiusNm)
+  } else {
+    syncRefsFromStorage()
+  }
+}
 
 /**
  * @returns {boolean}
@@ -26,6 +58,7 @@ export function setHelpersAutoArriveNearDestEnabled(on) {
   } catch {
     /* ignore */
   }
+  syncRefsFromStorage()
 }
 
 /**
@@ -54,9 +87,12 @@ export function setHelpersAutoArriveRadiusNm(nm) {
   } catch {
     /* ignore */
   }
+  syncRefsFromStorage()
 }
 
 /** @returns {number} meters */
 export function helpersTriggerRadiusMeters() {
-  return getHelpersAutoArriveRadiusNm() * 1852
+  return helpersAutoArriveRadiusNmRef.value * 1852
 }
+
+syncRefsFromStorage()

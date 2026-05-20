@@ -718,6 +718,13 @@ export async function writeAssignment(body) {
     if (auditMs != null && auditMs > 0) {
       entry.historyAuditBucketMs = auditMs
     }
+    if (
+      typeof e.dispatchedAtMs === 'number' &&
+      Number.isFinite(e.dispatchedAtMs) &&
+      e.dispatchedAtMs > 0
+    ) {
+      entry.dispatchedAtMs = e.dispatchedAtMs
+    }
     if (source === 'linehaul' || source === 'complete') {
       if (/^\d+$/.test(seq)) {
         tripHistoryLedger = tripHistoryLedger.filter(
@@ -788,6 +795,12 @@ export async function writeAssignment(body) {
             : null
         const forkId = `h-${seq}-n${incomingAt}-${Math.random().toString(36).slice(2, 9)}`
         const cleanDh = stripTripHistoryOutcomeFields({ ...newDh })
+        const forkIncomingDispatched =
+          typeof e.dispatchedAtMs === 'number' &&
+          Number.isFinite(e.dispatchedAtMs) &&
+          e.dispatchedAtMs > 0
+            ? e.dispatchedAtMs
+            : null
         const nextFork = {
           id: forkId,
           source: incomingSource,
@@ -797,6 +810,7 @@ export async function writeAssignment(body) {
           dispatchHeader: cleanDh,
           tripDetails: { ...newTd },
           ...(incomingAudit != null ? { historyAuditBucketMs: incomingAudit } : {}),
+          ...(forkIncomingDispatched != null ? { dispatchedAtMs: forkIncomingDispatched } : {}),
         }
         const rest = tripHistoryLedger.filter(
           (x) => !x || String(x.dailyTripLegSequence) !== seq,
@@ -846,6 +860,20 @@ export async function writeAssignment(body) {
             : null
         const resolvedId =
           prior && prior.id && String(prior.id).trim() ? String(prior.id).trim() : id
+        const priorDispatchedMs =
+          prior &&
+          typeof prior.dispatchedAtMs === 'number' &&
+          Number.isFinite(prior.dispatchedAtMs) &&
+          prior.dispatchedAtMs > 0
+            ? prior.dispatchedAtMs
+            : null
+        const incomingDispatchedMs =
+          typeof e.dispatchedAtMs === 'number' &&
+          Number.isFinite(e.dispatchedAtMs) &&
+          e.dispatchedAtMs > 0
+            ? e.dispatchedAtMs
+            : null
+        const mergedDispatchedMs = priorDispatchedMs ?? incomingDispatchedMs
         const nextEntry = {
           id: resolvedId,
           source: incomingSource,
@@ -860,6 +888,7 @@ export async function writeAssignment(body) {
             : priorAudit != null
               ? { historyAuditBucketMs: priorAudit }
               : {}),
+          ...(mergedDispatchedMs != null ? { dispatchedAtMs: mergedDispatchedMs } : {}),
         }
         const rest = tripHistoryLedger.filter(
           (x) =>

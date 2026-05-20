@@ -19,6 +19,8 @@ import {
   setNy511ApiKeyForAccount,
   getGwbUpperCamYoutubeUrlForAccount,
   setGwbUpperCamYoutubeUrlForAccount,
+  getHelpersAutoArrivePrefsForAccount,
+  setHelpersAutoArrivePrefsForAccount,
 } from './user-profile-pg.mjs'
 import { sanitizeTomtomApiKey } from './tomtom-key.mjs'
 import { sanitizeHereApiKey } from './here-traffic-api.mjs'
@@ -771,8 +773,12 @@ app.get('/api/settings/credentials', async (req) => {
     ny511ApiKey = (await getNy511ApiKeyForAccount(ak)) || ''
   }
   let gwbUpperCamYoutubeUrl = ''
+  /** @type {{ enabled: boolean, radiusNm: number } | null} */
+  let helpersAutoArrivePrefs = null
   if (typeof ak === 'string' && ak.trim()) {
-    gwbUpperCamYoutubeUrl = (await getGwbUpperCamYoutubeUrlForAccount(ak)) || ''
+    const akTrim = ak.trim()
+    gwbUpperCamYoutubeUrl = (await getGwbUpperCamYoutubeUrlForAccount(akTrim)) || ''
+    helpersAutoArrivePrefs = await getHelpersAutoArrivePrefsForAccount(akTrim)
   }
   return {
     ...meta,
@@ -781,6 +787,12 @@ app.get('/api/settings/credentials', async (req) => {
     ...(includeHere ? { hereApiKey } : {}),
     ...(includeNy511 ? { ny511ApiKey } : {}),
     gwbUpperCamYoutubeUrl,
+    ...(helpersAutoArrivePrefs
+      ? {
+          helpersAutoArriveNearDestEnabled: helpersAutoArrivePrefs.enabled,
+          helpersAutoArriveRadiusNm: helpersAutoArrivePrefs.radiusNm,
+        }
+      : {}),
     secretHint: process.env.FEDEX_TOOL_SECRET ? null : TOOL_SECRET_HINT,
   }
 })
@@ -889,6 +901,44 @@ app.put('/api/settings/gwb-upper-cam-youtube-url', async (req, reply) => {
     }
     await setGwbUpperCamYoutubeUrlForAccount(ak.trim(), raw)
     return { ok: true, gwbUpperCamYoutubeUrl: raw }
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e)
+    return reply.code(400).send({ error: msg })
+  }
+})
+
+const HELPERS_RADIUS_NM_MIN = 0.25
+const HELPERS_RADIUS_NM_MAX = 25
+
+app.put('/api/settings/helpers-auto-arrive', async (req, reply) => {
+  try {
+    const ak = req.credentialAccountKey
+    if (typeof ak !== 'string' || !ak.trim()) {
+      return reply.code(400).send({ error: 'No account in session.' })
+    }
+    const body = req.body ?? {}
+    const enabled = body.enabled === true
+    const rawNm = body.radiusNm
+    const nm =
+      typeof rawNm === 'number' && Number.isFinite(rawNm)
+        ? rawNm
+        : typeof rawNm === 'string' && rawNm.trim()
+          ? Number.parseFloat(rawNm.trim())
+          : NaN
+    if (!Number.isFinite(nm)) {
+      return reply.code(400).send({ error: 'radiusNm must be a number (nautical miles).' })
+    }
+    if (nm < HELPERS_RADIUS_NM_MIN || nm > HELPERS_RADIUS_NM_MAX) {
+      return reply.code(400).send({
+        error: `radiusNm must be between ${HELPERS_RADIUS_NM_MIN} and ${HELPERS_RADIUS_NM_MAX} NM.`,
+      })
+    }
+    await setHelpersAutoArrivePrefsForAccount(ak.trim(), { enabled, radiusNm: nm })
+    return {
+      ok: true,
+      helpersAutoArriveNearDestEnabled: enabled,
+      helpersAutoArriveRadiusNm: nm,
+    }
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e)
     return reply.code(400).send({ error: msg })

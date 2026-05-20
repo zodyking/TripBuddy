@@ -236,7 +236,7 @@ function drawRouteCellWithArrow(doc, cell, parts) {
   }
 }
 
-const COLS = 8
+const COLS = 10
 
 /** @typedef {{ key: string, originId: string, destId: string, dispatchDate: string, dispatchTime: string, legLabel: string, dailyTripLegSequence?: string, tractorNumber: string, when: string, od: string, tripFormPageCount: number, screenshots: { label: string, jpeg: string }[] }} ProofTripAppendix */
 
@@ -321,7 +321,9 @@ function buildTableBody(opts, proofRangeByKey) {
         },
         ascii(r.weekday || '-'),
         ascii(r.dispatchDate || '-'),
-        ascii(r.dispatchTime || '-'),
+        ascii(String(r.assignedTime ?? r.dispatchTime ?? '-').trim() || '-'),
+        ascii(String(r.dispatchedTime ?? 'n/a').trim() || 'n/a'),
+        ascii(String(r.arrivedTime ?? 'n/a').trim() || 'n/a'),
         { content: ascii(r.legLabel || '-'), styles: { halign: 'center', fontStyle: 'bold' } },
         { content: ascii(r.tractorNumber || '-'), styles: { halign: 'center' } },
         { content: fmtMi(r.billableMi), styles: { fontStyle: 'bold', halign: 'right' } },
@@ -348,7 +350,7 @@ function buildTableBody(opts, proofRangeByKey) {
             },
             {
               content: leftBlock,
-              colSpan: 5,
+              colSpan: 7,
               _equip: true,
             },
             {
@@ -365,7 +367,7 @@ function buildTableBody(opts, proofRangeByKey) {
             },
             {
               content: leftBlock,
-              colSpan: 7,
+              colSpan: 9,
               _equip: true,
             },
           ])
@@ -562,13 +564,13 @@ async function buildWeekTotalsJsPdf(opts) {
       margin: { left: MX, right: MX, bottom: MB },
       showFoot: 'lastPage',
 
-      head: [['#', 'Route', 'Day', 'Date', 'Time', 'Leg #', 'Tractor', 'Miles']],
+      head: [['#', 'Route', 'Day', 'Date', 'Assigned', 'Dispatched', 'Arrived', 'Leg #', 'Tractor', 'Miles']],
       body,
       foot: [
         [
           {
             content: 'WEEK TOTAL',
-            colSpan: 7,
+            colSpan: 9,
             styles: {
               fontStyle: 'bold',
               fillColor: BLACK,
@@ -625,15 +627,16 @@ async function buildWeekTotalsJsPdf(opts) {
       alternateRowStyles: { fillColor: BGALT },
 
       columnStyles: {
-        0: { cellWidth: 6, halign: 'center' },
+        0: { cellWidth: 5, halign: 'center' },
         1: { cellWidth: 'auto' },
-        /* Wider than before so weekday + `h:mm AM/PM` stay one line; Route stays `auto` and absorbs the shrink. */
-        2: { cellWidth: 20 },
-        3: { cellWidth: 16 },
-        4: { cellWidth: 16, halign: 'center' },
-        5: { cellWidth: 20, halign: 'center', overflow: 'linebreak' },
-        6: { cellWidth: 14, halign: 'center' },
-        7: { cellWidth: 11, halign: 'right' },
+        2: { cellWidth: 17 },
+        3: { cellWidth: 13 },
+        4: { cellWidth: 12, halign: 'center' },
+        5: { cellWidth: 12, halign: 'center' },
+        6: { cellWidth: 12, halign: 'center' },
+        7: { cellWidth: 15, halign: 'center', overflow: 'linebreak' },
+        8: { cellWidth: 11, halign: 'center' },
+        9: { cellWidth: 10, halign: 'right' },
       },
 
       willDrawCell(data) {

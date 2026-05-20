@@ -101,6 +101,7 @@ import {
   announceGeofenceArrival,
   announceArrivalSuccess,
 } from '../utils/tripVoiceAnnouncement.js'
+import { applyHelpersLocationPrefsFromCredentials } from '../utils/helpersLocationPrefs.js'
 import {
   announceTractorChange,
   announceDriverChange,
@@ -1855,6 +1856,7 @@ const driverDisplayName = computed(() => {
 async function refreshLinehaulCredMeta() {
   try {
     linehaulCredMeta.value = await getCredentials()
+    applyHelpersLocationPrefsFromCredentials(linehaulCredMeta.value)
   } catch {
     linehaulCredMeta.value = null
   }
@@ -1873,6 +1875,7 @@ async function setupLinehaulPolling() {
   }
   try {
     const c = await getCredentials()
+    applyHelpersLocationPrefsFromCredentials(c)
     const raw =
       typeof c.linehaulPollMinutes === 'number' ? c.linehaulPollMinutes : 0
     const m = Math.max(0, Math.min(24 * 60, Math.floor(raw)))
