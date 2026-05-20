@@ -68,7 +68,7 @@ const workWeekFromCred = ref({
   shiftEndMins: 1439,
 })
 
-/** `workWeek`: Settings work week. `paySchedule`: Sun–Sat FedEx window by **arrived** instant (fallback: audit `displayDate` + assigned clock). */
+/** `workWeek`: Settings work week. `paySchedule`: Sun–Sat FedEx payout window by local dispatch time (week/day rows ignore shift-day remap). */
 const historyWeekViewMode = ref(/** @type {'workWeek' | 'paySchedule'} */ ('workWeek'))
 
 const historyGroupingOpts = computed(() => {
@@ -484,22 +484,20 @@ function tripOdIdsOnly(e) {
  * @param {LedgerEntry} e
  */
 function tripPayWhenWithLeg(e) {
-  let raw = fedExPaySortKeyMs(e)
-  if (!(raw > 0)) {
-    raw = typeof e.displayDate === 'number' && e.displayDate > 0 ? e.displayDate : 0
-  }
-  const when = raw > 0 ? formatWhenWithWeekday(raw) : '—'
+  const when = formatWhenWithWeekday(e.displayDate)
   const seq = String(e.dailyTripLegSequence || '').trim()
   if (/^\d+$/.test(seq)) return `${when} · Leg #${seq}`
   return when
 }
 
 /**
- * Split wall-clock instant + leg for PDF columns (WinAnsi-safe strings).
- * @param {number | null | undefined} ts
- * @param {string} legLabel
+ * Split dispatch timestamp + leg for PDF columns (WinAnsi-safe strings).
+ * @param {LedgerEntry} e
  */
-function tripPdfDispatchColumnsFromMs(ts, legLabel) {
+function tripPdfDispatchColumns(e) {
+  const ts = e.displayDate
+  const seq = String(e.dailyTripLegSequence || '').trim()
+  const legLabel = /^\d+$/.test(seq) ? seq : '-'
   if (typeof ts !== 'number' || !Number.isFinite(ts) || ts <= 0) {
     return {
       weekday: '-',
@@ -530,16 +528,6 @@ function tripPdfDispatchColumnsFromMs(ts, legLabel) {
     }),
     legLabel,
   }
-}
-
-/**
- * Split dispatch timestamp + leg for PDF columns (WinAnsi-safe strings).
- * @param {LedgerEntry} e
- */
-function tripPdfDispatchColumns(e) {
-  const seq = String(e.dailyTripLegSequence || '').trim()
-  const legLabel = /^\d+$/.test(seq) ? seq : '-'
-  return tripPdfDispatchColumnsFromMs(e.displayDate, legLabel)
 }
 
 /**
@@ -587,55 +575,6 @@ function ledgerAssignedAtMs(e) {
 }
 
 /**
- * FedEx Sun–Sat placement + pay PDF "Day/Date" anchor: use delivered `historyOutcomeAt` when present;
- * otherwise local calendar date from `displayDate` with time-of-day from assigned (`recordedAt` / `ledgerEventMs`);
- * otherwise fall back to `displayDate` then assigned.
- * @param {LedgerEntry} e
- * @returns {number} epoch ms, or 0 if unknown
- */
-function fedExPayPlacementMs(e) {
-  const arrived = ledgerArrivedAtMs(e)
-  if (arrived != null && arrived > 0) return arrived
-
-  const disp =
-    typeof e.displayDate === 'number' && Number.isFinite(e.displayDate) && e.displayDate > 0
-      ? e.displayDate
-      : null
-  const assigned = ledgerAssignedAtMs(e)
-  if (disp != null && assigned != null && assigned > 0) {
-    const dD = new Date(disp)
-    const dA = new Date(assigned)
-    if (!isNaN(dD.getTime()) && !isNaN(dA.getTime())) {
-      const merged = new Date(
-        dD.getFullYear(),
-        dD.getMonth(),
-        dD.getDate(),
-        dA.getHours(),
-        dA.getMinutes(),
-        dA.getSeconds(),
-        dA.getMilliseconds(),
-      )
-      const t = merged.getTime()
-      if (!isNaN(t) && t > 0) return t
-    }
-  }
-  if (disp != null) return disp
-  if (assigned != null && assigned > 0) return assigned
-  return 0
-}
-
-/**
- * Sort / compare key: placement first, then legacy display anchor.
- * @param {LedgerEntry} e
- */
-function fedExPaySortKeyMs(e) {
-  const p = fedExPayPlacementMs(e)
-  if (typeof p === 'number' && Number.isFinite(p) && p > 0) return p
-  const d = e.displayDate
-  return typeof d === 'number' && Number.isFinite(d) && d > 0 ? d : 0
-}
-
-/**
  * Tractor saved on ledger `tripDetails` (from Linehaul trip snapshot).
  * @param {LedgerEntry} e
  */
@@ -653,7 +592,7 @@ function tripPdfTractor(e) {
  * @param {LedgerEntry[]} items
  */
 function computeWeekPayEstimate(items) {
-  const sorted = [...items].sort((a, b) => fedExPaySortKeyMs(b) - fedExPaySortKeyMs(a))
+  const sorted = [...items].sort((a, b) => b.displayDate - a.displayDate)
   let sumBillable = 0
   /** @type {{
    *   id: string,
@@ -682,14 +621,7 @@ function computeWeekPayEstimate(items) {
     const base = paidMi ?? 0
     const billableMi = billableMilesForPayEstimate(base)
     sumBillable += billableMi
-    const placementMs = fedExPayPlacementMs(e)
-    const placementForCols = placementMs > 0 ? placementMs : 0
-    const seq = String(e.dailyTripLegSequence || '').trim()
-    const legLabel = /^\d+$/.test(seq) ? seq : '-'
-    const dispatchCols =
-      placementForCols > 0
-        ? tripPdfDispatchColumnsFromMs(placementForCols, legLabel)
-        : tripPdfDispatchColumns(e)
+    const dispatchCols = tripPdfDispatchColumns(e)
     const dispatchedMs =
       typeof e.dispatchedAtMs === 'number' && Number.isFinite(e.dispatchedAtMs) && e.dispatchedAtMs > 0
         ? e.dispatchedAtMs
@@ -727,7 +659,7 @@ function computeWeekPayEstimate(items) {
   }
 }
 
-/** FedEx Ground-style pay period: local Sun 00:00 → Sat 23:59:59.999 inclusive, keyed by placement instant (arrived or fallback). */
+/** FedEx Ground-style pay period: local Sun 00:00 → Sat 23:59:59.999 (paycheck Fri covers prior completed period). */
 function fedExPayPeriodContaining(ms) {
   if (typeof ms !== 'number' || !Number.isFinite(ms) || ms <= 0) return null
   const d = new Date(ms)
@@ -757,16 +689,14 @@ function fedExPaycheckFridayMs(periodEndMs) {
 }
 
 /**
- * Group ledger entries by FedEx pay period (Sun 00:00 – Sat 23:59:59.999 local), one row per trip
- * using **arrived** time when set, else audit date + assigned clock (see {@link fedExPayPlacementMs}).
+ * Group ledger entries by FedEx pay period (each trip counted once by dispatch time).
  * @param {LedgerEntry[]} items
  */
 function entriesByFedExPayPeriod(items) {
   /** @type {Map<string, { meta: NonNullable<ReturnType<typeof fedExPayPeriodContaining>>, items: LedgerEntry[] }>} */
   const map = new Map()
   for (const e of items) {
-    const anchor = fedExPayPlacementMs(e)
-    const p = fedExPayPeriodContaining(anchor > 0 ? anchor : e.displayDate)
+    const p = fedExPayPeriodContaining(e.displayDate)
     if (!p) continue
     const cur = map.get(p.key)
     if (!cur) map.set(p.key, { meta: p, items: [e] })
@@ -774,7 +704,7 @@ function entriesByFedExPayPeriod(items) {
   }
   const list = Array.from(map.values()).sort((a, b) => b.meta.periodStartMs - a.meta.periodStartMs)
   for (const g of list) {
-    g.items.sort((a, b) => fedExPaySortKeyMs(b) - fedExPaySortKeyMs(a))
+    g.items.sort((a, b) => b.displayDate - a.displayDate)
   }
   return list
 }
@@ -1131,10 +1061,7 @@ const tripsByWorkWeek = computed(() => {
   /** @type {Map<string, { meta: NonNullable<ReturnType<typeof workWeekGroupMeta>>, items: LedgerEntry[] }>} */
   const map = new Map()
   for (const e of items) {
-    const t =
-      historyWeekViewMode.value === 'paySchedule'
-        ? fedExPayPlacementMs(e) || (typeof e.displayDate === 'number' ? e.displayDate : 0)
-        : e.displayDate
+    const t = e.displayDate
     if (typeof t !== 'number' || !Number.isFinite(t) || t <= 0) continue
     const meta = workWeekGroupMeta(t, wwOpts)
     if (!meta) continue
@@ -1147,7 +1074,7 @@ const tripsByWorkWeek = computed(() => {
   }
 
   for (const g of map.values()) {
-    g.items.sort((a, b) => fedExPaySortKeyMs(b) - fedExPaySortKeyMs(a))
+    g.items.sort((a, b) => b.displayDate - a.displayDate)
   }
 
   const ordered = Array.from(map.entries()).sort(
@@ -1158,10 +1085,7 @@ const tripsByWorkWeek = computed(() => {
     /** @type {Map<string, LedgerEntry[]>} */
     const byDay = new Map()
     for (const e of g.items) {
-      const t =
-        historyWeekViewMode.value === 'paySchedule'
-          ? fedExPayPlacementMs(e) || (typeof e.displayDate === 'number' ? e.displayDate : 0)
-          : e.displayDate
+      const t = e.displayDate
       const dk =
         typeof t === 'number' && Number.isFinite(t) && t > 0 ? historyTripDayGroupKey(t) : ''
       const dayKey = dk || '_unknown'
@@ -1170,7 +1094,7 @@ const tripsByWorkWeek = computed(() => {
       byDay.set(dayKey, arr)
     }
     for (const arr of byDay.values()) {
-      arr.sort((a, b) => fedExPaySortKeyMs(b) - fedExPaySortKeyMs(a))
+      arr.sort((a, b) => b.displayDate - a.displayDate)
     }
 
     const dayKeysSorted = Array.from(byDay.keys()).sort((a, b) => {
@@ -1334,7 +1258,7 @@ function dayPayEstimateFor(weekKey, shiftDayKey) {
 
 const pdfGroupingLabel = computed(() => {
   if (historyWeekViewMode.value === 'paySchedule') {
-    return 'FedEx pay schedule (Sun-Sat)'
+    return 'FedEx Sun–Sat pay week'
   }
   const DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
   const ws = workWeekFromCred.value.workWeekStartDay
@@ -1345,13 +1269,13 @@ const pdfGroupingLabel = computed(() => {
 })
 
 const pdfDriverInfoBlock = computed(() => {
-  const lines = []
+  const parts = []
   const id =
     storedUsername.value.trim() ||
     String(pdfCredMeta.value.employeeNumber ?? '').trim()
   const name = String(pdfCredMeta.value.driverName ?? '').trim()
-  if (id) lines.push(`Login / ID: ${id}`)
-  if (name) lines.push(`Name: ${name}`)
+  if (id) parts.push(`Employee #${id}`)
+  if (name) parts.push(name)
   const d = linehaulDriverBody.value
   if (d && typeof d === 'object') {
     const loc =
@@ -1360,17 +1284,16 @@ const pdfDriverInfoBlock = computed(() => {
       d.driverActvStat != null ? String(d.driverActvStat).trim() : ''
     const ds =
       d.driverAvlStat != null ? String(d.driverAvlStat).trim() : ''
-    if (loc) lines.push(`Location: ${loc}`)
-    if (da) lines.push(`Active: ${da}`)
-    if (ds) lines.push(`Avail. status: ${ds}`)
+    const bits = [loc, da && `Active: ${da}`, ds && `Avail.: ${ds}`].filter(Boolean)
+    if (bits.length) parts.push(bits.join(' · '))
   }
-  return lines.length
-    ? lines.join('\n')
-    : 'Driver details not loaded - open Home after sign-in to refresh Linehaul.'
+  return parts.length
+    ? parts.join('  ·  ')
+    : 'Driver not loaded — open Home after sign-in.'
 })
 
 const pdfTruckInfoBlock = computed(() => {
-  const lines = []
+  const parts = []
   const t = linehaulTractorBody.value
   if (t && typeof t === 'object') {
     const tn = t.tractorNbr != null ? String(t.tractorNbr).trim() : ''
@@ -1383,15 +1306,13 @@ const pdfTruckInfoBlock = computed(() => {
       t.detlCodeActvStat != null ? String(t.detlCodeActvStat).trim() : ''
     const avl =
       t.detlCodeAvailStat != null ? String(t.detlCodeAvailStat).trim() : ''
-    if (tn) lines.push(`Tractor: ${tn}`)
-    if (lid) lines.push(`Location ID: ${lid}`)
-    if (dom) lines.push(`Domicile: ${dom}`)
-    if (act) lines.push(`Active: ${act}`)
-    if (avl) lines.push(`Avail. status: ${avl}`)
+    if (tn) parts.push(`#${tn}`)
+    if (lid) parts.push(`Loc ${lid}`)
+    if (dom) parts.push(dom)
+    if (act) parts.push(`Act ${act}`)
+    if (avl) parts.push(`Avail ${avl}`)
   }
-  return lines.length
-    ? lines.join('\n')
-    : 'Tractor details not loaded - open Home after sign-in to refresh Linehaul.'
+  return parts.length ? parts.join('  ·  ') : 'Not loaded — open Home after sign-in.'
 })
 
 /**
@@ -1425,9 +1346,9 @@ async function onDownloadWeekTotalsPdf(wg) {
     for (const dg of wg.days) {
       const dk = dg.shiftDayKey ? String(dg.shiftDayKey) : 'unk'
       const est = dayPayEstimateFor(key, dk)
-      const byId = new Map(dg.items.map((x) => [x.id, x]))
-      const mappedRows = est.rows.map((r) => {
-        const e = byId.get(r.id)
+      const sorted = [...dg.items].sort((a, b) => b.displayDate - a.displayDate)
+      const mappedRows = est.rows.map((r, i) => {
+        const e = sorted[i]
         const td = e?.tripDetails && typeof e.tripDetails === 'object' ? e.tripDetails : {}
         const oDir = directoryLookup(dirMap, r.originId)
         const dDir = directoryLookup(dirMap, r.destId)
@@ -1549,7 +1470,6 @@ async function onDownloadWeekTotalsPdf(wg) {
       }
     }
 
-    const cal = viewMonthInfo.value.groupLabel || 'Calendar view'
     const estWeek =
       weekPayEstimateByKey.value[key] || {
         sumBillable: 0,
@@ -1559,12 +1479,12 @@ async function onDownloadWeekTotalsPdf(wg) {
     const { blob, filename } = await getHistoryWeekTotalsPdfBlob({
       documentTitle:
         historyWeekViewMode.value === 'paySchedule'
-          ? 'FedEx pay schedule mileage report'
-          : 'Weekly Mileage Report',
+          ? 'Pay week mileage'
+          : 'Weekly mileage',
       driverBlock: pdfDriverInfoBlock.value,
       truckBlock: pdfTruckInfoBlock.value,
       weekRangeLabel: wg.groupLabel,
-      calendarContext: cal,
+      calendarContext: '',
       groupingModeLabel: pdfGroupingLabel.value,
       generatedAtMs: Date.now(),
       roundingBandMin: PAY_ROUND_BAND_MIN,

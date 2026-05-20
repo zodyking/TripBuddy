@@ -267,7 +267,7 @@ function buildTableBody(opts, proofRangeByKey) {
   for (const day of opts.days) {
     body.push([
       {
-        content: `${ascii(day.dayLabel || 'Day').toUpperCase()}  ·  DAY TOTAL: ${fmtMi(day.sumBillable)} mi`,
+        content: `${ascii(String(day.dayLabel || 'Day').trim())}  ·  Day total ${fmtMi(day.sumBillable)} mi`,
         colSpan: COLS,
         styles: {
           fillColor: BLACK,
@@ -481,7 +481,7 @@ async function buildWeekTotalsJsPdf(opts) {
   }
 
   /**
-   * Black band letterhead for **mileage table pages only**: title, week range, pay/calendar + grouping, driver, truck.
+   * Black band letterhead for **mileage table pages only**: title, week range, driver, truck.
    * @param {import('jspdf').jsPDF} doc
    * @param {string} titleText
    * @returns {number} height (mm) of the letterhead block
@@ -489,31 +489,28 @@ async function buildWeekTotalsJsPdf(opts) {
   function drawWeekTotalsLetterhead(doc, titleText) {
     const W = doc.internal.pageSize.getWidth()
     const IW = W - MX * 2
-    const metaParts = [opts.calendarContext?.trim(), `Grouping: ${opts.groupingModeLabel}`]
-      .filter(Boolean)
-      .map(ascii)
-      .join('   ·   ')
+    const printedLine = ascii(`Printed ${genLabel}`)
 
     const driverBody = ascii((opts.driverBlock ?? '').trim().replace(/\s*\n\s*/g, '  ·  ') || '-')
     const truckBody = ascii((opts.truckBlock ?? '').trim().replace(/\s*\n\s*/g, '  ·  ') || '-')
     doc.setFont('helvetica', 'bold')
     doc.setFontSize(6.4)
-    const driverLines = doc.splitTextToSize(`DRIVER  ${driverBody}`, IW)
-    const truckLines = doc.splitTextToSize(`TRUCK  ${truckBody}`, IW)
+    const driverLines = doc.splitTextToSize(`Driver  ${driverBody}`, IW)
+    const truckLines = doc.splitTextToSize(`Tractor  ${truckBody}`, IW)
     const dShow = driverLines.slice(0, 2)
     const tShow = truckLines.slice(0, 2)
     const lineGap = 3.55
 
     const titleY = 11
-    const weekY = titleY + 6.2
-    const blockY0 = weekY + 5.2
-    const headerH = Math.max(34, blockY0 + dShow.length * lineGap + tShow.length * lineGap + 4)
+    const weekY = titleY + 5.4
+    const blockY0 = weekY + 4.8
+    const headerH = Math.max(32, blockY0 + dShow.length * lineGap + tShow.length * lineGap + 4)
 
     doc.setFillColor(...BLACK)
     doc.rect(0, 0, W, headerH, 'F')
 
     doc.setFont('helvetica', 'bold')
-    doc.setFontSize(15)
+    doc.setFontSize(13)
     doc.setTextColor(...WHITE)
     doc.text(titleText, MX, titleY)
 
@@ -521,11 +518,9 @@ async function buildWeekTotalsJsPdf(opts) {
     doc.setFontSize(8)
     doc.setTextColor(...LGRAY)
     doc.text(ascii(opts.weekRangeLabel), MX, weekY)
-    if (metaParts) {
-      doc.setFontSize(6.2)
-      doc.setTextColor(...GRAY)
-      doc.text(metaParts, W - MX, weekY, { align: 'right' })
-    }
+    doc.setFontSize(6.2)
+    doc.setTextColor(...GRAY)
+    doc.text(printedLine, W - MX, weekY, { align: 'right' })
 
     let y = blockY0
     doc.setFont('helvetica', 'bold')
@@ -609,8 +604,8 @@ async function buildWeekTotalsJsPdf(opts) {
         fillColor: DGRAY,
         textColor: WHITE,
         fontStyle: 'bold',
-        fontSize: 6.5,
-        cellPadding: { top: 1.2, bottom: 1.2, left: 1.2, right: 1.2 },
+        fontSize: 7,
+        cellPadding: { top: 1, bottom: 1, left: 0.85, right: 0.85 },
         lineColor: DGRAY,
       },
 
@@ -627,16 +622,16 @@ async function buildWeekTotalsJsPdf(opts) {
       alternateRowStyles: { fillColor: BGALT },
 
       columnStyles: {
-        0: { cellWidth: 5, halign: 'center' },
-        1: { cellWidth: 'auto' },
-        2: { cellWidth: 17 },
-        3: { cellWidth: 13 },
-        4: { cellWidth: 12, halign: 'center' },
-        5: { cellWidth: 12, halign: 'center' },
-        6: { cellWidth: 12, halign: 'center' },
-        7: { cellWidth: 15, halign: 'center', overflow: 'linebreak' },
-        8: { cellWidth: 11, halign: 'center' },
-        9: { cellWidth: 10, halign: 'right' },
+        0: { cellWidth: 5.5, halign: 'center', overflow: 'visible' },
+        1: { cellWidth: 42, halign: 'left', overflow: 'linebreak' },
+        2: { cellWidth: 15, halign: 'center', overflow: 'visible' },
+        3: { cellWidth: 14, halign: 'center', overflow: 'visible' },
+        4: { cellWidth: 17, halign: 'center', overflow: 'visible' },
+        5: { cellWidth: 18, halign: 'center', overflow: 'visible' },
+        6: { cellWidth: 17, halign: 'center', overflow: 'visible' },
+        7: { cellWidth: 14, halign: 'center', overflow: 'visible' },
+        8: { cellWidth: 11.5, halign: 'center', overflow: 'visible' },
+        9: { cellWidth: 10.5, halign: 'right', overflow: 'visible' },
       },
 
       willDrawCell(data) {
@@ -655,6 +650,22 @@ async function buildWeekTotalsJsPdf(opts) {
       },
 
       didParseCell(data) {
+        const colIdx =
+          data.column && typeof data.column.index === 'number'
+            ? data.column.index
+            : typeof data.column === 'number'
+              ? data.column
+              : -1
+        if (
+          (data.section === 'head' || data.section === 'body') &&
+          colIdx >= 2 &&
+          colIdx <= 9
+        ) {
+          data.cell.styles.overflow = 'visible'
+          if (colIdx >= 4 && colIdx <= 6) {
+            data.cell.styles.cellPadding = { top: 0.5, bottom: 0.5, left: 0.55, right: 0.55 }
+          }
+        }
         const raw = data.cell.raw
         if (raw && typeof raw === 'object' && '_routeDraw' in raw) {
           const rd = raw._routeDraw
