@@ -238,6 +238,30 @@ function drawRouteCellWithArrow(doc, cell, parts) {
 
 const COLS = 10
 
+/** Column labels repeated under each day section (matches mileage table headers). */
+const MILEAGE_LEDGER_LABELS = [
+  '#',
+  'Route',
+  'Day',
+  'Date',
+  'Assigned',
+  'Dispatched',
+  'Arrived',
+  'Leg #',
+  'Tractor',
+  'Miles',
+]
+
+/**
+ * @returns {unknown[]}
+ */
+function mileageLedgerHeaderBodyRow() {
+  return MILEAGE_LEDGER_LABELS.map((label) => ({
+    content: ascii(label),
+    _ledgerHeader: true,
+  }))
+}
+
 /** @typedef {{ key: string, originId: string, destId: string, dispatchDate: string, dispatchTime: string, legLabel: string, dailyTripLegSequence?: string, tractorNumber: string, when: string, od: string, tripFormPageCount: number, screenshots: { label: string, jpeg: string }[] }} ProofTripAppendix */
 
 /**
@@ -265,6 +289,7 @@ function buildTableBody(opts, proofRangeByKey) {
   }
 
   for (const day of opts.days) {
+    body.push(mileageLedgerHeaderBodyRow())
     body.push([
       {
         content: `${ascii(String(day.dayLabel || 'Day').trim())}  ·  Day total ${fmtMi(day.sumBillable)} mi`,
@@ -421,7 +446,7 @@ function appendixDispatchDarkTitlePageSet(appendixStartPage, proofTrips) {
  * @returns {Promise<{ doc: import('jspdf').jsPDF, fileName: string }>}
  */
 async function buildWeekTotalsJsPdf(opts) {
-  const title = ascii(opts.documentTitle?.trim() || 'Weekly Mileage Report')
+  const title = ascii(opts.documentTitle?.trim() || 'Weekly Mileage')
   const genAt =
     typeof opts.generatedAtMs === 'number' && Number.isFinite(opts.generatedAtMs)
       ? new Date(opts.generatedAtMs)
@@ -623,7 +648,7 @@ async function buildWeekTotalsJsPdf(opts) {
 
       columnStyles: {
         0: { cellWidth: 5.5, halign: 'center', overflow: 'visible' },
-        1: { cellWidth: 42, halign: 'left', overflow: 'linebreak' },
+        1: { cellWidth: 'auto', halign: 'left', overflow: 'linebreak' },
         2: { cellWidth: 15, halign: 'center', overflow: 'visible' },
         3: { cellWidth: 14, halign: 'center', overflow: 'visible' },
         4: { cellWidth: 17, halign: 'center', overflow: 'visible' },
@@ -656,8 +681,20 @@ async function buildWeekTotalsJsPdf(opts) {
             : typeof data.column === 'number'
               ? data.column
               : -1
-        if (
-          (data.section === 'head' || data.section === 'body') &&
+        const raw = data.cell.raw
+        if (raw && typeof raw === 'object' && '_ledgerHeader' in raw) {
+          data.cell.styles.fillColor = DGRAY
+          data.cell.styles.textColor = WHITE
+          data.cell.styles.fontStyle = 'bold'
+          data.cell.styles.fontSize = 7
+          data.cell.styles.valign = 'middle'
+          data.cell.styles.overflow = 'visible'
+          data.cell.styles.lineColor = DGRAY
+          data.cell.styles.cellPadding = { top: 1, bottom: 1, left: 0.85, right: 0.85 }
+          data.cell.styles.halign =
+            colIdx === 1 ? 'left' : colIdx === 9 ? 'right' : 'center'
+        } else if (
+          data.section === 'body' &&
           colIdx >= 2 &&
           colIdx <= 9
         ) {
@@ -666,7 +703,6 @@ async function buildWeekTotalsJsPdf(opts) {
             data.cell.styles.cellPadding = { top: 0.5, bottom: 0.5, left: 0.55, right: 0.55 }
           }
         }
-        const raw = data.cell.raw
         if (raw && typeof raw === 'object' && '_routeDraw' in raw) {
           const rd = raw._routeDraw
           if (

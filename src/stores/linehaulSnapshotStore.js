@@ -594,7 +594,7 @@ function buildLedgerSnapBodyForHistoryUpsert(tripState) {
 async function executeHistoryUpsert(tripState, fingerprint, assignmentInstructions) {
   if (fingerprint === lastHistoryUpsertOkFingerprint) return
 
-  const seqStr = String(seq).trim()
+  const seqStr = String(tripState.dailyTripLegSequence ?? '').trim()
   if (!/^\d+$/.test(seqStr)) return
 
   const snapBody = buildLedgerSnapBodyForHistoryUpsert(tripState)
@@ -834,6 +834,7 @@ export async function markTripLegSequenceCompleted(dailyTripLegSequence) {
           historyOutcome: 'delivered',
           historyOutcomeAt: now,
         },
+        outcomeTouchedAt: now,
         tripDetails: buildHistoryTripDetailsFromBody(snapBody),
       }
     : {
@@ -852,6 +853,7 @@ export async function markTripLegSequenceCompleted(dailyTripLegSequence) {
           historyOutcome: 'delivered',
           historyOutcomeAt: now,
         },
+        outcomeTouchedAt: now,
         tripDetails: {},
       }
 
