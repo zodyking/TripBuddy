@@ -375,12 +375,12 @@ function buildTableBody(opts, proofRangeByKey) {
             },
             {
               content: leftBlock,
-              colSpan: 7,
+              colSpan: 4,
               _equip: true,
             },
             {
               content: reasonLine,
-              colSpan: 2,
+              colSpan: 5,
               _equipReason: true,
             },
           ])
@@ -739,7 +739,7 @@ async function buildWeekTotalsJsPdf(opts) {
           data.cell.styles.fillColor = BG
           data.cell.styles.fontSize = 6.2
           data.cell.styles.textColor = DGRAY
-          data.cell.styles.halign = 'right'
+          data.cell.styles.halign = 'left'
           data.cell.styles.valign = 'top'
           data.cell.styles.cellPadding = { top: 0.35, bottom: 0.35, left: 0.5, right: 1.2 }
           data.cell.styles.lineColor = [235, 235, 235]
