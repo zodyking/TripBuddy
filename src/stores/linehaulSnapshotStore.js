@@ -366,6 +366,13 @@ function processApiResponse(mergedApiBody, assignmentInstructions, context) {
   }
 
   if (incSeq && incSeq !== prev.dailyTripLegSequence) {
+    const prevSeqStr = prev.dailyTripLegSequence
+      ? String(prev.dailyTripLegSequence).trim()
+      : ''
+    if (prevSeqStr && /^\d+$/.test(prevSeqStr) && prevSeqStr !== incSeq) {
+      pendingDispatchedAtMsBySeq.delete(prevSeqStr)
+      prevDispatchSignalBySeq.delete(prevSeqStr)
+    }
     const isNewTrip = prev.dailyTripLegSequence && incSeq !== prev.dailyTripLegSequence
     next.dailyTripLegSequence = incSeq
     updates.push('sequence')
@@ -499,6 +506,19 @@ const prevDispatchSignalBySeq = new Map()
 const pendingDispatchedAtMsBySeq = new Map()
 
 /**
+ * True when a first-seen dispatch instant is queued for persistence for `seq`.
+ * Used to bypass history upsert dedupe when the trip JSON fingerprint is unchanged (e.g. driver
+ * ENRT while trip body still APRVD) but `dispatchedAtMs` must still be written once.
+ * @param {string | null | undefined} seq
+ */
+function hasValidPendingDispatchedAtMsForSeq(seq) {
+  const seqStr = String(seq ?? '').trim()
+  if (!/^\d+$/.test(seqStr)) return false
+  const v = pendingDispatchedAtMsBySeq.get(seqStr)
+  return typeof v === 'number' && Number.isFinite(v) && v > 0
+}
+
+/**
  * After Linehaul poll updates stable state, record first transition to dispatched for pay mileage.
  */
 function noteFirstDispatchEdgeForActiveLeg() {
@@ -519,8 +539,9 @@ function noteFirstDispatchEdgeForActiveLeg() {
  */
 function scheduleHistoryUpsert(tripState, assignmentInstructions) {
   const fp = computeStateFingerprint(tripState)
+  const pendingDispatch = hasValidPendingDispatchedAtMsForSeq(tripState.dailyTripLegSequence)
 
-  if (fp === lastHistoryUpsertOkFingerprint) return
+  if (fp === lastHistoryUpsertOkFingerprint && !pendingDispatch) return
 
   _historyUpsertPending = { tripState: { ...tripState }, fingerprint: fp, assignmentInstructions }
 
@@ -592,7 +613,8 @@ function buildLedgerSnapBodyForHistoryUpsert(tripState) {
  * @param {string} assignmentInstructions
  */
 async function executeHistoryUpsert(tripState, fingerprint, assignmentInstructions) {
-  if (fingerprint === lastHistoryUpsertOkFingerprint) return
+  const pendingDispatch = hasValidPendingDispatchedAtMsForSeq(tripState.dailyTripLegSequence)
+  if (fingerprint === lastHistoryUpsertOkFingerprint && !pendingDispatch) return
 
   const seqStr = String(tripState.dailyTripLegSequence ?? '').trim()
   if (!/^\d+$/.test(seqStr)) return
@@ -1436,7 +1458,11 @@ function applyLinehaulFedexPollSnapshot(p) {
 
   noteFirstDispatchEdgeForActiveLeg()
 
-  if (stateChanged) {
+  const needHistoryUpsert =
+    stateChanged ||
+    hasValidPendingDispatchedAtMsForSeq(stableTripState.value.dailyTripLegSequence)
+
+  if (needHistoryUpsert) {
     const historyGate = shouldUpsertToHistory(stableTripState.value, {
       prePlanSnapshot: prePlanTripSnapshot.value,
       tripPhase: tripPhase.value,
@@ -1447,7 +1473,7 @@ function applyLinehaulFedexPollSnapshot(p) {
     }
 
     const seq = stableTripState.value.dailyTripLegSequence
-    if (seq) {
+    if (seq && stateChanged) {
       void syncDollyFromLinehaul(seq, stableTripState.value).catch(() => {})
     }
   }

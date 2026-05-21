@@ -547,20 +547,24 @@ function formatPayClockOrNa(ms) {
  * @returns {number | null}
  */
 function ledgerArrivedAtMs(e) {
-  const touched =
-    typeof e.outcomeTouchedAt === 'number' &&
-    Number.isFinite(e.outcomeTouchedAt) &&
-    e.outcomeTouchedAt > 0
-  if (!touched) return null
   const dh = e.dispatchHeader
   if (!dh || typeof dh !== 'object') return null
   const o = /** @type {Record<string, unknown>} */ (dh)
-  const out = String(o.historyOutcome ?? '')
+  const fromRow = String(e.outcome ?? '')
     .trim()
     .toLowerCase()
+  const fromHeader = String(o.historyOutcome ?? '')
+    .trim()
+    .toLowerCase()
+  const out = fromRow || fromHeader
   if (out !== 'delivered') return null
-  const at = o.historyOutcomeAt
-  return typeof at === 'number' && Number.isFinite(at) && at > 0 ? at : null
+  const headerAt = o.historyOutcomeAt
+  if (typeof headerAt === 'number' && Number.isFinite(headerAt) && headerAt > 0) {
+    return headerAt
+  }
+  const ot = e.outcomeTouchedAt
+  if (typeof ot === 'number' && Number.isFinite(ot) && ot > 0) return ot
+  return null
 }
 
 /**
