@@ -2482,6 +2482,23 @@ onUnmounted(() => {
                               :datetime="new Date(e.displayDate).toISOString()"
                               >{{ formatWhen(e.displayDate) }}</time
                             >
+                            <span class="history-trip-meta-strip__sep" aria-hidden="true">·</span>
+            <button
+              type="button"
+              class="history-link tap history-audit-day-btn"
+              @click.stop="openAuditDayModal(e)"
+            >
+              Audit day…
+            </button>
+            <button
+              type="button"
+              class="history-trip-form-pdf-btn tap"
+              :disabled="tripFormPdfBusyId === e.id"
+              title="Open a FedEx-style trip form PDF for this leg (preview and download)"
+              @click.stop="onOpenTripFormPdf(e)"
+            >
+              {{ tripFormPdfBusyId === e.id ? 'PDF…' : 'View PDF' }}
+            </button>
                             <template v-if="e.dailyTripLegSequence">
                               <span class="history-trip-meta-strip__sep" aria-hidden="true">·</span>
                               <span class="history-trip-meta-strip__leg">Leg #{{ e.dailyTripLegSequence }}</span>
@@ -2498,73 +2515,15 @@ onUnmounted(() => {
                           </p>
                         </div>
                       </summary>
+                    <div class="history-dispatch">
+                      <p v-if="str(e.dispatchHeader?.tripStatusText)" class="history-meta">
+                        Status: {{ str(e.dispatchHeader.tripStatusText) }}
+                      </p>
+                      <p v-if="str(e.dispatchHeader?.instructions)" class="history-instr">
+                        {{ str(e.dispatchHeader.instructions) }}
+                      </p>
+                    </div>
                     <div class="history-body">
-                      <div class="history-trip-body-stack">
-                        <div class="history-dispatch history-dispatch--in-body">
-                          <p v-if="str(e.dispatchHeader?.tripStatusText)" class="history-meta history-meta--trip">
-                            <span class="history-meta__k">Status</span>
-                            <span class="history-meta__v">{{ str(e.dispatchHeader.tripStatusText) }}</span>
-                          </p>
-                          <p v-if="str(e.dispatchHeader?.instructions)" class="history-instr history-instr--trip">
-                            {{ str(e.dispatchHeader.instructions) }}
-                          </p>
-                        </div>
-                        <div class="history-trip-body-panel">
-                          <div class="history-trip-time-row" role="group" aria-label="Trip times">
-                            <div class="history-trip-time-cell">
-                              <span class="history-trip-time-cell__lab">Assigned</span>
-                              <span
-                                class="history-trip-time-cell__val"
-                                :class="{
-                                  'history-trip-time-cell__val--muted':
-                                    formatPayClockOrNa(ledgerAssignedAtMs(e)) === 'n/a',
-                                }"
-                                >{{ formatPayClockOrNa(ledgerAssignedAtMs(e)) }}</span
-                              >
-                            </div>
-                            <div class="history-trip-time-cell">
-                              <span class="history-trip-time-cell__lab">Dispatched</span>
-                              <span
-                                class="history-trip-time-cell__val"
-                                :class="{
-                                  'history-trip-time-cell__val--muted':
-                                    formatPayClockOrNa(ledgerDispatchedAtMsForPay(e)) === 'n/a',
-                                }"
-                                >{{ formatPayClockOrNa(ledgerDispatchedAtMsForPay(e)) }}</span
-                              >
-                            </div>
-                            <div class="history-trip-time-cell">
-                              <span class="history-trip-time-cell__lab">Arrived</span>
-                              <span
-                                class="history-trip-time-cell__val"
-                                :class="{
-                                  'history-trip-time-cell__val--muted':
-                                    formatPayClockOrNa(ledgerArrivedAtMs(e)) === 'n/a',
-                                }"
-                                >{{ formatPayClockOrNa(ledgerArrivedAtMs(e)) }}</span
-                              >
-                            </div>
-                          </div>
-                          <div class="history-trip-body-toolbar">
-                            <button
-                              type="button"
-                              class="history-trip-tool-btn history-trip-tool-btn--accent tap"
-                              :disabled="tripFormPdfBusyId === e.id"
-                              title="FedEx-style trip form PDF (preview and download)"
-                              @click.stop="onOpenTripFormPdf(e)"
-                            >
-                              {{ tripFormPdfBusyId === e.id ? 'PDF…' : 'Trip PDF' }}
-                            </button>
-                            <button
-                              type="button"
-                              class="history-trip-tool-btn tap"
-                              @click.stop="openAuditDayModal(e)"
-                            >
-                              Audit day
-                            </button>
-                          </div>
-                        </div>
-                      </div>
                       <template v-for="mb in [mileageBlock(e)]" :key="e.id + '-mileage'">
                         <div class="history-mileage">
                           <div class="history-mileage-top">
@@ -3542,35 +3501,6 @@ onUnmounted(() => {
   cursor: wait;
 }
 
-.history-trip-form-pdf-btn {
-  flex-shrink: 0;
-  margin-left: 0.15rem;
-  font-size: 0.62rem;
-  font-weight: 700;
-  letter-spacing: 0.03em;
-  padding: 0.22rem 0.5rem;
-  border-radius: 8px;
-  border: 1px solid rgba(56, 189, 248, 0.55);
-  background: rgba(56, 189, 248, 0.12);
-  color: #dff6ff;
-  cursor: pointer;
-}
-
-.history-trip-form-pdf-btn:hover:not(:disabled) {
-  background: rgba(56, 189, 248, 0.22);
-  border-color: rgba(125, 211, 252, 0.85);
-}
-
-.history-trip-form-pdf-btn:focus-visible {
-  outline: 2px solid rgba(125, 211, 252, 0.9);
-  outline-offset: 2px;
-}
-
-.history-trip-form-pdf-btn:disabled {
-  opacity: 0.55;
-  cursor: wait;
-}
-
 .history-mile-pill {
   flex-shrink: 0;
   display: inline-flex;
@@ -4382,148 +4312,6 @@ onUnmounted(() => {
   border-bottom: 1px solid #2a2a34;
 }
 
-/* Trip card body: status + clocks + tools in one compact surface (tokens from App.vue :root) */
-.history-trip-body-stack {
-  margin: 0 0 0.42rem;
-  padding: 0.38rem 0.45rem;
-  border-radius: 8px;
-  background: var(--color-bg-surface, #16161d);
-  border: 1px solid var(--color-glass-border, rgba(255, 255, 255, 0.06));
-}
-
-.history-dispatch.history-dispatch--in-body {
-  padding: 0 0 0.32rem;
-  margin: 0 0 0.32rem;
-  border-bottom: 1px solid var(--color-glass-border, rgba(255, 255, 255, 0.06));
-}
-
-.history-meta.history-meta--trip {
-  margin: 0;
-  display: flex;
-  align-items: baseline;
-  gap: 0.35rem;
-  flex-wrap: wrap;
-  font-size: 0.62rem;
-  line-height: 1.25;
-  color: var(--color-text-secondary, #a8a8b8);
-}
-
-.history-meta__k {
-  font-size: 0.48rem;
-  font-weight: 800;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: var(--color-text-tertiary, #6e6e7e);
-}
-
-.history-meta__v {
-  font-weight: 700;
-  color: var(--color-text-primary, #f4f4f8);
-}
-
-.history-instr.history-instr--trip {
-  margin: 0.28rem 0 0;
-  font-size: 0.62rem;
-  line-height: 1.28;
-  color: var(--color-text-secondary, #a8a8b8);
-  display: -webkit-box;
-  -webkit-line-clamp: 3;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-}
-
-.history-trip-body-panel {
-  display: flex;
-  flex-direction: column;
-  gap: 0.38rem;
-}
-
-.history-trip-time-row {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 0.2rem 0.45rem;
-}
-
-@media (max-width: 380px) {
-  .history-trip-time-row {
-    grid-template-columns: 1fr;
-  }
-}
-
-.history-trip-time-cell {
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 0.04rem;
-}
-
-.history-trip-time-cell__lab {
-  font-size: 0.45rem;
-  font-weight: 800;
-  letter-spacing: 0.07em;
-  text-transform: uppercase;
-  color: var(--color-text-tertiary, #6e6e7e);
-}
-
-.history-trip-time-cell__val {
-  font-size: 0.62rem;
-  font-weight: 700;
-  font-variant-numeric: tabular-nums;
-  color: var(--color-text-primary, #f4f4f8);
-}
-
-.history-trip-time-cell__val--muted {
-  font-size: 0.58rem;
-  font-weight: 600;
-  color: var(--color-text-tertiary, #6e6e7e);
-}
-
-.history-trip-body-toolbar {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 0.35rem 0.45rem;
-}
-
-.history-trip-tool-btn {
-  flex: 0 0 auto;
-  font-size: 0.58rem;
-  font-weight: 700;
-  letter-spacing: 0.04em;
-  padding: 0.22rem 0.48rem;
-  border-radius: 6px;
-  border: 1px solid var(--color-glass-border, rgba(255, 255, 255, 0.08));
-  background: var(--color-bg-elevated, #0f0f14);
-  color: var(--color-text-secondary, #a8a8b8);
-  cursor: pointer;
-}
-
-.history-trip-tool-btn:hover:not(:disabled) {
-  border-color: rgba(123, 77, 181, 0.45);
-  color: var(--color-text-primary, #f4f4f8);
-}
-
-.history-trip-tool-btn:focus-visible {
-  outline: 2px solid var(--color-accent-purple-light, #9d6fd7);
-  outline-offset: 2px;
-}
-
-.history-trip-tool-btn--accent {
-  border-color: rgba(123, 77, 181, 0.42);
-  color: #e4d4ff;
-  background: rgba(123, 77, 181, 0.12);
-}
-
-.history-trip-tool-btn--accent:hover:not(:disabled) {
-  background: rgba(123, 77, 181, 0.2);
-  border-color: var(--color-accent-purple-light, #9d6fd7);
-}
-
-.history-trip-tool-btn:disabled {
-  opacity: 0.5;
-  cursor: wait;
-}
-
 .history-od {
   margin: 0;
   display: flex;
@@ -4568,15 +4356,15 @@ onUnmounted(() => {
 }
 
 .history-body {
-  padding: 0.32rem 0.45rem 0.48rem;
+  padding: 0.45rem 0.55rem 0.55rem;
 }
 
 .history-mileage {
-  margin-bottom: 0.38rem;
-  padding: 0.32rem 0.42rem;
+  margin-bottom: 0.45rem;
+  padding: 0.38rem 0.48rem;
   border-radius: 6px;
-  background: rgba(123, 77, 181, 0.07);
-  border: 1px solid rgba(123, 77, 181, 0.22);
+  background: rgba(124, 92, 255, 0.05);
+  border: 1px solid rgba(124, 92, 255, 0.18);
 }
 
 .history-mileage-top {
@@ -4629,9 +4417,9 @@ onUnmounted(() => {
 }
 
 .history-trip-meta {
-  margin: 0 0 0.35rem;
-  font-size: 0.64rem;
-  line-height: 1.28;
+  margin: 0 0 0.45rem;
+  font-size: 0.68rem;
+  line-height: 1.3;
   color: var(--color-text-secondary, #a8a8b8);
 }
 
