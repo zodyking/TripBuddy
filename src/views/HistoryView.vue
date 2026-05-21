@@ -3542,35 +3542,6 @@ onUnmounted(() => {
   cursor: wait;
 }
 
-.history-trip-form-pdf-btn {
-  flex-shrink: 0;
-  margin-left: 0.15rem;
-  font-size: 0.62rem;
-  font-weight: 700;
-  letter-spacing: 0.03em;
-  padding: 0.22rem 0.5rem;
-  border-radius: 8px;
-  border: 1px solid rgba(56, 189, 248, 0.55);
-  background: rgba(56, 189, 248, 0.12);
-  color: #dff6ff;
-  cursor: pointer;
-}
-
-.history-trip-form-pdf-btn:hover:not(:disabled) {
-  background: rgba(56, 189, 248, 0.22);
-  border-color: rgba(125, 211, 252, 0.85);
-}
-
-.history-trip-form-pdf-btn:focus-visible {
-  outline: 2px solid rgba(125, 211, 252, 0.9);
-  outline-offset: 2px;
-}
-
-.history-trip-form-pdf-btn:disabled {
-  opacity: 0.55;
-  cursor: wait;
-}
-
 .history-mile-pill {
   flex-shrink: 0;
   display: inline-flex;
