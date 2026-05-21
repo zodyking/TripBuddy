@@ -547,24 +547,20 @@ function formatPayClockOrNa(ms) {
  * @returns {number | null}
  */
 function ledgerArrivedAtMs(e) {
+  const touched =
+    typeof e.outcomeTouchedAt === 'number' &&
+    Number.isFinite(e.outcomeTouchedAt) &&
+    e.outcomeTouchedAt > 0
+  if (!touched) return null
   const dh = e.dispatchHeader
   if (!dh || typeof dh !== 'object') return null
   const o = /** @type {Record<string, unknown>} */ (dh)
-  const fromRow = String(e.outcome ?? '')
+  const out = String(o.historyOutcome ?? '')
     .trim()
     .toLowerCase()
-  const fromHeader = String(o.historyOutcome ?? '')
-    .trim()
-    .toLowerCase()
-  const out = fromRow || fromHeader
   if (out !== 'delivered') return null
-  const headerAt = o.historyOutcomeAt
-  if (typeof headerAt === 'number' && Number.isFinite(headerAt) && headerAt > 0) {
-    return headerAt
-  }
-  const ot = e.outcomeTouchedAt
-  if (typeof ot === 'number' && Number.isFinite(ot) && ot > 0) return ot
-  return null
+  const at = o.historyOutcomeAt
+  return typeof at === 'number' && Number.isFinite(at) && at > 0 ? at : null
 }
 
 /**
@@ -2486,23 +2482,6 @@ onUnmounted(() => {
                               :datetime="new Date(e.displayDate).toISOString()"
                               >{{ formatWhen(e.displayDate) }}</time
                             >
-                            <span class="history-trip-meta-strip__sep" aria-hidden="true">·</span>
-            <button
-              type="button"
-              class="history-link tap history-audit-day-btn"
-              @click.stop="openAuditDayModal(e)"
-            >
-              Audit day…
-            </button>
-            <button
-              type="button"
-              class="history-trip-form-pdf-btn tap"
-              :disabled="tripFormPdfBusyId === e.id"
-              title="Open a FedEx-style trip form PDF for this leg (preview and download)"
-              @click.stop="onOpenTripFormPdf(e)"
-            >
-              {{ tripFormPdfBusyId === e.id ? 'PDF…' : 'View PDF' }}
-            </button>
                             <template v-if="e.dailyTripLegSequence">
                               <span class="history-trip-meta-strip__sep" aria-hidden="true">·</span>
                               <span class="history-trip-meta-strip__leg">Leg #{{ e.dailyTripLegSequence }}</span>
@@ -2528,6 +2507,46 @@ onUnmounted(() => {
                       </p>
                     </div>
                     <div class="history-body">
+                      <div class="history-trip-body-tools">
+                        <div class="history-trip-clocks" role="group" aria-label="Trip times">
+                          <div class="history-trip-clock">
+                            <span class="history-trip-clock__lab">Assigned</span>
+                            <span class="history-trip-clock__val">{{
+                              formatPayClockOrNa(ledgerAssignedAtMs(e))
+                            }}</span>
+                          </div>
+                          <div class="history-trip-clock">
+                            <span class="history-trip-clock__lab">Dispatched</span>
+                            <span class="history-trip-clock__val">{{
+                              formatPayClockOrNa(ledgerDispatchedAtMsForPay(e))
+                            }}</span>
+                          </div>
+                          <div class="history-trip-clock">
+                            <span class="history-trip-clock__lab">Arrived</span>
+                            <span class="history-trip-clock__val">{{
+                              formatPayClockOrNa(ledgerArrivedAtMs(e))
+                            }}</span>
+                          </div>
+                        </div>
+                        <div class="history-trip-body-actions">
+                          <button
+                            type="button"
+                            class="history-trip-form-pdf-btn tap"
+                            :disabled="tripFormPdfBusyId === e.id"
+                            title="Open a FedEx-style trip form PDF for this leg (preview and download)"
+                            @click.stop="onOpenTripFormPdf(e)"
+                          >
+                            {{ tripFormPdfBusyId === e.id ? 'PDF…' : 'Trip form PDF' }}
+                          </button>
+                          <button
+                            type="button"
+                            class="history-link tap history-audit-day-btn history-trip-audit-btn"
+                            @click.stop="openAuditDayModal(e)"
+                          >
+                            Audit day…
+                          </button>
+                        </div>
+                      </div>
                       <template v-for="mb in [mileageBlock(e)]" :key="e.id + '-mileage'">
                         <div class="history-mileage">
                           <div class="history-mileage-top">
@@ -2638,14 +2657,21 @@ onUnmounted(() => {
                     :key="row.id"
                     class="history-pay-row"
                   >
-                    <span class="history-pay-row__main">
+                    <div class="history-pay-row__main">
                       <span class="history-pay-row__od">{{ row.od }}</span>
                       <span class="history-pay-row__when">{{ row.when }}</span>
-                      <span class="history-pay-row__clocks"
-                        >Assigned {{ row.assignedTime }} · Dispatched {{ row.dispatchedTime }} · Arrived
-                        {{ row.arrivedTime }}</span
-                      >
-                    </span>
+                      <div class="history-pay-row__clocks" role="group" aria-label="Trip times">
+                        <span class="history-pay-clock"
+                          ><span class="history-pay-clock__lab">Assigned</span> {{ row.assignedTime }}</span
+                        >
+                        <span class="history-pay-clock"
+                          ><span class="history-pay-clock__lab">Dispatched</span> {{ row.dispatchedTime }}</span
+                        >
+                        <span class="history-pay-clock"
+                          ><span class="history-pay-clock__lab">Arrived</span> {{ row.arrivedTime }}</span
+                        >
+                      </div>
+                    </div>
                     <span class="history-pay-row__nums history-pay-row__nums--week-mi">
                       <span class="history-od-lab">Miles:</span>
                       <span class="history-od-id">{{ formatMilesSum(row.billableMi) }}</span>
@@ -2695,14 +2721,21 @@ onUnmounted(() => {
                         :key="row.id"
                         class="history-pay-row"
                       >
-                        <span class="history-pay-row__main">
+                        <div class="history-pay-row__main">
                           <span class="history-pay-row__od">{{ row.od }}</span>
                           <span class="history-pay-row__when">{{ row.when }}</span>
-                          <span class="history-pay-row__clocks"
-                            >Assigned {{ row.assignedTime }} · Dispatched {{ row.dispatchedTime }} · Arrived
-                            {{ row.arrivedTime }}</span
-                          >
-                        </span>
+                          <div class="history-pay-row__clocks" role="group" aria-label="Trip times">
+                            <span class="history-pay-clock"
+                              ><span class="history-pay-clock__lab">Assigned</span> {{ row.assignedTime }}</span
+                            >
+                            <span class="history-pay-clock"
+                              ><span class="history-pay-clock__lab">Dispatched</span> {{ row.dispatchedTime }}</span
+                            >
+                            <span class="history-pay-clock"
+                              ><span class="history-pay-clock__lab">Arrived</span> {{ row.arrivedTime }}</span
+                            >
+                          </div>
+                        </div>
                         <span class="history-pay-row__nums">
                           <span class="history-pay-row__bill">{{ row.billableMi }} mi → {{ formatUsdWhole(row.billableMi) }}</span>
                           <span v-if="row.rounded" class="history-pay-row__note"
@@ -3507,11 +3540,10 @@ onUnmounted(() => {
 
 .history-trip-form-pdf-btn {
   flex-shrink: 0;
-  margin-left: 0.15rem;
   font-size: 0.62rem;
   font-weight: 700;
   letter-spacing: 0.03em;
-  padding: 0.22rem 0.5rem;
+  padding: 0.28rem 0.55rem;
   border-radius: 8px;
   border: 1px solid rgba(56, 189, 248, 0.55);
   background: rgba(56, 189, 248, 0.12);
@@ -3700,10 +3732,29 @@ onUnmounted(() => {
 }
 
 .history-pay-row__clocks {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.35rem 0.85rem;
   font-size: 0.55rem;
   font-variant-numeric: tabular-nums;
-  color: #6a6a7a;
-  line-height: 1.3;
+  color: #8a8a98;
+  line-height: 1.35;
+}
+
+.history-pay-clock {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.22rem;
+  white-space: nowrap;
+}
+
+.history-pay-clock__lab {
+  font-size: 0.48rem;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: #5c5c6a;
 }
 
 .history-pay-row__nums {
@@ -4390,6 +4441,64 @@ onUnmounted(() => {
 
 .history-body {
   padding: 0.45rem 0.55rem 0.55rem;
+}
+
+.history-trip-body-tools {
+  margin-bottom: 0.48rem;
+  padding-bottom: 0.48rem;
+  border-bottom: 1px solid #2e2e38;
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+}
+
+.history-trip-clocks {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.35rem 0.65rem;
+}
+
+@media (max-width: 420px) {
+  .history-trip-clocks {
+    grid-template-columns: 1fr;
+  }
+}
+
+.history-trip-clock {
+  display: flex;
+  flex-direction: column;
+  gap: 0.08rem;
+  min-width: 0;
+}
+
+.history-trip-clock__lab {
+  font-size: 0.48rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #6f6f7c;
+}
+
+.history-trip-clock__val {
+  font-size: 0.68rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: #d4d0e8;
+}
+
+.history-trip-body-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.45rem 0.65rem;
+}
+
+.history-trip-audit-btn {
+  font-size: 0.62rem;
+  font-weight: 600;
+  color: #a8b4ff;
+  text-decoration: underline;
+  text-underline-offset: 0.12em;
 }
 
 .history-mileage {
