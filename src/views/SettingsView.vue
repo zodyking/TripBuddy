@@ -1840,6 +1840,13 @@ onUnmounted(() => {
           <em>Auto arrive and check in running</em> and runs your Home <strong>Arrive</strong> quick action,
           then your <strong>Check-in</strong> quick action (same pairing as the late-night prompt).
         </p>
+        <p class="helpers-hint">
+          The threshold is <strong>nautical miles</strong> (NM) to FedEx’s lat/long for that destination ID
+          (often the terminal, not necessarily the exact street gate). You must stay
+          <strong>inside</strong> the circle continuously for <strong>about 40 seconds</strong> with
+          reasonably good GPS accuracy before it runs—this blocks one-off bad samples that used to fire
+          early. 2 NM ≈ 2.3 statute miles.
+        </p>
         <p v-if="helpersProximityMsg" class="cred-msg cred-msg--error">{{ helpersProximityMsg }}</p>
         <div class="audio-row">
           <label class="toggle-switch">

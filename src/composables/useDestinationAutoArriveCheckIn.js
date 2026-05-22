@@ -5,9 +5,26 @@ import { haversineM } from '../utils/polylineSnap.js'
 import {
   helpersAutoArriveNearDestEnabledRef,
   helpersAutoArriveRadiusNmRef,
+  HELPERS_RADIUS_NM_DEFAULT,
+  HELPERS_RADIUS_NM_MAX,
+  HELPERS_RADIUS_NM_MIN,
 } from '../utils/helpersLocationPrefs.js'
 import { enqueueAnnouncement } from '../utils/alertAudioQueue.js'
 import { appGeoLat, appGeoLng, appGeoAccuracyM } from './useAppGeolocationWatch.js'
+import { pushLiveLog } from '../stores/liveLogStore.js'
+
+/** Must stay inside the trigger circle this long before running (filters single-sample GPS spikes). */
+const DWELL_MS = 40_000
+
+/**
+ * @param {unknown} raw
+ * @returns {number}
+ */
+function clampRadiusNm(raw) {
+  const n = Number(raw)
+  if (!Number.isFinite(n)) return HELPERS_RADIUS_NM_DEFAULT
+  return Math.min(HELPERS_RADIUS_NM_MAX, Math.max(HELPERS_RADIUS_NM_MIN, n))
+}
 
 /**
  * When the driver enters the destination radius (and ENRT), announce and run arrive → check-in.
@@ -30,11 +47,19 @@ export function useDestinationAutoArriveCheckIn(opts) {
   /** When false, next "inside" event may trigger (after leaving radius). */
   let armed = true
 
+  /** Monotonic clock (ms) when we first saw a strict inside + acceptable accuracy; cleared when outside or accuracy bad. */
+  let insideSinceMs = /** @type {number | null} */ (null)
+
+  function resetDwell() {
+    insideSinceMs = null
+  }
+
   watch(
     () =>
       `${String(opts.currentTripLegSeq.value ?? '').trim()}|${String(opts.tripDestLocationId.value ?? '').trim()}`,
     () => {
       armed = true
+      resetDwell()
     },
   )
 
@@ -46,6 +71,7 @@ export function useDestinationAutoArriveCheckIn(opts) {
       destLat.value = null
       destLng.value = null
       armed = true
+      resetDwell()
       if (!id) return
 
       const origin = String(opts.linehaulOriginIdForApi.value ?? '').trim()
@@ -85,6 +111,7 @@ export function useDestinationAutoArriveCheckIn(opts) {
     const destId = String(opts.tripDestLocationId.value ?? '').trim()
     if (!destId) {
       armed = true
+      resetDwell()
       return
     }
 
@@ -105,24 +132,51 @@ export function useDestinationAutoArriveCheckIn(opts) {
       return
     }
 
-    const maxM = helpersAutoArriveRadiusNmRef.value * 1852
-    const acc = appGeoAccuracyM.value
-    const accM = acc != null && Number.isFinite(acc) ? Math.max(0, acc) : 0
-    const slackM = Math.min(800, accM)
-    const d = haversineM(ulat, ulng, dlat, dlng)
-    const inside = d <= maxM + slackM
-
-    if (!inside) {
-      armed = true
+    if (Math.abs(dlat) > 90 || Math.abs(dlng) > 180) {
+      resetDwell()
       return
     }
 
+    const nm = clampRadiusNm(helpersAutoArriveRadiusNmRef.value)
+    const maxM = nm * 1852
+    const d = haversineM(ulat, ulng, dlat, dlng)
+
+    /** Strict geofence — do not add accuracy slack (it widened the circle and caused early triggers). */
+    const strictInside = d <= maxM
+
+    if (!strictInside) {
+      armed = true
+      resetDwell()
+      return
+    }
+
+    const acc = appGeoAccuracyM.value
+    const accM = acc != null && Number.isFinite(acc) ? Math.max(0, acc) : 0
+    /** Ignore fixes whose reported uncertainty is huge relative to the allowed radius. */
+    const maxAccAllowed = Math.min(2500, maxM * 0.45)
+    if (accM > maxAccAllowed) {
+      resetDwell()
+      return
+    }
+
+    const now = Date.now()
+    if (insideSinceMs == null) insideSinceMs = now
+    if (now - insideSinceMs < DWELL_MS) return
+
     if (!armed) return
+
+    const dNm = d / 1852
+    pushLiveLog({
+      type: 'info',
+      message: `[Proximity auto arrive] firing: ~${dNm.toFixed(2)} NM from Linehaul dest coords (threshold ${nm} NM), GPS accuracy ~${Math.round(accM)} m`,
+      ts: now,
+    })
 
     enqueueAnnouncement('Auto arrive and check in running', {
       category: 'helpersAutoArriveProx',
     })
     armed = false
+    resetDwell()
     void opts.runArriveThenCheckIn().catch((e) => {
       const code = e && typeof e === 'object' && 'code' in e ? /** @type {{ code?: string }} */ (e).code : null
       if (code === 'HELPERS_SKIP') {
