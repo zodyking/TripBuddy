@@ -95,6 +95,12 @@ function linehaulExtrasFromTripDetails(td) {
  * @param {Record<string, unknown>} td
  */
 function pickEtaLine(extras, td) {
+  const tdObj = td && typeof td === 'object' && !Array.isArray(td) ? /** @type {Record<string, unknown>} */ (td) : {}
+  const appCap = tdObj.appCapturedTripArrivalLocal
+  if (appCap != null) {
+    const s = String(appCap).trim()
+    if (s) return s
+  }
   const preferredKeys = [
     'etaOfTripLeg',
     'estimatedTripArrivalDateTime',

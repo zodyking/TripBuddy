@@ -59,6 +59,7 @@ import {
   ensureFedexApiReady,
 } from '../composables/useApiHealth.js'
 import { useLateNightArriveCheckPrompt } from '../composables/useLateNightArriveCheckPrompt.js'
+import { upsertTripHistoryAppCapturedArrival } from '../utils/tripHistoryAppArrivalStamp.js'
 import { useDestinationAutoArriveCheckIn } from '../composables/useDestinationAutoArriveCheckIn.js'
 import {
   liveLogEntries,
@@ -1060,10 +1061,10 @@ async function autoRunCheckInQuickAction() {
   )
   if (!checkInAuto) {
     notifyQuickActionInApp('No check-in quick action found to auto-run', 'warning')
-    return
+    return { ok: false, skipped: false }
   }
   notifyQuickActionInApp(`Auto-running ${checkInAuto.manualButtonLabel || checkInAuto.name}…`, 'info')
-  await runQuickAction(checkInAuto)
+  return await runQuickAction(checkInAuto)
 }
 
 function findArriveQuickAction() {
@@ -1076,6 +1077,19 @@ function findArriveQuickAction() {
           (act) => act.action === 'arriveEndToEnd' || act.action === 'arrive',
         )),
   )
+}
+
+async function stampTripHistoryAfterAutomatedArriveCheckIn() {
+  const seq = String(currentTripLegSeq.value ?? '').trim()
+  if (!/^\d+$/.test(seq)) return
+  try {
+    await upsertTripHistoryAppCapturedArrival(seq)
+  } catch (e) {
+    notifyQuickActionInApp(
+      e instanceof Error ? e.message : 'Could not save arrival time on trip history.',
+      'warning',
+    )
+  }
 }
 
 async function helpersProxRunArriveChain() {
@@ -1098,7 +1112,16 @@ async function helpersProxRunArriveChain() {
   if (!r1?.ok) {
     throw new Error(String(r1?.error || 'Arrive quick action failed'))
   }
-  await autoRunCheckInQuickAction()
+  const r2 = await autoRunCheckInQuickAction()
+  if (r2?.skipped) {
+    const e = new Error('HELPERS_SKIP')
+    /** @type {Error & { code?: string }} */ (e).code = 'HELPERS_SKIP'
+    throw e
+  }
+  if (!r2?.ok) {
+    throw new Error(String(r2?.error || 'Check-in quick action failed'))
+  }
+  await stampTripHistoryAfterAutomatedArriveCheckIn()
 }
 
 async function runLateNightArriveThenCheckIn() {
@@ -1113,7 +1136,10 @@ async function runLateNightArriveThenCheckIn() {
   const r1 = await runQuickAction(arrive)
   if (r1?.skipped) return
   if (!r1?.ok) return
-  await autoRunCheckInQuickAction()
+  const r2 = await autoRunCheckInQuickAction()
+  if (r2?.skipped) return
+  if (!r2?.ok) return
+  await stampTripHistoryAfterAutomatedArriveCheckIn()
 }
 
 const {
