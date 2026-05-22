@@ -1,4 +1,8 @@
 import { getTomtomKeyEffective, getHereKeyEffective } from './stores/trafficTileKey.js'
+import {
+  pauseApplyHelpersLocationPrefsFromCredentials,
+  resumeApplyHelpersLocationPrefsFromCredentials,
+} from './utils/helpersLocationPrefs.js'
 
 /**
  * All API calls include cookies (session auth). Use for `/api/*` only.
@@ -498,12 +502,17 @@ export async function putGwbUpperCamYoutubeUrl(body) {
  * @param {{ enabled: boolean, radiusNm: number }} body
  */
 export async function putHelpersAutoArrivePrefs(body) {
-  const r = await apiFetch('/api/settings/helpers-auto-arrive', {
-    method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body ?? {}),
-  })
-  return handleJson(r)
+  pauseApplyHelpersLocationPrefsFromCredentials()
+  try {
+    const r = await apiFetch('/api/settings/helpers-auto-arrive', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body ?? {}),
+    })
+    return handleJson(r)
+  } finally {
+    resumeApplyHelpersLocationPrefsFromCredentials()
+  }
 }
 
 /** Per-account API usage counters and limits (server / PostgreSQL). */

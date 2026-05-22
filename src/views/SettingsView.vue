@@ -129,6 +129,8 @@ async function onHelpersProximityToggle(enabled) {
     syncHelpersPrefsFromStorage()
     return
   }
+  const previousEnabled = helpersAutoArriveEnabled.value
+  helpersAutoArriveEnabled.value = enabled
   helpersProximityBusy.value = true
   helpersProximityMsg.value = ''
   const radius = Math.min(
@@ -144,6 +146,7 @@ async function onHelpersProximityToggle(enabled) {
     setHelpersAutoArriveRadiusNm(radius)
     syncHelpersPrefsFromStorage()
   } catch (e) {
+    helpersAutoArriveEnabled.value = previousEnabled
     helpersProximityMsg.value = e instanceof Error ? e.message : String(e)
     syncHelpersPrefsFromStorage()
   } finally {

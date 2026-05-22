@@ -17,6 +17,8 @@ export const appGeoError = ref('')
 /** @type {number | null} */
 let watchId = null
 let started = false
+/** @type {(() => void) | null} */
+let visibilityHandler = null
 
 async function syncPermissionLabel() {
   if (typeof navigator === 'undefined' || !navigator.permissions?.query) return
@@ -68,6 +70,30 @@ export function startAppGeolocationWatch() {
     },
     { enableHighAccuracy: true, maximumAge: 5000, timeout: 20_000 },
   )
+
+  if (typeof document !== 'undefined' && !visibilityHandler) {
+    visibilityHandler = () => {
+      if (document.visibilityState !== 'visible') return
+      if (!navigator.geolocation?.getCurrentPosition) return
+      navigator.geolocation.getCurrentPosition(
+        (pos) => {
+          appGeoLat.value = pos.coords.latitude
+          appGeoLng.value = pos.coords.longitude
+          appGeoAccuracyM.value =
+            pos.coords.accuracy != null && Number.isFinite(pos.coords.accuracy)
+              ? pos.coords.accuracy
+              : null
+          appGeoPermission.value = 'granted'
+          appGeoError.value = ''
+        },
+        () => {
+          /* keep last watch fix; tab wake can fail transiently */
+        },
+        { enableHighAccuracy: true, maximumAge: 0, timeout: 25_000 },
+      )
+    }
+    document.addEventListener('visibilitychange', visibilityHandler)
+  }
 }
 
 export function stopAppGeolocationWatch() {
@@ -76,6 +102,10 @@ export function stopAppGeolocationWatch() {
   }
   watchId = null
   started = false
+  if (typeof document !== 'undefined' && visibilityHandler) {
+    document.removeEventListener('visibilitychange', visibilityHandler)
+    visibilityHandler = null
+  }
 }
 
 /**

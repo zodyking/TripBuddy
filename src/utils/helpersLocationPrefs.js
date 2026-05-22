@@ -11,10 +11,32 @@ export const HELPERS_RADIUS_NM_DEFAULT = 2
 export const helpersAutoArriveNearDestEnabledRef = ref(false)
 export const helpersAutoArriveRadiusNmRef = ref(HELPERS_RADIUS_NM_DEFAULT)
 
+/** While > 0, ignore server credential merges for helpers prefs (avoids stale GET overwriting a PUT in flight). */
+let applyFromCredentialsPaused = 0
+
+/** Call before saving helpers prefs to the server; pair with `resumeApplyHelpersLocationPrefsFromCredentials`. */
+export function pauseApplyHelpersLocationPrefsFromCredentials() {
+  applyFromCredentialsPaused += 1
+}
+
+/** Call in `finally` after {@link pauseApplyHelpersLocationPrefsFromCredentials}. */
+export function resumeApplyHelpersLocationPrefsFromCredentials() {
+  applyFromCredentialsPaused = Math.max(0, applyFromCredentialsPaused - 1)
+}
+
 function syncRefsFromStorage() {
   if (typeof window === 'undefined') return
   helpersAutoArriveNearDestEnabledRef.value = getHelpersAutoArriveNearDestEnabled()
   helpersAutoArriveRadiusNmRef.value = getHelpersAutoArriveRadiusNm()
+}
+
+function coerceRadiusNm(raw) {
+  if (typeof raw === 'number' && Number.isFinite(raw)) return raw
+  if (typeof raw === 'string' && raw.trim()) {
+    const n = Number.parseFloat(raw.trim())
+    if (Number.isFinite(n)) return n
+  }
+  return NaN
 }
 
 /**
@@ -22,18 +44,28 @@ function syncRefsFromStorage() {
  * @param {unknown} meta
  */
 export function applyHelpersLocationPrefsFromCredentials(meta) {
+  if (applyFromCredentialsPaused > 0) return
+
   if (!meta || typeof meta !== 'object') {
     syncRefsFromStorage()
     return
   }
   const m = /** @type {Record<string, unknown>} */ (meta)
-  if (typeof m.helpersAutoArriveNearDestEnabled === 'boolean') {
+  const hasEnabledKey = Object.prototype.hasOwnProperty.call(m, 'helpersAutoArriveNearDestEnabled')
+  const hasRadiusKey = Object.prototype.hasOwnProperty.call(m, 'helpersAutoArriveRadiusNm')
+
+  if (!hasEnabledKey && !hasRadiusKey) {
+    syncRefsFromStorage()
+    return
+  }
+
+  if (hasEnabledKey && typeof m.helpersAutoArriveNearDestEnabled === 'boolean') {
     setHelpersAutoArriveNearDestEnabled(m.helpersAutoArriveNearDestEnabled)
   }
-  if (typeof m.helpersAutoArriveRadiusNm === 'number' && Number.isFinite(m.helpersAutoArriveRadiusNm)) {
-    setHelpersAutoArriveRadiusNm(m.helpersAutoArriveRadiusNm)
-  } else {
-    syncRefsFromStorage()
+
+  const radParsed = coerceRadiusNm(m.helpersAutoArriveRadiusNm)
+  if (hasRadiusKey && Number.isFinite(radParsed)) {
+    setHelpersAutoArriveRadiusNm(radParsed)
   }
 }
 
