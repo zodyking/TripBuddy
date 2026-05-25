@@ -365,7 +365,10 @@ function buildTableBody(opts, proofRangeByKey) {
       const reasonRaw =
         typeof r.outcomeReasonRight === 'string' ? r.outcomeReasonRight.trim() : ''
       const reasonLine = reasonRaw ? `Reason: ${ascii(reasonRaw)}` : ''
-      const leftBlock = [eqLine, proofLine].filter(Boolean).join('\n')
+      const holidayRaw =
+        typeof r.holidayMileageLine === 'string' ? r.holidayMileageLine.trim() : ''
+      const holidayLine = holidayRaw ? ascii(holidayRaw) : ''
+      const leftBlock = [eqLine, holidayLine, proofLine].filter(Boolean).join('\n')
       if (leftBlock || reasonLine) {
         if (reasonLine) {
           body.push([

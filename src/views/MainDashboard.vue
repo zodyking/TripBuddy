@@ -52,6 +52,7 @@ import {
   tripBodyDailySeq,
   lastDailyTripLegSequence,
   stableTripState,
+  assignmentTripHistoryLedger,
 } from '../stores/linehaulSnapshotStore.js'
 import {
   apiOk,
@@ -61,6 +62,9 @@ import {
 import { useLateNightArriveCheckPrompt } from '../composables/useLateNightArriveCheckPrompt.js'
 import { upsertTripHistoryAppCapturedArrival } from '../utils/tripHistoryAppArrivalStamp.js'
 import { useDestinationAutoArriveCheckIn } from '../composables/useDestinationAutoArriveCheckIn.js'
+import TripOdProgressBar from '../components/TripOdProgressBar.vue'
+import { haversineM } from '../utils/polylineSnap.js'
+import { appGeoLat, appGeoLng } from '../composables/useAppGeolocationWatch.js'
 import {
   liveLogEntries,
   registerAssignmentListener,
@@ -145,6 +149,10 @@ const destLocationLoading = ref(false)
 const destLocationError = ref('')
 /** @type {import('vue').Ref<unknown>} */
 const destLocationBody = ref(null)
+
+/** Destination terminal coords (from background Linehaul fetch for directory) — Home progress bar. */
+const tripWatchDestLat = ref(/** @type {number | null} */ (null))
+const tripWatchDestLng = ref(/** @type {number | null} */ (null))
 
 const originLocationModalOpen = ref(false)
 const originLocationLoading = ref(false)
@@ -312,6 +320,101 @@ const currentTripLegSeq = computed(() =>
 )
 const prePlanTripLegSeq = computed(() =>
   tripBodyDailySeq(prePlanTripSnapshot.value),
+)
+
+/** Ledger row for the active leg (from last assignment poll). */
+const currentTripLedgerRow = computed(() => {
+  const seq = String(currentTripLegSeq.value ?? '').trim()
+  if (!/^\d+$/.test(seq)) return null
+  for (const raw of assignmentTripHistoryLedger.value) {
+    if (!raw || typeof raw !== 'object') continue
+    const row = /** @type {Record<string, unknown>} */ (raw)
+    if (String(row.dailyTripLegSequence ?? '').trim() === seq) return row
+  }
+  return null
+})
+
+/**
+ * @param {Record<string, unknown> | null} row
+ */
+function ledgerDispatchedAtMsForTripProgress(row) {
+  if (!row) return null
+  const d = row.dispatchedAtMs
+  if (!(typeof d === 'number' && Number.isFinite(d) && d > 0)) return null
+  const rec = row.recordedAt
+  const recMs = typeof rec === 'number' && Number.isFinite(rec) && rec > 0 ? rec : null
+  if (recMs != null && d <= recMs) return null
+  return d
+}
+
+const tripProgressAssignedMs = computed(() => {
+  const row = currentTripLedgerRow.value
+  if (!row) return null
+  const ra = row.recordedAt
+  if (typeof ra === 'number' && Number.isFinite(ra) && ra > 0) return ra
+  const le = row.ledgerEventMs
+  if (typeof le === 'number' && Number.isFinite(le) && le > 0) return le
+  return null
+})
+
+const tripProgressDispatchedMs = computed(() => ledgerDispatchedAtMsForTripProgress(currentTripLedgerRow.value))
+
+const tripProgressArrivedMs = computed(() => {
+  const row = currentTripLedgerRow.value
+  if (!row) return null
+  const td = row.tripDetails && typeof row.tripDetails === 'object' ? /** @type {Record<string, unknown>} */ (row.tripDetails) : {}
+  const a = td.appCapturedTripArrivalAtMs
+  return typeof a === 'number' && Number.isFinite(a) && a > 0 ? a : null
+})
+
+const tripProgressDistM = computed(() => {
+  const dlat = tripWatchDestLat.value
+  const dlng = tripWatchDestLng.value
+  const ulat = appGeoLat.value
+  const ulng = appGeoLng.value
+  if (
+    dlat == null ||
+    dlng == null ||
+    ulat == null ||
+    ulng == null ||
+    !Number.isFinite(+dlat) ||
+    !Number.isFinite(+dlng) ||
+    !Number.isFinite(+ulat) ||
+    !Number.isFinite(+ulng)
+  ) {
+    return null
+  }
+  return haversineM(ulat, ulng, dlat, dlng)
+})
+
+const tripProgressDenomNm = computed(() => {
+  const row = currentTripLedgerRow.value
+  const td = row?.tripDetails && typeof row.tripDetails === 'object' ? /** @type {Record<string, unknown>} */ (row.tripDetails) : {}
+  const m = td.mileage && typeof td.mileage === 'object' && !Array.isArray(td.mileage) ? td.mileage : null
+  if (m) {
+    const mo = /** @type {Record<string, unknown>} */ (m)
+    const raw =
+      mo.linehaulRawTotalMiles != null ? String(mo.linehaulRawTotalMiles) : String(mo.totalMiles ?? '')
+    const n = Number.parseFloat(raw.replace(/,/g, ''))
+    if (Number.isFinite(n) && n > 1) return Math.max(25, n * 0.869)
+  }
+  return 180
+})
+
+const tripHolidayMileageUi = computed(() => {
+  const row = currentTripLedgerRow.value
+  const td = row?.tripDetails && typeof row.tripDetails === 'object' ? /** @type {Record<string, unknown>} */ (row.tripDetails) : {}
+  const m = td.mileage && typeof td.mileage === 'object' && !Array.isArray(td.mileage) ? td.mileage : null
+  if (!m || /** @type {Record<string, unknown>} */ (m).usFederalHolidayMileage1_5x !== true) return null
+  const mo = /** @type {Record<string, unknown>} */ (m)
+  const base = mo.linehaulRawTotalMiles != null ? String(mo.linehaulRawTotalMiles).trim() : ''
+  const adj = mo.totalMiles != null ? String(mo.totalMiles).trim() : ''
+  const sum = typeof mo.usFederalHolidayMileageSummary === 'string' ? mo.usFederalHolidayMileageSummary.trim() : ''
+  return { base, adj, sum }
+})
+
+const showTripOdProgressBar = computed(
+  () => Boolean(linehaulTripsBody.value) && !linehaulTripsError.value && dispatchSlideIndex.value === 0,
 )
 
 /** Trip JSON shown in Trip Details (matches Dispatch carousel). */
@@ -1570,7 +1673,19 @@ async function fetchAndPersistTripDestinationToDirectory() {
     originId: origin || undefined,
   })
   if (myGen !== destDirectoryAutoSaveGen) return
-  if (!r.ok) return
+  if (!r.ok) {
+    tripWatchDestLat.value = null
+    tripWatchDestLng.value = null
+    return
+  }
+  const ex = extractLocationForDirectory(r.body)
+  if (ex?.latitude != null && ex?.longitude != null && Number.isFinite(ex.latitude) && Number.isFinite(ex.longitude)) {
+    tripWatchDestLat.value = ex.latitude
+    tripWatchDestLng.value = ex.longitude
+  } else {
+    tripWatchDestLat.value = null
+    tripWatchDestLng.value = null
+  }
   try {
     await persistFetchedLocationToDirectory(r.body)
     if (myGen !== destDirectoryAutoSaveGen) return
@@ -1587,6 +1702,8 @@ watch(
     if (!id) {
       lastAutoSavedDestKey = ''
       destDirectoryAutoSaveGen += 1
+      tripWatchDestLat.value = null
+      tripWatchDestLng.value = null
       return
     }
     void fetchAndPersistTripDestinationToDirectory()
@@ -2695,6 +2812,24 @@ onUnmounted(() => {
                   <span v-else class="dispatch-od-val dispatch-od-val--text">{{ tripOriginDest.destination }}</span>
                 </div>
               </div>
+              <div v-if="tripHolidayMileageUi" class="trip-holiday-mile-pill" role="status">
+                <span class="trip-holiday-mile-pill__tag">1.5×</span>
+                <span class="trip-holiday-mile-pill__body">
+                  <strong>Federal holiday mileage</strong>
+                  (time and a half)
+                  <template v-if="tripHolidayMileageUi.base && tripHolidayMileageUi.adj">
+                    · {{ tripHolidayMileageUi.base }} → {{ tripHolidayMileageUi.adj }} mi
+                  </template>
+                </span>
+              </div>
+              <TripOdProgressBar
+                v-if="showTripOdProgressBar"
+                :assigned-ms="tripProgressAssignedMs ?? undefined"
+                :dispatched-ms="tripProgressDispatchedMs ?? undefined"
+                :arrived-ms="tripProgressArrivedMs ?? undefined"
+                :dist-meters="tripProgressDistM ?? undefined"
+                :denom-nm="tripProgressDenomNm"
+              />
             </div>
 
             <div v-if="dispatchSlideIndex === 1 && prePlanTripSnapshot" class="dispatch-slide">
@@ -4064,6 +4199,37 @@ button.trailer-nbr.copyable-inline {
   display: flex;
   flex-direction: column;
   gap: 0.35rem;
+}
+.trip-holiday-mile-pill {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  padding: 0.45rem 0.65rem;
+  border-radius: 8px;
+  background: linear-gradient(
+    90deg,
+    rgba(123, 77, 181, 0.22),
+    rgba(255, 107, 26, 0.18)
+  );
+  border: 1px solid rgba(255, 107, 26, 0.35);
+  font-size: 0.78rem;
+  line-height: 1.35;
+  color: var(--text, #e8e8ee);
+}
+.trip-holiday-mile-pill__tag {
+  flex-shrink: 0;
+  padding: 0.12rem 0.45rem;
+  border-radius: 6px;
+  font-weight: 800;
+  font-size: 0.72rem;
+  letter-spacing: 0.04em;
+  background: var(--color-accent-orange, #ff6b1a);
+  color: #1a0d06;
+}
+.trip-holiday-mile-pill__body strong {
+  font-weight: 700;
+  color: #fde68a;
 }
 .dispatch-preplan-badge {
   align-self: flex-start;

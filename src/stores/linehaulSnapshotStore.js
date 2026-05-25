@@ -671,6 +671,9 @@ export const linehaulFetching = ref(false)
 /** True while Playwright bearer capture runs after FedEx 401/403 (avoid flashing errors in cards). */
 export const linehaulAuthRecoveryInProgress = ref(false)
 
+/** Last `getAssignment().tripHistoryLedger` snapshot (for Home trip card / pay helpers). */
+export const assignmentTripHistoryLedger = ref(/** @type {unknown[]} */ ([]))
+
 /** Cached full trip snapshot (from APRVD) with trailer details for persistence after dispatch. */
 export const cachedTripSnapshot = ref(null)
 /** Pre-plan trip: a second APRVD trip with different dailyTripLegSequence while current trip exists. */
@@ -690,6 +693,14 @@ let lastHistoryUpsertOkFingerprint = null
 /** Last successful mileage fetch per active leg (avoid duplicate Apigee calls). */
 let lastTripMileageOkKey = ''
 
+/** Clear mileage fetch dedupe for a leg so the next poll can refetch (e.g. after arrival timestamp). */
+export function invalidateLastTripMileageFetchKeyForSeq(seq) {
+  const s = String(seq ?? '').trim()
+  if (!s) return
+  const prefix = `${s}|`
+  if (lastTripMileageOkKey.startsWith(prefix)) lastTripMileageOkKey = ''
+}
+
 /** Clear in-memory trip state (call on sign-out; hidden seq comes from getAssignment on next sign-in). */
 export function resetLinehaulSession() {
   linehaulTractorBody.value = null
@@ -707,6 +718,7 @@ export function resetLinehaulSession() {
   cachedTripSnapshot.value = null
   prePlanTripSnapshot.value = null
   hiddenDailyTripLegSequences.value = []
+  assignmentTripHistoryLedger.value = []
   lastHistoryUpsertOkFingerprint = null
   prevDriverAvlStat = null
   lastTripMileageOkKey = ''
@@ -1542,6 +1554,7 @@ async function refreshLinehaulApisImpl(attempt) {
     tripHistoryLedgerSnapshot = Array.isArray(assign.tripHistoryLedger)
       ? assign.tripHistoryLedger
       : []
+    assignmentTripHistoryLedger.value = tripHistoryLedgerSnapshot
     hiddenDailyTripLegSequences.value = Array.isArray(assign.hiddenDailyTripLegSequences)
       ? assign.hiddenDailyTripLegSequences.map(String)
       : []
