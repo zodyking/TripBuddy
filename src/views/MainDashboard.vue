@@ -154,6 +154,10 @@ const destLocationBody = ref(null)
 const tripWatchDestLat = ref(/** @type {number | null} */ (null))
 const tripWatchDestLng = ref(/** @type {number | null} */ (null))
 
+/** Origin terminal coords (Linehaul location fetch) — OD leg length for Home progress bar. */
+const tripWatchOriginLat = ref(/** @type {number | null} */ (null))
+const tripWatchOriginLng = ref(/** @type {number | null} */ (null))
+
 const originLocationModalOpen = ref(false)
 const originLocationLoading = ref(false)
 const originLocationError = ref('')
@@ -385,6 +389,27 @@ const tripProgressDistM = computed(() => {
     return null
   }
   return haversineM(ulat, ulng, dlat, dlng)
+})
+
+/** Great-circle origin-terminal → destination-terminal leg (meters) for OD progress. */
+const tripProgressOdLegM = computed(() => {
+  const olat = tripWatchOriginLat.value
+  const olng = tripWatchOriginLng.value
+  const dlat = tripWatchDestLat.value
+  const dlng = tripWatchDestLng.value
+  if (
+    olat == null ||
+    olng == null ||
+    dlat == null ||
+    dlng == null ||
+    !Number.isFinite(+olat) ||
+    !Number.isFinite(+olng) ||
+    !Number.isFinite(+dlat) ||
+    !Number.isFinite(+dlng)
+  ) {
+    return null
+  }
+  return haversineM(olat, olng, dlat, dlng)
 })
 
 const tripProgressDenomNm = computed(() => {
@@ -1719,7 +1744,19 @@ async function fetchAndPersistTripOriginToDirectory() {
     originId: dest || undefined,
   })
   if (myGen !== originDirectoryAutoSaveGen) return
-  if (!r.ok) return
+  if (!r.ok) {
+    tripWatchOriginLat.value = null
+    tripWatchOriginLng.value = null
+    return
+  }
+  const ex = extractLocationForDirectory(r.body)
+  if (ex?.latitude != null && ex?.longitude != null && Number.isFinite(ex.latitude) && Number.isFinite(ex.longitude)) {
+    tripWatchOriginLat.value = ex.latitude
+    tripWatchOriginLng.value = ex.longitude
+  } else {
+    tripWatchOriginLat.value = null
+    tripWatchOriginLng.value = null
+  }
   try {
     await persistFetchedLocationToDirectory(r.body)
     if (myGen !== originDirectoryAutoSaveGen) return
@@ -1736,6 +1773,8 @@ watch(
     if (!id) {
       lastAutoSavedOriginKey = ''
       originDirectoryAutoSaveGen += 1
+      tripWatchOriginLat.value = null
+      tripWatchOriginLng.value = null
       return
     }
     void fetchAndPersistTripOriginToDirectory()
@@ -2807,6 +2846,7 @@ onUnmounted(() => {
                 :dispatched-ms="tripProgressDispatchedMs ?? undefined"
                 :arrived-ms="tripProgressArrivedMs ?? undefined"
                 :dist-meters="tripProgressDistM ?? undefined"
+                :leg-od-meters="tripProgressOdLegM ?? undefined"
                 :denom-nm="tripProgressDenomNm"
               />
             </div>
