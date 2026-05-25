@@ -1556,6 +1556,16 @@ app.post('/api/fedex/linehaul/capture-bearer', async (req, reply) => {
   const tryOktaLogin = body.tryOktaLogin !== false
   const clearSession = body.clearSession !== false
   const bypassValidityProbe = body.bypassValidityProbe === true
+  /** Default on for faster dispatch gate / tighter navigation timeout. */
+  const fastDispatchGate = body.fastDispatchGate !== false
+  const tokenQuietMs =
+    typeof body.tokenQuietMs === 'number' && body.tokenQuietMs >= 0
+      ? body.tokenQuietMs
+      : undefined
+  const navigationTimeoutMs =
+    typeof body.navigationTimeoutMs === 'number' && body.navigationTimeoutMs > 0
+      ? body.navigationTimeoutMs
+      : undefined
   const sid = req.cookies?.[COOKIE_NAME]
   const ak = getSessionAccountKey(sid)
   try {
@@ -1565,6 +1575,9 @@ app.post('/api/fedex/linehaul/capture-bearer', async (req, reply) => {
         tryOktaLogin,
         clearSession,
         bypassValidityProbe,
+        fastDispatchGate,
+        ...(tokenQuietMs !== undefined ? { tokenQuietMs } : {}),
+        ...(navigationTimeoutMs !== undefined ? { navigationTimeoutMs } : {}),
       })
     const result = ak
       ? await runWithCredentialAccountKey(ak, runCapture)

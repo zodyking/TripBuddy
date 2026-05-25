@@ -21,6 +21,10 @@ import {
   markInAppItemRead,
   markInAppAllRead,
 } from '../stores/inAppNotificationsStore.js'
+import {
+  linehaulBearerCaptureOverlayVisible,
+  linehaulBearerCaptureProgress,
+} from '../stores/linehaulBearerCaptureOverlay.js'
 
 const route = useRoute()
 const router = useRouter()
@@ -262,6 +266,35 @@ onUnmounted(() => {
         <span class="nav-label">Settings</span>
       </RouterLink>
     </nav>
+
+    <Teleport to="body">
+      <div
+        v-if="linehaulBearerCaptureOverlayVisible"
+        class="lh-bearer-sync-overlay"
+        role="presentation"
+        aria-live="polite"
+        aria-busy="true"
+      >
+        <div class="lh-bearer-sync-panel">
+          <p class="lh-bearer-sync-title">Server synchronizing</p>
+          <div
+            class="lh-bearer-sync-track"
+            role="progressbar"
+            :aria-valuenow="Math.round(linehaulBearerCaptureProgress)"
+            aria-valuemin="0"
+            aria-valuemax="100"
+            aria-label="Synchronization progress"
+          >
+            <div
+              class="lh-bearer-sync-fill"
+              :style="{
+                width: `${Math.min(100, Math.max(0, linehaulBearerCaptureProgress))}%`,
+              }"
+            />
+          </div>
+        </div>
+      </div>
+    </Teleport>
   </div>
 </template>
 
@@ -274,6 +307,80 @@ onUnmounted(() => {
   flex-direction: column;
   overflow: hidden;
   overscroll-behavior: none;
+}
+
+/* Linehaul bearer capture — full-screen lock (teleported to body) */
+.lh-bearer-sync-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 100001;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-6, 1.5rem);
+  padding-bottom: max(var(--space-6, 1.5rem), env(safe-area-inset-bottom));
+  background: var(--color-bg-overlay, rgba(8, 8, 10, 0.9));
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  pointer-events: all;
+  box-sizing: border-box;
+}
+
+.lh-bearer-sync-panel {
+  width: min(22rem, 100%);
+  padding: var(--space-8, 2rem) var(--space-6, 1.5rem);
+  border-radius: var(--radius-xl, 1rem);
+  background: var(--color-bg-surface, #16161d);
+  border: 1px solid var(--color-glass-border, rgba(255, 255, 255, 0.06));
+  box-shadow: var(--shadow-lg, 0 12px 40px rgba(0, 0, 0, 0.45)),
+    0 0 0 1px var(--color-border-subtle, rgba(255, 255, 255, 0.04)) inset;
+}
+
+.lh-bearer-sync-title {
+  margin: 0 0 var(--space-5, 1.25rem);
+  font-size: var(--text-lg, 1.125rem);
+  font-weight: var(--weight-semibold, 600);
+  color: var(--color-text-primary, #f4f4f8);
+  text-align: center;
+  letter-spacing: var(--tracking-wide, 0.025em);
+}
+
+.lh-bearer-sync-track {
+  height: 0.45rem;
+  border-radius: var(--radius-full, 9999px);
+  background: var(--color-border, rgba(255, 255, 255, 0.08));
+  overflow: hidden;
+}
+
+.lh-bearer-sync-fill {
+  height: 100%;
+  min-width: 0;
+  border-radius: inherit;
+  background: linear-gradient(
+    90deg,
+    var(--color-accent-purple, #7b4db5),
+    var(--color-accent-purple-light, #9d6fd7),
+    var(--color-accent-orange, #ff6b1a)
+  );
+  background-size: 200% 100%;
+  transition: width 0.2s ease-out;
+  animation: lh-bearer-sync-shimmer 2.2s ease-in-out infinite;
+}
+
+@keyframes lh-bearer-sync-shimmer {
+  0%,
+  100% {
+    background-position: 0% 50%;
+  }
+  50% {
+    background-position: 100% 50%;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .lh-bearer-sync-fill {
+    animation: none;
+  }
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
