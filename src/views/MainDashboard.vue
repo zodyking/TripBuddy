@@ -63,6 +63,7 @@ import { useLateNightArriveCheckPrompt } from '../composables/useLateNightArrive
 import { upsertTripHistoryAppCapturedArrival } from '../utils/tripHistoryAppArrivalStamp.js'
 import { useDestinationAutoArriveCheckIn } from '../composables/useDestinationAutoArriveCheckIn.js'
 import TripOdProgressBar from '../components/TripOdProgressBar.vue'
+import TripLegMapModal from '../components/TripLegMapModal.vue'
 import { haversineM } from '../utils/polylineSnap.js'
 import { appGeoLat, appGeoLng } from '../composables/useAppGeolocationWatch.js'
 import {
@@ -153,10 +154,6 @@ const destLocationBody = ref(null)
 /** Destination terminal coords (from background Linehaul fetch for directory) — Home progress bar. */
 const tripWatchDestLat = ref(/** @type {number | null} */ (null))
 const tripWatchDestLng = ref(/** @type {number | null} */ (null))
-
-/** Origin terminal coords (Linehaul location fetch) — OD leg length for Home progress bar. */
-const tripWatchOriginLat = ref(/** @type {number | null} */ (null))
-const tripWatchOriginLng = ref(/** @type {number | null} */ (null))
 
 const originLocationModalOpen = ref(false)
 const originLocationLoading = ref(false)
@@ -391,7 +388,7 @@ const tripProgressDistM = computed(() => {
   return haversineM(ulat, ulng, dlat, dlng)
 })
 
-/** Great-circle origin-terminal → destination-terminal leg (meters) for OD progress. */
+/** Great-circle distance origin terminal → destination terminal (meters). */
 const tripProgressOdLegM = computed(() => {
   const olat = tripWatchOriginLat.value
   const olng = tripWatchOriginLng.value
@@ -411,6 +408,18 @@ const tripProgressOdLegM = computed(() => {
   }
   return haversineM(olat, olng, dlat, dlng)
 })
+
+const tripLegMapHasCoords = computed(() => {
+  const pts = [
+    tripWatchOriginLat.value,
+    tripWatchOriginLng.value,
+    tripWatchDestLat.value,
+    tripWatchDestLng.value,
+  ]
+  return pts.every((x) => typeof x === 'number' && Number.isFinite(x))
+})
+
+const tripLegMapTractorNumber = computed(() => String(stableTripState.value?.tractorNumber ?? '').trim())
 
 const tripProgressDenomNm = computed(() => {
   const row = currentTripLedgerRow.value
@@ -2150,6 +2159,20 @@ onUnmounted(() => {
 <template>
   <div class="main" :class="{ 'main--automation-preview': showAutomationPreviewFocus }">
     <p v-if="copyToast" class="copy-toast" role="status" aria-live="polite">{{ copyToast }}</p>
+    <TripLegMapModal
+      :open="tripLegMapOpen"
+      :z-index="PORTAL_Z_TRIP_LEG_MAP"
+      :origin-lat="tripWatchOriginLat ?? undefined"
+      :origin-lng="tripWatchOriginLng ?? undefined"
+      :dest-lat="tripWatchDestLat ?? undefined"
+      :dest-lng="tripWatchDestLng ?? undefined"
+      :origin-label="tripOriginDest.origin"
+      :dest-label="tripOriginDest.destination"
+      :truck-lat="appGeoLat ?? undefined"
+      :truck-lng="appGeoLng ?? undefined"
+      :tractor-number="tripLegMapTractorNumber"
+      @close="tripLegMapOpen = false"
+    />
     <Teleport to="body">
       <div
         v-if="tripCompleteDialog"
@@ -2841,13 +2864,15 @@ onUnmounted(() => {
               </div>
               <TripOdProgressBar
                 v-if="showTripOdProgressBar"
-                :trip-phase="tripPhase"
                 :assigned-ms="tripProgressAssignedMs ?? undefined"
                 :dispatched-ms="tripProgressDispatchedMs ?? undefined"
                 :arrived-ms="tripProgressArrivedMs ?? undefined"
                 :dist-meters="tripProgressDistM ?? undefined"
                 :leg-od-meters="tripProgressOdLegM ?? undefined"
                 :denom-nm="tripProgressDenomNm"
+                :trip-phase="tripPhase"
+                :map-available="tripLegMapHasCoords"
+                @open-map="tripLegMapOpen = true"
               />
             </div>
 
