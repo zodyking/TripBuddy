@@ -317,10 +317,6 @@ function tripPaidMiles(e) {
   // Only include delivered trips in totals (not rejected/removed/current)
   const outcome = historyOutcomeUiSelectKey(e)
   if (outcome !== 'delivered') return null
-  const m = e?.tripDetails?.mileage
-  if (!m || typeof m !== 'object' || Array.isArray(m)) return null
-  const resolved = resolvePaidMilesFromMileageRecord(/** @type {Record<string, unknown>} */ (m))
-  if (resolved && Number.isFinite(resolved.value)) return resolved.value
   const mb = mileageBlock(e)
   if (!mb?.total) return null
   const n = parseFloat(String(mb.total).replace(/,/g, '').trim())
