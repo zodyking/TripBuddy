@@ -1,5 +1,6 @@
 import { normalizeDirectoryLocationId } from './directoryLocationLookup.js'
 import { generateLinehaulPretripPDF } from './linehaulPretripPdfTemplate.js'
+import { resolvePaidMilesFromMileageRecord } from './tripMileageResolve.js'
 
 /** @param {string} s */
 function ascii(s) {

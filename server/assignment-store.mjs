@@ -130,9 +130,14 @@ function mileagePayloadFromApiBody(body) {
   if (!body || typeof body !== 'object' || Array.isArray(body)) return null
   const b = /** @type {Record<string, unknown>} */ (body)
   const totalMiles = b.totalMiles != null ? String(b.totalMiles).trim() : ''
+  const linehaulRawTotalMiles =
+    b.linehaulRawTotalMiles != null ? String(b.linehaulRawTotalMiles).trim() : ''
   const runH = b.runTimeHours
   const runTimeHours =
     typeof runH === 'number' && Number.isFinite(runH) ? runH : null
+  const linehaulRawRunH = b.linehaulRawRunTimeHours
+  const linehaulRawRunTimeHours =
+    typeof linehaulRawRunH === 'number' && Number.isFinite(linehaulRawRunH) ? linehaulRawRunH : null
   const origin = b.origin != null ? String(b.origin).trim() : ''
   const destination = b.destination != null ? String(b.destination).trim() : ''
   const directionList = Array.isArray(b.directionList) ? b.directionList : []
@@ -143,7 +148,9 @@ function mileagePayloadFromApiBody(body) {
     source: 'linehaul_api',
   }
   if (totalMiles) out.totalMiles = totalMiles
+  if (linehaulRawTotalMiles) out.linehaulRawTotalMiles = linehaulRawTotalMiles
   if (runTimeHours != null) out.runTimeHours = runTimeHours
+  if (linehaulRawRunTimeHours != null) out.linehaulRawRunTimeHours = linehaulRawRunTimeHours
   if (origin) out.origin = origin
   if (destination) out.destination = destination
   return out
