@@ -264,6 +264,133 @@ function mileageIsPriorOdCopy(td) {
   return Boolean(m && m.copiedFromPriorOd === true)
 }
 
+
+/** Miles delta to treat Linehaul banner `totalMiles` as holiday-inflated vs per-state sum. */
+const HOLIDAY_MILES_INFLATION_MARGIN = 0.35
+
+/**
+ * @param {unknown} v
+ * @returns {number | null}
+ */
+function parseMilesNumber(v) {
+  if (v == null) return null
+  const n = Number.parseFloat(String(v).replace(/,/g, '').trim())
+  if (!Number.isFinite(n) || n < 0) return null
+  return n
+}
+
+/**
+ * Sum `mileagePerState` across `viewTripInfoDetails` directionList rows.
+ * @param {unknown} dl
+ * @returns {number | null}
+ */
+function sumDirectionListMilesFromApi(dl) {
+  if (!Array.isArray(dl) || dl.length === 0) return null
+  let sum = 0
+  let count = 0
+  for (const row of dl) {
+    if (!row || typeof row !== 'object' || Array.isArray(row)) continue
+    const mp = /** @type {Record<string, unknown>} */ (row).mileagePerState
+    let n = null
+    if (typeof mp === 'number' && Number.isFinite(mp)) n = mp
+    else n = parseMilesNumber(mp)
+    if (n == null) continue
+    sum += n
+    count++
+  }
+  return count ? sum : null
+}
+
+/**
+ * Paid (non-holiday) miles: prefer stored raw total, else per-state sum when banner is inflated,
+ * else banner / sum fallback (matches trip card / progress: raw over banner).
+ * @param {Record<string, unknown>} m
+ * @returns {number | null}
+ */
+function resolvePaidMilesNumberFromMileageRecord(m) {
+  const raw = parseMilesNumber(m.linehaulRawTotalMiles)
+  if (raw != null && raw > 0) return raw
+
+  const banner = parseMilesNumber(m.totalMiles)
+  const dirSum = sumDirectionListMilesFromApi(m.directionList)
+
+  if (dirSum != null && dirSum > 0 && banner != null && banner > dirSum + HOLIDAY_MILES_INFLATION_MARGIN) {
+    return dirSum
+  }
+  if (banner != null && banner > 0) return banner
+  if (dirSum != null && dirSum > 0) return dirSum
+  return null
+}
+
+/**
+ * @param {number} n
+ * @returns {string}
+ */
+function milesStringForMileageStorage(n) {
+  const r = Math.round(n * 10) / 10
+  return Number.isInteger(r) ? String(r) : r.toFixed(1)
+}
+
+/**
+ * One-time correction: legacy rows kept holiday-inflated `totalMiles` while per-state list (or raw)
+ * reflects paid miles.
+ * @param {unknown[]} ledger
+ * @returns {{ ledger: unknown[], changed: boolean }}
+ */
+function applyTripHistoryLedgerHolidayMileageAudit(ledger) {
+  if (!Array.isArray(ledger) || ledger.length === 0) {
+    return { ledger, changed: false }
+  }
+  let changed = false
+  const result = ledger.map((e) => {
+    if (!e || typeof e !== 'object' || Array.isArray(e)) return e
+    const entry = /** @type {Record<string, unknown>} */ (e)
+    const td0 =
+      entry.tripDetails && typeof entry.tripDetails === 'object' && !Array.isArray(entry.tripDetails)
+        ? /** @type {Record<string, unknown>} */ ({ ...entry.tripDetails })
+        : {}
+    const m0 = td0.mileage
+    if (!m0 || typeof m0 !== 'object' || Array.isArray(m0)) return e
+    const m = /** @type {Record<string, unknown>} */ ({ ...m0 })
+    const paid = resolvePaidMilesNumberFromMileageRecord(m)
+    if (paid == null) return e
+
+    const currentBanner = parseMilesNumber(m.totalMiles)
+    if (currentBanner == null) {
+      const nextM = {
+        ...m,
+        totalMiles: milesStringForMileageStorage(paid),
+      }
+      if (m.linehaulRawTotalMiles == null || String(m.linehaulRawTotalMiles).trim() === '') {
+        nextM.linehaulRawTotalMiles = milesStringForMileageStorage(paid)
+      }
+      changed = true
+      return {
+        ...entry,
+        tripDetails: { ...td0, mileage: nextM },
+      }
+    }
+
+    if (Math.abs(currentBanner - paid) <= 0.051) return e
+
+    const nextM = {
+      ...m,
+      totalMiles: milesStringForMileageStorage(paid),
+    }
+    const rawNum = parseMilesNumber(m.linehaulRawTotalMiles)
+    if (rawNum == null || Math.abs(rawNum - paid) > 0.051) {
+      nextM.linehaulRawTotalMiles = milesStringForMileageStorage(paid)
+    }
+    changed = true
+    return {
+      ...entry,
+      tripDetails: { ...td0, mileage: nextM },
+    }
+  })
+  return { ledger: result, changed }
+}
+
+
 /**
  * For each trip missing mileage, copy totalMiles / runTimeHours from another trip with the same
  * origin/destination ids: prefer the nearest **older** row with usable mileage; if none, the nearest
@@ -458,6 +585,8 @@ const DEFAULT_ASSIGNMENT = {
   lastDailyTripLegSequencePersisted: null,
   /** Completed trips ledger: { id, completedAt, dailyTripLegSequence, dispatchHeader, tripDetails } */
   tripHistoryLedger: [],
+  /** One-time server migration: correct holiday-inflated `totalMiles` in ledger mileage. */
+  tripHistoryLedgerHolidayMileageAuditV1: false,
 }
 
 function cloneDefault() {
@@ -553,11 +682,52 @@ function normalizeAssignmentData(data) {
       /^\d+$/.test(data.lastDailyTripLegSequencePersisted)
         ? data.lastDailyTripLegSequencePersisted
         : null,
+    tripHistoryLedgerHolidayMileageAuditV1:
+      data.tripHistoryLedgerHolidayMileageAuditV1 === true,
   }
   if (!Array.isArray(base.hiddenDailyTripLegSequences)) {
     base.hiddenDailyTripLegSequences = []
   }
   return base
+}
+
+/**
+ * Ledger migrations on read (legacy OD cache, prior-OD mileage fill, holiday mileage audit).
+ * @param {string} key
+ * @param {Record<string, unknown>} raw
+ * @param {Record<string, unknown>} n
+ */
+async function persistTripHistoryLedgerReadMigrations(key, raw, n) {
+  /** @type {Record<string, unknown> | null} */
+  const legacyOdCache =
+    raw &&
+    typeof raw === 'object' &&
+    !Array.isArray(raw) &&
+    raw.odMileageCache &&
+    typeof raw.odMileageCache === 'object' &&
+    !Array.isArray(raw.odMileageCache)
+      ? /** @type {Record<string, unknown>} */ (raw.odMileageCache)
+      : null
+  if (legacyOdCache && Object.keys(legacyOdCache).length > 0) {
+    n.tripHistoryLedger = applyOdCacheToLedger(
+      /** @type {unknown[]} */ (n.tripHistoryLedger || []),
+      legacyOdCache,
+    )
+    await writeKeyJson(key, n)
+  }
+  const odBack = applyPriorOdMileageBackfill(/** @type {unknown[]} */ (n.tripHistoryLedger || []))
+  if (odBack.changed) {
+    n.tripHistoryLedger = odBack.ledger
+    await writeKeyJson(key, n)
+  }
+  if (!n.tripHistoryLedgerHolidayMileageAuditV1) {
+    const hol = applyTripHistoryLedgerHolidayMileageAudit(
+      /** @type {unknown[]} */ (n.tripHistoryLedger || []),
+    )
+    n.tripHistoryLedger = hol.ledger
+    n.tripHistoryLedgerHolidayMileageAuditV1 = true
+    await writeKeyJson(key, n)
+  }
 }
 
 export async function readAssignment() {
@@ -572,25 +742,8 @@ export async function readAssignment() {
   if (!('persistedCachedTripSnapshot' in n)) n.persistedCachedTripSnapshot = null
   if (!('lastDailyTripLegSequencePersisted' in n)) n.lastDailyTripLegSequencePersisted = null
   if (!Array.isArray(n.tripHistoryLedger)) n.tripHistoryLedger = []
-  /** @type {Record<string, unknown> | null} */
-  const legacyOdCache =
-    raw &&
-    typeof raw === 'object' &&
-    !Array.isArray(raw) &&
-    raw.odMileageCache &&
-    typeof raw.odMileageCache === 'object' &&
-    !Array.isArray(raw.odMileageCache)
-      ? /** @type {Record<string, unknown>} */ (raw.odMileageCache)
-      : null
-  if (legacyOdCache && Object.keys(legacyOdCache).length > 0) {
-    n.tripHistoryLedger = applyOdCacheToLedger(n.tripHistoryLedger, legacyOdCache)
-    await writeKeyJson(key, n)
-  }
-  const odBack = applyPriorOdMileageBackfill(n.tripHistoryLedger)
-  if (odBack.changed) {
-    n.tripHistoryLedger = odBack.ledger
-    await writeKeyJson(key, n)
-  }
+  if (!('tripHistoryLedgerHolidayMileageAuditV1' in n)) n.tripHistoryLedgerHolidayMileageAuditV1 = false
+  await persistTripHistoryLedgerReadMigrations(key, raw, n)
   return n
 }
 
@@ -613,6 +766,8 @@ export async function readAssignmentForAccount(accountKey) {
   if (!('persistedCachedTripSnapshot' in n)) n.persistedCachedTripSnapshot = null
   if (!('lastDailyTripLegSequencePersisted' in n)) n.lastDailyTripLegSequencePersisted = null
   if (!Array.isArray(n.tripHistoryLedger)) n.tripHistoryLedger = []
+  if (!('tripHistoryLedgerHolidayMileageAuditV1' in n)) n.tripHistoryLedgerHolidayMileageAuditV1 = false
+  await persistTripHistoryLedgerReadMigrations(key, raw, n)
   return n
 }
 
@@ -1080,6 +1235,8 @@ export async function writeAssignment(body) {
     persistedCachedTripSnapshot,
     lastDailyTripLegSequencePersisted,
     tripHistoryLedger,
+    tripHistoryLedgerHolidayMileageAuditV1:
+      prev.tripHistoryLedgerHolidayMileageAuditV1 === true,
   }
 
   await writeKeyJson(key, next)
