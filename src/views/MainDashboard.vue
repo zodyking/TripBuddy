@@ -8,7 +8,7 @@ import {
   onActivated,
   nextTick,
 } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRouter, onBeforeRouteLeave } from 'vue-router'
 import {
   getAssignment,
   getCredentials,
@@ -124,6 +124,7 @@ const router = useRouter()
 
 const PORTAL_Z_MODAL = 2_147_483_001
 const PORTAL_Z_LOCATION_MODAL = 2_147_483_002
+const PORTAL_Z_TRIP_LEG_MAP = 2_147_483_003
 
 const loadError = ref(null)
 const runErrorBanner = ref(null)
@@ -154,6 +155,15 @@ const destLocationBody = ref(null)
 /** Destination terminal coords (from background Linehaul fetch for directory) — Home progress bar. */
 const tripWatchDestLat = ref(/** @type {number | null} */ (null))
 const tripWatchDestLng = ref(/** @type {number | null} */ (null))
+
+/** Origin terminal coords (Linehaul fetch) — leg map + OD leg length. */
+const tripWatchOriginLat = ref(/** @type {number | null} */ (null))
+const tripWatchOriginLng = ref(/** @type {number | null} */ (null))
+const tripLegMapOpen = ref(false)
+
+onBeforeRouteLeave(() => {
+  tripLegMapOpen.value = false
+})
 
 const originLocationModalOpen = ref(false)
 const originLocationLoading = ref(false)
@@ -2133,6 +2143,7 @@ onActivated(() => {
 })
 
 onUnmounted(() => {
+  tripLegMapOpen.value = false
   if (tripPhaseVoiceTimer) {
     clearTimeout(tripPhaseVoiceTimer)
     tripPhaseVoiceTimer = null

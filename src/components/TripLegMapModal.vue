@@ -26,11 +26,25 @@ const elRef = ref(null)
 let map = null
 /** @type {L.LayerGroup | null} */
 let overlayLayer = null
+/** @type {ReturnType<typeof setTimeout> | null} */
+let resizeTimer = null
+
+function clearResizeTimer() {
+  if (resizeTimer != null) {
+    clearTimeout(resizeTimer)
+    resizeTimer = null
+  }
+}
 
 function destroyMap() {
+  clearResizeTimer()
   overlayLayer = null
   if (map) {
-    map.remove()
+    try {
+      map.remove()
+    } catch {
+      /* Leaflet can throw if the container was detached (e.g. route change). */
+    }
     map = null
   }
 }
@@ -87,11 +101,24 @@ function sync() {
     mkT.addTo(overlayLayer)
   }
 
-  map.fitBounds(L.latLngBounds(boundsPts), {
-    padding: [52, 52],
-    maxZoom: 14,
-    animate: false,
-  })
+  try {
+    const b = L.latLngBounds(boundsPts)
+    if (b.isValid()) {
+      map.fitBounds(b, {
+        padding: [52, 52],
+        maxZoom: 14,
+        animate: false,
+      })
+    } else {
+      map.setView(boundsPts[0], 11, { animate: false })
+    }
+  } catch {
+    try {
+      map.setView(boundsPts[0], 11, { animate: false })
+    } catch {
+      /* ignore */
+    }
+  }
 }
 
 function initMap() {
@@ -111,9 +138,11 @@ function initMap() {
     },
   ).addTo(map)
   sync()
+  clearResizeTimer()
   nextTick(() => {
     map?.invalidateSize()
-    setTimeout(() => {
+    resizeTimer = setTimeout(() => {
+      resizeTimer = null
       map?.invalidateSize()
       sync()
     }, 200)

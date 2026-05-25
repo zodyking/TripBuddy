@@ -85,13 +85,15 @@ const fillPct = computed(() => {
   const d = distMetersSafe.value
   if (leg != null && leg > 0 && d != null) {
     const cov = Math.max(0, Math.min(leg, leg - d))
-    return Math.round(Math.min(100, Math.max(4, (100 * cov) / leg)))
+    const pct = Math.round(Math.min(100, Math.max(4, (100 * cov) / leg)))
+    return Number.isFinite(pct) ? pct : 6
   }
   const dNm = distNm.value
   if (dNm != null) {
-    const cap = Math.max(15, props.denomNm)
+    const cap = Math.max(15, Number(props.denomNm) || 180)
     const raw = 100 * (1 - Math.min(1, Math.max(0, dNm) / cap))
-    return Math.round(Math.min(100, Math.max(5, raw)))
+    const pct = Math.round(Math.min(100, Math.max(5, raw)))
+    return Number.isFinite(pct) ? pct : 6
   }
   const ph = String(props.tripPhase ?? '').toLowerCase()
   if (ph === 'dispatched') return 38
