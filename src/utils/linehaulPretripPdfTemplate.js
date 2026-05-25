@@ -25,6 +25,8 @@ export async function generateLinehaulPretripPDF(input = {}) {
     zip: '',
     phone: '',
     paid: '',
+    /** Optional disclosure under PAID miles (e.g. federal holiday 1.5×). */
+    paidMileageNote: '',
     avr: '',
     invoiceRef: '',
     gpsNorth: '',
@@ -200,6 +202,26 @@ export async function generateLinehaulPretripPDF(input = {}) {
 
   text('PAID', 22, 412, 11.0, 'bold')
   text(data.paid, 161, 412, 10.0)
+
+  const paidNote = String(data.paidMileageNote ?? '').trim()
+  if (paidNote) {
+    const maxW = leftW - 8
+    const noteLines = doc.splitTextToSize(paidNote, maxW)
+    let noteY = 421
+    const noteSize = 6.7
+    const lineGap = 7.6
+    const maxLines = 3
+    const n = Math.min(noteLines.length, maxLines)
+    for (let i = 0; i < n; i++) {
+      let line = noteLines[i]
+      if (i === n - 1 && noteLines.length > maxLines) {
+        const t = String(line).trimEnd()
+        line = t.length > 3 ? `${t.slice(0, Math.max(0, t.length - 3)).trimEnd()}...` : `${t}...`
+      }
+      text(line, 22, noteY, noteSize, 'bold')
+      noteY += lineGap
+    }
+  }
 
   text('STANDARD ROUTE DETAILS PROVIDED UPON REQUEST', 22, 443, 7.8)
   text(`AUTOMATED DISPATCH / ARRIVAL (AVR): ${data.avr}`, 22, 473, 7.4, 'bold')

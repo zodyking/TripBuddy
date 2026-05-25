@@ -3,6 +3,7 @@ import { getDataAccountKey, userScopeKey, keyForUser } from './scope-kv.mjs'
 import { emitLog } from './log-bus.mjs'
 import { publishInAppForAccount } from './notification-publish.mjs'
 import { inferTravelDirectionFromTripBody } from './bridge-travel-context.mjs'
+import { usFederalHolidayMileageMultiplierInfoFromLedgerEntry } from '../src/utils/usFederalHolidays.js'
 
 /**
  * @returns {string}
@@ -211,8 +212,15 @@ function mileageSliceFromPriorOdEntry(entry) {
   const mil = /** @type {Record<string, unknown>} */ (td).mileage
   if (!mil || typeof mil !== 'object' || Array.isArray(mil)) return null
   const m = /** @type {Record<string, unknown>} */ (mil)
-  const totalMiles = m.totalMiles != null ? String(m.totalMiles).trim() : ''
-  const runH = m.runTimeHours
+  const totalMilesRaw =
+    m.linehaulRawTotalMiles != null ? String(m.linehaulRawTotalMiles).trim() : ''
+  const totalMiles =
+    totalMilesRaw ||
+    (m.totalMiles != null ? String(m.totalMiles).trim() : '')
+  const runH =
+    m.linehaulRawRunTimeHours != null && Number.isFinite(Number(m.linehaulRawRunTimeHours))
+      ? Number(m.linehaulRawRunTimeHours)
+      : m.runTimeHours
   const hasRt = typeof runH === 'number' && Number.isFinite(runH) && runH > 0
   if (totalMiles === '' && !hasRt) return null
   /** @type {Record<string, unknown>} */
@@ -314,9 +322,18 @@ function applyPriorOdMileageBackfill(ledger) {
     }
     if (!donorSlice) return
 
+    const td1 = mergeTripDetailsMileage(td0, donorSlice)
+    const mergedMil =
+      td1.mileage && typeof td1.mileage === 'object' && !Array.isArray(td1.mileage)
+        ? applyUsFederalHolidayMileageAugmentation(
+            e,
+            /** @type {Record<string, unknown>} */ (td1.mileage),
+          )
+        : td1.mileage
+
     result[i] = {
       ...e,
-      tripDetails: mergeTripDetailsMileage(td0, donorSlice),
+      tripDetails: { ...td1, mileage: mergedMil },
     }
     changed = true
   }
@@ -390,10 +407,69 @@ function applyOdCacheToLedger(ledger, odCache) {
     }
     return {
       ...entry,
-      tripDetails: mergeTripDetailsMileage(td, /** @type {Record<string, unknown>} */ (cached)),
+      tripDetails: (() => {
+        const td1 = mergeTripDetailsMileage(td, /** @type {Record<string, unknown>} */ (cached))
+        const mergedMil =
+          td1.mileage && typeof td1.mileage === 'object' && !Array.isArray(td1.mileage)
+            ? applyUsFederalHolidayMileageAugmentation(
+                entry,
+                /** @type {Record<string, unknown>} */ (td1.mileage),
+              )
+            : td1.mileage
+        return { ...td1, mileage: mergedMil }
+      })(),
     }
   })
 }
+/**
+ * @param {Record<string, unknown>} mileageObj
+ * @param {unknown} entry
+ * @returns {Record<string, unknown>}
+ */
+function applyUsFederalHolidayMileageAugmentation(entry, mileageObj) {
+  const base = { ...mileageObj }
+  const rawSrc =
+    base.linehaulRawTotalMiles != null
+      ? String(base.linehaulRawTotalMiles).trim()
+      : base.totalMiles != null
+        ? String(base.totalMiles).trim()
+        : ''
+  if (!rawSrc) return base
+  const info = usFederalHolidayMileageMultiplierInfoFromLedgerEntry(
+    /** @type {{ recordedAt?: unknown, dispatchedAtMs?: unknown, tripDetails?: unknown }} */ (entry),
+  )
+  if (!info.apply) {
+    if (!base.linehaulRawTotalMiles && base.totalMiles) {
+      base.linehaulRawTotalMiles = String(base.totalMiles).trim()
+    }
+    return base
+  }
+  const num = Number.parseFloat(rawSrc.replace(/,/g, ''))
+  if (!Number.isFinite(num) || num <= 0) return base
+  const adj = Math.round(num * 1.5 * 100) / 100
+  const adjStr = Number.isInteger(adj) ? String(adj) : String(adj)
+  let runAdj = base.runTimeHours
+  if (typeof runAdj === 'number' && Number.isFinite(runAdj) && runAdj > 0) {
+    runAdj = Math.round(runAdj * 1.5 * 1000) / 1000
+  }
+  const rawRun =
+    typeof base.linehaulRawRunTimeHours === 'number' && Number.isFinite(base.linehaulRawRunTimeHours)
+      ? base.linehaulRawRunTimeHours
+      : typeof base.runTimeHours === 'number' && Number.isFinite(base.runTimeHours)
+        ? base.runTimeHours
+        : undefined
+  return {
+    ...base,
+    linehaulRawTotalMiles: rawSrc,
+    ...(rawRun != null ? { linehaulRawRunTimeHours: rawRun } : {}),
+    totalMiles: adjStr,
+    ...(typeof runAdj === 'number' && Number.isFinite(runAdj) ? { runTimeHours: runAdj } : {}),
+    usFederalHolidayMileage1_5x: true,
+    usFederalHolidayMileageSummary: info.detail,
+    usFederalHolidayMileageLabelsCsv: info.labels.join('; '),
+  }
+}
+
 /**
  * @param {unknown[]} ledger
  * @param {string} originId
@@ -409,9 +485,10 @@ function applyOdMileageToLedgerByPair(ledger, originId, destId, mileageObj) {
       entry.tripDetails && typeof entry.tripDetails === 'object'
         ? /** @type {Record<string, unknown>} */ ({ ...entry.tripDetails })
         : {}
+    const augmented = applyUsFederalHolidayMileageAugmentation(entry, mileageObj)
     return {
       ...entry,
-      tripDetails: mergeTripDetailsMileage(td, mileageObj),
+      tripDetails: mergeTripDetailsMileage(td, augmented),
     }
   })
 }

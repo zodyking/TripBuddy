@@ -1,4 +1,5 @@
 import { putAssignment } from '../api.js'
+import { invalidateLastTripMileageFetchKeyForSeq } from '../stores/linehaulSnapshotStore.js'
 
 /**
  * Human-readable local arrival stamp for trip-form PDF / history (browser locale).
@@ -36,4 +37,5 @@ export async function upsertTripHistoryAppCapturedArrival(dailyTripLegSequence, 
       },
     },
   })
+  invalidateLastTripMileageFetchKeyForSeq(seq)
 }
