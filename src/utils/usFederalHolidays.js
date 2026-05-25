@@ -129,21 +129,42 @@ export function usFederalHolidayObservedAmericaNewYork(ms) {
 }
 
 /**
+ * Optional timestamps when the ledger row is briefly missing `dispatchedAtMs` during mileage merge,
+ * or when `mileage.fetchedAt` should count toward the NY holiday calendar.
+ * @typedef {{
+ *   dispatchedAtMs?: unknown,
+ *   mileageFetchedAtMs?: unknown,
+ * }} UsFederalHolidayMileageHints
+ */
+
+/**
  * @param {{ recordedAt?: unknown, dispatchedAtMs?: unknown, tripDetails?: unknown }} entry ledger row
+ * @param {UsFederalHolidayMileageHints | null | undefined} hints
  * @returns {{ apply: boolean, labels: string[], detail: string }}
  */
-export function usFederalHolidayMileageMultiplierInfoFromLedgerEntry(entry) {
+export function usFederalHolidayMileageMultiplierInfoFromLedgerEntry(entry, hints) {
   const labels = /** @type {string[]} */ ([])
   const parts = /** @type {string[]} */ ([])
 
   const ts = []
   const ra = entry?.recordedAt
   if (typeof ra === 'number' && Number.isFinite(ra) && ra > 0) ts.push({ ms: ra, label: 'Assigned' })
-  const dd = entry?.dispatchedAtMs
-  if (typeof dd === 'number' && Number.isFinite(dd) && dd > 0) ts.push({ ms: dd, label: 'Dispatched' })
+  const ledgerDd = entry?.dispatchedAtMs
+  const hintDd = hints && /** @type {UsFederalHolidayMileageHints} */ (hints).dispatchedAtMs
+  const dd =
+    typeof ledgerDd === 'number' && Number.isFinite(ledgerDd) && ledgerDd > 0
+      ? ledgerDd
+      : typeof hintDd === 'number' && Number.isFinite(hintDd) && hintDd > 0
+        ? hintDd
+        : undefined
+  if (dd != null) ts.push({ ms: dd, label: 'Dispatched' })
   const td = entry?.tripDetails && typeof entry.tripDetails === 'object' ? entry.tripDetails : {}
   const aa = /** @type {Record<string, unknown>} */ (td).appCapturedTripArrivalAtMs
   if (typeof aa === 'number' && Number.isFinite(aa) && aa > 0) ts.push({ ms: aa, label: 'Arrived' })
+  const mf = hints && /** @type {UsFederalHolidayMileageHints} */ (hints).mileageFetchedAtMs
+  if (typeof mf === 'number' && Number.isFinite(mf) && mf > 0) {
+    ts.push({ ms: mf, label: 'Mileage snapshot' })
+  }
 
   for (const { ms, label } of ts) {
     const h = usFederalHolidayObservedAmericaNewYork(ms)
