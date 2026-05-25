@@ -3,7 +3,6 @@ import { getDataAccountKey, userScopeKey, keyForUser } from './scope-kv.mjs'
 import { emitLog } from './log-bus.mjs'
 import { publishInAppForAccount } from './notification-publish.mjs'
 import { inferTravelDirectionFromTripBody } from './bridge-travel-context.mjs'
-import { usFederalHolidayMileageMultiplierInfoFromLedgerEntry } from '../src/utils/usFederalHolidays.js'
 
 /**
  * @returns {string}
@@ -51,9 +50,6 @@ export const PRESETS = {
 
 /** Max ledger entries per user (newest first). Soft cap — raised so routine trips are not trimmed. */
 const MAX_TRIP_HISTORY = 2000
-
-/** Bump when `reconcileTripHistoryLedgerHolidayMileage` logic changes and must run again. */
-const HOLIDAY_LEDGER_RECONCILE_VERSION = 1
 
 const TRIP_OUTCOMES = new Set(['delivered', 'rejected', 'removed', 'none'])
 const MAX_TRIP_OUTCOME_REASON_LEN = 500
@@ -328,11 +324,7 @@ function applyPriorOdMileageBackfill(ledger) {
     const td1 = mergeTripDetailsMileage(td0, donorSlice)
     const mergedMil =
       td1.mileage && typeof td1.mileage === 'object' && !Array.isArray(td1.mileage)
-        ? applyUsFederalHolidayMileageAugmentation(
-            e,
-            /** @type {Record<string, unknown>} */ (td1.mileage),
-            undefined,
-          )
+        ? /** @type {Record<string, unknown>} */ (td1.mileage)
         : td1.mileage
 
     result[i] = {
@@ -415,11 +407,7 @@ function applyOdCacheToLedger(ledger, odCache) {
         const td1 = mergeTripDetailsMileage(td, /** @type {Record<string, unknown>} */ (cached))
         const mergedMil =
           td1.mileage && typeof td1.mileage === 'object' && !Array.isArray(td1.mileage)
-            ? applyUsFederalHolidayMileageAugmentation(
-                entry,
-                /** @type {Record<string, unknown>} */ (td1.mileage),
-                undefined,
-              )
+            ? /** @type {Record<string, unknown>} */ (td1.mileage)
             : td1.mileage
         return { ...td1, mileage: mergedMil }
       })(),
@@ -427,76 +415,12 @@ function applyOdCacheToLedger(ledger, odCache) {
   })
 }
 /**
- * @param {Record<string, unknown>} mileageObj
- * @param {unknown} entry
- * @param {{ dispatchedAtMs?: unknown } | undefined} fetchHints Optional dispatch instant from the
- *   mileage fetch request when the ledger row does not yet include `dispatchedAtMs`.
- * @returns {Record<string, unknown>}
- */
-function applyUsFederalHolidayMileageAugmentation(entry, mileageObj, fetchHints) {
-  const base = { ...mileageObj }
-  const rawSrc =
-    base.linehaulRawTotalMiles != null
-      ? String(base.linehaulRawTotalMiles).trim()
-      : base.totalMiles != null
-        ? String(base.totalMiles).trim()
-        : ''
-  if (!rawSrc) return base
-  /** @type {{ dispatchedAtMs?: unknown, mileageFetchedAtMs?: unknown }} */
-  const holidayHints = {}
-  if (fetchHints && typeof fetchHints === 'object') {
-    const hd = /** @type {{ dispatchedAtMs?: unknown }} */ (fetchHints).dispatchedAtMs
-    if (typeof hd === 'number' && Number.isFinite(hd) && hd > 0) {
-      holidayHints.dispatchedAtMs = hd
-    }
-  }
-  if (typeof base.fetchedAt === 'number' && Number.isFinite(base.fetchedAt) && base.fetchedAt > 0) {
-    holidayHints.mileageFetchedAtMs = base.fetchedAt
-  }
-  const info = usFederalHolidayMileageMultiplierInfoFromLedgerEntry(
-    /** @type {{ recordedAt?: unknown, dispatchedAtMs?: unknown, tripDetails?: unknown }} */ (entry),
-    Object.keys(holidayHints).length ? holidayHints : undefined,
-  )
-  if (!info.apply) {
-    if (!base.linehaulRawTotalMiles && base.totalMiles) {
-      base.linehaulRawTotalMiles = String(base.totalMiles).trim()
-    }
-    return base
-  }
-  const num = Number.parseFloat(rawSrc.replace(/,/g, ''))
-  if (!Number.isFinite(num) || num <= 0) return base
-  const adj = Math.round(num * 1.5 * 100) / 100
-  const adjStr = Number.isInteger(adj) ? String(adj) : String(adj)
-  let runAdj = base.runTimeHours
-  if (typeof runAdj === 'number' && Number.isFinite(runAdj) && runAdj > 0) {
-    runAdj = Math.round(runAdj * 1.5 * 1000) / 1000
-  }
-  const rawRun =
-    typeof base.linehaulRawRunTimeHours === 'number' && Number.isFinite(base.linehaulRawRunTimeHours)
-      ? base.linehaulRawRunTimeHours
-      : typeof base.runTimeHours === 'number' && Number.isFinite(base.runTimeHours)
-        ? base.runTimeHours
-        : undefined
-  return {
-    ...base,
-    linehaulRawTotalMiles: rawSrc,
-    ...(rawRun != null ? { linehaulRawRunTimeHours: rawRun } : {}),
-    totalMiles: adjStr,
-    ...(typeof runAdj === 'number' && Number.isFinite(runAdj) ? { runTimeHours: runAdj } : {}),
-    usFederalHolidayMileage1_5x: true,
-    usFederalHolidayMileageSummary: info.detail,
-    usFederalHolidayMileageLabelsCsv: info.labels.join('; '),
-  }
-}
-
-/**
  * @param {unknown[]} ledger
  * @param {string} originId
  * @param {string} destId
  * @param {Record<string, unknown>} mileageObj
- * @param {{ dispatchedAtMs?: unknown } | undefined} fetchHints
  */
-function applyOdMileageToLedgerByPair(ledger, originId, destId, mileageObj, fetchHints) {
+function applyOdMileageToLedgerByPair(ledger, originId, destId, mileageObj) {
   const o = String(originId).trim()
   const d = String(destId).trim()
   return ledger.map((entry) => {
@@ -505,50 +429,11 @@ function applyOdMileageToLedgerByPair(ledger, originId, destId, mileageObj, fetc
       entry.tripDetails && typeof entry.tripDetails === 'object'
         ? /** @type {Record<string, unknown>} */ ({ ...entry.tripDetails })
         : {}
-    const augmented = applyUsFederalHolidayMileageAugmentation(entry, mileageObj, fetchHints)
     return {
       ...entry,
-      tripDetails: mergeTripDetailsMileage(td, augmented),
+      tripDetails: mergeTripDetailsMileage(td, mileageObj),
     }
   })
-}
-
-/**
- * One-time / version-gated: fix rows that have mileage but missed holiday augmentation.
- * @param {unknown[]} ledger
- * @returns {{ ledger: unknown[], changed: boolean }}
- */
-function reconcileTripHistoryLedgerHolidayMileage(ledger) {
-  if (!Array.isArray(ledger) || ledger.length === 0) {
-    return { ledger, changed: false }
-  }
-  let changed = false
-  const out = ledger.map((entry) => {
-    if (!entry || typeof entry !== 'object') return entry
-    const e = /** @type {Record<string, unknown>} */ (entry)
-    const td =
-      e.tripDetails && typeof e.tripDetails === 'object' && !Array.isArray(e.tripDetails)
-        ? /** @type {Record<string, unknown>} */ ({ ...e.tripDetails })
-        : null
-    if (!td) return entry
-    const mil =
-      td.mileage && typeof td.mileage === 'object' && !Array.isArray(td.mileage)
-        ? /** @type {Record<string, unknown>} */ ({ ...td.mileage })
-        : null
-    if (!mil) return entry
-    if (mil.usFederalHolidayMileage1_5x === true) return entry
-    const totalStr = mil.totalMiles != null ? String(mil.totalMiles).trim() : ''
-    if (!totalStr) return entry
-
-    const nextMil = applyUsFederalHolidayMileageAugmentation(e, mil, undefined)
-    if (nextMil.usFederalHolidayMileage1_5x !== true) return entry
-    changed = true
-    return {
-      ...e,
-      tripDetails: { ...td, mileage: nextMil },
-    }
-  })
-  return { ledger: changed ? out : ledger, changed }
 }
 
 const DEFAULT_ASSIGNMENT = {
@@ -566,8 +451,6 @@ const DEFAULT_ASSIGNMENT = {
   lastDailyTripLegSequencePersisted: null,
   /** Completed trips ledger: { id, completedAt, dailyTripLegSequence, dispatchHeader, tripDetails } */
   tripHistoryLedger: [],
-  /** Server migration: `reconcileTripHistoryLedgerHolidayMileage` last applied at this version. */
-  holidayMileageLedgerReconcileVersion: 0,
 }
 
 function cloneDefault() {
@@ -663,12 +546,6 @@ function normalizeAssignmentData(data) {
       /^\d+$/.test(data.lastDailyTripLegSequencePersisted)
         ? data.lastDailyTripLegSequencePersisted
         : null,
-    holidayMileageLedgerReconcileVersion:
-      typeof data.holidayMileageLedgerReconcileVersion === 'number' &&
-      Number.isFinite(data.holidayMileageLedgerReconcileVersion) &&
-      data.holidayMileageLedgerReconcileVersion >= 0
-        ? data.holidayMileageLedgerReconcileVersion
-        : 0,
   }
   if (!Array.isArray(base.hiddenDailyTripLegSequences)) {
     base.hiddenDailyTripLegSequences = []
@@ -705,22 +582,6 @@ export async function readAssignment() {
   const odBack = applyPriorOdMileageBackfill(n.tripHistoryLedger)
   if (odBack.changed) {
     n.tripHistoryLedger = odBack.ledger
-  }
-  const ver =
-    typeof n.holidayMileageLedgerReconcileVersion === 'number' &&
-    Number.isFinite(n.holidayMileageLedgerReconcileVersion)
-      ? n.holidayMileageLedgerReconcileVersion
-      : 0
-  let dirty = odBack.changed
-  if (ver < HOLIDAY_LEDGER_RECONCILE_VERSION) {
-    const holidayRec = reconcileTripHistoryLedgerHolidayMileage(n.tripHistoryLedger)
-    if (holidayRec.changed) {
-      n.tripHistoryLedger = holidayRec.ledger
-    }
-    n.holidayMileageLedgerReconcileVersion = HOLIDAY_LEDGER_RECONCILE_VERSION
-    dirty = true
-  }
-  if (dirty) {
     await writeKeyJson(key, n)
   }
   return n
@@ -745,19 +606,6 @@ export async function readAssignmentForAccount(accountKey) {
   if (!('persistedCachedTripSnapshot' in n)) n.persistedCachedTripSnapshot = null
   if (!('lastDailyTripLegSequencePersisted' in n)) n.lastDailyTripLegSequencePersisted = null
   if (!Array.isArray(n.tripHistoryLedger)) n.tripHistoryLedger = []
-  const ver =
-    typeof n.holidayMileageLedgerReconcileVersion === 'number' &&
-    Number.isFinite(n.holidayMileageLedgerReconcileVersion)
-      ? n.holidayMileageLedgerReconcileVersion
-      : 0
-  if (ver < HOLIDAY_LEDGER_RECONCILE_VERSION) {
-    const holidayRec = reconcileTripHistoryLedgerHolidayMileage(n.tripHistoryLedger)
-    if (holidayRec.changed) {
-      n.tripHistoryLedger = holidayRec.ledger
-    }
-    n.holidayMileageLedgerReconcileVersion = HOLIDAY_LEDGER_RECONCILE_VERSION
-    await writeKeyJson(key, n)
-  }
   return n
 }
 
@@ -848,12 +696,6 @@ export async function writeAssignment(body) {
     lastDailyTripLegSequencePersisted =
       typeof s === 'string' && /^\d+$/.test(s) ? s : null
   }
-
-  const holidayVer =
-    typeof prev.holidayMileageLedgerReconcileVersion === 'number' &&
-    Number.isFinite(prev.holidayMileageLedgerReconcileVersion)
-      ? prev.holidayMileageLedgerReconcileVersion
-      : 0
 
   let tripHistoryLedger = Array.isArray(prev.tripHistoryLedger)
     ? prev.tripHistoryLedger
@@ -1114,18 +956,11 @@ export async function writeAssignment(body) {
     const rawBody = p.body
     const mileageObj = mileagePayloadFromApiBody(rawBody)
     if (pk && mileageObj) {
-      const dispatchHint =
-        typeof p.dispatchedAtMs === 'number' &&
-        Number.isFinite(p.dispatchedAtMs) &&
-        p.dispatchedAtMs > 0
-          ? { dispatchedAtMs: p.dispatchedAtMs }
-          : undefined
       tripHistoryLedger = applyOdMileageToLedgerByPair(
         tripHistoryLedger,
         oid,
         did,
         mileageObj,
-        dispatchHint,
       )
     }
   } else if (body.patchTripHistoryEntry && typeof body.patchTripHistoryEntry === 'object') {
@@ -1238,7 +1073,6 @@ export async function writeAssignment(body) {
     persistedCachedTripSnapshot,
     lastDailyTripLegSequencePersisted,
     tripHistoryLedger,
-    holidayMileageLedgerReconcileVersion: holidayVer,
   }
 
   await writeKeyJson(key, next)

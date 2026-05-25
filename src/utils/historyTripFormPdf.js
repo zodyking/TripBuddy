@@ -472,30 +472,10 @@ async function buildTripFormJsPdf(opts) {
     '-',
   )
 
-  const milObj =
+  const paidMi =
     td.mileage && typeof td.mileage === 'object' && !Array.isArray(td.mileage)
-      ? /** @type {Record<string, unknown>} */ (td.mileage)
-      : null
-  const paidMi = milObj ? String(milObj.totalMiles ?? '').trim() : ''
-
-  /** Visible federal-holiday paid-mileage disclosure (matches History / week PDF tone). */
-  let paidMileageNote = ''
-  if (milObj && milObj.usFederalHolidayMileage1_5x === true) {
-    const summary =
-      typeof milObj.usFederalHolidayMileageSummary === 'string'
-        ? milObj.usFederalHolidayMileageSummary.trim()
-        : ''
-    const b = milObj.linehaulRawTotalMiles != null ? String(milObj.linehaulRawTotalMiles).trim() : ''
-    const a = milObj.totalMiles != null ? String(milObj.totalMiles).trim() : ''
-    if (summary) {
-      paidMileageNote = `Federal holiday paid miles 1.5×: ${summary}`
-    } else if (b && a) {
-      paidMileageNote = `Federal holiday mileage 1.5× applied: ${b} -> ${a} mi (America/New York calendar).`
-    } else {
-      paidMileageNote = 'Federal holiday mileage 1.5× (time and a half) applied to paid miles.'
-    }
-    paidMileageNote = ascii(paidMileageNote)
-  }
+      ? String(/** @type {Record<string, unknown>} */ (td.mileage).totalMiles ?? '').trim()
+      : ''
 
   const dispatchTs =
     typeof e.displayDate === 'number' && Number.isFinite(e.displayDate) && e.displayDate > 0
@@ -634,7 +614,6 @@ async function buildTripFormJsPdf(opts) {
     zip: destZip,
     phone: destPhone,
     paid: paidMi || '-',
-    paidMileageNote,
     avr: '1-888-867-1142',
     invoiceRef: tmsRef,
     gpsNorth: latStr,

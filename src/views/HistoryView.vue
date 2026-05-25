@@ -286,12 +286,7 @@ function mileageBlock(e) {
       : null
   const dl = Array.isArray(mo.directionList) ? mo.directionList : []
   if (!total && !dl.length && run == null) return null
-  const holiday1_5 = mo.usFederalHolidayMileage1_5x === true
-  const baseMi =
-    mo.linehaulRawTotalMiles != null ? String(mo.linehaulRawTotalMiles).trim() : ''
-  const summary =
-    typeof mo.usFederalHolidayMileageSummary === 'string' ? mo.usFederalHolidayMileageSummary.trim() : ''
-  return { total, run, directionList: dl, holiday1_5, baseMi, summary }
+  return { total, run, directionList: dl }
 }
 
 /**
@@ -651,18 +646,6 @@ function computeWeekPayEstimate(items) {
     sumBillable += billableMi
     const dispatchCols = tripPdfDispatchColumns(e)
     const dispatchedMs = ledgerDispatchedAtMsForPay(e)
-    const td = e.tripDetails && typeof e.tripDetails === 'object' ? /** @type {Record<string, unknown>} */ (e.tripDetails) : {}
-    const mil = td.mileage && typeof td.mileage === 'object' && !Array.isArray(td.mileage) ? td.mileage : null
-    const mo = mil ? /** @type {Record<string, unknown>} */ (mil) : null
-    let holidayMileageLine = ''
-    if (mo && mo.usFederalHolidayMileage1_5x === true) {
-      const b = mo.linehaulRawTotalMiles != null ? String(mo.linehaulRawTotalMiles).trim() : ''
-      const a = mo.totalMiles != null ? String(mo.totalMiles).trim() : ''
-      holidayMileageLine =
-        b && a
-          ? `Federal holiday mileage 1.5× applied: ${b} → ${a} mi (America/New York calendar).`
-          : 'Federal holiday mileage 1.5× (time and a half) applied.'
-    }
     rows.push({
       id: e.id,
       dailyTripLegSequence: e.dailyTripLegSequence || '',
@@ -685,7 +668,6 @@ function computeWeekPayEstimate(items) {
       tractorNumber: tripPdfTractor(e),
       paidMi,
       billableMi,
-      holidayMileageLine,
       rounded: base >= PAY_ROUND_BAND_MIN && base <= PAY_ROUND_BAND_MAX,
       equipmentPdfBlock: formatTripEquipmentPdfBlock(e.tripDetails),
     })
@@ -1404,7 +1386,6 @@ async function onDownloadWeekTotalsPdf(wg) {
           when: r.when,
           billableMi: r.billableMi,
           rounded: r.rounded,
-          holidayMileageLine: r.holidayMileageLine,
           originId: r.originId,
           destId: r.destId,
           originLocationName: oDir?.locationName ?? '',
@@ -2599,14 +2580,6 @@ onUnmounted(() => {
                               </template>
                             </p>
                           </div>
-                          <p v-if="mb && mb.holiday1_5" class="history-mileage-holiday">
-                            <span class="history-mileage-holiday__tag">1.5×</span>
-                            <span v-if="mb.baseMi && mb.total" class="history-mileage-holiday__nums"
-                              >{{ mb.baseMi }} → {{ mb.total }} mi (federal holiday)</span
-                            >
-                            <span v-else class="history-mileage-holiday__nums">Federal holiday · time and a half</span>
-                            <span v-if="mb.summary" class="history-mileage-holiday__sum">{{ mb.summary }}</span>
-                          </p>
                           <ul
                             v-if="mb && mb.directionList && mb.directionList.length"
                             class="history-mileage-by-state"
@@ -4616,39 +4589,6 @@ onUnmounted(() => {
   font-weight: 600;
   color: var(--color-text-secondary, #b4b4c4);
   font-variant-numeric: tabular-nums;
-}
-
-.history-mileage-holiday {
-  margin: 0.35rem 0 0;
-  padding: 0.35rem 0.45rem;
-  border-radius: 6px;
-  background: rgba(123, 77, 181, 0.15);
-  border: 1px solid rgba(255, 107, 26, 0.35);
-  font-size: 0.66rem;
-  line-height: 1.35;
-  color: var(--color-text-primary, #f0f0f8);
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.35rem;
-  align-items: baseline;
-}
-.history-mileage-holiday__tag {
-  font-weight: 800;
-  letter-spacing: 0.04em;
-  padding: 0.08rem 0.32rem;
-  border-radius: 4px;
-  background: var(--color-accent-orange, #ff6b1a);
-  color: #1a0d06;
-  font-size: 0.62rem;
-}
-.history-mileage-holiday__nums {
-  font-weight: 700;
-  color: #fde68a;
-}
-.history-mileage-holiday__sum {
-  flex-basis: 100%;
-  font-size: 0.6rem;
-  color: var(--color-text-secondary, #b8b8c8);
 }
 
 .history-mileage-by-state {

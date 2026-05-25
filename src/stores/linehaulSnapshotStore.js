@@ -696,10 +696,9 @@ let lastTripMileageOkKey = ''
 /** Clear mileage fetch dedupe for a leg so the next poll can refetch (e.g. after arrival timestamp). */
 export function invalidateLastTripMileageFetchKeyForSeq(seq) {
   const s = String(seq ?? '').trim()
-  if (!s || !lastTripMileageOkKey) return
-  const parts = lastTripMileageOkKey.split('|')
-  const keySeq = parts[0] === 'hm2' && parts.length > 1 ? parts[1] : parts[0]
-  if (keySeq === s) lastTripMileageOkKey = ''
+  if (!s) return
+  const prefix = `${s}|`
+  if (lastTripMileageOkKey.startsWith(prefix)) lastTripMileageOkKey = ''
 }
 
 /** Clear in-memory trip state (call on sign-out; hidden seq comes from getAssignment on next sign-in). */
@@ -1736,8 +1735,7 @@ async function maybeFetchTripMileageAfterDispatched() {
   const destinationId = stable.destination?.number || ''
 
   if (!seq || !originId || !destinationId) return
-  /** Bump when server holiday merge rules change so one refetch re-applies flags. */
-  const fetchKey = `hm2|${seq}|${originId}|${destinationId}`
+  const fetchKey = `${seq}|${originId}|${destinationId}`
   if (lastTripMileageOkKey === fetchKey) return
 
   const tractorBody = linehaulTractorBody.value
@@ -1756,19 +1754,12 @@ async function maybeFetchTripMileageAfterDispatched() {
   })
   if (!res.ok || res.body == null || typeof res.body !== 'object') return
 
-  const pendingDispatchMs = pendingDispatchedAtMsBySeq.get(String(seq).trim())
-
   try {
     await putAssignment({
       applyOdMileageFromFetch: {
         originId,
         destinationId,
         body: res.body,
-        ...(typeof pendingDispatchMs === 'number' &&
-        Number.isFinite(pendingDispatchMs) &&
-        pendingDispatchMs > 0
-          ? { dispatchedAtMs: pendingDispatchMs }
-          : {}),
       },
     })
     lastTripMileageOkKey = fetchKey

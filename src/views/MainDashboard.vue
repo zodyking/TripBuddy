@@ -401,18 +401,6 @@ const tripProgressDenomNm = computed(() => {
   return 180
 })
 
-const tripHolidayMileageUi = computed(() => {
-  const row = currentTripLedgerRow.value
-  const td = row?.tripDetails && typeof row.tripDetails === 'object' ? /** @type {Record<string, unknown>} */ (row.tripDetails) : {}
-  const m = td.mileage && typeof td.mileage === 'object' && !Array.isArray(td.mileage) ? td.mileage : null
-  if (!m || /** @type {Record<string, unknown>} */ (m).usFederalHolidayMileage1_5x !== true) return null
-  const mo = /** @type {Record<string, unknown>} */ (m)
-  const base = mo.linehaulRawTotalMiles != null ? String(mo.linehaulRawTotalMiles).trim() : ''
-  const adj = mo.totalMiles != null ? String(mo.totalMiles).trim() : ''
-  const sum = typeof mo.usFederalHolidayMileageSummary === 'string' ? mo.usFederalHolidayMileageSummary.trim() : ''
-  return { base, adj, sum }
-})
-
 const showTripOdProgressBar = computed(
   () => Boolean(linehaulTripsBody.value) && !linehaulTripsError.value && dispatchSlideIndex.value === 0,
 )
@@ -2812,16 +2800,6 @@ onUnmounted(() => {
                   <span v-else class="dispatch-od-val dispatch-od-val--text">{{ tripOriginDest.destination }}</span>
                 </div>
               </div>
-              <div v-if="tripHolidayMileageUi" class="trip-holiday-mile-pill" role="status">
-                <span class="trip-holiday-mile-pill__tag">1.5×</span>
-                <span class="trip-holiday-mile-pill__body">
-                  <strong>Federal holiday mileage</strong>
-                  (time and a half)
-                  <template v-if="tripHolidayMileageUi.base && tripHolidayMileageUi.adj">
-                    · {{ tripHolidayMileageUi.base }} → {{ tripHolidayMileageUi.adj }} mi
-                  </template>
-                </span>
-              </div>
               <TripOdProgressBar
                 v-if="showTripOdProgressBar"
                 :assigned-ms="tripProgressAssignedMs ?? undefined"
@@ -4199,37 +4177,6 @@ button.trailer-nbr.copyable-inline {
   display: flex;
   flex-direction: column;
   gap: 0.35rem;
-}
-.trip-holiday-mile-pill {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  flex-wrap: wrap;
-  padding: 0.45rem 0.65rem;
-  border-radius: 8px;
-  background: linear-gradient(
-    90deg,
-    rgba(123, 77, 181, 0.22),
-    rgba(255, 107, 26, 0.18)
-  );
-  border: 1px solid rgba(255, 107, 26, 0.35);
-  font-size: 0.78rem;
-  line-height: 1.35;
-  color: var(--text, #e8e8ee);
-}
-.trip-holiday-mile-pill__tag {
-  flex-shrink: 0;
-  padding: 0.12rem 0.45rem;
-  border-radius: 6px;
-  font-weight: 800;
-  font-size: 0.72rem;
-  letter-spacing: 0.04em;
-  background: var(--color-accent-orange, #ff6b1a);
-  color: #1a0d06;
-}
-.trip-holiday-mile-pill__body strong {
-  font-weight: 700;
-  color: #fde68a;
 }
 .dispatch-preplan-badge {
   align-self: flex-start;
