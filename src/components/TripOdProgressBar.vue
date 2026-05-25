@@ -2,30 +2,18 @@
 import { computed } from 'vue'
 
 const props = defineProps({
-  /** First-seen / assigned instant (ms) */
   assignedMs: { type: Number, default: null },
-  /** First dispatch / ENRT instant (ms) */
   dispatchedMs: { type: Number, default: null },
-  /** Arrival instant when known (ms) */
   arrivedMs: { type: Number, default: null },
-  /** Haversine distance from current position to destination terminal (meters) */
   distMeters: { type: Number, default: null },
-  /** Haversine origin-terminal → destination-terminal leg length (meters) */
   legOdMeters: { type: Number, default: null },
-  /** Fallback NM scale when `legOdMeters` is unknown (paid miles heuristic from parent) */
   denomNm: { type: Number, default: 180 },
-  /**
-   * Trip phase from FedEx/driver state (used when OD leg or position is incomplete).
-   * @type {'assigned' | 'dispatched' | 'none'}
-   */
   tripPhase: { type: String, default: 'none' },
 })
 
-/** X positions for Assigned / Dispatched / Arrive ticks (percent of track width). */
-const M1 = 6
+const M1 = 7
 const M2 = 50
-const M3 = 94
-
+const M3 = 93
 const MIN_LEG_NM = 0.25
 
 function fmtTime(ms) {
@@ -43,7 +31,6 @@ const odLegNm = computed(() => {
   return props.legOdMeters / 1852
 })
 
-/** NM covered toward destination along the OD leg (straight-line model: leg − remaining). */
 const coveredNm = computed(() => {
   const leg = odLegNm.value
   const rem = distNm.value
@@ -51,60 +38,51 @@ const coveredNm = computed(() => {
   return Math.max(0, leg - rem)
 })
 
-/**
- * Progress 0..1 from origin toward destination: covered OD NM / total OD NM.
- * Clamped when remaining exceeds leg (off-path GPS) or data is thin.
- */
 const odProgressFraction = computed(() => {
   const leg = odLegNm.value
   const rem = distNm.value
   if (leg == null || rem == null || leg < MIN_LEG_NM) return null
-  const raw = (leg - rem) / leg
-  return Math.min(1, Math.max(0, raw))
+  return Math.min(1, Math.max(0, (leg - rem) / leg))
 })
 
 const fillPct = computed(() => {
   if (typeof props.arrivedMs === 'number' && Number.isFinite(props.arrivedMs) && props.arrivedMs > 0) {
     return 100
   }
-
   const frac = odProgressFraction.value
   if (frac != null) {
     return Math.round(Math.min(100, Math.max(0, 100 * frac)))
   }
-
   const rem = distNm.value
   if (props.tripPhase === 'dispatched' && rem != null) {
     const cap = Math.max(15, props.denomNm)
     const raw = 100 * (1 - Math.min(1, Math.max(0, rem) / cap))
     return Math.round(Math.min(100, Math.max(5, raw)))
   }
-
   if (typeof props.assignedMs === 'number' && Number.isFinite(props.assignedMs) && props.assignedMs > 0) {
     const elapsed = Math.max(0, Date.now() - props.assignedMs)
     const hours = elapsed / (1000 * 60 * 60)
-    const bump = Math.min(32, hours * 5)
-    return Math.round(Math.min(M2 - 4, Math.max(6, 10 + bump)))
+    const bump = Math.min(28, hours * 4)
+    return Math.round(Math.min(44, Math.max(5, 8 + bump)))
   }
-
-  return 10
+  return 8
 })
 
 const milestoneMeta = computed(() => {
   const arrivedKnown = typeof props.arrivedMs === 'number' && Number.isFinite(props.arrivedMs) && props.arrivedMs > 0
   return [
-    { key: 'asg', label: 'Assigned', leftPct: M1, time: fmtTime(props.assignedMs) },
-    { key: 'dsp', label: 'Dispatched', leftPct: M2, time: fmtTime(props.dispatchedMs) },
-    { key: 'arv', label: 'Arrive', leftPct: M3, time: arrivedKnown ? fmtTime(props.arrivedMs) : '—' },
+    { key: 'asg', abbr: 'Asg', leftPct: M1, time: fmtTime(props.assignedMs) },
+    { key: 'dsp', abbr: 'Dsp', leftPct: M2, time: fmtTime(props.dispatchedMs) },
+    { key: 'arv', abbr: 'Arr', leftPct: M3, time: arrivedKnown ? fmtTime(props.arrivedMs) : '—' },
   ]
 })
 
-const distanceHeadline = computed(() => {
+const statsLine = computed(() => {
   const rem = distNm.value
   const leg = odLegNm.value
   const cov = coveredNm.value
   if (rem != null && leg != null && cov != null) {
-    return `${rem.toFixed(1)} NM out · ${cov.toFixed(1)} / ${leg.toFixed(1)} NM`
+    return `${rem.toFixed(1)} NM · ${cov.toFixed(1)}/${leg.toFixed(1)}`
   }
   if (rem != null) return `${rem.toFixed(1)} NM out`
   return null
@@ -112,50 +90,54 @@ const distanceHeadline = computed(() => {
 
 const ariaProgress = computed(() => {
   if (typeof props.arrivedMs === 'number' && Number.isFinite(props.arrivedMs) && props.arrivedMs > 0) {
-    return 'Trip complete; arrived.'
+    return 'Arrived.'
   }
   const rem = distNm.value
   const leg = odLegNm.value
   const cov = coveredNm.value
   if (rem != null && leg != null && cov != null) {
-    return `About ${rem.toFixed(1)} nautical miles to destination; roughly ${cov.toFixed(1)} of ${leg.toFixed(1)} nautical miles along the origin-to-destination leg.`
+    return `${rem.toFixed(1)} NM to destination; about ${cov.toFixed(1)} of ${leg.toFixed(1)} NM along the leg.`
   }
   if (props.tripPhase === 'dispatched' && rem != null) {
-    return `En route; about ${rem.toFixed(1)} nautical miles to destination.`
+    return `${rem.toFixed(1)} NM to destination.`
   }
-  return 'Pre-departure or incomplete location data for origin-to-destination distance.'
+  return 'Leg progress; location data may be incomplete.'
+})
+
+const ariaGroupLabel = computed(() => {
+  const m = milestoneMeta.value
+  return `Leg progress. Asg ${m[0].time}, Dsp ${m[1].time}, Arr ${m[2].time}. ${ariaProgress.value}`
 })
 </script>
 
 <template>
-  <div class="trip-od-progress" role="group" :aria-label="`Trip progress to destination. ${ariaProgress}`">
-    <div class="trip-od-progress__head">
-      <span class="trip-od-progress__title">Progress to destination</span>
-      <span v-if="distanceHeadline != null" class="trip-od-progress__nm">{{ distanceHeadline }}</span>
-      <span v-else class="trip-od-progress__nm trip-od-progress__nm--muted">Distance —</span>
+  <div class="trip-od-progress" role="group" :aria-label="ariaGroupLabel">
+    <div class="trip-od-progress__top">
+      <span class="trip-od-progress__title">Leg progress</span>
+      <span v-if="statsLine != null" class="trip-od-progress__stats">{{ statsLine }}</span>
+      <span v-else class="trip-od-progress__stats trip-od-progress__stats--muted">—</span>
     </div>
 
-    <div class="trip-od-progress__milestones" aria-hidden="true">
-      <div
-        v-for="m in milestoneMeta"
-        :key="m.key"
-        class="trip-od-progress__ms-col"
-        :class="`trip-od-progress__ms-col--${m.key}`"
-      >
-        <span class="trip-od-progress__ms-label">{{ m.label }}</span>
-        <span class="trip-od-progress__ms-time">{{ m.time }}</span>
-      </div>
-    </div>
-
-    <div class="trip-od-progress__track-wrap">
+    <div class="trip-od-progress__track-block">
       <div class="trip-od-progress__track" aria-hidden="true">
         <div class="trip-od-progress__fill" :style="{ width: fillPct + '%' }" />
         <div
           v-for="m in milestoneMeta"
-          :key="'tick-' + m.key"
+          :key="'t-' + m.key"
           class="trip-od-progress__tick"
           :style="{ left: m.leftPct + '%' }"
         />
+      </div>
+      <div class="trip-od-progress__caps" aria-hidden="true">
+        <span
+          v-for="m in milestoneMeta"
+          :key="'c-' + m.key"
+          class="trip-od-progress__cap"
+          :class="'trip-od-progress__cap--' + m.key"
+        >
+          <span class="trip-od-progress__abbr">{{ m.abbr }}</span>
+          <span class="trip-od-progress__time">{{ m.time }}</span>
+        </span>
       </div>
     </div>
   </div>
@@ -163,122 +145,123 @@ const ariaProgress = computed(() => {
 
 <style scoped>
 .trip-od-progress {
-  margin-top: 0.65rem;
-  padding-top: 0.55rem;
-  border-top: 1px solid var(--color-border, rgba(255, 255, 255, 0.08));
+  margin-top: 0.4rem;
+  padding-top: 0.35rem;
+  border-top: 1px solid var(--color-border, rgba(255, 255, 255, 0.07));
 }
 
-.trip-od-progress__head {
+.trip-od-progress__top {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   justify-content: space-between;
-  flex-wrap: wrap;
-  gap: 0.35rem 0.5rem;
-  margin-bottom: 0.35rem;
+  gap: 0.4rem;
+  margin-bottom: 0.28rem;
+  min-height: 1.1rem;
 }
 
 .trip-od-progress__title {
-  font-size: var(--text-xs, 0.72rem);
-  font-weight: var(--weight-semibold, 600);
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  color: var(--color-text-tertiary, #8b8b98);
-}
-
-.trip-od-progress__nm {
-  font-size: var(--text-xs, 0.72rem);
+  flex: 0 1 auto;
+  font-size: 0.62rem;
   font-weight: 600;
-  color: var(--color-accent-orange, #ff6b1a);
-  text-align: right;
-  min-width: 0;
-  max-width: 100%;
-  line-height: 1.25;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--color-text-tertiary, #8f8f9c);
+  white-space: nowrap;
 }
 
-.trip-od-progress__nm--muted {
-  color: var(--color-text-tertiary, #8b8b98);
+.trip-od-progress__stats {
+  flex: 1 1 auto;
+  text-align: right;
+  font-size: 0.62rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--color-accent-orange, #f97316);
+  min-width: 0;
+  line-height: 1.2;
+}
+
+.trip-od-progress__stats--muted {
+  color: var(--color-text-tertiary, #7a7a88);
   font-weight: 500;
 }
 
-.trip-od-progress__milestones {
-  display: grid;
-  grid-template-columns: 1fr 1fr 1fr;
-  align-items: start;
-  gap: 0.25rem 0.35rem;
-  margin-bottom: 0.4rem;
-  font-size: 0.62rem;
-  line-height: 1.2;
-  color: var(--color-text-secondary, #c8c8d4);
-}
-
-.trip-od-progress__ms-col {
+.trip-od-progress__track-block {
   display: flex;
   flex-direction: column;
-  gap: 1px;
-  min-width: 0;
-}
-
-.trip-od-progress__ms-col--asg {
-  text-align: left;
-}
-.trip-od-progress__ms-col--dsp {
-  text-align: center;
-}
-.trip-od-progress__ms-col--arv {
-  text-align: right;
-}
-
-.trip-od-progress__ms-label {
-  font-weight: 700;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  color: var(--color-text-tertiary, #9a9aa8);
-  font-size: 0.58rem;
-}
-
-.trip-od-progress__ms-time {
-  font-weight: 500;
-  color: var(--color-text-secondary, #b6b6c4);
-}
-
-.trip-od-progress__track-wrap {
-  position: relative;
-  padding-bottom: 2px;
+  gap: 0.2rem;
 }
 
 .trip-od-progress__track {
   position: relative;
-  height: 10px;
-  border-radius: var(--radius-full, 9999px);
-  background: var(--color-glass, rgba(22, 22, 29, 0.55));
-  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.35);
+  height: 5px;
+  border-radius: 9999px;
+  background: rgba(0, 0, 0, 0.28);
+  box-shadow: inset 0 1px 1px rgba(0, 0, 0, 0.45);
   overflow: visible;
 }
 
 .trip-od-progress__fill {
   height: 100%;
-  border-radius: var(--radius-full, 9999px);
-  background: linear-gradient(
-    90deg,
-    var(--color-accent-purple, #7b4db5),
-    var(--color-accent-orange, #ff6b1a)
-  );
-  box-shadow: 0 0 12px rgba(123, 77, 181, 0.35);
-  transition: width 0.45s var(--ease-out, ease-out);
-  position: relative;
-  z-index: 0;
+  border-radius: 9999px;
+  background: linear-gradient(90deg, #6d3ea3 0%, #c2410c 100%);
+  opacity: 0.92;
+  transition: width 0.38s cubic-bezier(0.33, 1, 0.68, 1);
+  box-shadow: 0 0 6px rgba(109, 62, 163, 0.35);
 }
 
 .trip-od-progress__tick {
   position: absolute;
-  top: 0;
-  bottom: 0;
-  width: 2px;
+  top: 50%;
+  width: 1px;
+  height: 9px;
+  margin-top: -4px;
   transform: translateX(-50%);
   border-radius: 1px;
-  background: rgba(244, 244, 248, 0.92);
-  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.45);
-  z-index: 2;
+  background: rgba(255, 255, 255, 0.42);
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.35);
   pointer-events: none;
+  z-index: 1;
+}
+
+.trip-od-progress__caps {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  align-items: start;
+  gap: 0 0.15rem;
+  font-size: 0.52rem;
+  line-height: 1.15;
+  color: var(--color-text-tertiary, #8b8b98);
+}
+
+.trip-od-progress__cap {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  min-width: 0;
+}
+
+.trip-od-progress__cap--asg {
+  text-align: left;
+}
+.trip-od-progress__cap--dsp {
+  text-align: center;
+}
+.trip-od-progress__cap--arv {
+  text-align: right;
+}
+
+.trip-od-progress__abbr {
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  font-size: 0.5rem;
+  color: var(--color-text-tertiary, #7e7e8c);
+}
+
+.trip-od-progress__time {
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  font-size: 0.52rem;
+  color: var(--color-text-secondary, #a8a8b8);
 }
 </style>
