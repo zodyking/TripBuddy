@@ -13,6 +13,10 @@ import {
 } from '../api.js'
 import { pushLiveLog } from './liveLogStore.js'
 import {
+  startLinehaulBearerCaptureOverlay,
+  finishLinehaulBearerCaptureOverlay,
+} from './linehaulBearerCaptureOverlay.js'
+import {
   buildHistoryDispatchHeaderFromBody,
   buildHistoryTripDetailsFromBody,
 } from '../utils/tripHistorySnapshot.js'
@@ -1544,6 +1548,7 @@ async function refreshLinehaulApisImpl(attempt) {
   if (authFailed) {
     linehaulAuthRecoveryInProgress.value = true
     let recovered = false
+    startLinehaulBearerCaptureOverlay()
     try {
       pushLiveLog({
         type: 'info',
@@ -1571,6 +1576,7 @@ async function refreshLinehaulApisImpl(attempt) {
         ts: Date.now(),
       })
     } finally {
+      finishLinehaulBearerCaptureOverlay(recovered)
       linehaulAuthRecoveryInProgress.value = false
     }
     if (recovered) return

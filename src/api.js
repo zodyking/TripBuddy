@@ -529,7 +529,11 @@ export async function deleteCredentials() {
  *   tryOktaLogin?: boolean
  *   clearSession?: boolean
  *   bypassValidityProbe?: boolean
+ *   fastDispatchGate?: boolean
+ *   navigationTimeoutMs?: number
+ *   tokenQuietMs?: number
  * }} [opts] clearSession default true. bypassValidityProbe true skips server probe (Settings manual + Home retry after 401).
+ * fastDispatchGate defaults true on the server capture route for shorter waits.
  */
 export async function postLinehaulCaptureBearer(opts = {}) {
   const r = await apiFetch('/api/fedex/linehaul/capture-bearer', {

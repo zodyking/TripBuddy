@@ -45,6 +45,10 @@ import {
   clearLiveLog,
   reconnectLiveLogStream,
 } from '../stores/liveLogStore.js'
+import {
+  startLinehaulBearerCaptureOverlay,
+  finishLinehaulBearerCaptureOverlay,
+} from '../stores/linehaulBearerCaptureOverlay.js'
 import SettingsSection from '../components/settings/SettingsSection.vue'
 import LeafletPinModal from '../components/LeafletPinModal.vue'
 import GeoFenceEditor from '../components/GeoFenceEditor.vue'
@@ -708,6 +712,8 @@ async function runCaptureLinehaulBearer() {
     /* ignore */
   }
   captureBearerBusy.value = true
+  startLinehaulBearerCaptureOverlay()
+  let captureOverlayOk = false
   try {
     const result = await postLinehaulCaptureBearer({
       headless: true,
@@ -715,6 +721,7 @@ async function runCaptureLinehaulBearer() {
       clearSession: true,
       bypassValidityProbe: true,
     })
+    captureOverlayOk = true
     if (result.skipped) {
       pushLiveLog({
         type: 'info',
@@ -737,6 +744,7 @@ async function runCaptureLinehaulBearer() {
       ts: Date.now(),
     })
   } finally {
+    finishLinehaulBearerCaptureOverlay(captureOverlayOk)
     captureBearerBusy.value = false
   }
 }

@@ -124,6 +124,7 @@ function sleep(ms, signal) {
  *   credentialOverride?: { username: string, password: string } | null
  *   fastDispatchGate?: boolean
  *   navigationTimeoutMs?: number
+ *   tokenQuietMs?: number — after last Apigee JWT seen, wait this long before saving (captures a fresher token).
  * }} [opts]
  * credentialOverride — use these for automated sign-in instead of saved credentials (e.g. app login form).
  * fastDispatchGate — short waits for app login (pair with tight outer timeout).
@@ -146,13 +147,19 @@ export async function captureAndSaveLinehaulBearer(opts = {}) {
     credentialOverride = null,
     fastDispatchGate = false,
     navigationTimeoutMs: navigationTimeoutMsOpt,
+    tokenQuietMs: tokenQuietMsOpt,
   } = opts
+
+  const tokenQuietMs =
+    typeof tokenQuietMsOpt === 'number' && tokenQuietMsOpt >= 0
+      ? tokenQuietMsOpt
+      : 520
 
   const navigationTimeoutMs =
     typeof navigationTimeoutMsOpt === 'number' && navigationTimeoutMsOpt > 0
       ? navigationTimeoutMsOpt
       : fastDispatchGate
-        ? 85_000
+        ? 72_000
         : 120_000
 
   const log = (/** @type {string} */ type, /** @type {string} */ message) => {
@@ -188,6 +195,8 @@ export async function captureAndSaveLinehaulBearer(opts = {}) {
 
     /** @type {string | null} */
     let capturedLinehaul = null
+    /** Last time we stored a Linehaul JWT from an Apigee request (for quiet-period settle). */
+    let lastLinehaulTokenAt = 0
     /** @type {string | null} */
     let capturedDriverName = null
     /** Throttle noisy Linehaul request logs */
@@ -216,13 +225,15 @@ export async function captureAndSaveLinehaulBearer(opts = {}) {
           )
         }
       }
-      if (!capturedLinehaul) {
-        const t = tokenFromRequest(request)
-        if (t) {
-          capturedLinehaul = t
+      const t = tokenFromRequest(request)
+      if (t) {
+        const changed = t !== capturedLinehaul
+        capturedLinehaul = t
+        lastLinehaulTokenAt = Date.now()
+        if (changed) {
           log(
             'info',
-            `[Linehaul capture] Captured JWT from browser (${t.length} chars). Saving…`,
+            `[Linehaul capture] Captured JWT from browser (${t.length} chars). Waiting for traffic to settle…`,
           )
         }
       }
@@ -299,10 +310,18 @@ export async function captureAndSaveLinehaulBearer(opts = {}) {
       const waitStarted = Date.now()
       const deadline = waitStarted + waitMs
       let lastHeartbeat = Date.now()
-      while (!capturedLinehaul && Date.now() < deadline) {
+      const POLL_MS = 50
+      while (Date.now() < deadline) {
         if (signal?.aborted) throw new Error('Aborted')
         const now = Date.now()
-        if (now - lastHeartbeat >= 10_000) {
+        if (
+          capturedLinehaul &&
+          lastLinehaulTokenAt > 0 &&
+          now - lastLinehaulTokenAt >= tokenQuietMs
+        ) {
+          break
+        }
+        if (!capturedLinehaul && now - lastHeartbeat >= 12_000) {
           lastHeartbeat = now
           const elapsed = Math.floor((now - waitStarted) / 1000)
           log(
@@ -310,7 +329,7 @@ export async function captureAndSaveLinehaulBearer(opts = {}) {
             `[Linehaul capture] Still waiting for Linehaul JWT (${elapsed}s) — page=${page.url()}`,
           )
         }
-        await sleep(250, signal)
+        await sleep(POLL_MS, signal)
       }
 
       if (!capturedLinehaul) {
