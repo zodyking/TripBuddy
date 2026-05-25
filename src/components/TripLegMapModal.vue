@@ -2,7 +2,7 @@
 import { ref, watch, onBeforeUnmount, nextTick, useId } from 'vue'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
-import { mapPinPreviewIcon, userLocationTruckIcon } from '../utils/mapMarkers.js'
+import { directoryBuildingIcon, userLocationTruckIcon } from '../utils/mapMarkers.js'
 
 const props = defineProps({
   open: { type: Boolean, default: false },
@@ -10,6 +10,10 @@ const props = defineProps({
   originLng: { type: Number, default: null },
   destLat: { type: Number, default: null },
   destLng: { type: Number, default: null },
+  /** FedEx location id for origin pin (Directory-style chip). */
+  originPinId: { type: String, default: '' },
+  /** FedEx location id for destination pin. */
+  destPinId: { type: String, default: '' },
   originLabel: { type: String, default: 'Origin' },
   destLabel: { type: String, default: 'Destination' },
   truckLat: { type: Number, default: null },
@@ -58,6 +62,12 @@ function validCoord(lat, lng) {
   )
 }
 
+function pinTooltip(locationId, fallbackLabel) {
+  const id = String(locationId ?? '').trim()
+  if (id) return `Location ${id}`
+  return String(fallbackLabel ?? '').trim() || 'Location'
+}
+
 function sync() {
   if (!map) return
   if (overlayLayer) {
@@ -74,30 +84,38 @@ function sync() {
   const boundsPts = [oll, dll]
 
   L.polyline([oll, dll], {
-    color: '#a855f7',
-    weight: 5,
-    opacity: 0.92,
+    color: '#a78bfa',
+    weight: 4,
+    opacity: 0.88,
     lineJoin: 'round',
     lineCap: 'round',
   }).addTo(overlayLayer)
 
   const oLabel = String(props.originLabel ?? '').trim() || 'Origin'
   const dLabel = String(props.destLabel ?? '').trim() || 'Destination'
+  const oid = String(props.originPinId ?? '').trim()
+  const did = String(props.destPinId ?? '').trim()
 
-  const mkO = L.marker(oll, { icon: mapPinPreviewIcon(), title: oLabel })
-  mkO.bindTooltip(oLabel, { direction: 'top', offset: [0, -44], opacity: 0.95 })
+  const mkO = L.marker(oll, {
+    icon: directoryBuildingIcon(true, oid),
+    title: pinTooltip(oid, oLabel),
+  })
+  mkO.bindTooltip(pinTooltip(oid, oLabel), { direction: 'top', offset: [0, -46], opacity: 0.95 })
   mkO.addTo(overlayLayer)
 
-  const mkD = L.marker(dll, { icon: mapPinPreviewIcon(), title: dLabel })
-  mkD.bindTooltip(dLabel, { direction: 'top', offset: [0, -44], opacity: 0.95 })
+  const mkD = L.marker(dll, {
+    icon: directoryBuildingIcon(false, did),
+    title: pinTooltip(did, dLabel),
+  })
+  mkD.bindTooltip(pinTooltip(did, dLabel), { direction: 'top', offset: [0, -46], opacity: 0.95 })
   mkD.addTo(overlayLayer)
 
   if (validCoord(props.truckLat, props.truckLng)) {
     const tll = L.latLng(props.truckLat, props.truckLng)
     boundsPts.push(tll)
     const raw = String(props.tractorNumber ?? '').trim()
-    const mkT = L.marker(tll, { icon: userLocationTruckIcon(raw), title: 'Your position' })
-    mkT.bindTooltip('Your position', { direction: 'top', offset: [0, -48], opacity: 0.95 })
+    const mkT = L.marker(tll, { icon: userLocationTruckIcon(raw), title: 'Your location' })
+    mkT.bindTooltip('Your location', { direction: 'top', offset: [0, -48], opacity: 0.95 })
     mkT.addTo(overlayLayer)
   }
 
@@ -130,9 +148,10 @@ function initMap() {
   })
   L.control.zoom({ position: 'topright' }).addTo(map)
   L.tileLayer(
-    'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png',
+    'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
     {
-      attribution: '© OSM © CARTO',
+      attribution:
+        '&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a> &copy; <a href="https://carto.com/attributions">CARTO</a>',
       subdomains: 'abcd',
       maxZoom: 20,
     },
@@ -156,6 +175,8 @@ watch(
     props.originLng,
     props.destLat,
     props.destLng,
+    props.originPinId,
+    props.destPinId,
     props.truckLat,
     props.truckLng,
     props.tractorNumber,
@@ -173,7 +194,16 @@ watch(
 )
 
 watch(
-  () => [props.originLat, props.originLng, props.destLat, props.destLng, props.truckLat, props.truckLng],
+  () => [
+    props.originLat,
+    props.originLng,
+    props.destLat,
+    props.destLng,
+    props.originPinId,
+    props.destPinId,
+    props.truckLat,
+    props.truckLng,
+  ],
   () => {
     if (props.open && map) sync()
   },
@@ -205,7 +235,7 @@ function onBackdrop() {
         <header class="trip-leg-map-head">
           <div class="trip-leg-map-titles">
             <h2 :id="titleId" class="trip-leg-map-title">Leg map</h2>
-            <p class="trip-leg-map-sub">Origin, destination, and your GPS when available</p>
+            <p class="trip-leg-map-sub">Directory basemap and building pins; route line and your truck when GPS is on.</p>
           </div>
           <button type="button" class="trip-leg-map-close tap" aria-label="Close map" @click="emit('close')">
             ×
@@ -296,6 +326,30 @@ function onBackdrop() {
 
 :deep(.leaflet-container) {
   font-family: inherit;
-  background: #1a1a22;
+  background: #0e0e12;
+}
+
+:deep(.leaflet-control-zoom a) {
+  background: rgba(22, 22, 29, 0.92);
+  color: var(--color-text-primary, #f4f4f8);
+  border-color: var(--color-border, rgba(255, 255, 255, 0.12));
+}
+
+:deep(.leaflet-control-zoom a:hover) {
+  background: rgba(40, 40, 52, 0.95);
+}
+
+:deep(.leaflet-control-attribution) {
+  font-size: 0.625rem;
+  color: var(--color-text-tertiary, #6e6e7e);
+  background: rgba(8, 8, 10, 0.75) !important;
+  max-width: calc(100% - 1rem);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+:deep(.leaflet-control-attribution a) {
+  color: var(--color-accent-purple, #7b4db5);
 }
 </style>

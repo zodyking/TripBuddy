@@ -138,20 +138,9 @@ function onOpenMap() {
 
 <template>
   <div class="trip-od-progress" role="group" :aria-label="ariaGroupLabel">
-    <button
-      type="button"
-      class="trip-od-progress__hit tap"
-      :disabled="!mapAvailable"
-      :class="{ 'trip-od-progress__hit--active': mapAvailable }"
-      :aria-label="
-        mapAvailable
-          ? 'Open map: origin, destination, route line, and your position when GPS is available'
-          : 'Leg map unavailable until origin and destination coordinates load'
-      "
-      @click="onOpenMap"
-    >
-      <div class="trip-od-progress__head">
-        <span class="trip-od-progress__title">Leg progress</span>
+    <div class="trip-od-progress__head">
+      <span class="trip-od-progress__title">Leg progress</span>
+      <div class="trip-od-progress__head-right">
         <span class="trip-od-progress__stat" aria-hidden="true">
           <template v-if="nmRatioText">
             <span class="trip-od-progress__ratio">{{ nmRatioText }}</span>
@@ -162,72 +151,60 @@ function onOpenMap() {
             <span class="trip-od-progress__unit trip-od-progress__unit--muted">NM</span>
           </template>
         </span>
+        <button
+          v-if="mapAvailable"
+          type="button"
+          class="trip-od-progress__map-btn tap"
+          aria-label="Open leg route map"
+          title="Leg route map"
+          @click.stop="onOpenMap"
+        >
+          <svg class="trip-od-progress__map-ico" viewBox="0 0 24 24" aria-hidden="true">
+            <path
+              fill="currentColor"
+              d="M20.5 3l-.16.03L15 5.1 9 3 3.36 4.9c-.21.07-.36.25-.36.48V20.5c0 .28.22.5.5.5l.16-.03L9 18.9l6 2.1 5.64-1.9c.21-.07.36-.25.36-.48V3.5c0-.28-.22-.5-.5-.5zM10 5.47l4 1.4v11.66l-4-1.4V5.47zm-5 .99l3-1.01v11.7l-3 1.16V6.46zm14 11.08l-3 1.01V6.46l3-1.01v11.08z"
+            />
+          </svg>
+        </button>
       </div>
+    </div>
 
-      <div class="trip-od-progress__viz" aria-hidden="true">
-        <div class="trip-od-progress__track">
-          <div class="trip-od-progress__fill" :style="{ width: fillPct + '%' }" />
-          <div
-            v-for="m in markerStyle"
-            :key="m.key"
-            class="trip-od-progress__marker"
-            :style="{ left: m.leftPct + '%' }"
-          >
-            <span class="trip-od-progress__marker-dot" :class="{ 'trip-od-progress__marker-dot--accent': m.key === 'asg' }" />
-            <span class="trip-od-progress__marker-cap">
-              <em :title="m.label">{{ m.abbr }}</em>
-              <span>{{ m.time }}</span>
-            </span>
-          </div>
+    <div class="trip-od-progress__viz" aria-hidden="true">
+      <div class="trip-od-progress__track">
+        <div class="trip-od-progress__fill" :style="{ width: fillPct + '%' }" />
+        <div
+          v-for="m in markerStyle"
+          :key="m.key"
+          class="trip-od-progress__marker"
+          :style="{ left: m.leftPct + '%' }"
+        >
+          <span
+            class="trip-od-progress__marker-dot"
+            :class="{ 'trip-od-progress__marker-dot--accent': m.key === 'asg' }"
+          />
+          <span class="trip-od-progress__marker-cap">
+            <em :title="m.label">{{ m.abbr }}</em>
+            <span>{{ m.time }}</span>
+          </span>
         </div>
       </div>
-    </button>
-    <p v-if="mapAvailable" class="trip-od-progress__hint">Tap bar for map</p>
+    </div>
   </div>
 </template>
 
 <style scoped>
 .trip-od-progress {
-  margin-top: 0.65rem;
-  padding-top: 0.55rem;
+  margin-top: 0.55rem;
+  padding-top: 0.45rem;
   border-top: 1px solid var(--color-border, rgba(255, 255, 255, 0.08));
-}
-
-.trip-od-progress__hit {
-  display: block;
-  width: 100%;
-  margin: 0;
-  padding: 0.35rem 0 0.15rem;
-  border: none;
-  border-radius: var(--radius-md, 0.5rem);
-  background: transparent;
-  text-align: left;
-  cursor: default;
-  color: inherit;
-}
-
-.trip-od-progress__hit--active {
-  cursor: pointer;
-}
-
-.trip-od-progress__hit--active:hover {
-  background: rgba(255, 255, 255, 0.04);
-}
-
-.trip-od-progress__hit--active:active {
-  background: rgba(255, 255, 255, 0.07);
-}
-
-.trip-od-progress__hit:disabled {
-  opacity: 1;
 }
 
 .trip-od-progress__head {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   justify-content: space-between;
   gap: 0.5rem;
-  margin-bottom: 0.45rem;
+  margin-bottom: 0.3rem;
 }
 
 .trip-od-progress__title {
@@ -236,6 +213,13 @@ function onOpenMap() {
   letter-spacing: 0.04em;
   text-transform: uppercase;
   color: var(--color-text-tertiary, #8b8b98);
+}
+
+.trip-od-progress__head-right {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  flex-shrink: 0;
 }
 
 .trip-od-progress__stat {
@@ -269,22 +253,47 @@ function onOpenMap() {
   opacity: 0.85;
 }
 
+.trip-od-progress__map-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.85rem;
+  height: 1.85rem;
+  padding: 0;
+  border: 1px solid var(--color-border, rgba(255, 255, 255, 0.1));
+  border-radius: var(--radius-md, 0.5rem);
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--color-accent-purple-light, #c4b5fd);
+  cursor: pointer;
+}
+
+.trip-od-progress__map-btn:hover {
+  background: rgba(255, 255, 255, 0.09);
+  color: var(--color-text-primary, #f4f4f8);
+}
+
+.trip-od-progress__map-ico {
+  width: 1rem;
+  height: 1rem;
+  display: block;
+}
+
 .trip-od-progress__viz {
   position: relative;
-  padding-bottom: 2.35rem;
+  padding-bottom: 1.75rem;
 }
 
 .trip-od-progress__track {
   position: relative;
-  height: 14px;
+  height: 11px;
   border-radius: var(--radius-full, 9999px);
   background: linear-gradient(
     180deg,
-    rgba(255, 255, 255, 0.07) 0%,
+    rgba(255, 255, 255, 0.06) 0%,
     var(--color-glass, rgba(22, 22, 29, 0.65)) 40%,
     rgba(0, 0, 0, 0.25) 100%
   );
-  box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.45);
+  box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.4);
   overflow: visible;
 }
 
@@ -298,8 +307,8 @@ function onOpenMap() {
     #ffb38a 100%
   );
   box-shadow:
-    0 0 14px rgba(123, 77, 181, 0.45),
-    inset 0 1px 0 rgba(255, 255, 255, 0.22);
+    0 0 10px rgba(123, 77, 181, 0.35),
+    inset 0 1px 0 rgba(255, 255, 255, 0.18);
   transition: width 0.5s var(--ease-out, cubic-bezier(0.22, 1, 0.36, 1));
 }
 
@@ -314,22 +323,22 @@ function onOpenMap() {
 }
 
 .trip-od-progress__marker-dot {
-  width: 9px;
-  height: 9px;
+  width: 8px;
+  height: 8px;
   border-radius: 50%;
   background: var(--color-text-primary, #f4f4f8);
-  border: 2px solid rgba(10, 10, 14, 0.65);
-  box-shadow: 0 0 0 2px rgba(123, 77, 181, 0.45);
+  border: 1px solid rgba(10, 10, 14, 0.65);
+  box-shadow: 0 0 0 2px rgba(123, 77, 181, 0.4);
 }
 
 .trip-od-progress__marker-dot--accent {
   background: var(--color-accent-orange, #ff6b1a);
-  box-shadow: 0 0 0 2px rgba(255, 107, 26, 0.35);
+  box-shadow: 0 0 0 2px rgba(255, 107, 26, 0.32);
 }
 
 .trip-od-progress__marker-cap {
   position: absolute;
-  top: calc(50% + 11px);
+  top: calc(50% + 8px);
   left: 50%;
   transform: translateX(-50%);
   display: flex;
@@ -350,12 +359,5 @@ function onOpenMap() {
   text-transform: uppercase;
   color: var(--color-text-tertiary, #9a9aa8);
   font-size: 0.58rem;
-}
-
-.trip-od-progress__hint {
-  margin: 0.2rem 0 0;
-  font-size: 0.62rem;
-  color: var(--color-text-tertiary, #7a7a88);
-  letter-spacing: 0.02em;
 }
 </style>

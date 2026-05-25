@@ -2177,6 +2177,8 @@ onUnmounted(() => {
       :origin-lng="tripWatchOriginLng ?? undefined"
       :dest-lat="tripWatchDestLat ?? undefined"
       :dest-lng="tripWatchDestLng ?? undefined"
+      :origin-pin-id="tripOriginLocationId != null && tripOriginLocationId !== '' ? String(tripOriginLocationId) : ''"
+      :dest-pin-id="tripDestLocationId != null && tripDestLocationId !== '' ? String(tripDestLocationId) : ''"
       :origin-label="tripOriginDest.origin"
       :dest-label="tripOriginDest.destination"
       :truck-lat="appGeoLat ?? undefined"
