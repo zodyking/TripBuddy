@@ -2802,6 +2802,7 @@ onUnmounted(() => {
               </div>
               <TripOdProgressBar
                 v-if="showTripOdProgressBar"
+                :trip-phase="tripPhase"
                 :assigned-ms="tripProgressAssignedMs ?? undefined"
                 :dispatched-ms="tripProgressDispatchedMs ?? undefined"
                 :arrived-ms="tripProgressArrivedMs ?? undefined"

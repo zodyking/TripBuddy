@@ -12,7 +12,18 @@ const props = defineProps({
   distMeters: { type: Number, default: null },
   /** NM cap for progress normalization (from paid miles or default) */
   denomNm: { type: Number, default: 180 },
+  /**
+   * Trip phase from FedEx/driver state. Distance-to-destination should only advance the bar
+   * after dispatch; while assigned, the bar stays in the pre-departure segment.
+   * @type {'assigned' | 'dispatched' | 'none'}
+   */
+  tripPhase: { type: String, default: 'none' },
 })
+
+/** X positions for Assigned / Dispatched / Arrive ticks (percent of track width). */
+const M1 = 6
+const M2 = 50
+const M3 = 94
 
 function fmtTime(ms) {
   if (typeof ms !== 'number' || !Number.isFinite(ms) || ms <= 0) return '—'
@@ -24,63 +35,94 @@ const distNm = computed(() => {
   return props.distMeters / 1852
 })
 
-/** Progress fill driven by distance to destination (closer → fuller). */
-const fillPct = computed(() => {
+/** 0..1 how "close" to destination in NM (1 = at dest). */
+const distCloseFactor = computed(() => {
   const dNm = distNm.value
-  if (dNm == null) return 6
+  if (dNm == null) return null
   const cap = Math.max(15, props.denomNm)
-  const raw = 100 * (1 - Math.min(1, Math.max(0, dNm) / cap))
-  return Math.round(Math.min(100, Math.max(5, raw)))
+  return 1 - Math.min(1, Math.max(0, dNm) / cap)
 })
 
-const timelineEndMs = computed(() => {
-  const a = props.arrivedMs
-  if (typeof a === 'number' && Number.isFinite(a) && a > 0) return a
-  return Date.now()
-})
-
-const markerStyle = computed(() => {
-  const a0 = props.assignedMs
-  if (!(typeof a0 === 'number' && Number.isFinite(a0) && a0 > 0)) return []
-  const end = timelineEndMs.value
-  const span = Math.max(60_000, end - a0)
-  /** @param {number | null | undefined} ms */
-  const pct = (ms) => {
-    if (!(typeof ms === 'number' && Number.isFinite(ms) && ms > 0)) return null
-    const p = ((ms - a0) / span) * 100
-    return Math.min(96, Math.max(4, p))
+/**
+ * Fill maps to journey segments:
+ * - Arrived (timestamp known): 100%
+ * - Dispatched: 50% → 100% from distance (closer to destination = fuller bar)
+ * - Assigned / none: early segment only (does not use proximity to destination, which misleads at the terminal)
+ */
+const fillPct = computed(() => {
+  if (typeof props.arrivedMs === 'number' && Number.isFinite(props.arrivedMs) && props.arrivedMs > 0) {
+    return 100
   }
-  const out = [
-    { key: 'asg', label: 'Assigned', time: fmtTime(a0), leftPct: 4 },
+
+  const close = distCloseFactor.value
+
+  if (props.tripPhase === 'dispatched') {
+    if (close == null) return 52
+    const seg = 50 * close
+    return Math.round(Math.min(100, Math.max(M2, M2 + seg)))
+  }
+
+  if (typeof props.assignedMs === 'number' && Number.isFinite(props.assignedMs) && props.assignedMs > 0) {
+    const elapsed = Math.max(0, Date.now() - props.assignedMs)
+    const hours = elapsed / (1000 * 60 * 60)
+    const bump = Math.min(32, hours * 5)
+    return Math.round(Math.min(M2 - 4, Math.max(6, 10 + bump)))
+  }
+
+  return 10
+})
+
+const milestoneMeta = computed(() => {
+  const arrivedKnown = typeof props.arrivedMs === 'number' && Number.isFinite(props.arrivedMs) && props.arrivedMs > 0
+  return [
+    { key: 'asg', label: 'Assigned', leftPct: M1, time: fmtTime(props.assignedMs) },
+    { key: 'dsp', label: 'Dispatched', leftPct: M2, time: fmtTime(props.dispatchedMs) },
+    { key: 'arv', label: 'Arrive', leftPct: M3, time: arrivedKnown ? fmtTime(props.arrivedMs) : '—' },
   ]
-  const pD = pct(props.dispatchedMs)
-  if (pD != null) out.push({ key: 'dsp', label: 'Dispatched', time: fmtTime(props.dispatchedMs), leftPct: pD })
-  const pA = pct(props.arrivedMs)
-  if (pA != null) out.push({ key: 'arv', label: 'Arrived', time: fmtTime(props.arrivedMs), leftPct: pA })
-  return out
+})
+
+const ariaProgress = computed(() => {
+  if (typeof props.arrivedMs === 'number' && Number.isFinite(props.arrivedMs) && props.arrivedMs > 0) {
+    return 'Trip complete; arrived.'
+  }
+  if (props.tripPhase === 'dispatched') {
+    const d = distNm.value
+    if (d != null) return `En route; about ${d.toFixed(1)} nautical miles to destination.`
+    return 'En route; distance to destination not available.'
+  }
+  return 'Pre-departure; progress does not use distance to destination until dispatched.'
 })
 </script>
 
 <template>
-  <div class="trip-od-progress" role="group" aria-label="Trip progress to destination">
+  <div class="trip-od-progress" role="group" :aria-label="`Trip progress to destination. ${ariaProgress}`">
     <div class="trip-od-progress__head">
       <span class="trip-od-progress__title">Progress to destination</span>
       <span v-if="distNm != null" class="trip-od-progress__nm">{{ distNm.toFixed(1) }} NM out</span>
       <span v-else class="trip-od-progress__nm trip-od-progress__nm--muted">Distance —</span>
     </div>
-    <div class="trip-od-progress__track" aria-hidden="true">
-      <div class="trip-od-progress__fill" :style="{ width: fillPct + '%' }" />
+
+    <div class="trip-od-progress__milestones" aria-hidden="true">
       <div
-        v-for="m in markerStyle"
+        v-for="m in milestoneMeta"
         :key="m.key"
-        class="trip-od-progress__marker"
-        :style="{ left: m.leftPct + '%' }"
+        class="trip-od-progress__ms-col"
+        :class="`trip-od-progress__ms-col--${m.key}`"
       >
-        <span class="trip-od-progress__marker-dot" />
-        <span class="trip-od-progress__marker-cap">
-          <em>{{ m.label }}</em>
-          <span>{{ m.time }}</span>
-        </span>
+        <span class="trip-od-progress__ms-label">{{ m.label }}</span>
+        <span class="trip-od-progress__ms-time">{{ m.time }}</span>
+      </div>
+    </div>
+
+    <div class="trip-od-progress__track-wrap">
+      <div class="trip-od-progress__track" aria-hidden="true">
+        <div class="trip-od-progress__fill" :style="{ width: fillPct + '%' }" />
+        <div
+          v-for="m in milestoneMeta"
+          :key="'tick-' + m.key"
+          class="trip-od-progress__tick"
+          :style="{ left: m.leftPct + '%' }"
+        />
       </div>
     </div>
   </div>
@@ -121,6 +163,52 @@ const markerStyle = computed(() => {
   font-weight: 500;
 }
 
+.trip-od-progress__milestones {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  align-items: start;
+  gap: 0.25rem 0.35rem;
+  margin-bottom: 0.4rem;
+  font-size: 0.62rem;
+  line-height: 1.2;
+  color: var(--color-text-secondary, #c8c8d4);
+}
+
+.trip-od-progress__ms-col {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.trip-od-progress__ms-col--asg {
+  text-align: left;
+}
+.trip-od-progress__ms-col--dsp {
+  text-align: center;
+}
+.trip-od-progress__ms-col--arv {
+  text-align: right;
+}
+
+.trip-od-progress__ms-label {
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--color-text-tertiary, #9a9aa8);
+  font-size: 0.58rem;
+}
+
+.trip-od-progress__ms-time {
+  font-weight: 500;
+  color: var(--color-text-secondary, #b6b6c4);
+}
+
+.trip-od-progress__track-wrap {
+  position: relative;
+  padding-bottom: 2px;
+}
+
 .trip-od-progress__track {
   position: relative;
   height: 10px;
@@ -140,47 +228,20 @@ const markerStyle = computed(() => {
   );
   box-shadow: 0 0 12px rgba(123, 77, 181, 0.35);
   transition: width 0.45s var(--ease-out, ease-out);
+  position: relative;
+  z-index: 0;
 }
 
-.trip-od-progress__marker {
+.trip-od-progress__tick {
   position: absolute;
   top: 0;
+  bottom: 0;
+  width: 2px;
   transform: translateX(-50%);
-  display: flex;
-  flex-direction: column;
-  align-items: center;
+  border-radius: 1px;
+  background: rgba(244, 244, 248, 0.92);
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.45);
+  z-index: 2;
   pointer-events: none;
-}
-
-.trip-od-progress__marker-dot {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  margin-top: 1px;
-  background: var(--color-text-primary, #f4f4f8);
-  border: 1px solid rgba(0, 0, 0, 0.35);
-  box-shadow: 0 0 0 2px rgba(123, 77, 181, 0.35);
-}
-
-.trip-od-progress__marker-cap {
-  margin-top: 6px;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 1px;
-  min-width: 4.5rem;
-  text-align: center;
-  font-size: 0.62rem;
-  line-height: 1.15;
-  color: var(--color-text-secondary, #c8c8d4);
-}
-
-.trip-od-progress__marker-cap em {
-  font-style: normal;
-  font-weight: 700;
-  letter-spacing: 0.03em;
-  text-transform: uppercase;
-  color: var(--color-text-tertiary, #9a9aa8);
-  font-size: 0.58rem;
 }
 </style>
