@@ -65,7 +65,7 @@ import { useDestinationAutoArriveCheckIn } from '../composables/useDestinationAu
 import TripOdProgressBar from '../components/TripOdProgressBar.vue'
 import TripLegMapModal from '../components/TripLegMapModal.vue'
 import { haversineM } from '../utils/polylineSnap.js'
-import { appGeoLat, appGeoLng } from '../composables/useAppGeolocationWatch.js'
+import { appGeoLat, appGeoLng, setTripProgressGeolocationBoost } from '../composables/useAppGeolocationWatch.js'
 import {
   liveLogEntries,
   registerAssignmentListener,
@@ -1303,6 +1303,7 @@ useDestinationAutoArriveCheckIn({
   tripDestLocationId,
   linehaulOriginIdForApi,
   currentTripLegSeq,
+  legProgressCapNm: tripProgressDenomNm,
   isEnrtEligible: () => {
     if (suppressHomeLinehaulErrors.value) return false
     const ds = String(linehaulDriverBody.value?.driverAvlStat ?? '').trim().toUpperCase()
@@ -1316,6 +1317,20 @@ useDestinationAutoArriveCheckIn({
   runArriveThenCheckIn: helpersProxRunArriveChain,
   notifyInApp: (msg, kind) => notifyQuickActionInApp(msg, kind || 'info'),
 })
+
+watch(
+  [tripPhase, tripDestLocationId, tripWatchDestLat],
+  () => {
+    const phase = tripPhase.value
+    const hasDest = Boolean(String(tripDestLocationId.value ?? '').trim())
+    const lat = tripWatchDestLat.value
+    const hasCoords = lat != null && Number.isFinite(lat)
+    setTripProgressGeolocationBoost(
+      (phase === 'assigned' || phase === 'dispatched') && hasDest && hasCoords,
+    )
+  },
+  { immediate: true },
+)
 
 function clearAutomationPreviewNow() {
   lastPreviewBusy.value = false
@@ -2143,6 +2158,7 @@ onActivated(() => {
 })
 
 onUnmounted(() => {
+  setTripProgressGeolocationBoost(false)
   tripLegMapOpen.value = false
   if (tripPhaseVoiceTimer) {
     clearTimeout(tripPhaseVoiceTimer)

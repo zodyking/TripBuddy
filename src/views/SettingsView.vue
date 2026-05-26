@@ -1853,7 +1853,9 @@ onUnmounted(() => {
           (often the terminal, not necessarily the exact street gate). You must stay
           <strong>inside</strong> the circle continuously for <strong>about 40 seconds</strong> with
           reasonably good GPS accuracy before it runs—this blocks one-off bad samples that used to fire
-          early. 2 NM ≈ 2.3 statute miles.
+          early. 2 NM ≈ 2.3 statute miles. On longer paid legs (12+ NM on the Home leg-progress scale), the
+          effective circle may tighten so it stays in proportion to that same scale, but it is never wider
+          than the trigger distance you set here.
         </p>
         <p v-if="helpersProximityMsg" class="cred-msg cred-msg--error">{{ helpersProximityMsg }}</p>
         <div class="audio-row">

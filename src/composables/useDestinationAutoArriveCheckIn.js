@@ -1,4 +1,4 @@
-import { ref, watch, onMounted, onBeforeUnmount } from 'vue'
+import { ref, watch, onMounted, onBeforeUnmount, unref } from 'vue'
 import { fetchFedexLinehaulLocation } from '../api.js'
 import { extractLocationForDirectory } from '../utils/linehaulLocationDisplay.js'
 import { haversineM } from '../utils/polylineSnap.js'
@@ -27,6 +27,17 @@ function clampRadiusNm(raw) {
 }
 
 /**
+ * Tie geofence scale to leg length (same NM scale as Home leg progress). Never wider than the user's setting.
+ * @param {number} userNm
+ * @param {number | null | undefined} capNm
+ */
+function effectiveProximityRadiusNm(userNm, capNm) {
+  if (capNm == null || !Number.isFinite(capNm) || capNm < 12) return userNm
+  const scaled = Math.max(HELPERS_RADIUS_NM_MIN, capNm * 0.075)
+  return Math.min(userNm, scaled)
+}
+
+/**
  * When the driver enters the destination radius (and ENRT), announce and run arrive → check-in.
  *
  * @param {{
@@ -38,6 +49,7 @@ function clampRadiusNm(raw) {
  *   isAutomationRunning: () => boolean,
  *   runArriveThenCheckIn: () => Promise<void>,
  *   notifyInApp: (message: string, kind?: 'info' | 'warning' | 'error') => void,
+ *   legProgressCapNm?: import('vue').ComputedRef<number>,
  * }} opts
  */
 export function useDestinationAutoArriveCheckIn(opts) {
@@ -137,8 +149,10 @@ export function useDestinationAutoArriveCheckIn(opts) {
       return
     }
 
-    const nm = clampRadiusNm(helpersAutoArriveRadiusNmRef.value)
-    const maxM = nm * 1852
+    const userNm = clampRadiusNm(helpersAutoArriveRadiusNmRef.value)
+    const capLeg = opts.legProgressCapNm != null ? unref(opts.legProgressCapNm) : null
+    const effNm = effectiveProximityRadiusNm(userNm, capLeg)
+    const maxM = effNm * 1852
     const d = haversineM(ulat, ulng, dlat, dlng)
 
     /** Strict geofence — do not add accuracy slack (it widened the circle and caused early triggers). */
@@ -166,9 +180,13 @@ export function useDestinationAutoArriveCheckIn(opts) {
     if (!armed) return
 
     const dNm = d / 1852
+    const capStr =
+      capLeg != null && Number.isFinite(capLeg) && capLeg >= 12
+        ? `, leg cap ${capLeg.toFixed(1)} NM → eff ${effNm.toFixed(2)} NM (max ${userNm.toFixed(2)} NM)`
+        : ''
     pushLiveLog({
       type: 'info',
-      message: `[Proximity auto arrive] firing: ~${dNm.toFixed(2)} NM from Linehaul dest coords (threshold ${nm} NM), GPS accuracy ~${Math.round(accM)} m`,
+      message: `[Proximity auto arrive] firing: ~${dNm.toFixed(2)} NM from Linehaul dest coords (threshold ${effNm.toFixed(2)} NM${capStr}), GPS accuracy ~${Math.round(accM)} m`,
       ts: now,
     })
 
@@ -200,6 +218,7 @@ export function useDestinationAutoArriveCheckIn(opts) {
       opts.suppressHomeLinehaulErrors,
       helpersAutoArriveNearDestEnabledRef,
       helpersAutoArriveRadiusNmRef,
+      ...(opts.legProgressCapNm ? [opts.legProgressCapNm] : []),
     ],
     () => {
       maybeTriggerProximityAutoArrive()

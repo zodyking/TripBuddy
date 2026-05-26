@@ -19,6 +19,8 @@ let watchId = null
 let started = false
 /** @type {(() => void) | null} */
 let visibilityHandler = null
+/** @type {ReturnType<typeof setInterval> | null} */
+let tripProgressBoostIntervalId = null
 
 async function syncPermissionLabel() {
   if (typeof navigator === 'undefined' || !navigator.permissions?.query) return
@@ -38,6 +40,48 @@ async function syncPermissionLabel() {
 }
 
 /**
+ * @param {GeolocationPosition} pos
+ */
+function applyGeoPosition(pos) {
+  appGeoLat.value = pos.coords.latitude
+  appGeoLng.value = pos.coords.longitude
+  appGeoAccuracyM.value =
+    pos.coords.accuracy != null && Number.isFinite(pos.coords.accuracy) ? pos.coords.accuracy : null
+  appGeoPermission.value = 'granted'
+  appGeoError.value = ''
+}
+
+function clearTripProgressGeolocationBoostInterval() {
+  if (tripProgressBoostIntervalId != null && typeof window !== 'undefined') {
+    window.clearInterval(tripProgressBoostIntervalId)
+  }
+  tripProgressBoostIntervalId = null
+}
+
+/**
+ * While Dispatch leg progress is active, request fresher fixes than `watchPosition` alone
+ * so distance-to-destination updates feel live.
+ * @param {boolean} on
+ */
+export function setTripProgressGeolocationBoost(on) {
+  clearTripProgressGeolocationBoostInterval()
+  if (!on) return
+  if (typeof window === 'undefined' || !navigator.geolocation?.getCurrentPosition) return
+
+  const tick = () => {
+    navigator.geolocation.getCurrentPosition(
+      (pos) => applyGeoPosition(pos),
+      () => {
+        /* keep last watch fix */
+      },
+      { enableHighAccuracy: true, maximumAge: 0, timeout: 25_000 },
+    )
+  }
+  tick()
+  tripProgressBoostIntervalId = window.setInterval(tick, 7500)
+}
+
+/**
  * Single shared watch for the authenticated app shell (Home, Settings, etc.).
  * Idempotent: safe to call multiple times.
  */
@@ -52,23 +96,14 @@ export function startAppGeolocationWatch() {
   void syncPermissionLabel()
 
   watchId = navigator.geolocation.watchPosition(
-    (pos) => {
-      appGeoLat.value = pos.coords.latitude
-      appGeoLng.value = pos.coords.longitude
-      appGeoAccuracyM.value =
-        pos.coords.accuracy != null && Number.isFinite(pos.coords.accuracy)
-          ? pos.coords.accuracy
-          : null
-      appGeoPermission.value = 'granted'
-      appGeoError.value = ''
-    },
+    (pos) => applyGeoPosition(pos),
     (err) => {
       if (err && /** @type {GeolocationPositionError} */ (err).code === 1) {
         appGeoPermission.value = 'denied'
       }
       appGeoError.value = err?.message ? String(err.message) : 'Geolocation error'
     },
-    { enableHighAccuracy: true, maximumAge: 5000, timeout: 20_000 },
+    { enableHighAccuracy: true, maximumAge: 2500, timeout: 20_000 },
   )
 
   if (typeof document !== 'undefined' && !visibilityHandler) {
@@ -76,16 +111,7 @@ export function startAppGeolocationWatch() {
       if (document.visibilityState !== 'visible') return
       if (!navigator.geolocation?.getCurrentPosition) return
       navigator.geolocation.getCurrentPosition(
-        (pos) => {
-          appGeoLat.value = pos.coords.latitude
-          appGeoLng.value = pos.coords.longitude
-          appGeoAccuracyM.value =
-            pos.coords.accuracy != null && Number.isFinite(pos.coords.accuracy)
-              ? pos.coords.accuracy
-              : null
-          appGeoPermission.value = 'granted'
-          appGeoError.value = ''
-        },
+        (pos) => applyGeoPosition(pos),
         () => {
           /* keep last watch fix; tab wake can fail transiently */
         },
@@ -97,6 +123,7 @@ export function startAppGeolocationWatch() {
 }
 
 export function stopAppGeolocationWatch() {
+  clearTripProgressGeolocationBoostInterval()
   if (watchId != null && typeof navigator !== 'undefined' && navigator.geolocation?.clearWatch) {
     navigator.geolocation.clearWatch(watchId)
   }
@@ -120,14 +147,7 @@ export function requestAppGeolocationOnceFromGesture() {
     }
     navigator.geolocation.getCurrentPosition(
       (pos) => {
-        appGeoLat.value = pos.coords.latitude
-        appGeoLng.value = pos.coords.longitude
-        appGeoAccuracyM.value =
-          pos.coords.accuracy != null && Number.isFinite(pos.coords.accuracy)
-            ? pos.coords.accuracy
-            : null
-        appGeoPermission.value = 'granted'
-        appGeoError.value = ''
+        applyGeoPosition(pos)
         resolve(true)
       },
       () => resolve(false),
