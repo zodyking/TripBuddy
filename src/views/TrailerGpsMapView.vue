@@ -70,6 +70,12 @@ function tryStartTripProximityWatch() {
       if (!Array.isArray(tr)) return
       maybeAnnounceNearTrailer(pos.coords.latitude, pos.coords.longitude, tr, {
         mapOpen: true,
+        userHeadingDeg:
+          typeof pos.coords.heading === 'number' && Number.isFinite(pos.coords.heading) && pos.coords.heading >= 0
+            ? pos.coords.heading
+            : null,
+        speedMps:
+          typeof pos.coords.speed === 'number' && Number.isFinite(pos.coords.speed) ? pos.coords.speed : null,
       })
     },
     () => {},
