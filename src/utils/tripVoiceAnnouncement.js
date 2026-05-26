@@ -526,6 +526,12 @@ const prevTrailerGps = new Map()
 /** @type {Map<string, number>} trlrOrder → last near-announce timestamp */
 const nearTrailerCooldown = new Map()
 
+/** @type {Map<string, number>} trlrOrder → last farther “approaching” announce */
+const approachingTrailerCooldown = new Map()
+
+/** Outer ring for “approaching” speech = this × configured near radius. */
+const APPROACHING_TRAILER_RADIUS_MULT = 3
+
 const RELOC_MIN_MOVE_M = 12
 const NEAR_COOLDOWN_MS = 110_000
 
@@ -539,6 +545,32 @@ function haversineM(lat1, lng1, lat2, lng2) {
     Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) * Math.sin(dLng / 2)
   const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
   return R * c
+}
+
+/**
+ * Initial bearing from (lat1,lng1) toward (lat2,lng2), degrees clockwise from true north (0–360).
+ */
+function initialBearingDeg(lat1, lng1, lat2, lng2) {
+  const toRad = (d) => (d * Math.PI) / 180
+  const φ1 = toRad(lat1)
+  const φ2 = toRad(lat2)
+  const Δλ = toRad(lng2 - lng1)
+  const y = Math.sin(Δλ) * Math.cos(φ2)
+  const x = Math.cos(φ1) * Math.sin(φ2) - Math.sin(φ1) * Math.cos(φ2) * Math.cos(Δλ)
+  const θ = Math.atan2(y, x)
+  return ((θ * 180) / Math.PI + 360) % 360
+}
+
+/**
+ * Left / right / ahead relative to user course-over-ground (both 0–360, north=0).
+ */
+function sideRelativeToUserCourse(bearingToTargetDeg, userHeadingDeg) {
+  let diff = bearingToTargetDeg - userHeadingDeg
+  diff = ((diff % 360) + 360) % 360
+  if (diff > 180) diff -= 360
+  if (diff > 52) return 'on your right'
+  if (diff < -52) return 'on your left'
+  return 'ahead'
 }
 
 function gpsKey(lat, lng) {
@@ -641,7 +673,11 @@ export function maybeAnnounceTrailerRelocated(trailers) {
  * @param {number} userLat
  * @param {number} userLng
  * @param {unknown[]} trailers
- * @param {{ mapOpen?: boolean }} [opts]
+ * @param {{
+ *   mapOpen?: boolean,
+ *   userHeadingDeg?: number | null,
+ *   speedMps?: number | null,
+ * }} [opts]
  */
 export function maybeAnnounceNearTrailer(userLat, userLng, trailers, opts) {
   if (typeof window === 'undefined') return
@@ -652,6 +688,14 @@ export function maybeAnnounceNearTrailer(userLat, userLng, trailers, opts) {
   if (mode === 'off' || !isTrailerGpsTtsEnabled()) return
   evaluateGestureGate()
   if (!gestureUnlocked) return
+
+  const innerR = getNearTrailerRadiusMeters()
+  const outerR = innerR * APPROACHING_TRAILER_RADIUS_MULT
+  const cog = opts?.userHeadingDeg
+  const spd = opts?.speedMps
+  const cogOk =
+    typeof cog === 'number' && Number.isFinite(cog) && cog >= 0 && cog <= 360
+  const speedOk = spd == null || !Number.isFinite(spd) || spd >= 0.45
 
   const now = Date.now()
   for (const t of trailers) {
@@ -664,23 +708,40 @@ export function maybeAnnounceNearTrailer(userLat, userLng, trailers, opts) {
     if (isNaN(lat) || isNaN(lng)) continue
 
     const d = haversineM(userLat, userLng, lat, lng)
-    if (d > getNearTrailerRadiusMeters()) continue
-
-    const last = nearTrailerCooldown.get(order) ?? 0
-    if (now - last < NEAR_COOLDOWN_MS) continue
-    nearTrailerCooldown.set(order, now)
-
     const nbr = String(tr.trlrNbr ?? '').trim() || order
     const idSpeech = trailerNumberForSpeech(nbr)
-    const text = `You are near trailer ${idSpeech}.`
-    pushLiveLog({ type: 'info', message: `[TripVoice] ${text}`, ts: Date.now() })
-    enqueueAnnouncement(text, { bell: mode === 'both', category: `nearTrailer:${order}` })
+
+    if (d <= innerR) {
+      const last = nearTrailerCooldown.get(order) ?? 0
+      if (now - last < NEAR_COOLDOWN_MS) continue
+      nearTrailerCooldown.set(order, now)
+      const text = `You are near trailer ${idSpeech}.`
+      pushLiveLog({ type: 'info', message: `[TripVoice] ${text}`, ts: Date.now() })
+      enqueueAnnouncement(text, { bell: mode === 'both', category: `nearTrailer:${order}` })
+      continue
+    }
+
+    if (d <= outerR) {
+      const lastA = approachingTrailerCooldown.get(order) ?? 0
+      if (now - lastA < NEAR_COOLDOWN_MS) continue
+      approachingTrailerCooldown.set(order, now)
+      let text = `Approaching trailer ${idSpeech}.`
+      if (cogOk && speedOk) {
+        const brg = initialBearingDeg(userLat, userLng, lat, lng)
+        const side = sideRelativeToUserCourse(brg, /** @type {number} */ (cog))
+        if (side === 'on your right') text = `Approaching trailer ${idSpeech} on your right.`
+        else if (side === 'on your left') text = `Approaching trailer ${idSpeech} on your left.`
+      }
+      pushLiveLog({ type: 'info', message: `[TripVoice] ${text}`, ts: Date.now() })
+      enqueueAnnouncement(text, { bell: mode === 'both', category: `approachTrailer:${order}` })
+    }
   }
 }
 
 export function clearTrailerGpsTracking() {
   prevTrailerGps.clear()
   nearTrailerCooldown.clear()
+  approachingTrailerCooldown.clear()
 }
 
 /**

@@ -34,6 +34,20 @@ const headingOffsetDeg = ref(0)
 
 const COMPASS_OFFSET_STORAGE_KEY = 'compass_heading_offset'
 
+/** Latest device bearing before user offset (slider updates map + preview without waiting for the next sensor tick). */
+let lastBaseMapBearing = /** @type {number | null} */ (null)
+
+/**
+ * @param {number} baseDeg
+ * @param {number} offsetDeg
+ * @returns {number}
+ */
+function combineBearingWithOffset(baseDeg, offsetDeg) {
+  const b = Number(baseDeg)
+  const o = Number(offsetDeg)
+  return (((b + o) % 360) + 360) % 360
+}
+
 /**
  * Set the compass heading offset for calibration (degrees, any numeric; normalized 0–359).
  * Persists a signed -180…180 value to localStorage for compatibility with existing settings.
@@ -47,6 +61,11 @@ export function setCompassHeadingOffset(deg) {
     localStorage.setItem(COMPASS_OFFSET_STORAGE_KEY, String(Math.round(signed)))
   } catch {
     /* ignore */
+  }
+  if (lastBaseMapBearing != null) {
+    const bearing = combineBearingWithOffset(lastBaseMapBearing, headingOffsetDeg.value)
+    heading.value = bearing
+    smoothHeading.value = bearing
   }
 }
 
@@ -108,9 +127,9 @@ function getViewportOrientationDegrees() {
  *
  * @see node_modules/leaflet-rotate/src/map/handler/CompassBearing.js
  * @param {DeviceOrientationEvent} event
- * @returns {number | null}
+ * @returns {number | null} bearing before user calibration offset
  */
-function getMapBearingFromDeviceOrientation(event) {
+function getBaseMapBearingFromDeviceOrientation(event) {
   const hasWebkit =
     'webkitCompassHeading' in event &&
     typeof event.webkitCompassHeading === 'number' &&
@@ -135,7 +154,7 @@ function getMapBearingFromDeviceOrientation(event) {
     deviceOrientation = getViewportOrientationDegrees()
   }
 
-  let bearing = angle - deviceOrientation + headingOffsetDeg.value
+  let bearing = angle - deviceOrientation
   bearing = ((bearing % 360) + 360) % 360
   return bearing
 }
@@ -167,12 +186,13 @@ let orientationEventName = null
  * @param {DeviceOrientationEvent} event
  */
 function handleOrientation(event) {
-  const bearing = getMapBearingFromDeviceOrientation(event)
-  if (bearing !== null) {
-    heading.value = bearing
-    applySmoothHeading(bearing)
-    errorMessage.value = null
-  }
+  const base = getBaseMapBearingFromDeviceOrientation(event)
+  if (base === null) return
+  lastBaseMapBearing = base
+  const bearing = combineBearingWithOffset(base, headingOffsetDeg.value)
+  heading.value = bearing
+  applySmoothHeading(bearing)
+  errorMessage.value = null
 }
 
 /**
@@ -257,6 +277,7 @@ function stopTracking() {
   orientationHandler = null
   orientationEventName = null
   isTracking.value = false
+  lastBaseMapBearing = null
   heading.value = null
   smoothHeading.value = null
 }

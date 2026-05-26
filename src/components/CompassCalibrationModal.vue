@@ -108,9 +108,10 @@ const previewRotate = computed(() => {
       </header>
 
       <p class="cal-lead">
-        Rotate the offset until the preview matches the road ahead. Tap the map compass to toggle heading-up
-        mode; use the sliders button under the compass for this panel (press-and-hold on the compass also works on
-        desktop).
+        Adjust the offset until the <strong>heading-up trailer map</strong> (when compass mode is on) matches how you
+        are actually pointed on the ground. The ring preview uses the same bearing numbers as the live map — it is not
+        tied to map road tiles. Tap the map compass to toggle heading-up mode; use the sliders button under the compass
+        for this panel (press-and-hold on the compass also works on desktop).
       </p>
 
       <p v-if="permissionState === 'denied'" class="cal-warn" role="status">

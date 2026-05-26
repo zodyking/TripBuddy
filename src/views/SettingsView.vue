@@ -1940,7 +1940,9 @@ onUnmounted(() => {
             <span class="audio-near-trailer-unit" aria-hidden="true">ft</span>
           </div>
           <p class="audio-near-trailer-hint">
-            “You are near trailer …” only while a trailer location map is open. Open the map from a trailer card pin.
+            While a trailer location map is open: “Approaching trailer …” at three times this distance (left/right
+            when GPS course is available), then “You are near trailer …” inside the radius. Open the map from a trailer
+            card pin.
           </p>
         </div>
 
