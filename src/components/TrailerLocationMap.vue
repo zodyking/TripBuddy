@@ -18,11 +18,14 @@ import {
 } from '../utils/mapMarkers.js'
 import { useCompassOrientation } from '../composables/useCompassOrientation.js'
 import { useMapCompassLongPress } from '../composables/useMapCompassLongPress.js'
-import CompassCalibrationModal from './CompassCalibrationModal.vue'
 import {
   syncMapNavigationGestures,
   applyUserTruckMarkerDomRotation,
+  centerMapOnLatLng,
 } from '../composables/useMapFollowControls.js'
+import {
+  setCompassHeadingOffset,
+} from '../composables/useCompassOrientation.js'
 
 /**
  * @typedef {{
@@ -83,6 +86,7 @@ const containerRef = ref(null)
 
 const {
   smoothHeading,
+  headingOffsetDeg,
   showCompassToggle,
   permissionState: compassPermission,
   errorMessage: compassError,
@@ -450,10 +454,18 @@ let unbindTruckBearingSync = null
 let mapResizeObserver = null
 /** @type {ReturnType<typeof setTimeout> | null} */
 let layoutRetryTimer = null
-/** @type {ReturnType<typeof setTimeout> | null} */
-let followFitDebounce = null
-/** Debounced fitBounds while live GPS follow is on — keeps trailers + truck in view (centering on user alone hid trailer pins). */
-const FOLLOW_FIT_DEBOUNCE_MS = 700
+
+/** User manually zoomed/panned — stop auto-centering until recenter button tapped. */
+const userCameraLocked = ref(false)
+/** True when inline calibration panel is visible. */
+const calibrationPanelOpen = ref(false)
+
+/** Computed offset in signed degrees (-180 to 180) for display. */
+const offsetSigned = computed(() => {
+  const v = headingOffsetDeg.value
+  if (typeof v !== 'number' || !Number.isFinite(v)) return 0
+  return v > 180 ? v - 360 : v
+})
 
 /**
  * @param {number} aLat
@@ -480,16 +492,32 @@ function syncNavigationGestures() {
   })
 }
 
+/** @type {boolean} */
+let isInternalZoom = false
+
 function bindTruckBearingSync() {
   if (!map || unbindTruckBearingSync) return
   const fn = () => {
     applyUserMarkerRotation()
   }
+  const onZoomStart = () => {
+    if (!isInternalZoom && trailerGeoFollowActive.value) {
+      userCameraLocked.value = true
+    }
+  }
   map.on('rotate', fn)
   map.on('zoomend', fn)
+  map.on('zoomstart', onZoomStart)
+  map.on('dragstart', () => {
+    if (trailerGeoFollowActive.value) {
+      userCameraLocked.value = true
+    }
+  })
   unbindTruckBearingSync = () => {
     map?.off('rotate', fn)
     map?.off('zoomend', fn)
+    map?.off('zoomstart', onZoomStart)
+    map?.off('dragstart')
     unbindTruckBearingSync = null
   }
 }
@@ -518,7 +546,7 @@ function makeTrailerIcon(trailer) {
 }
 
 function makeUserTruckIcon() {
-  return userLocationTruckIcon('')
+  return userLocationTruckIcon(props.userVehicleId || '')
 }
 
 
@@ -576,12 +604,15 @@ function scheduleFitBounds() {
     } else {
       b = b.pad(0.14)
     }
+    isInternalZoom = true
     map.fitBounds(b, {
       padding: [56, 56],
       maxZoom: 19,
       animate: motion,
     })
-    // fitBounds resets bearing on leaflet-rotate; restore heading-up mode
+    requestAnimationFrame(() => {
+      isInternalZoom = false
+    })
     if (compassModeActive.value) {
       applyMapCompassRotation()
       applyUserMarkerRotation()
@@ -589,14 +620,27 @@ function scheduleFitBounds() {
   }, 80)
 }
 
-function scheduleFollowFitDebounced() {
-  if (!map || compassModeActive.value || !trailerGeoFollowActive.value) return
-  if (!effectiveTrailers.value.length) return
-  if (followFitDebounce) clearTimeout(followFitDebounce)
-  followFitDebounce = setTimeout(() => {
-    followFitDebounce = null
-    scheduleFitBounds()
-  }, FOLLOW_FIT_DEBOUNCE_MS)
+/**
+ * Center map on user without changing zoom (follow behavior).
+ * Skipped if user has manually adjusted camera.
+ */
+function centerOnUser() {
+  if (!map || !userFix.value || userCameraLocked.value) return
+  const motion = !prefersReducedMotion()
+  centerMapOnLatLng(map, L.latLng(userFix.value.lat, userFix.value.lng), { animate: motion })
+  if (compassModeActive.value) {
+    applyMapCompassRotation()
+    applyUserMarkerRotation()
+  }
+}
+
+/**
+ * Recenter button handler: clear user lock, fit all pins + user, then resume follow.
+ */
+function onRecenterClick() {
+  userCameraLocked.value = false
+  didFitWithUser = false
+  scheduleFitBounds()
 }
 
 function syncUserOverlay() {
@@ -675,9 +719,42 @@ function onCompassPressStart() {
 const onCompassButtonClick = wrapCompassToggle(handleCompassToggle)
 
 function onCalibrationControlClick() {
-  calibrationModalOpen.value = true
+  if (!compassModeActive.value) {
+    void handleCompassToggle().then(() => {
+      calibrationPanelOpen.value = true
+    })
+  } else {
+    calibrationPanelOpen.value = true
+  }
   void Promise.resolve(startTracking()).catch(() => {})
 }
+
+function onCalibrationPanelClose() {
+  calibrationPanelOpen.value = false
+}
+
+function onOffsetSliderInput(/** @type {Event} */ e) {
+  const t = /** @type {HTMLInputElement} */ (e.target)
+  const raw = Number(t.value)
+  if (!Number.isFinite(raw)) return
+  setCompassHeadingOffset(Math.round(raw))
+}
+
+function nudgeOffset(delta) {
+  let next = offsetSigned.value + delta
+  next = Math.max(-180, Math.min(180, Math.round(next)))
+  setCompassHeadingOffset(next)
+}
+
+function resetOffset() {
+  setCompassHeadingOffset(0)
+}
+
+const headingDisplay = computed(() => {
+  const h = smoothHeading.value
+  if (h == null || !Number.isFinite(h)) return '—'
+  return `${Math.round(h)}°`
+})
 
 /**
  * @param {number} lat
@@ -707,12 +784,11 @@ function setUserFixFromLatLng(lat, lng, accuracyM = 40, fitCamera = false, opts 
     accuracyM: Number.isFinite(accuracyM) && accuracyM > 0 ? accuracyM : 40,
   }
   syncUserOverlay()
-  if (trailerGeoFollowActive.value && map && userFix.value) {
-    scheduleFollowFitDebounced()
-  }
   if (fitCamera && map && effectiveTrailers.value.length && !didFitWithUser) {
     didFitWithUser = true
     scheduleFitBounds()
+  } else if (trailerGeoFollowActive.value && map && userFix.value) {
+    centerOnUser()
   }
 }
 
@@ -830,12 +906,18 @@ function applyTrailerMarkersToMap() {
   }
 }
 
+/** @type {string} */
+let lastTrailerPinKeys = ''
+
 function syncTrailerMarkers() {
   applyTrailerMarkersToMap()
   const pins = effectiveTrailers.value
+  const newKeys = pins.map((p) => `${p.order}:${p.lat}:${p.lng}`).join('|')
+  const pinsChanged = newKeys !== lastTrailerPinKeys
+  lastTrailerPinKeys = newKeys
   if (!didFitWithUser) {
     scheduleFitBounds()
-  } else if (pins.length && userFix.value) {
+  } else if (pinsChanged && !userCameraLocked.value) {
     scheduleFitBounds()
   }
 }
@@ -843,23 +925,19 @@ function syncTrailerMarkers() {
 /**
  * Leaflet often needs `invalidateSize` after the map container gets a real flex height
  * (mobile modals) or after rotation. Does not change the camera framing.
+ * @param {{ markersChanged?: boolean }} [opts]
  */
-function relayoutMapSurface() {
+function relayoutMapSurface(opts = {}) {
   if (!map || !overlayLayer) return
   try {
     map.invalidateSize({ animate: false })
   } catch {
     /* ignore */
   }
-  applyTrailerMarkersToMap()
-  syncUserOverlay()
-  try {
-    darkLayer?.redraw?.()
-    streetLayer?.redraw?.()
-    satelliteLayer?.redraw?.()
-  } catch {
-    /* ignore */
+  if (opts.markersChanged) {
+    applyTrailerMarkersToMap()
   }
+  syncUserOverlay()
 }
 
 function initMap() {
@@ -981,18 +1059,17 @@ function destroyMap() {
     clearTimeout(fitDebounce)
     fitDebounce = null
   }
-  if (followFitDebounce) {
-    clearTimeout(followFitDebounce)
-    followFitDebounce = null
-  }
   trailerMarkers.clear()
   userMarker = null
   userFix.value = null
+  userCameraLocked.value = false
+  calibrationPanelOpen.value = false
   overlayLayer = null
   userLayer = null
   darkLayer = null
   streetLayer = null
   satelliteLayer = null
+  lastTrailerPinKeys = ''
   if (map) {
     map.remove()
     map = null
@@ -1056,11 +1133,6 @@ watch(smoothHeading, () => {
   if (compassModeActive.value) {
     applyMapCompassRotation()
     applyUserMarkerRotation()
-    try {
-      map?.invalidateSize({ animate: false })
-    } catch {
-      /* ignore */
-    }
   }
 })
 
@@ -1068,13 +1140,9 @@ watch(compassModeActive, (active) => {
   if (!active && map && typeof map.setBearing === 'function') {
     map.setBearing(0)
   }
-  if (active && followFitDebounce) {
-    clearTimeout(followFitDebounce)
-    followFitDebounce = null
-  }
   nextTick(() => {
     relayoutMapSurface()
-    if (active === false && effectiveTrailers.value.length) {
+    if (active === false && effectiveTrailers.value.length && !userCameraLocked.value) {
       scheduleFitBounds()
     }
   })
@@ -1184,7 +1252,69 @@ watch(
         </svg>
         <span class="sr-only">Open heading offset and calibration</span>
       </button>
+      <button
+        v-if="userCameraLocked && trailerGeoFollowActive"
+        type="button"
+        class="map-control-btn map-control-btn--recenter tap"
+        title="Recenter map on truck and trailers"
+        aria-label="Recenter"
+        @click="onRecenterClick"
+      >
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+          <circle cx="12" cy="12" r="3" />
+          <path d="M12 2v4M12 18v4M2 12h4M18 12h4" />
+        </svg>
+      </button>
       </div>
+    <!-- Inline calibration panel (overlays live map) -->
+    <div
+      v-if="calibrationPanelOpen"
+      class="calibration-panel"
+      role="dialog"
+      aria-modal="false"
+      aria-label="Compass calibration"
+    >
+      <div class="calibration-panel__header">
+        <h3 class="calibration-panel__title">Compass calibration</h3>
+        <button
+          type="button"
+          class="calibration-panel__close tap"
+          aria-label="Close"
+          @click="onCalibrationPanelClose"
+        >×</button>
+      </div>
+      <p class="calibration-panel__hint">
+        Adjust until the truck icon points where you are actually facing.
+      </p>
+      <div class="calibration-panel__live">
+        <span class="calibration-panel__label">Heading</span>
+        <span class="calibration-panel__heading">{{ headingDisplay }}</span>
+      </div>
+      <div class="calibration-panel__offset">
+        <div class="calibration-panel__offset-head">
+          <span class="calibration-panel__label">Offset</span>
+          <span class="calibration-panel__offset-val">{{ offsetSigned }}°</span>
+        </div>
+        <input
+          class="calibration-panel__slider tap"
+          type="range"
+          min="-180"
+          max="180"
+          step="1"
+          :value="offsetSigned"
+          aria-label="Heading offset in degrees"
+          @input="onOffsetSliderInput"
+        />
+        <div class="calibration-panel__nudge-row">
+          <button type="button" class="calibration-panel__nudge tap" @click="nudgeOffset(-5)">−5°</button>
+          <button type="button" class="calibration-panel__nudge tap" @click="nudgeOffset(-1)">−1°</button>
+          <button type="button" class="calibration-panel__nudge tap" @click="nudgeOffset(1)">+1°</button>
+          <button type="button" class="calibration-panel__nudge tap" @click="nudgeOffset(5)">+5°</button>
+        </div>
+        <button type="button" class="calibration-panel__reset tap" @click="resetOffset">Reset to 0°</button>
+      </div>
+      <button type="button" class="calibration-panel__done tap" @click="onCalibrationPanelClose">Done</button>
+    </div>
     <p
       v-if="copyToast"
       class="trailer-loc-copy-toast"
@@ -1301,10 +1431,6 @@ watch(
         </div>
       </div>
     </div>
-    <CompassCalibrationModal
-      v-model="calibrationModalOpen"
-      :map-compass-mode-active="compassModeActive"
-    />
   </div>
 </template>
 
@@ -1730,5 +1856,182 @@ watch(
 
 :deep(.leaflet-popup-tip) {
   background: #fff;
+}
+
+/* Recenter button */
+.map-control-btn--recenter {
+  background: rgba(34, 197, 94, 0.9);
+  border-color: rgba(34, 197, 94, 0.7);
+  color: #fff;
+}
+
+.map-control-btn--recenter:hover {
+  background: rgba(34, 197, 94, 1);
+}
+
+.map-control-btn--recenter svg {
+  width: 1.1rem;
+  height: 1.1rem;
+}
+
+/* Inline calibration panel */
+.calibration-panel {
+  position: absolute;
+  z-index: 1001;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  padding: 0.75rem 1rem 1rem;
+  padding-bottom: max(1rem, env(safe-area-inset-bottom, 0px));
+  background: rgba(10, 10, 15, 0.94);
+  backdrop-filter: blur(12px);
+  border-top: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 1rem 1rem 0 0;
+  box-shadow: 0 -4px 24px rgba(0, 0, 0, 0.4);
+}
+
+.calibration-panel__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 0.5rem;
+}
+
+.calibration-panel__title {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 700;
+  color: #f0f0f5;
+}
+
+.calibration-panel__close {
+  width: 2rem;
+  height: 2rem;
+  border: none;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.1);
+  color: #e8e8ee;
+  font-size: 1.25rem;
+  line-height: 1;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.calibration-panel__close:hover {
+  background: rgba(255, 255, 255, 0.18);
+}
+
+.calibration-panel__hint {
+  margin: 0 0 0.65rem;
+  font-size: 0.75rem;
+  line-height: 1.4;
+  color: rgba(200, 200, 215, 0.9);
+}
+
+.calibration-panel__live {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  margin-bottom: 0.6rem;
+}
+
+.calibration-panel__label {
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: rgba(180, 180, 195, 0.85);
+}
+
+.calibration-panel__heading {
+  font-size: 1.2rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: #a8e6ff;
+}
+
+.calibration-panel__offset {
+  margin-bottom: 0.75rem;
+}
+
+.calibration-panel__offset-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.3rem;
+}
+
+.calibration-panel__offset-val {
+  font-size: 0.9rem;
+  font-variant-numeric: tabular-nums;
+  color: rgba(200, 210, 255, 0.95);
+}
+
+.calibration-panel__slider {
+  width: 100%;
+  height: 0.4rem;
+  margin: 0.2rem 0 0.5rem;
+  accent-color: #7b4db5;
+  cursor: pointer;
+}
+
+.calibration-panel__nudge-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+  margin-bottom: 0.45rem;
+}
+
+.calibration-panel__nudge {
+  flex: 1;
+  min-width: 3rem;
+  padding: 0.4rem 0.3rem;
+  border-radius: 0.4rem;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.06);
+  color: inherit;
+  font-size: 0.75rem;
+  cursor: pointer;
+}
+
+.calibration-panel__nudge:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.calibration-panel__reset {
+  width: 100%;
+  padding: 0.4rem;
+  border-radius: 0.4rem;
+  border: 1px dashed rgba(255, 255, 255, 0.2);
+  background: transparent;
+  color: rgba(200, 200, 215, 0.95);
+  font-size: 0.75rem;
+  cursor: pointer;
+}
+
+.calibration-panel__reset:hover {
+  border-color: rgba(255, 255, 255, 0.35);
+}
+
+.calibration-panel__done {
+  width: 100%;
+  padding: 0.55rem 1rem;
+  border: none;
+  border-radius: 0.5rem;
+  background: linear-gradient(180deg, #8b5fd4 0%, #6b3fa8 100%);
+  color: #fff;
+  font-weight: 600;
+  font-size: 0.88rem;
+  cursor: pointer;
+}
+
+.calibration-panel__done:hover {
+  filter: brightness(1.08);
+}
+
+/* Adjust hints position when calibration panel is open */
+.trailer-loc-root.has-trailer-ledger .calibration-panel {
+  bottom: 0;
 }
 </style>

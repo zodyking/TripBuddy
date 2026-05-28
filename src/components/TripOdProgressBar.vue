@@ -1,5 +1,5 @@
 <script setup>
-import { computed } from 'vue'
+import { computed, ref, watch } from 'vue'
 
 const props = defineProps({
   assignedMs: { type: Number, default: null },
@@ -13,6 +13,8 @@ const props = defineProps({
   /** @type {'none' | 'assigned' | 'dispatched' | string} */
   tripPhase: { type: String, default: 'none' },
   mapAvailable: { type: Boolean, default: false },
+  /** When true, legs have changed and monotonic fill should reset. */
+  legChangeTrigger: { type: [Number, String], default: '' },
 })
 
 const emit = defineEmits(['open-map'])
@@ -51,6 +53,19 @@ const arrivedDone = computed(() => {
   return typeof a === 'number' && Number.isFinite(a) && a > 0
 })
 
+/** Remaining NM for display. */
+const remainingNm = computed(() => {
+  const m = distMetersSafe.value
+  if (m == null) return null
+  return m / 1852
+})
+
+const remainingNmDisplay = computed(() => {
+  const nm = remainingNm.value
+  if (nm == null) return null
+  return `${nm.toFixed(1)} NM left`
+})
+
 /** Covered NM along leg heuristic: leg − remaining-to-dest, clamped. */
 const coveredNm = computed(() => {
   if (arrivedDone.value && legNm.value != null) return legNm.value
@@ -79,26 +94,60 @@ const ariaGroupLabel = computed(
   () => `Leg progress. ${nmRatioText.value ? `${nmRatioText.value} nautical miles covered of leg total` : 'Mileage ratio unavailable'}. ${ariaTailDist.value}.`,
 )
 
-const fillPct = computed(() => {
+/** Computed raw fill pct before monotonic enforcement. */
+const fillPctRaw = computed(() => {
   if (arrivedDone.value) return 100
   const leg = legMeters.value
   const d = distMetersSafe.value
   if (leg != null && leg > 0 && d != null) {
     const cov = Math.max(0, Math.min(leg, leg - d))
-    const pct = Math.round(Math.min(100, Math.max(4, (100 * cov) / leg)))
-    return Number.isFinite(pct) ? pct : 6
+    const pct = Math.round(Math.min(100, Math.max(1, (100 * cov) / leg)))
+    return Number.isFinite(pct) ? pct : 1
   }
   const dNm = distNm.value
   if (dNm != null) {
     const cap = Math.max(15, Number(props.denomNm) || 180)
     const raw = 100 * (1 - Math.min(1, Math.max(0, dNm) / cap))
-    const pct = Math.round(Math.min(100, Math.max(5, raw)))
-    return Number.isFinite(pct) ? pct : 6
+    const pct = Math.round(Math.min(100, Math.max(1, raw)))
+    return Number.isFinite(pct) ? pct : 1
   }
   const ph = String(props.tripPhase ?? '').toLowerCase()
   if (ph === 'dispatched') return 38
   if (ph === 'assigned') return 12
-  return 6
+  return 1
+})
+
+/** Monotonic fill: never go backward from GPS noise. */
+const maxFillPctSeen = ref(0)
+
+/** Reset monotonic max on leg change. */
+watch(
+  () => props.legChangeTrigger,
+  () => {
+    maxFillPctSeen.value = 0
+  },
+)
+
+/** Also reset on arrival reset (arrivedMs going from truthy to null). */
+watch(
+  () => props.arrivedMs,
+  (newVal, oldVal) => {
+    if (oldVal != null && newVal == null) {
+      maxFillPctSeen.value = 0
+    }
+  },
+)
+
+const fillPct = computed(() => {
+  const raw = fillPctRaw.value
+  if (arrivedDone.value) {
+    maxFillPctSeen.value = 100
+    return 100
+  }
+  if (raw > maxFillPctSeen.value) {
+    maxFillPctSeen.value = raw
+  }
+  return maxFillPctSeen.value
 })
 
 const timelineEndMs = computed(() => {
@@ -150,6 +199,7 @@ function onOpenMap() {
             <span class="trip-od-progress__ratio trip-od-progress__ratio--muted">—/—</span>
             <span class="trip-od-progress__unit trip-od-progress__unit--muted">NM</span>
           </template>
+          <span v-if="remainingNmDisplay" class="trip-od-progress__remaining">{{ remainingNmDisplay }}</span>
         </span>
         <button
           v-if="mapAvailable"
@@ -253,6 +303,14 @@ function onOpenMap() {
   opacity: 0.85;
 }
 
+.trip-od-progress__remaining {
+  font-size: 0.68rem;
+  font-weight: 600;
+  color: var(--color-accent-orange-soft, #ffa366);
+  margin-left: 0.35rem;
+  font-variant-numeric: tabular-nums;
+}
+
 .trip-od-progress__map-btn {
   display: inline-flex;
   align-items: center;
@@ -309,7 +367,7 @@ function onOpenMap() {
   box-shadow:
     0 0 10px rgba(123, 77, 181, 0.35),
     inset 0 1px 0 rgba(255, 255, 255, 0.18);
-  transition: width 0.5s var(--ease-out, cubic-bezier(0.22, 1, 0.36, 1));
+  transition: width 0.25s var(--ease-out, cubic-bezier(0.22, 1, 0.36, 1));
 }
 
 .trip-od-progress__marker {

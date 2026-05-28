@@ -26,6 +26,11 @@ function clampRadiusNm(raw) {
   return Math.min(HELPERS_RADIUS_NM_MAX, Math.max(HELPERS_RADIUS_NM_MIN, n))
 }
 
+/** Poll interval when actively ENRT and auto-arrive is enabled. */
+const ACTIVE_POLL_MS = 10_000
+/** Poll interval when idle or auto-arrive is disabled. */
+const IDLE_POLL_MS = 45_000
+
 /**
  * When the driver enters the destination radius (and ENRT), announce and run arrive → check-in.
  *
@@ -38,6 +43,7 @@ function clampRadiusNm(raw) {
  *   isAutomationRunning: () => boolean,
  *   runArriveThenCheckIn: () => Promise<void>,
  *   notifyInApp: (message: string, kind?: 'info' | 'warning' | 'error') => void,
+ *   remainingDistM?: import('vue').ComputedRef<number | null>,
  * }} opts
  */
 export function useDestinationAutoArriveCheckIn(opts) {
@@ -115,31 +121,42 @@ export function useDestinationAutoArriveCheckIn(opts) {
       return
     }
 
-    const ulat = appGeoLat.value
-    const ulng = appGeoLng.value
-    const dlat = destLat.value
-    const dlng = destLng.value
-    if (
-      ulat == null ||
-      ulng == null ||
-      dlat == null ||
-      dlng == null ||
-      !Number.isFinite(ulat) ||
-      !Number.isFinite(ulng) ||
-      !Number.isFinite(dlat) ||
-      !Number.isFinite(dlng)
-    ) {
-      return
-    }
-
-    if (Math.abs(dlat) > 90 || Math.abs(dlng) > 180) {
-      resetDwell()
-      return
-    }
-
     const nm = clampRadiusNm(helpersAutoArriveRadiusNmRef.value)
     const maxM = nm * 1852
-    const d = haversineM(ulat, ulng, dlat, dlng)
+
+    /** Use injected remainingDistM when available (same as progress bar); fallback to internal coords. */
+    let d = /** @type {number | null} */ (null)
+    if (opts.remainingDistM) {
+      const rem = opts.remainingDistM.value
+      if (rem != null && Number.isFinite(rem) && rem >= 0) {
+        d = rem
+      }
+    }
+
+    if (d == null) {
+      const ulat = appGeoLat.value
+      const ulng = appGeoLng.value
+      const dlat = destLat.value
+      const dlng = destLng.value
+      if (
+        ulat == null ||
+        ulng == null ||
+        dlat == null ||
+        dlng == null ||
+        !Number.isFinite(ulat) ||
+        !Number.isFinite(ulng) ||
+        !Number.isFinite(dlat) ||
+        !Number.isFinite(dlng)
+      ) {
+        return
+      }
+
+      if (Math.abs(dlat) > 90 || Math.abs(dlng) > 180) {
+        resetDwell()
+        return
+      }
+      d = haversineM(ulat, ulng, dlat, dlng)
+    }
 
     /** Strict geofence — do not add accuracy slack (it widened the circle and caused early triggers). */
     const strictInside = d <= maxM
@@ -168,7 +185,7 @@ export function useDestinationAutoArriveCheckIn(opts) {
     const dNm = d / 1852
     pushLiveLog({
       type: 'info',
-      message: `[Proximity auto arrive] firing: ~${dNm.toFixed(2)} NM from Linehaul dest coords (threshold ${nm} NM), GPS accuracy ~${Math.round(accM)} m`,
+      message: `[Proximity auto arrive] firing: ~${dNm.toFixed(2)} NM from dest (threshold ${nm} NM), GPS accuracy ~${Math.round(accM)} m`,
       ts: now,
     })
 
@@ -200,25 +217,48 @@ export function useDestinationAutoArriveCheckIn(opts) {
       opts.suppressHomeLinehaulErrors,
       helpersAutoArriveNearDestEnabledRef,
       helpersAutoArriveRadiusNmRef,
+      ...(opts.remainingDistM ? [opts.remainingDistM] : []),
     ],
     () => {
       maybeTriggerProximityAutoArrive()
     },
   )
 
-  const PROX_POLL_MS = 45_000
   /** @type {ReturnType<typeof setInterval> | null} */
   let intervalId = null
+  let currentPollMs = IDLE_POLL_MS
+
+  function restartInterval() {
+    if (intervalId != null) {
+      clearInterval(intervalId)
+      intervalId = null
+    }
+    const shouldBeActive =
+      helpersAutoArriveNearDestEnabledRef.value && opts.isEnrtEligible()
+    const nextPoll = shouldBeActive ? ACTIVE_POLL_MS : IDLE_POLL_MS
+    if (nextPoll !== currentPollMs) {
+      currentPollMs = nextPoll
+    }
+    intervalId = setInterval(() => {
+      maybeTriggerProximityAutoArrive()
+    }, currentPollMs)
+  }
 
   function onVisibility() {
     if (typeof document === 'undefined' || document.visibilityState !== 'visible') return
     maybeTriggerProximityAutoArrive()
+    restartInterval()
   }
 
+  watch(
+    () => `${helpersAutoArriveNearDestEnabledRef.value}|${opts.isEnrtEligible()}`,
+    () => {
+      restartInterval()
+    },
+  )
+
   onMounted(() => {
-    intervalId = setInterval(() => {
-      maybeTriggerProximityAutoArrive()
-    }, PROX_POLL_MS)
+    restartInterval()
     if (typeof document !== 'undefined') {
       document.addEventListener('visibilitychange', onVisibility)
     }

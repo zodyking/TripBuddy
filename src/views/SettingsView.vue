@@ -1843,8 +1843,8 @@ onUnmounted(() => {
 
       <SettingsSection title="Auto arrive and check-in near destination">
         <p class="helpers-lead">
-          When your driver status is <strong>ENRT</strong> and you move within the set distance of the
-          <strong>current trip destination</strong> (Linehaul facility coordinates), the app announces
+          When your driver status is <strong>ENRT</strong> and the <strong>Leg progress remaining NM</strong>
+          (shown on Home) drops to or below this threshold, the app announces
           <em>Auto arrive and check in running</em> and runs your Home <strong>Arrive</strong> quick action,
           then your <strong>Check-in</strong> quick action (same pairing as the late-night prompt).
         </p>
