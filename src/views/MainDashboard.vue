@@ -3001,54 +3001,56 @@ onUnmounted(() => {
           </div>
 
           <div v-if="expandedDollyApi" class="dolly-body">
-            <div class="dolly-actions-row">
-              <button
-                v-if="!dollyAddOpen"
-                type="button"
-                class="dolly-action-btn dolly-action-btn--add tap"
-                @click="dollyAddOpen = true"
-              >
-                Add
-              </button>
-              <button
-                v-else
-                type="button"
-                class="dolly-action-btn dolly-action-btn--ghost tap"
-                @click="(dollyAddOpen = false), (dollyAddDigits = '')"
-              >
-                Cancel
-              </button>
-              <button
-                v-if="canRemoveDolly"
-                type="button"
-                class="dolly-action-btn dolly-action-btn--remove tap"
-                :disabled="dollyPutBusy"
-                @click="onRemoveDolly"
-              >
-                Remove
-              </button>
-            </div>
-
-            <div v-if="dollyAddOpen" class="dolly-add-compact">
-              <label class="sr-only" for="dolly-compact-inp">6 digit dolly number</label>
-              <input
-                id="dolly-compact-inp"
-                :value="dollyAddDigits"
-                class="dolly-compact-inp"
-                inputmode="numeric"
-                maxlength="6"
-                placeholder="6 digits"
-                @input="onDollyAddInput"
-                @keydown.enter.prevent="dollyAddDigits.length === 6 && onAddDollySubmit()"
-              />
-              <button
-                type="button"
-                class="dolly-compact-btn btn primary"
-                :disabled="dollyPutBusy || dollyAddDigits.length !== 6"
-                @click.stop="onAddDollySubmit"
-              >
-                Add
-              </button>
+            <div
+              class="dolly-actions-row"
+              :class="{ 'dolly-actions-row--add': dollyAddOpen }"
+            >
+              <template v-if="dollyAddOpen">
+                <button
+                  type="button"
+                  class="dolly-action-btn dolly-action-btn--ghost tap"
+                  @click="(dollyAddOpen = false), (dollyAddDigits = '')"
+                >
+                  Cancel
+                </button>
+                <label class="sr-only" for="dolly-compact-inp">6 digit dolly number</label>
+                <input
+                  id="dolly-compact-inp"
+                  :value="dollyAddDigits"
+                  class="dolly-compact-inp"
+                  inputmode="numeric"
+                  maxlength="6"
+                  placeholder="6 digits"
+                  @input="onDollyAddInput"
+                  @keydown.enter.prevent="dollyAddDigits.length === 6 && onAddDollySubmit()"
+                />
+                <button
+                  type="button"
+                  class="dolly-compact-btn btn primary"
+                  :disabled="dollyPutBusy || dollyAddDigits.length !== 6"
+                  @click.stop="onAddDollySubmit"
+                >
+                  Add
+                </button>
+              </template>
+              <template v-else>
+                <button
+                  type="button"
+                  class="dolly-action-btn dolly-action-btn--add tap"
+                  @click="dollyAddOpen = true"
+                >
+                  Add
+                </button>
+                <button
+                  v-if="canRemoveDolly"
+                  type="button"
+                  class="dolly-action-btn dolly-action-btn--remove tap"
+                  :disabled="dollyPutBusy"
+                  @click="onRemoveDolly"
+                >
+                  Remove
+                </button>
+              </template>
             </div>
 
             <div v-if="tripDollySection.show" class="dolly-api-section">

@@ -178,10 +178,6 @@ export async function removeDollyFromRegistry(n) {
   let lastPrimaryNbr = reg.lastPrimaryNbr
   if (lastPrimaryNbr === sixD) {
     lastPrimaryNbr = null
-    const remaining = Object.keys(items).sort(
-      (a, b) => (items[b].lastSeenAt || 0) - (items[a].lastSeenAt || 0),
-    )
-    if (remaining.length) lastPrimaryNbr = remaining[0]
   }
   return writeDollyRegistry({ ...reg, lastPrimaryNbr, items })
 }
