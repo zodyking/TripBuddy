@@ -65,7 +65,7 @@ import { useDestinationAutoArriveCheckIn } from '../composables/useDestinationAu
 import TripOdProgressBar from '../components/TripOdProgressBar.vue'
 import TripLegMapModal from '../components/TripLegMapModal.vue'
 import { haversineM } from '../utils/polylineSnap.js'
-import { appGeoLat, appGeoLng } from '../composables/useAppGeolocationWatch.js'
+import { appGeoLat, appGeoLng, setAppGeoWatchProfile } from '../composables/useAppGeolocationWatch.js'
 import {
   liveLogEntries,
   registerAssignmentListener,
@@ -447,6 +447,19 @@ const tripProgressDenomNm = computed(() => {
 
 const showTripOdProgressBar = computed(
   () => Boolean(linehaulTripsBody.value) && !linehaulTripsError.value && dispatchSlideIndex.value === 0,
+)
+
+/** Toggle realtime geolocation when on active ENRT trip with progress bar visible. */
+watch(
+  () => ({
+    show: showTripOdProgressBar.value,
+    phase: tripPhase.value,
+  }),
+  ({ show, phase }) => {
+    const isActiveTrip = show && String(phase ?? '').toUpperCase() === 'ENRT'
+    setAppGeoWatchProfile(isActiveTrip ? 'activeTrip' : 'idle')
+  },
+  { immediate: true },
 )
 
 /** Trip JSON shown in Trip Details (matches Dispatch carousel). */
@@ -1315,6 +1328,7 @@ useDestinationAutoArriveCheckIn({
   isAutomationRunning: () => runningAutomationId.value != null,
   runArriveThenCheckIn: helpersProxRunArriveChain,
   notifyInApp: (msg, kind) => notifyQuickActionInApp(msg, kind || 'info'),
+  remainingDistM: tripProgressDistM,
 })
 
 function clearAutomationPreviewNow() {
@@ -2885,6 +2899,7 @@ onUnmounted(() => {
                 :denom-nm="tripProgressDenomNm"
                 :trip-phase="tripPhase"
                 :map-available="tripLegMapHasCoords"
+                :leg-change-trigger="currentTripLegSeq"
                 @open-map="tripLegMapOpen = true"
               />
             </div>

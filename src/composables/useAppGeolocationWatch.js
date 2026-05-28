@@ -20,6 +20,9 @@ let started = false
 /** @type {(() => void) | null} */
 let visibilityHandler = null
 
+/** Current profile: 'idle' saves battery, 'activeTrip' is realtime for ENRT. */
+let currentProfile = /** @type {'idle' | 'activeTrip'} */ ('idle')
+
 async function syncPermissionLabel() {
   if (typeof navigator === 'undefined' || !navigator.permissions?.query) return
   try {
@@ -38,19 +41,24 @@ async function syncPermissionLabel() {
 }
 
 /**
- * Single shared watch for the authenticated app shell (Home, Settings, etc.).
- * Idempotent: safe to call multiple times.
+ * Get watch options based on current profile.
  */
-export function startAppGeolocationWatch() {
-  if (typeof window === 'undefined') return
-  if (started) return
-  if (!navigator.geolocation?.watchPosition) {
-    appGeoPermission.value = 'unsupported'
-    return
+function getWatchOptions() {
+  if (currentProfile === 'activeTrip') {
+    return { enableHighAccuracy: true, maximumAge: 0, timeout: 15_000 }
   }
-  started = true
-  void syncPermissionLabel()
+  return { enableHighAccuracy: true, maximumAge: 5000, timeout: 20_000 }
+}
 
+/**
+ * Internal: restart the watch with current profile options.
+ */
+function restartWatch() {
+  if (watchId != null && navigator.geolocation?.clearWatch) {
+    navigator.geolocation.clearWatch(watchId)
+    watchId = null
+  }
+  if (!navigator.geolocation?.watchPosition) return
   watchId = navigator.geolocation.watchPosition(
     (pos) => {
       appGeoLat.value = pos.coords.latitude
@@ -68,8 +76,25 @@ export function startAppGeolocationWatch() {
       }
       appGeoError.value = err?.message ? String(err.message) : 'Geolocation error'
     },
-    { enableHighAccuracy: true, maximumAge: 5000, timeout: 20_000 },
+    getWatchOptions(),
   )
+}
+
+/**
+ * Single shared watch for the authenticated app shell (Home, Settings, etc.).
+ * Idempotent: safe to call multiple times.
+ */
+export function startAppGeolocationWatch() {
+  if (typeof window === 'undefined') return
+  if (started) return
+  if (!navigator.geolocation?.watchPosition) {
+    appGeoPermission.value = 'unsupported'
+    return
+  }
+  started = true
+  void syncPermissionLabel()
+
+  restartWatch()
 
   if (typeof document !== 'undefined' && !visibilityHandler) {
     visibilityHandler = () => {
@@ -134,4 +159,19 @@ export function requestAppGeolocationOnceFromGesture() {
       { enableHighAccuracy: true, maximumAge: 0, timeout: 25_000 },
     )
   })
+}
+
+/**
+ * Switch geolocation watch profile.
+ * - 'idle': default battery-saving mode (maximumAge 5s)
+ * - 'activeTrip': realtime mode for ENRT progress (maximumAge 0, faster timeout)
+ * @param {'idle' | 'activeTrip'} profile
+ */
+export function setAppGeoWatchProfile(profile) {
+  if (profile !== 'idle' && profile !== 'activeTrip') return
+  if (currentProfile === profile) return
+  currentProfile = profile
+  if (started) {
+    restartWatch()
+  }
 }
