@@ -541,16 +541,61 @@ onBeforeUnmount(() => {
   destroyMap()
 })
 
+/** Track previous highlight to swap icons incrementally. */
+let prevHighlightId = ''
+
+/**
+ * Update just the highlight icons without rebuilding all markers.
+ * @param {string} oldId
+ * @param {string} newId
+ */
+function updateMarkerHighlight(oldId, newId) {
+  if (oldId && markersById.has(oldId)) {
+    markersById.get(oldId)?.setIcon(directoryBuildingIcon(false, oldId))
+  }
+  if (newId && markersById.has(newId)) {
+    markersById.get(newId)?.setIcon(directoryBuildingIcon(true, newId))
+  }
+  if (newId && map) {
+    const m = markersById.get(newId)
+    if (m) {
+      const motion = prefersReducedMotion()
+      map.panTo(m.getLatLng(), { animate: !motion })
+    }
+  }
+}
+
 watch(
-  () => [props.pins, props.highlightId, props.fillHeight, props.vehicleId],
+  () => props.pins,
   () => {
     syncMarkers()
+    prevHighlightId = props.highlightId
+  },
+  { deep: true },
+)
+
+watch(
+  () => props.highlightId,
+  (newId) => {
+    const oldId = prevHighlightId
+    const pinsHaveChanged = pinsSignature() !== prevPinsSig.value
+    if (pinsHaveChanged) {
+      syncMarkers()
+    } else {
+      updateMarkerHighlight(oldId, newId)
+    }
+    prevHighlightId = newId
+  },
+)
+
+watch(
+  () => [props.fillHeight, props.vehicleId],
+  () => {
     syncUserOverlay()
     nextTick(() => {
       map?.invalidateSize()
     })
   },
-  { deep: true },
 )
 
 watch(smoothHeading, () => {

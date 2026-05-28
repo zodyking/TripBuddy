@@ -158,3 +158,30 @@ export async function setDollyRating(n, rating) {
   const items = { ...reg.items, [sixD]: item }
   return writeDollyRegistry({ ...reg, items })
 }
+
+/**
+ * Remove a dolly from the user registry (clears lastPrimary when it matches).
+ * @param {string} n
+ */
+export async function removeDollyFromRegistry(n) {
+  const sixD = six(n)
+  if (!sixD) throw new Error('Dolly number must be 6 digits')
+  const reg = await readDollyRegistry()
+  if (!reg.items[sixD]) {
+    if (reg.lastPrimaryNbr === sixD) {
+      return writeDollyRegistry({ ...reg, lastPrimaryNbr: null })
+    }
+    return reg
+  }
+  const items = { ...reg.items }
+  delete items[sixD]
+  let lastPrimaryNbr = reg.lastPrimaryNbr
+  if (lastPrimaryNbr === sixD) {
+    lastPrimaryNbr = null
+    const remaining = Object.keys(items).sort(
+      (a, b) => (items[b].lastSeenAt || 0) - (items[a].lastSeenAt || 0),
+    )
+    if (remaining.length) lastPrimaryNbr = remaining[0]
+  }
+  return writeDollyRegistry({ ...reg, lastPrimaryNbr, items })
+}

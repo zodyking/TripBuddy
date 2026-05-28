@@ -24,7 +24,7 @@ import {
   saveLocationToDirectory,
   getDollyRegistry,
   putDollyNumber,
-  patchDollyRating,
+  deleteDollyNumber,
   getTrailerNumbers,
   putTrailerNumber,
 } from '../api.js'
@@ -561,12 +561,18 @@ const primaryDollyOnTrip = computed(() => {
 
 const dollyPrimaryDisplay = computed(() => primaryDollyOnTrip.value || dollyReg.value?.lastPrimaryNbr || '')
 
-const dollyRating = computed(() => {
+/** Registry entry for the displayed dolly (manual add/remove target). */
+const dollyRegistryEntry = computed(() => {
   const n = dollyPrimaryDisplay.value
-  if (!n || !dollyReg.value?.items?.[n]) return 'none'
-  const r = dollyReg.value.items[n].rating
-  if (r === 'good' || r === 'bad' || r === 'none') return r
-  return 'none'
+  if (!n || !dollyReg.value?.items?.[n]) return null
+  return dollyReg.value.items[n]
+})
+
+const canRemoveDolly = computed(() => {
+  const n = dollyPrimaryDisplay.value
+  if (!n) return false
+  if (dollyRegistryEntry.value) return true
+  return dollyReg.value?.lastPrimaryNbr === n
 })
 
 async function loadDollyRegistry() {
@@ -606,7 +612,7 @@ async function onAddDollySubmit() {
   }
 }
 
-function onDollyHeaderClick() {
+function toggleDollyExpanded() {
   expandedDollyApi.value = !expandedDollyApi.value
 }
 
@@ -617,13 +623,22 @@ watch(
   },
 )
 
-async function setDollyRate(r) {
-  const n = dollyPrimaryDisplay.value
+async function onRemoveDolly() {
+  const n = dollySix(dollyPrimaryDisplay.value)
   if (!n) return
+  dollyPutBusy.value = true
   try {
-    dollyReg.value = await patchDollyRating({ dollyNbr: n, rating: r })
+    dollyReg.value = await deleteDollyNumber({ dollyNbr: n })
+    dollyAddOpen.value = false
+    dollyAddDigits.value = ''
+    copyToast.value = 'Dolly removed'
+    window.setTimeout(() => {
+      copyToast.value = ''
+    }, 2200)
   } catch {
     /* */
+  } finally {
+    dollyPutBusy.value = false
   }
 }
 
@@ -2963,75 +2978,54 @@ onUnmounted(() => {
           class="trip-details-wrap"
         >
         <div class="trailer-card trailer-card--dolly" role="group" aria-label="Dolly">
-          <div
-            class="dolly-header"
-            role="button"
-            tabindex="0"
-            :aria-expanded="!!expandedDollyApi"
-            @click="onDollyHeaderClick"
-            @keydown.enter.space.prevent="onDollyHeaderClick"
-          >
+          <div class="dolly-header">
             <button
               v-if="dollyPrimaryDisplay"
               type="button"
               class="dolly-number-display copyable-inline tap"
               title="Tap to copy dolly number"
-              @click.stop="copyTripDetailValue(dollyPrimaryDisplay, 'Dolly number')"
+              @click="copyTripDetailValue(dollyPrimaryDisplay, 'Dolly number')"
             >
               Dolly #{{ dollyPrimaryDisplay }}
             </button>
             <span v-else class="dolly-number-display dolly-number-display--empty">Dolly —</span>
-            <span class="trailer-expand-icon" aria-hidden="true">{{ expandedDollyApi ? '−' : '+' }}</span>
+            <button
+              type="button"
+              class="dolly-expand-btn tap"
+              :aria-expanded="!!expandedDollyApi"
+              :aria-label="expandedDollyApi ? 'Collapse dolly details' : 'Expand dolly details'"
+              @click="toggleDollyExpanded"
+            >
+              <span class="trailer-expand-icon" aria-hidden="true">{{ expandedDollyApi ? '−' : '+' }}</span>
+            </button>
           </div>
 
           <div v-if="expandedDollyApi" class="dolly-body">
-            <div class="dolly-body-row">
-              <span
-                v-if="dollyPrimaryDisplay"
-                class="dolly-rating-pill"
-                :class="`dolly-rating-pill--${dollyRating}`"
-              >
-                <template v-if="dollyRating === 'good'">Good</template>
-                <template v-else-if="dollyRating === 'bad'">Bad</template>
-                <template v-else>Unrated</template>
-              </span>
-              <div class="dolly-rate-inline" @click.stop>
-                <button
-                  v-for="opt in [
-                    { k: 'good', t: '👍' },
-                    { k: 'bad', t: '👎' },
-                    { k: 'none', t: '·' },
-                  ]"
-                  :key="opt.k"
-                  type="button"
-                  class="trip-dolly-star tap dolly-star--header"
-                  :class="{ 'trip-dolly-star--on': dollyRating === opt.k }"
-                  :title="opt.k === 'none' ? 'Clear rating' : `Mark ${opt.k}`"
-                  :disabled="!dollyPrimaryDisplay"
-                  @click.stop="setDollyRate(opt.k)"
-                >
-                  {{ opt.t }}
-                </button>
-              </div>
+            <div class="dolly-actions-row">
               <button
                 v-if="!dollyAddOpen"
                 type="button"
-                class="dolly-add-tile tap"
-                title="Set dolly number"
-                aria-label="Add or change dolly number"
-                @click.stop="dollyAddOpen = true"
+                class="dolly-action-btn dolly-action-btn--add tap"
+                @click="dollyAddOpen = true"
               >
-                +
+                Add
               </button>
               <button
                 v-else
                 type="button"
-                class="dolly-add-tile dolly-add-tile--active tap"
-                title="Close add dolly"
-                aria-label="Close"
-                @click.stop="(dollyAddOpen = false), (dollyAddDigits = '')"
+                class="dolly-action-btn dolly-action-btn--ghost tap"
+                @click="(dollyAddOpen = false), (dollyAddDigits = '')"
               >
-                ×
+                Cancel
+              </button>
+              <button
+                v-if="canRemoveDolly"
+                type="button"
+                class="dolly-action-btn dolly-action-btn--remove tap"
+                :disabled="dollyPutBusy"
+                @click="onRemoveDolly"
+              >
+                Remove
               </button>
             </div>
 
@@ -3054,14 +3048,6 @@ onUnmounted(() => {
                 @click.stop="onAddDollySubmit"
               >
                 Add
-              </button>
-              <button
-                type="button"
-                class="dolly-compact-btn btn secondary"
-                :disabled="dollyPutBusy"
-                @click.stop="(dollyAddOpen = false), (dollyAddDigits = '')"
-              >
-                Cancel
               </button>
             </div>
 
@@ -4386,8 +4372,24 @@ button.trailer-nbr.copyable-inline {
   gap: 0.5rem;
   padding: 0.6rem 0.65rem;
   background: #22222c;
-  cursor: pointer;
+  position: relative;
   user-select: none;
+}
+.dolly-expand-btn {
+  position: absolute;
+  right: 0.65rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.15rem 0.35rem;
+  border: none;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+.dolly-expand-btn:focus-visible {
+  outline: 2px solid var(--color-accent-purple, #7b4db5);
+  outline-offset: 2px;
 }
 .dolly-number-display {
   font-weight: 700;
@@ -4412,13 +4414,6 @@ button.trailer-nbr.copyable-inline {
   color: var(--muted, #9898a8);
   cursor: default;
 }
-.dolly-header .trailer-expand-icon {
-  position: absolute;
-  right: 0.65rem;
-}
-.dolly-header {
-  position: relative;
-}
 .dolly-body {
   padding: 0.55rem 0.65rem;
   border-top: 1px solid #2e2e38;
@@ -4427,11 +4422,37 @@ button.trailer-nbr.copyable-inline {
   flex-direction: column;
   gap: 0.5rem;
 }
-.dolly-body-row {
+.dolly-actions-row {
   display: flex;
   align-items: center;
-  gap: 0.35rem;
+  gap: 0.4rem;
   flex-wrap: wrap;
+}
+.dolly-action-btn {
+  padding: 0.35rem 0.65rem;
+  border-radius: 6px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  border: 1px solid #3a3a44;
+  background: #1a1a20;
+  color: #e8e8ee;
+  cursor: pointer;
+}
+.dolly-action-btn--add {
+  border-color: rgba(123, 77, 181, 0.45);
+  background: rgba(123, 77, 181, 0.15);
+  color: #c4b5fd;
+}
+.dolly-action-btn--remove {
+  border-color: rgba(239, 68, 68, 0.35);
+  color: #fca5a5;
+}
+.dolly-action-btn--remove:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.dolly-action-btn--ghost {
+  color: #9ca3af;
 }
 .dolly-api-section {
   border-top: 1px solid #2e2e38;

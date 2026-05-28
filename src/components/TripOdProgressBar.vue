@@ -94,27 +94,42 @@ const ariaGroupLabel = computed(
   () => `Leg progress. ${nmRatioText.value ? `${nmRatioText.value} nautical miles covered of leg total` : 'Mileage ratio unavailable'}. ${ariaTailDist.value}.`,
 )
 
-/** Computed raw fill pct before monotonic enforcement. */
+/** Whether trip has been dispatched (fill only moves after dispatch). */
+const isDispatched = computed(() => {
+  const d = props.dispatchedMs
+  return typeof d === 'number' && Number.isFinite(d) && d > 0
+})
+
+/** Computed raw fill pct before monotonic enforcement.
+ *  Fill only moves between DSP and ARR - before dispatch stays at ~4% (ASG marker area).
+ */
 const fillPctRaw = computed(() => {
   if (arrivedDone.value) return 100
+
+  // Before dispatch: no mileage-based progress, stay near ASG marker
+  if (!isDispatched.value) {
+    return 4
+  }
+
+  // After dispatch: GPS-based progress scales from ~4% (DSP position) to 100% (ARR)
   const leg = legMeters.value
   const d = distMetersSafe.value
   if (leg != null && leg > 0 && d != null) {
     const cov = Math.max(0, Math.min(leg, leg - d))
-    const pct = Math.round(Math.min(100, Math.max(1, (100 * cov) / leg)))
-    return Number.isFinite(pct) ? pct : 1
+    const rawPct = (100 * cov) / leg
+    // Scale so 0% distance covered = 4%, 100% covered = 100%
+    const pct = Math.round(4 + (rawPct * 96) / 100)
+    return Math.min(100, Math.max(4, pct))
   }
   const dNm = distNm.value
   if (dNm != null) {
     const cap = Math.max(15, Number(props.denomNm) || 180)
-    const raw = 100 * (1 - Math.min(1, Math.max(0, dNm) / cap))
-    const pct = Math.round(Math.min(100, Math.max(1, raw)))
-    return Number.isFinite(pct) ? pct : 1
+    const rawPct = 100 * (1 - Math.min(1, Math.max(0, dNm) / cap))
+    const pct = Math.round(4 + (rawPct * 96) / 100)
+    return Math.min(100, Math.max(4, pct))
   }
-  const ph = String(props.tripPhase ?? '').toLowerCase()
-  if (ph === 'dispatched') return 38
-  if (ph === 'assigned') return 12
-  return 1
+  // Phase fallback after dispatch but no GPS yet
+  return 4
 })
 
 /** Monotonic fill: never go backward from GPS noise. */

@@ -392,6 +392,9 @@ function bridgeMarkerLabelText(raw) {
   return `${s.slice(0, 9)}…`
 }
 
+/** @type {Map<string, L.Icon>} */
+const directoryIconCache = new Map()
+
 /**
  * Directory: flat purple office block + ID strip on the facade (no map-pin shield).
  * viewBox 0 0 44 48 — anchor bottom center.
@@ -448,13 +451,19 @@ function directoryBuildingSvg(selected, locationId = '') {
  * @param {string} [locationId]
  */
 export function directoryBuildingIcon(selected, locationId = '') {
-  return L.icon({
+  const cacheKey = `${locationId || ''}:${selected ? '1' : '0'}`
+  const cached = directoryIconCache.get(cacheKey)
+  if (cached) return cached
+
+  const icon = L.icon({
     iconUrl: svgDataUrl(directoryBuildingSvg(selected, locationId)),
     iconSize: [44, 48],
     iconAnchor: [22, 48],
     popupAnchor: [0, -46],
     className: 'map-marker-img-icon map-marker-img-icon--directory',
   })
+  directoryIconCache.set(cacheKey, icon)
+  return icon
 }
 
 /**

@@ -37,7 +37,20 @@ import { countSmartListMatches, SMART_LIST_WINDOW_MS } from '../utils/directoryT
 const locations = ref([])
 const loading = ref(false)
 const error = ref('')
+
+/** Immediate input value for search box. */
+const searchQueryImmediate = ref('')
+/** Debounced search query used by filteredLocations (200ms). */
 const searchQuery = ref('')
+/** @type {ReturnType<typeof setTimeout> | null} */
+let searchDebounceTimer = null
+
+watch(searchQueryImmediate, (v) => {
+  if (searchDebounceTimer) clearTimeout(searchDebounceTimer)
+  searchDebounceTimer = setTimeout(() => {
+    searchQuery.value = v
+  }, 200)
+})
 
 /** Station types shown on map + list. `ALL` = no type filter (every type). */
 const LOCATION_TYPE_FILTER_ALL = 'ALL'
@@ -1114,10 +1127,12 @@ onMounted(() => {
     loadFedexLogoForVcard()
   })()
   directoryPollTimer = setInterval(() => {
+    if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return
     void loadDirectory({ silent: true })
   }, DIRECTORY_POLL_MS)
   if (typeof window !== 'undefined') {
     geocodeStatusPollTimer = window.setInterval(() => {
+      if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return
       void (async () => {
         await syncDirectoryGeocodeStatus()
         if (serverGeocodeInBatch.value) {
@@ -1378,17 +1393,17 @@ onUnmounted(() => {
         <line x1="21" y1="21" x2="16.65" y2="16.65" />
       </svg>
       <input
-        v-model="searchQuery"
+        v-model="searchQueryImmediate"
         type="text"
         class="search-input"
         placeholder="Search by name, abbreviation, or address..."
         aria-label="Search locations"
       />
       <button
-        v-if="searchQuery"
+        v-if="searchQueryImmediate"
         type="button"
         class="search-clear tap"
-        @click="searchQuery = ''"
+        @click="searchQueryImmediate = ''; searchQuery = ''"
         aria-label="Clear search"
       >
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -1896,11 +1911,11 @@ onUnmounted(() => {
     <p v-if="filteredLocations.length" class="location-count">
       {{ filteredLocations.length }} location{{ filteredLocations.length === 1 ? '' : 's' }}
       <span
-        v-if="locations.length !== filteredLocations.length || searchQuery.trim()"
+        v-if="locations.length !== filteredLocations.length || searchQueryImmediate.trim()"
         class="location-count-hint"
       >
         ({{ locations.length }} saved · {{ locationsAfterGeoFilter.length }} after type &amp; region filters<template
-          v-if="searchQuery.trim() && filteredLocations.length !== locationsAfterGeoFilter.length"
+          v-if="searchQueryImmediate.trim() && filteredLocations.length !== locationsAfterGeoFilter.length"
           > · {{ filteredLocations.length }} match search</template
         >)
       </span>
