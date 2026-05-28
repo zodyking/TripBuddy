@@ -2,12 +2,13 @@ import { createRouter, createWebHistory } from 'vue-router'
 import AppShell from '../components/AppShell.vue'
 import MainDashboard from '../views/MainDashboard.vue'
 import SettingsView from '../views/SettingsView.vue'
-import DirectoryView from '../views/DirectoryView.vue'
 import HistoryView from '../views/HistoryView.vue'
 import TrafficView from '../views/TrafficView.vue'
 import TrailerGpsMapView from '../views/TrailerGpsMapView.vue'
 import LoginView from '../views/LoginView.vue'
 import { getAuthStatus } from '../api.js'
+
+const DirectoryView = () => import('../views/DirectoryView.vue')
 
 export const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),

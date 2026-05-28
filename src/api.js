@@ -409,6 +409,16 @@ export async function patchDollyRating(p) {
   return handleJson(r)
 }
 
+/** @param {{ dollyNbr: string }} p */
+export async function deleteDollyNumber(p) {
+  const r = await apiFetch('/api/dolly', {
+    method: 'DELETE',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(p),
+  })
+  return handleJson(r)
+}
+
 /**
  * Mark a FedEx daily trip leg sequence as user-completed (hide until API changes).
  * @param {string} dailyTripLegSequence

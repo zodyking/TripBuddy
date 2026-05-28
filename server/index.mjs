@@ -156,6 +156,7 @@ import { isSkippableInAppNotification } from './in-app-notification-noise.mjs'
 import {
   addOrTouchDolly,
   readDollyRegistry,
+  removeDollyFromRegistry,
   setDollyRating,
   syncDollyFromTrip,
 } from './dolly-store.mjs'
@@ -742,6 +743,17 @@ app.patch('/api/dolly', async (req, reply) => {
       return reply.code(400).send({ error: 'rating required' })
     }
     const d = await setDollyRating(/** @type {any} */ (n), /** @type {'none' | 'good' | 'bad'} */ (r))
+    return { ok: true, ...d }
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e)
+    return reply.code(400).send({ ok: false, error: msg })
+  }
+})
+
+app.delete('/api/dolly', async (req, reply) => {
+  try {
+    const b = req.body ?? {}
+    const d = await removeDollyFromRegistry(/** @type {any} */ (b).dollyNbr)
     return { ok: true, ...d }
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e)
