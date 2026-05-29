@@ -241,6 +241,10 @@ function onOpenMap() {
           v-for="m in markerStyle"
           :key="m.key"
           class="trip-od-progress__marker"
+          :class="{
+            'trip-od-progress__marker--start': m.key === 'asg' || m.key === 'dsp',
+            'trip-od-progress__marker--end': m.key === 'arr',
+          }"
           :style="{ left: m.leftPct + '%' }"
         >
           <span

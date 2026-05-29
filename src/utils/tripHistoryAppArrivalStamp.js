@@ -31,6 +31,11 @@ export async function upsertTripHistoryAppCapturedArrival(dailyTripLegSequence, 
       id: `h-${seq}`,
       source: 'linehaul',
       dailyTripLegSequence: seq,
+      outcomeTouchedAt: ms,
+      dispatchHeader: {
+        historyOutcome: 'delivered',
+        historyOutcomeAt: ms,
+      },
       tripDetails: {
         appCapturedTripArrivalLocal: formatAppCapturedTripArrivalLocal(ms),
         appCapturedTripArrivalAtMs: ms,

@@ -1905,8 +1905,8 @@ watch(
 }
 
 .calibration-panel__close {
-  width: 2rem;
-  height: 2rem;
+  width: 1.65rem;
+  height: 1.65rem;
   border: none;
   border-radius: 50%;
   background: rgba(255, 255, 255, 0.1);

@@ -547,6 +547,13 @@ function formatPayClockOrNa(ms) {
  * @returns {number | null}
  */
 function ledgerArrivedAtMs(e) {
+  const td =
+    e.tripDetails && typeof e.tripDetails === 'object'
+      ? /** @type {Record<string, unknown>} */ (e.tripDetails)
+      : {}
+  const appMs = td.appCapturedTripArrivalAtMs
+  if (typeof appMs === 'number' && Number.isFinite(appMs) && appMs > 0) return appMs
+
   const touched =
     typeof e.outcomeTouchedAt === 'number' &&
     Number.isFinite(e.outcomeTouchedAt) &&
