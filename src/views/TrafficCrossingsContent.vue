@@ -12,7 +12,6 @@ import {
 import { bridgeDelayTier } from '../utils/bridgeDelayTier.js'
 import { useMapVehicleId } from '../composables/useMapVehicleId.js'
 import { sanitizeNy511ImpactFootnote } from '../utils/ny511ImpactFootnote.js'
-import { extractYoutubeVideoIdFromInput } from '../utils/youtubeVideoId.js'
 
 defineOptions({ name: 'TrafficCrossingsContent' })
 
@@ -1835,13 +1834,25 @@ onUnmounted(() => {
   .bridge-tile-inner.has-camera {
     flex-direction: column;
   }
-  
+
+  /* Stacked portrait: column needs explicit 16:9 box (YouTube iframe has no intrinsic height). */
   .bridge-camera-col {
     width: 100%;
     max-width: none;
     margin-bottom: 0.25rem;
     align-self: auto;
-    max-height: 180px;
+    max-height: none;
+    aspect-ratio: 16 / 9;
+    height: auto;
+    flex: 0 0 auto;
+  }
+
+  .bridge-camera-col :deep(.camera-player--fill) {
+    height: 100%;
+    width: 100%;
+    aspect-ratio: unset;
+    flex: 1 1 auto;
+    min-height: 0;
   }
 }
 
