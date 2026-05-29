@@ -374,8 +374,12 @@ const tripProgressArrivedMs = computed(() => {
   const row = currentTripLedgerRow.value
   if (!row) return null
   const td = row.tripDetails && typeof row.tripDetails === 'object' ? /** @type {Record<string, unknown>} */ (row.tripDetails) : {}
-  const a = td.appCapturedTripArrivalAtMs
-  return typeof a === 'number' && Number.isFinite(a) && a > 0 ? a : null
+  const appMs = td.appCapturedTripArrivalAtMs
+  if (typeof appMs === 'number' && Number.isFinite(appMs) && appMs > 0) return appMs
+  const dh = row.dispatchHeader && typeof row.dispatchHeader === 'object' ? /** @type {Record<string, unknown>} */ (row.dispatchHeader) : {}
+  const outAt = dh.historyOutcomeAt
+  if (typeof outAt === 'number' && Number.isFinite(outAt) && outAt > 0) return outAt
+  return null
 })
 
 const tripProgressDistM = computed(() => {
@@ -1242,7 +1246,7 @@ function findArriveQuickAction() {
   )
 }
 
-async function stampTripHistoryAfterArrive() {
+async function stampTripHistoryAfterAutomatedArriveCheckIn() {
   const seq = String(currentTripLegSeq.value ?? '').trim()
   if (!/^\d+$/.test(seq)) return
   try {

@@ -165,33 +165,37 @@ const fillPct = computed(() => {
   return maxFillPctSeen.value
 })
 
-const timelineEndMs = computed(() => {
-  const a = props.arrivedMs
-  if (typeof a === 'number' && Number.isFinite(a) && a > 0) return a
-  return Date.now()
-})
+/** Fixed marker positions: ASG/DSP grouped at start, ARR at end (always visible). */
+const MARKER_ASG_PCT = 4
+const MARKER_DSP_PCT = 14
+const MARKER_ARR_PCT = 96
 
 const markerStyle = computed(() => {
   const a0 = props.assignedMs
-  if (!(typeof a0 === 'number' && Number.isFinite(a0) && a0 > 0)) return []
-  const end = timelineEndMs.value
-  const span = Math.max(60_000, end - a0)
-  /** @param {number | null | undefined} ms */
-  const pct = (ms) => {
-    if (!(typeof ms === 'number' && Number.isFinite(ms) && ms > 0)) return null
-    const p = ((ms - a0) / span) * 100
-    return Math.min(96, Math.max(4, p))
-  }
-  const out = [{ key: 'asg', abbr: 'ASG', label: 'Assigned', time: fmtTime(a0), leftPct: 4 }]
-  const pD = pct(props.dispatchedMs)
-  if (pD != null) {
-    out.push({ key: 'dsp', abbr: 'DSP', label: 'Dispatched', time: fmtTime(props.dispatchedMs), leftPct: pD })
-  }
-  const pA = pct(props.arrivedMs)
-  if (pA != null) {
-    out.push({ key: 'arr', abbr: 'ARR', label: 'Arrived', time: fmtTime(props.arrivedMs), leftPct: pA })
-  }
-  return out
+  const hasAssigned = typeof a0 === 'number' && Number.isFinite(a0) && a0 > 0
+  return [
+    {
+      key: 'asg',
+      abbr: 'ASG',
+      label: 'Assigned',
+      time: hasAssigned ? fmtTime(a0) : '—',
+      leftPct: MARKER_ASG_PCT,
+    },
+    {
+      key: 'dsp',
+      abbr: 'DSP',
+      label: 'Dispatched',
+      time: fmtTime(props.dispatchedMs),
+      leftPct: MARKER_DSP_PCT,
+    },
+    {
+      key: 'arr',
+      abbr: 'ARR',
+      label: 'Arrived',
+      time: fmtTime(props.arrivedMs),
+      leftPct: MARKER_ARR_PCT,
+    },
+  ]
 })
 
 function onOpenMap() {
@@ -393,31 +397,6 @@ function onOpenMap() {
   flex-direction: column;
   align-items: center;
   pointer-events: none;
-}
-
-.trip-od-progress__marker--start {
-  transform: translate(0, -50%);
-  align-items: flex-start;
-}
-
-.trip-od-progress__marker--start .trip-od-progress__marker-cap {
-  left: 0;
-  transform: none;
-  align-items: flex-start;
-  text-align: left;
-}
-
-.trip-od-progress__marker--end {
-  transform: translate(-100%, -50%);
-  align-items: flex-end;
-}
-
-.trip-od-progress__marker--end .trip-od-progress__marker-cap {
-  left: auto;
-  right: 0;
-  transform: none;
-  align-items: flex-end;
-  text-align: right;
 }
 
 .trip-od-progress__marker-dot {

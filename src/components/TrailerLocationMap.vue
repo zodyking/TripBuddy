@@ -1905,8 +1905,8 @@ watch(
 }
 
 .calibration-panel__close {
-  width: 1.65rem;
-  height: 1.65rem;
+  width: 2rem;
+  height: 2rem;
   border: none;
   border-radius: 50%;
   background: rgba(255, 255, 255, 0.1);
@@ -2001,7 +2001,7 @@ watch(
 
 .calibration-panel__reset {
   width: 100%;
-  padding: 0.4rem;
+  padding: 0.28rem;
   border-radius: 0.4rem;
   border: 1px dashed rgba(255, 255, 255, 0.2);
   background: transparent;
