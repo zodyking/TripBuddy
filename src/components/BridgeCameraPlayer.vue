@@ -415,10 +415,13 @@ onUnmounted(() => {
 }
 
 .camera-player--fill {
-  aspect-ratio: unset;
   flex: 1 1 auto;
   min-height: 0;
-  height: 100%;
+  width: 100%;
+  /* Fallback when parent height is indefinite (portrait stack); crossings page overrides in column layouts. */
+  aspect-ratio: 16 / 9;
+  height: auto;
+  max-height: 100%;
 }
 
 .camera-player--disabled {
