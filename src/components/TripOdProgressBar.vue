@@ -241,10 +241,6 @@ function onOpenMap() {
           v-for="m in markerStyle"
           :key="m.key"
           class="trip-od-progress__marker"
-          :class="{
-            'trip-od-progress__marker--start': m.key === 'asg' || m.key === 'dsp',
-            'trip-od-progress__marker--end': m.key === 'arr',
-          }"
           :style="{ left: m.leftPct + '%' }"
         >
           <span
@@ -397,6 +393,31 @@ function onOpenMap() {
   flex-direction: column;
   align-items: center;
   pointer-events: none;
+}
+
+.trip-od-progress__marker--start {
+  transform: translate(0, -50%);
+  align-items: flex-start;
+}
+
+.trip-od-progress__marker--start .trip-od-progress__marker-cap {
+  left: 0;
+  transform: none;
+  align-items: flex-start;
+  text-align: left;
+}
+
+.trip-od-progress__marker--end {
+  transform: translate(-100%, -50%);
+  align-items: flex-end;
+}
+
+.trip-od-progress__marker--end .trip-od-progress__marker-cap {
+  left: auto;
+  right: 0;
+  transform: none;
+  align-items: flex-end;
+  text-align: right;
 }
 
 .trip-od-progress__marker-dot {
