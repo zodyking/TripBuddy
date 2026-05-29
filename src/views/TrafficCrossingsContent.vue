@@ -12,6 +12,7 @@ import {
 import { bridgeDelayTier } from '../utils/bridgeDelayTier.js'
 import { useMapVehicleId } from '../composables/useMapVehicleId.js'
 import { sanitizeNy511ImpactFootnote } from '../utils/ny511ImpactFootnote.js'
+import { extractYoutubeVideoIdFromInput } from '../utils/youtubeVideoId.js'
 
 defineOptions({ name: 'TrafficCrossingsContent' })
 
