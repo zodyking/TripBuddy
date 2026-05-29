@@ -418,7 +418,6 @@ onUnmounted(() => {
   flex: 1 1 auto;
   min-height: 0;
   width: 100%;
-  /* Fallback when parent height is indefinite (portrait stack); crossings page overrides in column layouts. */
   aspect-ratio: 16 / 9;
   height: auto;
   max-height: 100%;

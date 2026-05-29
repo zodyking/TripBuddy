@@ -12,6 +12,7 @@ import {
 import { bridgeDelayTier } from '../utils/bridgeDelayTier.js'
 import { useMapVehicleId } from '../composables/useMapVehicleId.js'
 import { sanitizeNy511ImpactFootnote } from '../utils/ny511ImpactFootnote.js'
+import { extractYoutubeVideoIdFromInput } from '../utils/youtubeVideoId.js'
 
 defineOptions({ name: 'TrafficCrossingsContent' })
 
@@ -1821,6 +1822,12 @@ onUnmounted(() => {
   flex-direction: column;
   min-height: 0;
 }
+
+.bridge-camera-col :deep(.camera-player--fill) {
+  height: 100%;
+  aspect-ratio: unset;
+}
+
 
 .bridge-data-col {
   flex: 1 1 0;
