@@ -1,7 +1,10 @@
 import { readKeyJson, writeKeyJson } from './kv-store.mjs'
 import { G } from './scope-kv.mjs'
 import { readAssignmentForAccount } from './assignment-store.mjs'
-import { bridgeDelayTier } from './bridge-delay-tier.mjs'
+import {
+  classifyBridgeTraffic,
+  trafficLevelLabel,
+} from './bridge-delay-tier.mjs'
 import { inferTravelDirectionFromTripBody } from './bridge-travel-context.mjs'
 import { publishInAppForLastActiveUser } from './notification-publish.mjs'
 import { getLastActiveAccountKey } from './active-account.mjs'
@@ -60,10 +63,15 @@ async function dispatchWatchTravelDir() {
   return ''
 }
 
-function tierVerb(t) {
-  if (t === 'green') return 'light traffic'
-  if (t === 'orange') return 'moderate delays'
-  return 'heavy delays'
+/**
+ * @param {'green' | 'orange' | 'red'} tier
+ * @param {'low' | 'medium' | 'high' | 'standstill'} [level]
+ */
+function tierVerb(tier, level) {
+  if (level) return trafficLevelLabel(level)
+  if (tier === 'green') return 'light traffic'
+  if (tier === 'orange') return 'moderate traffic'
+  return 'heavy traffic'
 }
 
 /**
@@ -100,11 +108,21 @@ export async function maybeNotifyBridgeTierChanges(live) {
       if (rowDir !== watchDir) continue
     }
 
-    const m = o.routeTravelTime
-    const minutes = typeof m === 'number' && Number.isFinite(m) ? m : Number(m)
+    const minutesRaw = o.routeTravelTime
+    const minutes =
+      typeof minutesRaw === 'number' && Number.isFinite(minutesRaw)
+        ? minutesRaw
+        : Number(minutesRaw)
     if (!Number.isFinite(minutes) || minutes < 0) continue
 
-    const tier = bridgeDelayTier(minutes)
+    const { tier, level } = classifyBridgeTraffic({
+      routeId: o.routeId,
+      travelDirection: o.travelDirection,
+      routeTravelTime: minutes,
+      routeSpeed: o.routeSpeed,
+      routeTravelTimeHist: o.routeTravelTimeHist,
+      routeSpeedHist: o.routeSpeedHist,
+    })
     const prevTier = tiers[id]
     const name = String(o.crossingDisplayName || 'Crossing').trim() || 'Crossing'
 
@@ -118,7 +136,7 @@ export async function maybeNotifyBridgeTierChanges(live) {
             : watchDir === 'ToNJ'
               ? ' (dispatch toward NJ)'
               : ''
-        const msg = `${name}${dirLab ? ` ${dirLab}` : ''}: ${tierVerb(prevTier)} → ${tierVerb(tier)} (${Math.round(minutes)} min)${watchLab}`
+        const msg = `${name}${dirLab ? ` ${dirLab}` : ''}: ${tierVerb(prevTier)} → ${tierVerb(tier, level)} (${Math.round(minutes)} min)${watchLab}`
         void publishInAppForLastActiveUser({
           type: 'traffic',
           message: msg,

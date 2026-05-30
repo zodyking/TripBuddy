@@ -1,12 +1,9 @@
 /**
- * Same delay bands as the Traffic UI (`src/utils/bridgeDelayTier.js`).
- * @param {number} minutes
- * @returns {'green' | 'orange' | 'red'}
+ * Server-side bridge delay tiers (shared logic with Traffic UI).
  */
-export function bridgeDelayTier(minutes) {
-  const m = Number(minutes)
-  if (!Number.isFinite(m)) return 'orange'
-  if (m <= 3) return 'green'
-  if (m < 10) return 'orange'
-  return 'red'
-}
+export {
+  bridgeDelayTier,
+  bridgeDelayTierForRow,
+  classifyBridgeTraffic,
+  trafficLevelLabel,
+} from '../src/utils/bridgeTrafficCondition.js'

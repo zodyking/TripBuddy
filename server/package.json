@@ -7,7 +7,7 @@
     "dev": "node --watch index.mjs",
     "start": "node index.mjs",
     "postinstall": "playwright install chromium",
-    "test": "node --test ny511-traffic-feeds.test.mjs"
+    "test": "node --test ny511-traffic-feeds.test.mjs bridge-traffic-condition.test.mjs"
   },
   "dependencies": {
     "@fastify/cookie": "^11.0.2",

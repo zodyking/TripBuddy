@@ -1,13 +1,10 @@
 /**
- * Map marker / accent colors from current crossing delay (minutes).
- * Bands: ≤3 min green (good), <10 min orange (slow), ≥10 min red (heavy).
- * @param {number} minutes routeTravelTime (finite minutes)
- * @returns {'green' | 'orange' | 'red'}
+ * Delay tier colors for map markers and crossing cards.
+ * @see bridgeTrafficCondition.js for per-bridge classification.
  */
-export function bridgeDelayTier(minutes) {
-  const m = Number(minutes)
-  if (!Number.isFinite(m)) return 'orange'
-  if (m <= 3) return 'green'
-  if (m < 10) return 'orange'
-  return 'red'
-}
+export {
+  bridgeDelayTier,
+  bridgeDelayTierForRow,
+  classifyBridgeTraffic,
+  trafficLevelLabel,
+} from './bridgeTrafficCondition.js'
