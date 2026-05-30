@@ -3,6 +3,7 @@ import { onMounted } from 'vue'
 import { useRoute } from 'vue-router'
 import { postVisitPing, getAuthStatus, getPublicGeoFenceCheck } from './api.js'
 import { hydrateAllTrafficKeysFromServer } from './stores/trafficTileKey.js'
+import { hydrateBridgeTrafficProfilesFromServer } from './stores/bridgeTrafficProfilesStore.js'
 import { hydrateSenderTextEnFromServer } from './utils/senderNameTranslateClient.js'
 import { hydrateWahaPrefsFromServer } from './utils/wahaPrefs.js'
 
@@ -22,6 +23,7 @@ onMounted(() => {
   }
   void postVisitPing().catch(() => {})
   void hydrateAllTrafficKeysFromServer()
+  void hydrateBridgeTrafficProfilesFromServer()
   void hydrateSenderTextEnFromServer()
   void hydrateWahaPrefsFromServer()
 

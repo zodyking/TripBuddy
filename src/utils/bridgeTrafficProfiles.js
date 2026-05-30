@@ -351,11 +351,126 @@ export function resolveTrafficProfileKey(input) {
   })
 }
 
+/** @type {Readonly<Record<string, BridgeTrafficProfile>>} */
+let profileOverrides = Object.freeze({})
+
+/**
+ * Replace user overrides (partial profiles per key). Called after loading from server.
+ * @param {Record<string, Partial<BridgeTrafficProfile>> | null | undefined} overrides
+ */
+export function setBridgeTrafficProfileOverrides(overrides) {
+  if (!overrides || typeof overrides !== 'object') {
+    profileOverrides = Object.freeze({})
+    return
+  }
+  /** @type {Record<string, BridgeTrafficProfile>} */
+  const next = {}
+  for (const [k, v] of Object.entries(overrides)) {
+    if (!v || typeof v !== 'object') continue
+    const base = BRIDGE_TRAFFIC_PROFILES[k]
+    if (!base) continue
+    next[k] = mergeBridgeTrafficProfile(base, v)
+  }
+  profileOverrides = Object.freeze(next)
+}
+
+/** @returns {Readonly<Record<string, BridgeTrafficProfile>>} */
+export function getBridgeTrafficProfileOverrides() {
+  return profileOverrides
+}
+
+/**
+ * @param {BridgeTrafficProfile} base
+ * @param {Partial<BridgeTrafficProfile>} patch
+ * @returns {BridgeTrafficProfile}
+ */
+export function mergeBridgeTrafficProfile(base, patch) {
+  return { ...base, ...patch }
+}
+
 /**
  * @param {string | null} key
  * @returns {BridgeTrafficProfile | null}
  */
 export function trafficProfileForKey(key) {
   if (!key) return null
-  return BRIDGE_TRAFFIC_PROFILES[key] ?? null
+  const base = BRIDGE_TRAFFIC_PROFILES[key]
+  const ov = profileOverrides[key]
+  if (ov) return ov
+  return base ?? null
 }
+
+/** UI-editable fields (advanced fields keep calibrated defaults). */
+export const BRIDGE_THRESHOLD_FIELD_DEFS = Object.freeze([
+  {
+    key: 'lowMaxMinutes',
+    label: 'Green max',
+    unit: 'min',
+    tier: 'green',
+    hint: 'Crossing time at or below → light traffic',
+  },
+  {
+    key: 'lowMinSpeedMph',
+    label: 'Green min speed',
+    unit: 'mph',
+    tier: 'green',
+    hint: 'Speed at or above → light traffic',
+  },
+  {
+    key: 'mediumMaxMinutes',
+    label: 'Orange max',
+    unit: 'min',
+    tier: 'orange',
+    hint: 'Above green, up to here → moderate',
+  },
+  {
+    key: 'highMaxMinutes',
+    label: 'Red max',
+    unit: 'min',
+    tier: 'red',
+    hint: 'Above orange, up to here → heavy',
+  },
+  {
+    key: 'standstillMinMinutes',
+    label: 'Standstill',
+    unit: 'min',
+    tier: 'standstill',
+    hint: 'Crossing time alone → gridlock tier',
+  },
+])
+
+/**
+ * @param {string} profileKey
+ */
+function labelFromProfileKey(profileKey) {
+  const parts = profileKey.split('__').filter(Boolean)
+  const dirPart = parts[parts.length - 1]
+  const dir =
+    dirPart === 'to_ny' ? 'To NY' : dirPart === 'to_nj' ? 'To NJ' : dirPart.replace(/_/g, ' ')
+  const body = parts.slice(0, -1)
+  const deckIdx = body.findIndex((p) => p === 'upper' || p === 'lower')
+  let deck = ''
+  if (deckIdx >= 0) {
+    deck = body[deckIdx] === 'upper' ? 'Upper' : 'Lower'
+    body.splice(deckIdx, 1)
+  }
+  const bridge = body
+    .join(' ')
+    .replace(/\b\w/g, (c) => c.toUpperCase())
+    .replace(/George Washington Bridge/i, 'GWB')
+  return { bridge, deck, direction: dir }
+}
+
+/** @type {ReadonlyArray<{ key: string, bridge: string, deck: string, direction: string, directionSlug: 'ToNY' | 'ToNJ' }>} */
+export const BRIDGE_PROFILE_CATALOG = Object.freeze(
+  Object.keys(BRIDGE_TRAFFIC_PROFILES).map((key) => {
+    const { bridge, deck, direction } = labelFromProfileKey(key)
+    return {
+      key,
+      bridge,
+      deck,
+      direction,
+      directionSlug: key.endsWith('__to_nj') ? /** @type {const} */ ('ToNJ') : /** @type {const} */ ('ToNY'),
+    }
+  }),
+)
