@@ -2011,23 +2011,21 @@ onUnmounted(() => {
           Stay inside the zone ~40s with good GPS (blocks bad fixes).
         </p>
         <p v-if="helpersProximityMsg" class="cred-msg cred-msg--error">{{ helpersProximityMsg }}</p>
-        <div class="helpers-proximity-row">
-          <div class="helpers-proximity-field">
-            <label class="lbl" for="helpers-radius-nm">Trigger (NM)</label>
-            <input
-              id="helpers-radius-nm"
-              v-model.number="helpersRadiusNm"
-              class="inp tap helpers-proximity-input"
-              type="number"
-              :min="HELPERS_RADIUS_NM_MIN"
-              :max="HELPERS_RADIUS_NM_MAX"
-              step="0.25"
-              inputmode="decimal"
-              :disabled="helpersProximityBusy"
-              @blur="onHelpersRadiusBlur"
-            />
-          </div>
-          <div class="helpers-proximity-toggle">
+        <div class="api-key-row">
+          <label class="lbl api-key-lbl" for="helpers-radius-nm">Trigger</label>
+          <input
+            id="helpers-radius-nm"
+            v-model.number="helpersRadiusNm"
+            class="inp tap api-key-inp"
+            type="number"
+            :min="HELPERS_RADIUS_NM_MIN"
+            :max="HELPERS_RADIUS_NM_MAX"
+            step="0.25"
+            inputmode="decimal"
+            :disabled="helpersProximityBusy"
+            @blur="onHelpersRadiusBlur"
+          />
+          <div class="helpers-toggle-slot">
             <label class="toggle-switch">
               <input
                 type="checkbox"
@@ -2037,11 +2035,13 @@ onUnmounted(() => {
               />
               <span class="toggle-slider"></span>
             </label>
-            <span class="audio-row-label">Enabled</span>
+            <span class="helpers-toggle-label">Enabled</span>
           </div>
         </div>
-        <p class="helpers-hint helpers-proximity-hint">
-          {{ HELPERS_RADIUS_NM_MIN }}–{{ HELPERS_RADIUS_NM_MAX }} NM · default 2 NM
+        <p class="api-key-foot">
+          <span class="cred-hint">
+            {{ HELPERS_RADIUS_NM_MIN }}–{{ HELPERS_RADIUS_NM_MAX }} NM · default 2 NM
+          </span>
         </p>
       </SettingsSection>
 
@@ -2986,29 +2986,17 @@ onUnmounted(() => {
 .helpers-field {
   margin-top: 0.35rem;
 }
-.helpers-proximity-row {
-  display: flex;
-  align-items: flex-end;
-  gap: 0.75rem;
-  margin-top: 0.5rem;
-}
-.helpers-proximity-field {
-  flex: 1 1 auto;
-  min-width: 0;
-}
-.helpers-proximity-input {
-  width: 100%;
-  min-height: 2.5rem;
-}
-.helpers-proximity-toggle {
+.helpers-toggle-slot {
   display: flex;
   align-items: center;
   gap: 0.5rem;
-  flex-shrink: 0;
-  padding-bottom: 0.15rem;
+  flex: 0 0 auto;
+  min-height: var(--touch-target, 2.75rem);
 }
-.helpers-proximity-hint {
-  margin-top: 0.35rem;
+.helpers-toggle-label {
+  font-size: var(--text-sm, 0.8125rem);
+  color: var(--color-text-primary, #f4f4f8);
+  white-space: nowrap;
 }
 
 .audio-panel {
