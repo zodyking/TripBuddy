@@ -1,10 +1,11 @@
 /**
  * WAHA (WhatsApp HTTP API) client.
- * Connects to a co-hosted WAHA container for sending/receiving WhatsApp group messages.
- * The WAHA instance runs alongside the app via docker-compose (service: waha).
+ * Connects to a WAHA instance for sending/receiving WhatsApp group messages.
+ * Deploy WAHA as a separate service (Dokploy service or docker-compose).
  * @see https://github.com/devlikeapro/waha
  */
 
+const WAHA_URL_KEY = 'wahaBaseUrl'
 const WAHA_GROUP_ID_KEY = 'wahaGroupId'
 const WAHA_TTS_ENABLED_KEY = 'wahaTtsEnabled'
 const WAHA_POLL_INTERVAL_KEY = 'wahaPollIntervalMs'
@@ -13,14 +14,21 @@ const DEFAULT_SESSION = 'default'
 const DEFAULT_POLL_INTERVAL = 10_000
 
 /**
- * WAHA base URL — proxied through the app server at /api/waha,
- * or directly at the WAHA container URL for local dev.
+ * WAHA base URL.
+ * Priority: localStorage override > VITE env > server proxy fallback.
  */
 export function getWahaBaseUrl() {
   if (typeof window === 'undefined') return ''
-  const base = (import.meta.env.VITE_WAHA_URL || '').trim()
-  if (base) return base
+  const stored = (window.localStorage.getItem(WAHA_URL_KEY) ?? '').trim()
+  if (stored) return stored
+  const env = (import.meta.env.VITE_WAHA_URL || '').trim()
+  if (env) return env
   return `${window.location.origin}/api/waha`
+}
+
+export function setWahaBaseUrl(url) {
+  if (typeof window === 'undefined' || !window.localStorage) return
+  window.localStorage.setItem(WAHA_URL_KEY, String(url ?? '').trim())
 }
 
 export function getWahaApiKey() {

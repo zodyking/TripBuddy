@@ -66,6 +66,7 @@ import {
 import AutomationList from '../components/automation/AutomationList.vue'
 import AutomationEditor from '../components/automation/AutomationEditor.vue'
 import {
+  getWahaBaseUrl, setWahaBaseUrl,
   getWahaGroupId, setWahaGroupId,
   isWahaTtsEnabled, setWahaTtsEnabled,
   getSessionStatus, ensureSession, getQr, listGroups, sendGroupMessage,
@@ -648,6 +649,7 @@ async function resetApiQuotaToday() {
 }
 
 /** WhatsApp (WAHA) settings */
+const wahaUrlDraft = ref(getWahaBaseUrl())
 const wahaGroupIdDraft = ref(getWahaGroupId())
 const wahaTtsDraft = ref(isWahaTtsEnabled())
 const wahaConnMsg = ref('')
@@ -660,6 +662,7 @@ const wahaSendMsg = ref('')
 const wahaQrUrl = ref('')
 
 async function testWahaConnection() {
+  setWahaBaseUrl(wahaUrlDraft.value)
   wahaConnMsg.value = 'Checking…'
   wahaQrUrl.value = ''
   try {
@@ -2307,11 +2310,26 @@ onUnmounted(() => {
     <main v-show="settingsTab === 'whatsapp'" class="stack whatsapp-panel">
       <SettingsSection title="WhatsApp Messenger" section-id="settings-whatsapp">
         <p class="cred-hint">
-          Send and receive WhatsApp group messages. Incoming messages are read aloud via TTS.
-          WAHA runs automatically alongside the app.
+          Send and receive WhatsApp group messages via
+          <a href="https://github.com/devlikeapro/waha" target="_blank" rel="noopener noreferrer" class="ext-link">WAHA</a>.
+          Incoming messages are read aloud via TTS. Deploy WAHA as a separate Docker service
+          (<code>devlikeapro/waha</code> image) and enter its URL below.
         </p>
 
-        <h4 class="api-sub-heading" style="margin-top:0;padding-top:0;border-top:none">Status</h4>
+        <h4 class="api-sub-heading" style="margin-top:0;padding-top:0;border-top:none">Connection</h4>
+        <label class="lbl" for="waha-url">WAHA URL</label>
+        <input
+          id="waha-url"
+          v-model="wahaUrlDraft"
+          class="inp tap"
+          type="url"
+          autocomplete="off"
+          placeholder="http://your-waha-server:3000"
+        />
+        <p class="cred-hint">
+          Deploy WAHA as a separate Dokploy service (<code>devlikeapro/waha</code> image, port 3000).
+          Enter its URL here.
+        </p>
         <div class="btn-row">
           <button type="button" class="btn tap" @click="testWahaConnection">Check connection</button>
         </div>
