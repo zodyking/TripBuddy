@@ -121,6 +121,12 @@ export async function getSettingsAccessLog() {
   return handleJson(r)
 }
 
+/** Full bridge crossing history from Postgres (all stored points per route/direction). */
+export async function getBridgeTrafficExport() {
+  const r = await apiFetch('/api/settings/bridge-traffic-export')
+  return handleJson(r)
+}
+
 /** @returns {Promise<{ ok: boolean, enabled: boolean, redirectUrl: string, polygon: Array<{ lat: number, lng: number }> }>} */
 export async function getSettingsGeoFence() {
   const r = await apiFetch('/api/settings/geo-fence')
