@@ -498,6 +498,7 @@ function bridgeSvg(opts) {
  * @param {boolean} [p.selected]
  * @param {string} [p.shortLabel] one-word (or short) name on the marker
  * @param {'green' | 'orange' | 'red'} [p.delayTier] crossing-time severity (overrides trend palette when set)
+ * @param {'low' | 'medium' | 'high' | 'standstill'} [p.trafficLevel] full classification (standstill → purple pulse)
  */
 export function bridgesCrossingIcon(p) {
   const tk = p.trendKey || 'unk'
@@ -505,11 +506,17 @@ export function bridgesCrossingIcon(p) {
   let tower = '#5b21b6'
   let deck = '#4c1d95'
   let glow = '#c4b5fd'
+  const isStandstill = p.trafficLevel === 'standstill'
   if (p.isClosed) {
     stroke = '#94a3b8'
     tower = '#475569'
     deck = '#334155'
     glow = '#64748b'
+  } else if (isStandstill) {
+    stroke = '#ddd6fe'
+    tower = '#6d28d9'
+    deck = '#5b21b6'
+    glow = '#a78bfa'
   } else if (p.delayTier === 'green') {
     stroke = '#86efac'
     tower = '#15803d'
@@ -562,7 +569,13 @@ export function bridgesCrossingIcon(p) {
     iconSize: [52, 62],
     iconAnchor: [26, 60],
     popupAnchor: [0, -54],
-    className: 'map-marker-img-icon map-marker-img-icon--bridge',
+    className: [
+      'map-marker-img-icon',
+      'map-marker-img-icon--bridge',
+      isStandstill ? 'map-marker-bridge-pulse-standstill' : '',
+    ]
+      .filter(Boolean)
+      .join(' '),
   })
 }
 

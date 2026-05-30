@@ -24,6 +24,7 @@ const props = defineProps({
   /** @type {import('vue').PropType<Array<{
    *  id: string, lat: number, lng: number, title: string, shortLabel?: string,
    *  delayTier?: 'green' | 'orange' | 'red',
+   *  trafficLevel?: 'low' | 'medium' | 'high' | 'standstill',
    *  minutes: string, trendIcon: string,
    *  trendKey: 'worse' | 'better' | 'neutral' | 'unk',
    *  trendFull: string, isPick: boolean, isClosed: boolean, rank: number
@@ -170,6 +171,7 @@ function bridgePopupHtml(p) {
   const cls = ['bridge-popup']
   if (p.isPick) cls.push('bridge-popup--best')
   if (p.isClosed) cls.push('bridge-popup--closed')
+  if (p.trafficLevel === 'standstill') cls.push('bridge-popup--standstill')
   cls.push(trendCls)
   return `<div class="${cls.join(' ')}">
   <div class="bridge-popup__row">
@@ -424,13 +426,21 @@ function makeIcon(p, selected) {
   const tier = p.delayTier
   const delayTier =
     tier === 'green' || tier === 'orange' || tier === 'red' ? tier : undefined
+  const trafficLevel =
+    p.trafficLevel === 'low' ||
+    p.trafficLevel === 'medium' ||
+    p.trafficLevel === 'high' ||
+    p.trafficLevel === 'standstill'
+      ? p.trafficLevel
+      : undefined
   return bridgesCrossingIcon({
     trendKey: /** @type {'worse' | 'better' | 'neutral' | 'unk'} */(p.trendKey || 'unk'),
     isPick: !!p.isPick,
     isClosed: !!p.isClosed,
     selected,
     shortLabel: typeof p.shortLabel === 'string' ? p.shortLabel : '',
-    delayTier,
+    delayTier: trafficLevel === 'standstill' ? undefined : delayTier,
+    trafficLevel,
   })
 }
 
@@ -1178,6 +1188,12 @@ watch([geoTracking, compassModeActive], () => {
 }
 :deep(.bridge-popup--closed) {
   opacity: 0.75;
+}
+:deep(.bridge-popup--standstill .bridge-popup__time) {
+  color: #c4b5fd;
+}
+:deep(.bridge-popup--standstill .bridge-popup__rank) {
+  color: #a78bfa;
 }
 :deep(.bridge-popup__row) {
   display: flex;

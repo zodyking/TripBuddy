@@ -679,7 +679,29 @@ body {
   }
 }
 
+/* Bridge standstill — purple pulse (matches trailer radar style) */
+.leaflet-marker-icon.map-marker-bridge-pulse-standstill {
+  animation: bridge-marker-glow-purple 2s ease-in-out infinite;
+  filter: drop-shadow(0 0 4px rgba(167, 139, 250, 0.7));
+}
+
+@keyframes bridge-marker-glow-purple {
+  0%,
+  100% {
+    filter: drop-shadow(0 0 4px rgba(167, 139, 250, 0.55))
+      drop-shadow(0 0 10px rgba(124, 58, 237, 0.25));
+  }
+  50% {
+    filter: drop-shadow(0 0 10px rgba(196, 181, 253, 0.95))
+      drop-shadow(0 0 22px rgba(124, 58, 237, 0.55));
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
+  .leaflet-marker-icon.map-marker-bridge-pulse-standstill {
+    animation: none;
+    filter: drop-shadow(0 0 8px rgba(167, 139, 250, 0.75));
+  }
   .map-marker-trailer-pulse-heavy .map-beacon-circle,
   .map-marker-trailer-pulse-light .map-beacon-circle {
     animation: none;

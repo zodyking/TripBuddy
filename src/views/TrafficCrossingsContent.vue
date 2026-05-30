@@ -368,17 +368,6 @@ function trafficInputForRow(row) {
 }
 
 /**
- * Delay severity for card accent + trend chrome (empty string if closed).
- * @param {unknown} row
- */
-function delayTierForRow(row) {
-  if (isClosedRow(row)) return ''
-  const input = trafficInputForRow(row)
-  if (!input || finitePositive(input.routeTravelTime) == null) return 'orange'
-  return classifyBridgeTraffic(input).tier
-}
-
-/**
  * @param {unknown} v
  */
 function finitePositive(v) {
@@ -389,12 +378,31 @@ function finitePositive(v) {
 
 /**
  * @param {unknown} row
+ * @returns {{ level: string, tier: string }}
+ */
+function trafficClassifyForRow(row) {
+  if (isClosedRow(row)) return { level: '', tier: '' }
+  const input = trafficInputForRow(row)
+  if (!input || finitePositive(input.routeTravelTime) == null) {
+    return { level: /** @type {const} */ ('medium'), tier: /** @type {const} */ ('orange') }
+  }
+  const { level, tier } = classifyBridgeTraffic(input)
+  return { level, tier }
+}
+
+/**
+ * @param {unknown} row
  */
 function trafficLevelForRow(row) {
-  if (isClosedRow(row)) return ''
-  const input = trafficInputForRow(row)
-  if (!input || finitePositive(input.routeTravelTime) == null) return 'medium'
-  return classifyBridgeTraffic(input).level
+  return trafficClassifyForRow(row).level
+}
+
+/**
+ * Delay severity for card accent + trend chrome (empty string if closed).
+ * @param {unknown} row
+ */
+function delayTierForRow(row) {
+  return trafficClassifyForRow(row).tier
 }
 
 const TRAFFIC_LEVEL_LABEL = {
@@ -419,6 +427,8 @@ function trafficStatusTitle(row) {
  * @param {unknown} row
  */
 function delayTierClass(row) {
+  const level = trafficLevelForRow(row)
+  if (level === 'standstill') return 'bridge-trend--delay-standstill'
   const t = delayTierForRow(row)
   return t ? `bridge-trend--delay-${t}` : ''
 }
@@ -429,11 +439,9 @@ function delayTierClass(row) {
  */
 function bridgeChartStrokeColor(row) {
   if (isClosedRow(row)) return '#94a3b8'
-  const input = trafficInputForRow(row)
-  const t =
-    input && finitePositive(input.routeTravelTime) != null
-      ? classifyBridgeTraffic(input).tier
-      : 'orange'
+  const level = trafficLevelForRow(row)
+  if (level === 'standstill') return '#a78bfa'
+  const t = delayTierForRow(row)
   if (t === 'green') return '#4ade80'
   if (t === 'red') return '#f87171'
   return '#fb923c'
@@ -748,14 +756,15 @@ const mapPins = computed(() => {
     const pos = getBridgeAnchorForRouteId(id, direction.value)
     if (!pos) continue
     const ti = trendInfo(row)
-    const fm = finiteTravelMinutes(row)
+    const tc = trafficClassifyForRow(row)
     out.push({
       id,
       lat: pos[0],
       lng: pos[1],
       title: displayTitleShort(row),
       shortLabel: mapPinShortLabel(row),
-      delayTier: delayTierForRow(row) || /** @type {'orange'} */ ('orange'),
+      delayTier: tc.tier || /** @type {'orange'} */ ('orange'),
+      trafficLevel: tc.level || undefined,
       minutes: isClosedRow(row) ? '—' : (() => {
         const m = travelMinutes(row)
         return Number.isFinite(m) ? String(Math.round(m)) : '—'
@@ -1842,12 +1851,46 @@ onUnmounted(() => {
 }
 
 .bridge-tile--d-standstill::before {
-  background: linear-gradient(180deg, #fb7185, #9f1239);
-  box-shadow: 0 0 16px rgba(251, 113, 133, 0.42);
+  background: linear-gradient(180deg, #c4b5fd, #7c3aed);
+  box-shadow: 0 0 16px rgba(167, 139, 250, 0.5);
+  animation: bridge-tile-standstill-pulse 2s ease-in-out infinite;
 }
 
 .bridge-tile--d-standstill {
-  border-color: rgba(251, 113, 133, 0.35);
+  border-color: rgba(167, 139, 250, 0.42);
+  box-shadow:
+    0 0 0 1px rgba(124, 58, 237, 0.2),
+    0 4px 20px rgba(91, 33, 182, 0.25);
+  animation: bridge-tile-standstill-border 2s ease-in-out infinite;
+}
+
+@keyframes bridge-tile-standstill-pulse {
+  0%,
+  100% {
+    opacity: 0.92;
+    box-shadow: 0 0 12px rgba(167, 139, 250, 0.4);
+  }
+  50% {
+    opacity: 1;
+    box-shadow: 0 0 22px rgba(167, 139, 250, 0.65);
+  }
+}
+
+@keyframes bridge-tile-standstill-border {
+  0%,
+  100% {
+    border-color: rgba(167, 139, 250, 0.35);
+  }
+  50% {
+    border-color: rgba(196, 181, 253, 0.65);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .bridge-tile--d-standstill,
+  .bridge-tile--d-standstill::before {
+    animation: none;
+  }
 }
 
 .bridge-tile:active {
@@ -2017,6 +2060,13 @@ onUnmounted(() => {
   color: #fef2f2;
   background: rgba(127, 29, 29, 0.55);
   border-color: rgba(248, 113, 113, 0.48);
+}
+
+.bridge-trend.bridge-trend--delay-standstill {
+  color: #f5f3ff;
+  background: rgba(91, 33, 182, 0.62);
+  border-color: rgba(167, 139, 250, 0.55);
+  box-shadow: 0 0 10px rgba(167, 139, 250, 0.35);
 }
 
 .t--worse {
