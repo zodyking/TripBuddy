@@ -1034,6 +1034,8 @@ app.get('/api/settings/credentials', async (req) => {
           wahaChatId: wahaPrefs.chatId,
           wahaTtsEnabled: wahaPrefs.ttsEnabled,
           wahaDailyBriefingEnabled: wahaPrefs.dailyBriefingEnabled,
+          wahaUrl: wahaPrefs.wahaUrl || '',
+          wahaApiKey: wahaPrefs.wahaApiKey || '',
         }
       : {}),
     secretHint: process.env.FEDEX_TOOL_SECRET ? null : TOOL_SECRET_HINT,
@@ -1339,11 +1341,9 @@ app.put('/api/settings/waha-prefs', async (req, reply) => {
       return reply.code(400).send({ error: 'No account in session.' })
     }
     const body = req.body ?? {}
-    /** @type {{ chatId?: string, ttsEnabled?: boolean | null, dailyBriefingEnabled?: boolean | null }} */
     const prefs = {}
     if (Object.prototype.hasOwnProperty.call(body, 'chatId')) {
-      const chatId = String(body.chatId ?? '').trim().slice(0, WAHA_CHAT_ID_MAX)
-      prefs.chatId = chatId
+      prefs.chatId = String(body.chatId ?? '').trim().slice(0, WAHA_CHAT_ID_MAX)
     }
     if (Object.prototype.hasOwnProperty.call(body, 'ttsEnabled')) {
       prefs.ttsEnabled = body.ttsEnabled === true
@@ -1351,12 +1351,14 @@ app.put('/api/settings/waha-prefs', async (req, reply) => {
     if (Object.prototype.hasOwnProperty.call(body, 'dailyBriefingEnabled')) {
       prefs.dailyBriefingEnabled = body.dailyBriefingEnabled === true
     }
-    if (
-      !Object.prototype.hasOwnProperty.call(prefs, 'chatId') &&
-      !Object.prototype.hasOwnProperty.call(prefs, 'ttsEnabled') &&
-      !Object.prototype.hasOwnProperty.call(prefs, 'dailyBriefingEnabled')
-    ) {
-      return reply.code(400).send({ error: 'Provide chatId, ttsEnabled, and/or dailyBriefingEnabled.' })
+    if (Object.prototype.hasOwnProperty.call(body, 'wahaUrl')) {
+      prefs.wahaUrl = String(body.wahaUrl ?? '').trim().slice(0, 500)
+    }
+    if (Object.prototype.hasOwnProperty.call(body, 'wahaApiKey')) {
+      prefs.wahaApiKey = String(body.wahaApiKey ?? '').trim().slice(0, 500)
+    }
+    if (!Object.keys(prefs).length) {
+      return reply.code(400).send({ error: 'Provide at least one WAHA preference field.' })
     }
     await setWahaPrefsForAccount(ak.trim(), prefs)
     const stored = await getWahaPrefsForAccount(ak.trim())
@@ -1365,6 +1367,8 @@ app.put('/api/settings/waha-prefs', async (req, reply) => {
       wahaChatId: stored.chatId,
       wahaTtsEnabled: stored.ttsEnabled,
       wahaDailyBriefingEnabled: stored.dailyBriefingEnabled,
+      wahaUrl: stored.wahaUrl || '',
+      wahaApiKey: stored.wahaApiKey ? '••••' : '',
     }
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e)

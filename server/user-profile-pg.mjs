@@ -95,6 +95,12 @@ export async function ensureUserProfileTable() {
     await client.query(`
       ALTER TABLE ${TABLE} ADD COLUMN IF NOT EXISTS waha_daily_briefing_enabled BOOLEAN
     `)
+    await client.query(`
+      ALTER TABLE ${TABLE} ADD COLUMN IF NOT EXISTS waha_url TEXT
+    `)
+    await client.query(`
+      ALTER TABLE ${TABLE} ADD COLUMN IF NOT EXISTS waha_api_key_enc JSONB
+    `)
   } finally {
     client.release()
   }
@@ -445,15 +451,15 @@ export async function setHelpersAutoArrivePrefsForAccount(accountKey, prefs) {
 export async function getWahaPrefsForAccount(accountKey) {
   const ak = String(accountKey || '').trim()
   if (!ak) {
-    return { chatId: '', ttsEnabled: null, dailyBriefingEnabled: null }
+    return { chatId: '', ttsEnabled: null, dailyBriefingEnabled: null, wahaUrl: '', wahaApiKey: '' }
   }
   const p = await getPostgresPool()
   if (!p) {
-    return { chatId: '', ttsEnabled: null, dailyBriefingEnabled: null }
+    return { chatId: '', ttsEnabled: null, dailyBriefingEnabled: null, wahaUrl: '', wahaApiKey: '' }
   }
   await ensureUserProfileTable()
   const { rows } = await p.query(
-    `SELECT waha_chat_id, waha_tts_enabled, waha_daily_briefing_enabled
+    `SELECT waha_chat_id, waha_tts_enabled, waha_daily_briefing_enabled, waha_url, waha_api_key_enc
      FROM ${TABLE} WHERE account_key = $1`,
     [ak],
   )
@@ -472,7 +478,12 @@ export async function getWahaPrefsForAccount(accountKey) {
       : row?.waha_daily_briefing_enabled === false
         ? false
         : null
-  return { chatId, ttsEnabled, dailyBriefingEnabled }
+  const wahaUrl = typeof row?.waha_url === 'string' ? row.waha_url.trim() : ''
+  let wahaApiKey = ''
+  if (row?.waha_api_key_enc && typeof row.waha_api_key_enc === 'object') {
+    try { wahaApiKey = decryptString(row.waha_api_key_enc).trim() } catch { /* ignore */ }
+  }
+  return { chatId, ttsEnabled, dailyBriefingEnabled, wahaUrl, wahaApiKey }
 }
 
 /**
@@ -547,6 +558,22 @@ export async function setWahaPrefsForAccount(accountKey, prefs) {
        updated_at = now()`,
     [ak, chatId || null],
   )
+
+  if (prefs && Object.prototype.hasOwnProperty.call(prefs, 'wahaUrl')) {
+    const url = String(prefs.wahaUrl ?? '').trim().slice(0, 500)
+    await p.query(
+      `UPDATE ${TABLE} SET waha_url = $2, updated_at = now() WHERE account_key = $1`,
+      [ak, url || null],
+    )
+  }
+  if (prefs && Object.prototype.hasOwnProperty.call(prefs, 'wahaApiKey')) {
+    const raw = String(prefs.wahaApiKey ?? '').trim()
+    const enc = raw ? encryptString(raw) : null
+    await p.query(
+      `UPDATE ${TABLE} SET waha_api_key_enc = $2::jsonb, updated_at = now() WHERE account_key = $1`,
+      [ak, enc ? JSON.stringify(enc) : null],
+    )
+  }
 }
 
 /**

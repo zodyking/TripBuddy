@@ -3,7 +3,11 @@ import {
   setWahaChatId,
   setWahaTtsEnabled,
   setWahaDailyBriefingEnabled,
+  setWahaBaseUrl,
+  setWahaApiKey,
   getWahaChatId,
+  getWahaUrlForSettings,
+  getWahaApiKeyForSettings,
 } from './wahaApi.js'
 import { putWahaPrefs } from '../api.js'
 
@@ -34,7 +38,8 @@ export function applyWahaPrefsFromCredentials(meta) {
   const hasChat = Object.prototype.hasOwnProperty.call(m, 'wahaChatId')
   const hasTts = Object.prototype.hasOwnProperty.call(m, 'wahaTtsEnabled')
   const hasBriefing = Object.prototype.hasOwnProperty.call(m, 'wahaDailyBriefingEnabled')
-  if (!hasChat && !hasTts && !hasBriefing) return
+  const hasUrl = Object.prototype.hasOwnProperty.call(m, 'wahaUrl')
+  const hasApiKey = Object.prototype.hasOwnProperty.call(m, 'wahaApiKey')
 
   if (hasChat && typeof m.wahaChatId === 'string' && m.wahaChatId.trim()) {
     setWahaChatId(m.wahaChatId.trim())
@@ -44,6 +49,12 @@ export function applyWahaPrefsFromCredentials(meta) {
   }
   if (hasBriefing && typeof m.wahaDailyBriefingEnabled === 'boolean') {
     setWahaDailyBriefingEnabled(m.wahaDailyBriefingEnabled)
+  }
+  if (hasUrl && typeof m.wahaUrl === 'string' && m.wahaUrl.trim()) {
+    setWahaBaseUrl(m.wahaUrl.trim())
+  }
+  if (hasApiKey && typeof m.wahaApiKey === 'string' && m.wahaApiKey.trim()) {
+    setWahaApiKey(m.wahaApiKey.trim())
   }
 }
 
@@ -68,6 +79,15 @@ export async function hydrateWahaPrefsFromServer() {
         const localChat = getWahaChatId()
         if (!serverChat && localChat) {
           void syncCurrentWahaChatIdToServer().catch(() => {})
+        }
+        const localUrl = getWahaUrlForSettings()
+        const serverUrl = typeof data.wahaUrl === 'string' ? data.wahaUrl.trim() : ''
+        if (!serverUrl && localUrl) {
+          void saveWahaPrefsToServer({ wahaUrl: localUrl }).catch(() => {})
+        }
+        const localKey = getWahaApiKeyForSettings()
+        if (!data.wahaApiKey && localKey) {
+          void saveWahaPrefsToServer({ wahaApiKey: localKey }).catch(() => {})
         }
       }
     } catch {
@@ -104,6 +124,16 @@ export async function saveWahaPrefsToServer(prefs) {
   if (prefs && Object.prototype.hasOwnProperty.call(prefs, 'dailyBriefingEnabled')) {
     setWahaDailyBriefingEnabled(Boolean(prefs.dailyBriefingEnabled))
     body.dailyBriefingEnabled = Boolean(prefs.dailyBriefingEnabled)
+  }
+  if (prefs && Object.prototype.hasOwnProperty.call(prefs, 'wahaUrl')) {
+    const url = String(prefs.wahaUrl ?? '').trim()
+    setWahaBaseUrl(url)
+    body.wahaUrl = url
+  }
+  if (prefs && Object.prototype.hasOwnProperty.call(prefs, 'wahaApiKey')) {
+    const key = String(prefs.wahaApiKey ?? '').trim()
+    setWahaApiKey(key)
+    body.wahaApiKey = key
   }
 
   pauseApplyWahaPrefsFromCredentials()
