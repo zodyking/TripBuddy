@@ -59,6 +59,8 @@ export function useWahaMessenger(opts = {}) {
   const syncing = ref(false)
   const sending = ref(false)
   const error = ref('')
+  /** Non-blocking hint when live sync fails but cached messages are shown */
+  const syncWarning = ref('')
   const activeChatId = ref(getWahaChatId())
   const chatTitle = ref('')
   const chats = ref(/** @type {ReturnType<typeof normalizeWahaChat>[]} */ ([]))
@@ -465,6 +467,7 @@ export function useWahaMessenger(opts = {}) {
     const gen = ++syncGen
     syncing.value = true
     error.value = ''
+    syncWarning.value = ''
     try {
       const serverCache = await getWhatsAppThreadCache(chatId)
       if (gen !== syncGen) return
@@ -497,12 +500,23 @@ export function useWahaMessenger(opts = {}) {
         if (opts.scroll) await scrollToBottom()
         void hydrateMediaLazy(chatId)
         error.value = ''
+        syncWarning.value =
+          typeof synced.warning === 'string' ? synced.warning.trim() : ''
+      } else if (messages.value.length) {
+        syncWarning.value = synced.error || 'Live sync unavailable — showing cached messages'
+        error.value = ''
       } else if (!messages.value.length) {
         error.value = synced.error || 'Could not sync messages'
       }
     } catch (e) {
-      if (gen === syncGen && !messages.value.length) {
-        error.value = e instanceof Error ? e.message : String(e)
+      if (gen === syncGen) {
+        const msg = e instanceof Error ? e.message : String(e)
+        if (messages.value.length) {
+          syncWarning.value = msg
+          error.value = ''
+        } else {
+          error.value = msg
+        }
       }
     } finally {
       if (gen === syncGen) syncing.value = false
@@ -673,6 +687,7 @@ export function useWahaMessenger(opts = {}) {
     syncing,
     sending,
     error,
+    syncWarning,
     wahaChatKindLabel,
     loadChats,
     refreshMessages,

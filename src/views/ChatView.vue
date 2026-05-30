@@ -19,6 +19,7 @@ const {
   syncing,
   sending,
   error,
+  syncWarning,
   wahaChatKindLabel,
   loadChats,
   refreshMessages,
@@ -29,6 +30,26 @@ const {
 const hasActiveChat = computed(() => !!activeChatId.value)
 const threadBusy = computed(() => loading.value || syncing.value)
 const showThreadLoader = computed(() => threadBusy.value)
+
+/** Tap translated sender label to toggle original spelling */
+const peekOriginalSenderId = ref(/** @type {string | null} */ (null))
+
+function onSenderNameTap(msg) {
+  if (!msg?.isSenderNameTranslated || !msg.senderNameOriginal) return
+  peekOriginalSenderId.value = peekOriginalSenderId.value === msg.id ? null : msg.id
+}
+
+function senderNameLabel(msg) {
+  if (!msg) return ''
+  if (
+    msg.isSenderNameTranslated &&
+    msg.senderNameOriginal &&
+    peekOriginalSenderId.value === msg.id
+  ) {
+    return msg.senderNameOriginal
+  }
+  return msg.senderName || ''
+}
 
 function fmtTime(ts) {
   if (!ts) return ''
@@ -101,6 +122,10 @@ function onComposeKeydown(e) {
 
 watch(showChatList, (open) => {
   if (open) void loadChats()
+})
+
+watch(activeChatId, () => {
+  peekOriginalSenderId.value = null
 })
 
 function openMedia(url) {
@@ -220,8 +245,6 @@ function openMedia(url) {
     </div>
 
     <template v-else>
-      <p v-if="error && !displayMessages.length && !showThreadLoader" class="chat-banner chat-banner--err" role="alert">{{ error }}</p>
-
       <div class="chat-thread-wrap">
         <div
           v-if="showThreadLoader"
@@ -232,8 +255,26 @@ function openMedia(url) {
           aria-label="Loading messages"
         >
           <span class="chat-thread-spinner" aria-hidden="true" />
+          <p v-if="!displayMessages.length" class="chat-thread-loader-label">Loading messages…</p>
+        </div>
+        <div
+          v-else-if="error && !displayMessages.length"
+          class="chat-thread-loader chat-thread-status"
+          role="alert"
+        >
+          <p class="chat-thread-status-text">{{ error }}</p>
+          <button type="button" class="btn tap chat-thread-retry" @click="refreshMessages">
+            Try again
+          </button>
         </div>
         <div ref="scrollEl" class="chat-thread" role="log" aria-live="polite" aria-relevant="additions">
+        <p
+          v-if="syncWarning && displayMessages.length"
+          class="chat-thread-sync-hint"
+          role="status"
+        >
+          {{ syncWarning }}
+        </p>
         <p v-if="!threadBusy && !displayMessages.length && !error" class="chat-thread-empty">
           No messages yet. Say hello below.
         </p>
@@ -245,12 +286,27 @@ function openMedia(url) {
             :class="item.msg.fromMe ? 'chat-bubble-row--out' : 'chat-bubble-row--in'"
           >
             <div class="chat-bubble" :class="item.msg.fromMe ? 'chat-bubble--out' : 'chat-bubble--in'">
-              <p
+              <button
                 v-if="!item.msg.fromMe && item.msg.isGroupChat && item.msg.senderName"
-                class="chat-bubble-sender"
+                type="button"
+                class="chat-bubble-sender tap"
+                :class="{
+                  'chat-bubble-sender--translated': item.msg.isSenderNameTranslated,
+                  'is-showing-original':
+                    item.msg.isSenderNameTranslated &&
+                    peekOriginalSenderId === item.msg.id,
+                }"
+                :title="
+                  item.msg.isSenderNameTranslated
+                    ? peekOriginalSenderId === item.msg.id
+                      ? 'Tap for translation'
+                      : 'Tap for original name'
+                    : undefined
+                "
+                @click.stop="onSenderNameTap(item.msg)"
               >
-                {{ item.msg.senderName }}
-              </p>
+                {{ senderNameLabel(item.msg) }}
+              </button>
               <div v-if="item.msg.media?.url" class="chat-bubble-media">
                 <img
                   v-if="item.msg.media.kind === 'image'"
@@ -538,21 +594,6 @@ function openMedia(url) {
   font-size: var(--text-sm, 0.8125rem);
 }
 
-.chat-banner {
-  flex-shrink: 0;
-  margin: 0;
-  padding: 0.5rem 0.85rem;
-  font-size: 0.875rem;
-  text-align: center;
-  background: var(--color-bg-elevated, #0f0f14);
-  color: var(--color-text-secondary, #a8a8b8);
-}
-
-.chat-banner--err {
-  color: var(--color-error, #ef4444);
-  background: var(--color-error-muted, rgba(239, 68, 68, 0.15));
-}
-
 .chat-thread-wrap {
   flex: 1 1 0;
   min-height: 0;
@@ -595,6 +636,35 @@ function openMedia(url) {
   margin: 0;
   font-size: var(--text-sm, 0.8125rem);
   color: var(--color-text-secondary, #a8a8b8);
+}
+
+.chat-thread-status {
+  gap: 1rem;
+  padding: 1.25rem;
+}
+
+.chat-thread-status-text {
+  margin: 0;
+  max-width: 18rem;
+  text-align: center;
+  font-size: var(--text-sm, 0.8125rem);
+  line-height: 1.45;
+  color: var(--color-text-secondary, #a8a8b8);
+}
+
+.chat-thread-retry {
+  font-size: var(--text-sm, 0.8125rem);
+}
+
+.chat-thread-sync-hint {
+  margin: 0 0 0.35rem;
+  padding: 0.35rem 0.5rem;
+  font-size: var(--text-xs, 0.6875rem);
+  line-height: 1.35;
+  text-align: center;
+  color: var(--color-text-tertiary, #6e6e7e);
+  background: rgba(123, 77, 181, 0.08);
+  border-radius: var(--radius-md, 0.5rem);
 }
 
 @keyframes chat-spin {
@@ -676,11 +746,34 @@ function openMedia(url) {
 }
 
 .chat-bubble-sender {
+  display: block;
+  width: 100%;
   margin: 0 0 0.28rem;
+  padding: 0;
+  border: none;
+  background: none;
+  text-align: left;
+  font-family: inherit;
   font-size: 0.875rem;
   font-weight: var(--weight-bold, 700);
   color: var(--color-accent-orange, #ff6b1a);
   line-height: 1.2;
+}
+
+.chat-bubble-sender--translated {
+  color: var(--color-accent-purple-light, #9d6fd7);
+}
+
+.chat-bubble-sender--translated.is-showing-original {
+  color: var(--color-text-secondary, #a8a8b8);
+  font-weight: var(--weight-semibold, 600);
+  font-style: italic;
+}
+
+.chat-bubble-sender--translated:focus-visible {
+  outline: 2px solid var(--color-accent-purple, #7b4db5);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm, 0.375rem);
 }
 
 .chat-bubble-media {

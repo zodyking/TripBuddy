@@ -1,4 +1,7 @@
-import { englishDisplayName } from './senderNameLocale.js'
+import {
+  englishDisplayName,
+  needsEnglishSenderNameTranslation,
+} from './senderNameLocale.js'
 
 /**
  * WAHA (WhatsApp HTTP API) client.
@@ -614,8 +617,18 @@ export function normalizeWahaMessage(msg, opts = {}) {
   const media = normalizeWahaMedia(src)
   const hasMedia = Boolean(src?.hasMedia || media?.url)
   let senderName = resolveWahaSenderName(src, contactMap, activeChatId, lidMap, participantMap)
-  if (senderName && senderTextEn && typeof senderTextEn === 'object') {
-    senderName = englishDisplayName(senderName, senderTextEn)
+  const senderNameOriginal = senderName ? String(senderName).trim() : ''
+  let isSenderNameTranslated = false
+  if (senderNameOriginal && senderTextEn && typeof senderTextEn === 'object') {
+    if (needsEnglishSenderNameTranslation(senderNameOriginal)) {
+      const en = String(senderTextEn[senderNameOriginal] ?? '').trim()
+      if (en && en !== senderNameOriginal) {
+        senderName = en
+        isSenderNameTranslated = true
+      }
+    } else {
+      senderName = englishDisplayName(senderNameOriginal, senderTextEn)
+    }
   }
   const isGroupChat = activeChatId.endsWith('@g.us')
   return {
@@ -624,6 +637,8 @@ export function normalizeWahaMessage(msg, opts = {}) {
     fromMe,
     ts,
     senderName,
+    senderNameOriginal: isSenderNameTranslated ? senderNameOriginal : '',
+    isSenderNameTranslated,
     hasMedia,
     media,
     isGroupChat,
