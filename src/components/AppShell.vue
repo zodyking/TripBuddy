@@ -1,12 +1,10 @@
 <script setup>
 import { computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
+import { useRoute } from 'vue-router'
 import {
   startAppGeolocationWatch,
   stopAppGeolocationWatch,
 } from '../composables/useAppGeolocationWatch.js'
-import { postAuthLogout } from '../api.js'
-import { resetLinehaulSession } from '../stores/linehaulSnapshotStore.js'
 import { useApiHealth } from '../composables/useApiHealth.js'
 import {
   connectLiveLogStream,
@@ -30,7 +28,6 @@ import { useDailyBriefing } from '../composables/useDailyBriefing.js'
 import { hydrateOpenrouterApiKeyFromServer } from '../stores/trafficTileKey.js'
 
 const route = useRoute()
-const router = useRouter()
 const { apiOk, refreshHealth } = useApiHealth()
 
 const {
@@ -86,16 +83,6 @@ watch(menuOpen, (o) => {
     })
   }
 })
-
-async function logoutApp() {
-  try {
-    await postAuthLogout()
-  } catch {
-    /* still navigate */
-  }
-  resetLinehaulSession()
-  await router.push({ name: 'login' })
-}
 
 const headerAriaLabel = 'FedExTool — Linehaul'
 
@@ -191,14 +178,6 @@ onUnmounted(() => {
               <p v-else class="notif-empty">No notifications yet</p>
             </div>
           </div>
-          <button
-            type="button"
-            class="header-sign-out tap"
-            aria-label="Sign out of app"
-            @click="logoutApp"
-          >
-            Sign out
-          </button>
         </div>
       </div>
     </header>
@@ -650,24 +629,6 @@ onUnmounted(() => {
   font-size: 0.75rem;
   color: #6a6a78;
   text-align: center;
-}
-
-.header-sign-out {
-  padding: var(--space-2, 0.5rem) var(--space-3, 0.75rem);
-  border: 1px solid var(--color-border, rgba(255, 255, 255, 0.12));
-  border-radius: var(--radius-lg, 0.75rem);
-  background: rgba(255, 255, 255, 0.04);
-  color: var(--color-text-secondary, #a8a8b8);
-  font-size: var(--text-xs, 0.6875rem);
-  font-weight: var(--weight-semibold, 600);
-  text-transform: uppercase;
-  letter-spacing: var(--tracking-wide, 0.025em);
-}
-
-.header-sign-out:hover {
-  color: var(--color-text-primary, #f4f4f8);
-  background: rgba(239, 68, 68, 0.12);
-  border-color: rgba(239, 68, 68, 0.35);
 }
 
 /* Offline Banner */

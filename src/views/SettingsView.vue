@@ -28,7 +28,9 @@ import {
   postApiQuotaReset,
   fetchDirectory,
   bulkImportDirectory,
+  postAuthLogout,
 } from '../api.js'
+import { resetLinehaulSession } from '../stores/linehaulSnapshotStore.js'
 import {
   DIRECTORY_STATION_TYPES,
   DIRECTORY_LOCATION_TYPE_OTHER,
@@ -128,6 +130,33 @@ const route = useRoute()
 
 /** @type {import('vue').Ref<'general' | 'automation' | 'audio' | 'security' | 'directory' | 'helpers'>} */
 const settingsTab = ref('general')
+const settingsTabsEl = ref(/** @type {HTMLElement | null} */ (null))
+const signOutBusy = ref(false)
+
+async function signOutApp() {
+  if (signOutBusy.value) return
+  signOutBusy.value = true
+  try {
+    await postAuthLogout()
+  } catch {
+    /* still navigate */
+  }
+  resetLinehaulSession()
+  await router.push({ name: 'login' })
+  signOutBusy.value = false
+}
+
+/**
+ * Desktop: vertical wheel scrolls tab bar horizontally when tabs overflow.
+ * @param {WheelEvent} e
+ */
+function onSettingsTabsWheel(e) {
+  const el = settingsTabsEl.value
+  if (!el || el.scrollWidth <= el.clientWidth + 1) return
+  if (Math.abs(e.deltaY) <= Math.abs(e.deltaX)) return
+  e.preventDefault()
+  el.scrollLeft += e.deltaY
+}
 
 const helpersAutoArriveEnabled = ref(getHelpersAutoArriveNearDestEnabled())
 const helpersRadiusNm = ref(getHelpersAutoArriveRadiusNm())
@@ -1461,7 +1490,13 @@ onUnmounted(() => {
 
 <template>
   <div class="shell">
-    <div class="settings-tabs" role="tablist" aria-label="Settings sections">
+    <div
+      ref="settingsTabsEl"
+      class="settings-tabs"
+      role="tablist"
+      aria-label="Settings sections"
+      @wheel="onSettingsTabsWheel"
+    >
       <button
         type="button"
         class="tab-btn tap"
@@ -1922,6 +1957,18 @@ onUnmounted(() => {
           </div>
         </Teleport>
       </SettingsSection>
+
+      <div class="settings-sign-out-wrap">
+        <button
+          type="button"
+          class="btn settings-sign-out-btn tap"
+          :disabled="signOutBusy"
+          aria-label="Sign out of app"
+          @click="signOutApp"
+        >
+          {{ signOutBusy ? 'Signing out…' : 'Sign out' }}
+        </button>
+      </div>
     </main>
 
     <main v-show="settingsTab === 'helpers'" class="stack helpers-panel">
@@ -2618,6 +2665,10 @@ onUnmounted(() => {
 .shell {
   min-height: 100vh;
   min-height: 100dvh;
+  min-width: 0;
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
   padding: var(--space-4, 1rem) 0 var(--space-6, 1.5rem);
 }
 
@@ -2631,6 +2682,10 @@ onUnmounted(() => {
   gap: var(--space-1, 0.25rem);
   padding: var(--space-1, 0.25rem);
   margin-bottom: var(--space-4, 1rem);
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
   background: var(--color-glass, rgba(22, 22, 29, 0.72));
   backdrop-filter: blur(var(--blur-md, 12px));
   -webkit-backdrop-filter: blur(var(--blur-md, 12px));
@@ -2639,11 +2694,68 @@ onUnmounted(() => {
   overflow-x: auto;
   overflow-y: hidden;
   -webkit-overflow-scrolling: touch;
+  overscroll-behavior-x: contain;
+  scroll-snap-type: x proximity;
   scrollbar-width: none;
   -ms-overflow-style: none;
 }
 .settings-tabs::-webkit-scrollbar {
   display: none;
+}
+
+@media (pointer: fine) {
+  .settings-tabs {
+    scrollbar-width: thin;
+    scrollbar-color: rgba(139, 92, 246, 0.55) transparent;
+    padding-bottom: 0.15rem;
+  }
+  .settings-tabs::-webkit-scrollbar {
+    display: block;
+    height: 6px;
+  }
+  .settings-tabs::-webkit-scrollbar-thumb {
+    background: rgba(139, 92, 246, 0.5);
+    border-radius: 999px;
+  }
+  .settings-tabs::-webkit-scrollbar-track {
+    background: transparent;
+  }
+}
+
+.settings-sign-out-wrap {
+  margin-top: var(--space-2, 0.5rem);
+  padding-top: var(--space-4, 1rem);
+}
+
+.settings-sign-out-btn {
+  display: block;
+  width: 100%;
+  min-height: 3.25rem;
+  padding: var(--space-4, 1rem) var(--space-5, 1.25rem);
+  font-size: 1rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #fff;
+  border: none;
+  border-radius: var(--radius-xl, 1rem);
+  background: linear-gradient(145deg, #9b6fd4 0%, #7b4db5 45%, #6d28d9 100%);
+  box-shadow:
+    0 4px 14px rgba(109, 40, 217, 0.45),
+    0 0 0 1px rgba(167, 139, 250, 0.25) inset;
+}
+
+.settings-sign-out-btn:hover:not(:disabled) {
+  filter: brightness(1.08);
+}
+
+.settings-sign-out-btn:active:not(:disabled) {
+  transform: scale(0.99);
+}
+
+.settings-sign-out-btn:disabled {
+  opacity: 0.65;
+  cursor: wait;
 }
 
 .tab-btn {
