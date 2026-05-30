@@ -611,6 +611,19 @@ const openrouterApiMsg = ref('')
 const openrouterApiBusy = ref(false)
 const openrouterModelOptions = OPENROUTER_MODEL_OPTIONS
 const openrouterBriefingSystemPrompt = OPENROUTER_BRIEFING_SYSTEM_PROMPT
+const uiBuildLabel = ref('')
+
+async function refreshUiBuildLabel() {
+  try {
+    const r = await fetch('/api/build-info', { credentials: 'include' })
+    if (!r.ok) return
+    const data = await r.json().catch(() => ({}))
+    const parts = [data.mainScript, data.mainCss].filter(Boolean)
+    uiBuildLabel.value = parts.length ? parts.join(' · ') : 'unknown'
+  } catch {
+    /* optional */
+  }
+}
 
 async function saveOpenrouterApiKey() {
   if (!(await requireApi())) return
@@ -1478,6 +1491,7 @@ function applySettingsRouteFragment() {
 onMounted(async () => {
   tripAlertMode.value = getTripAlertMode()
   unregisterRecover = registerApiRecover(reconnectLiveLogStream)
+  void refreshUiBuildLabel()
   await loadCredentials()
   await loadAssignmentState()
   tomtomTrafficDraft.value = trafficTomtomKeyOverride.value
@@ -1783,6 +1797,7 @@ onUnmounted(() => {
       </SettingsSection>
 
       <SettingsSection title="API" section-id="settings-api">
+        <p v-if="uiBuildLabel" class="cred-hint api-build-label">App build: {{ uiBuildLabel }}</p>
         <!-- TomTom -->
         <h4 class="api-sub-heading">TomTom Traffic</h4>
         <p class="cred-hint">
@@ -1864,45 +1879,38 @@ onUnmounted(() => {
           Summarizes today’s monitored WhatsApp chat into a spoken briefing on login.
           <a href="https://openrouter.ai/" target="_blank" rel="noopener noreferrer" class="ext-link">OpenRouter API key</a>
         </p>
-        <div class="openrouter-settings-block">
-          <div class="api-key-row">
-            <label class="lbl api-key-lbl" for="openrouter-api-key">API key</label>
-            <input
-              id="openrouter-api-key"
-              v-model="openrouterApiDraft"
-              class="inp tap api-key-inp"
-              type="password"
-              autocomplete="off"
-              placeholder="sk-or-…"
-            />
-          </div>
-          <div class="api-key-row">
-            <label class="lbl api-key-lbl" for="openrouter-model">Model</label>
-            <select
-              id="openrouter-model"
-              v-model="openrouterModelDraft"
-              class="inp tap api-key-inp api-model-select"
-              :disabled="openrouterApiBusy"
-            >
-              <option v-for="opt in openrouterModelOptions" :key="opt.value" :value="opt.value">
-                {{ opt.label }}
-              </option>
-            </select>
-          </div>
-          <div class="api-key-row openrouter-save-row">
-            <span class="api-key-lbl openrouter-save-spacer" aria-hidden="true"></span>
-            <button
-              type="button"
-              class="btn primary tap api-key-save openrouter-save-btn"
-              :disabled="openrouterApiBusy"
-              @click="saveOpenrouterApiKey"
-            >
-              {{ openrouterApiBusy ? 'Saving…' : 'Save key & model' }}
-            </button>
-          </div>
+        <div class="api-key-row">
+          <label class="lbl api-key-lbl" for="openrouter-api-key">OpenRouter</label>
+          <input
+            id="openrouter-api-key"
+            v-model="openrouterApiDraft"
+            class="inp tap api-key-inp"
+            type="password"
+            autocomplete="off"
+            placeholder="API key"
+          />
+          <button type="button" class="btn primary tap api-key-save" :disabled="openrouterApiBusy" @click="saveOpenrouterApiKey">
+            {{ openrouterApiBusy ? 'Saving…' : 'Save' }}
+          </button>
+        </div>
+        <div class="api-key-row">
+          <label class="lbl api-key-lbl" for="openrouter-model">AI model</label>
+          <select
+            id="openrouter-model"
+            v-model="openrouterModelDraft"
+            class="inp tap api-key-inp api-model-select"
+            :disabled="openrouterApiBusy"
+          >
+            <option v-for="opt in openrouterModelOptions" :key="opt.value" :value="opt.value">
+              {{ opt.label }}
+            </option>
+          </select>
+          <button type="button" class="btn primary tap api-key-save" :disabled="openrouterApiBusy" @click="saveOpenrouterApiKey">
+            {{ openrouterApiBusy ? 'Saving…' : 'Save' }}
+          </button>
         </div>
         <p class="api-key-foot">
-          <span class="cred-hint">Key: {{ openrouterApiKeyOverride ? 'saved' : 'empty' }}</span>
+          <span class="cred-hint">Status: {{ openrouterApiKeyOverride ? 'saved' : 'empty' }}</span>
           <span class="cred-hint">Model: {{ openrouterModelDraft || OPENROUTER_DEFAULT_MODEL }}</span>
           <span v-if="openrouterApiMsg" class="cred-msg">{{ openrouterApiMsg }}</span>
         </p>
@@ -2742,25 +2750,10 @@ onUnmounted(() => {
 .api-model-select {
   min-height: var(--touch-target, 2.75rem);
 }
-.openrouter-settings-block {
-  display: flex;
-  flex-direction: column;
-  gap: 0.35rem;
-  margin-bottom: 0.25rem;
-  padding: 0.5rem 0;
-  border-top: 1px solid rgba(255, 255, 255, 0.06);
-  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
-}
-.openrouter-save-row {
-  margin-top: 0.15rem;
-}
-.openrouter-save-spacer {
-  flex: 0 0 4.75rem;
-  margin-bottom: 0;
-}
-.openrouter-save-btn {
-  flex: 1 1 auto;
-  max-width: 14rem;
+.api-build-label {
+  margin: 0 0 0.65rem;
+  font-size: 0.68rem;
+  opacity: 0.85;
 }
 .openrouter-prompt-details {
   margin: 0.5rem 0 0.75rem;
