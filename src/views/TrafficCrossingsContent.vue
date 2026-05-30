@@ -360,10 +360,9 @@ function trafficInputForRow(row) {
   return {
     routeId: o.routeId,
     travelDirection: o.travelDirection ?? direction.value,
+    facilityModifier: o.facilityModifier,
     routeTravelTime: o.routeTravelTime,
     routeSpeed: o.routeSpeed,
-    routeTravelTimeHist: o.routeTravelTimeHist,
-    routeSpeedHist: o.routeSpeedHist,
     series: seriesForRow(row),
   }
 }

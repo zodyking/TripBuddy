@@ -118,10 +118,9 @@ export async function maybeNotifyBridgeTierChanges(live) {
     const { tier, level } = classifyBridgeTraffic({
       routeId: o.routeId,
       travelDirection: o.travelDirection,
+      facilityModifier: o.facilityModifier,
       routeTravelTime: minutes,
       routeSpeed: o.routeSpeed,
-      routeTravelTimeHist: o.routeTravelTimeHist,
-      routeSpeedHist: o.routeSpeedHist,
     })
     const prevTier = tiers[id]
     const name = String(o.crossingDisplayName || 'Crossing').trim() || 'Crossing'

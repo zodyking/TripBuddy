@@ -2,112 +2,112 @@ import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import {
   classifyBridgeTraffic,
-  bridgeDelayTierForRow,
+  levelFromProfile,
 } from '../src/utils/bridgeTrafficCondition.js'
+import { BRIDGE_TRAFFIC_PROFILES } from '../src/utils/bridgeTrafficProfiles.js'
 
-describe('classifyBridgeTraffic', () => {
-  it('Bayonne 2 min stays light vs its ~2 min baseline', () => {
+describe('classifyBridgeTraffic (calibrated profiles)', () => {
+  it('Bayonne 2 min / 44 mph → low', () => {
     const r = classifyBridgeTraffic({
       routeId: 217,
+      travelDirection: 'ToNJ',
       routeTravelTime: 2,
       routeSpeed: 44,
-      routeTravelTimeHist: 2,
-      routeSpeedHist: 45,
     })
     assert.equal(r.level, 'low')
     assert.equal(r.tier, 'green')
   })
 
-  it('GWB To NJ ~12 min is light (not global red)', () => {
+  it('GWB upper To NJ 13 min / 27 mph → low', () => {
     const r = classifyBridgeTraffic({
       routeId: 12,
-      routeTravelTime: 12,
+      travelDirection: 'ToNJ',
+      facilityModifier: 'Upper',
+      routeTravelTime: 13,
       routeSpeed: 27,
-      routeTravelTimeHist: 12,
-      routeSpeedHist: 28,
     })
     assert.equal(r.level, 'low')
-    assert.equal(r.tier, 'green')
   })
 
-  it('GWB To NY ~18 min vs ~25 min hist is light', () => {
+  it('GWB upper To NY 18 min / 17 mph → low (not global red)', () => {
     const r = classifyBridgeTraffic({
       routeId: 211,
+      travelDirection: 'ToNY',
+      facilityModifier: 'Upper',
       routeTravelTime: 18,
       routeSpeed: 17,
-      routeTravelTimeHist: 25,
-      routeSpeedHist: 13,
     })
     assert.equal(r.level, 'low')
     assert.equal(r.tier, 'green')
   })
 
-  it('Outerbridge To NY 6 min vs ~7 min hist is light', () => {
-    const r = classifyBridgeTraffic({
-      routeId: 2520,
-      routeTravelTime: 6,
-      routeSpeed: 49,
-      routeTravelTimeHist: 7,
-      routeSpeedHist: 39,
-    })
-    assert.equal(r.level, 'low')
-    assert.equal(r.tier, 'green')
-  })
-
-  it('Goethals spike ~8 min is high or standstill', () => {
-    const r = classifyBridgeTraffic({
-      routeId: 87,
-      routeTravelTime: 8,
-      routeSpeed: 20,
-      routeTravelTimeHist: 2,
-      routeSpeedHist: 45,
-    })
-    assert.ok(r.level === 'high' || r.level === 'standstill')
-    assert.equal(r.tier, 'red')
-  })
-
-  it('GWB To NY severe delay is standstill', () => {
+  it('GWB upper To NY 7 mph at 22 min is not standstill (normal crawl)', () => {
     const r = classifyBridgeTraffic({
       routeId: 211,
-      routeTravelTime: 70,
-      routeSpeed: 9,
-      routeTravelTimeHist: 25,
-      routeSpeedHist: 13,
-    })
-    assert.equal(r.level, 'standstill')
-    assert.equal(r.tier, 'red')
-  })
-
-  it('Verrazzano To NJ ~11 min near static baseline is light', () => {
-    const r = classifyBridgeTraffic({
-      routeId: 'verrazzano',
-      travelDirection: 'ToNJ',
-      routeTravelTime: 10.8,
-      routeSpeed: 40,
-    })
-    assert.equal(r.level, 'low')
-    assert.equal(r.tier, 'green')
-  })
-
-  it('Verrazzano To NY ~28 min near static baseline is not heavy', () => {
-    const r = classifyBridgeTraffic({
-      routeId: 'verrazzano',
       travelDirection: 'ToNY',
-      routeTravelTime: 28.3,
-      routeSpeed: 34,
+      facilityModifier: 'Upper',
+      routeTravelTime: 22,
+      routeSpeed: 7,
     })
-    assert.ok(['low', 'medium'].includes(r.level))
     assert.notEqual(r.level, 'standstill')
   })
 
-  it('bridgeDelayTierForRow uses PANYNJ hist fields', () => {
-    const tier = bridgeDelayTierForRow({
-      routeId: 260,
-      routeTravelTime: 4,
-      routeSpeed: 46,
-      routeTravelTimeHist: 4,
-      routeSpeedHist: 47,
+  it('GWB upper To NY 50 min / 8 mph → standstill', () => {
+    const r = classifyBridgeTraffic({
+      routeId: 211,
+      travelDirection: 'ToNY',
+      facilityModifier: 'Upper',
+      routeTravelTime: 50,
+      routeSpeed: 8,
     })
-    assert.equal(tier, 'green')
+    assert.equal(r.level, 'standstill')
+  })
+
+  it('Goethals To NJ spike 9 min / 12 mph → standstill', () => {
+    const r = classifyBridgeTraffic({
+      routeId: 87,
+      travelDirection: 'ToNJ',
+      routeTravelTime: 9,
+      routeSpeed: 12,
+    })
+    assert.equal(r.level, 'standstill')
+  })
+
+  it('Outerbridge To NY 6 min / 49 mph → low', () => {
+    const r = classifyBridgeTraffic({
+      routeId: 2520,
+      travelDirection: 'ToNY',
+      routeTravelTime: 6,
+      routeSpeed: 49,
+    })
+    assert.equal(r.level, 'low')
+  })
+
+  it('Verrazzano To NJ 11 min / 40 mph → low', () => {
+    const r = classifyBridgeTraffic({
+      routeId: 'verrazzano',
+      travelDirection: 'ToNJ',
+      routeTravelTime: 11,
+      routeSpeed: 40,
+    })
+    assert.equal(r.level, 'low')
+  })
+
+  it('Verrazzano To NY 28 min / 34 mph → low', () => {
+    const r = classifyBridgeTraffic({
+      routeId: 'verrazzano',
+      travelDirection: 'ToNY',
+      routeTravelTime: 28,
+      routeSpeed: 34,
+    })
+    assert.equal(r.level, 'low')
+  })
+})
+
+describe('levelFromProfile standstill rules', () => {
+  it('requires time threshold for very low speed on GWB NY', () => {
+    const p = BRIDGE_TRAFFIC_PROFILES.george_washington_bridge__upper__to_ny
+    assert.equal(levelFromProfile(22, 7, p), 'medium')
+    assert.equal(levelFromProfile(45, 8, p), 'standstill')
   })
 })

@@ -1,33 +1,17 @@
 /**
  * Per-bridge / per-direction traffic severity from crossing time + observed speed.
- * Baseline comes from PANYNJ `routeTravelTimeHist` / `routeSpeedHist` when present,
- * else calibrated static profiles, else median of stored history series.
+ * Uses calibrated profiles (from stored history); optional live series refines unknown routes.
  */
+
+import {
+  normalizeTravelDir,
+  resolveTrafficProfileKey,
+  trafficProfileForKey,
+} from './bridgeTrafficProfiles.js'
 
 /** @typedef {'low' | 'medium' | 'high' | 'standstill'} BridgeTrafficLevel */
 /** @typedef {'green' | 'orange' | 'red'} BridgeDelayTier */
-
-/**
- * Static fallbacks when API hist is missing (Verrazzano uses direction key).
- * Each routeId is already direction-specific in PANYNJ data.
- * @type {Readonly<Record<string, { baselineMinutes: number, baselineSpeedMph: number }>>}
- */
-export const BRIDGE_TRAFFIC_STATIC_BASELINES = Object.freeze({
-  217: { baselineMinutes: 2, baselineSpeedMph: 45 },
-  222: { baselineMinutes: 2, baselineSpeedMph: 45 },
-  87: { baselineMinutes: 2, baselineSpeedMph: 45 },
-  86: { baselineMinutes: 3, baselineSpeedMph: 40 },
-  260: { baselineMinutes: 4, baselineSpeedMph: 47 },
-  2520: { baselineMinutes: 7, baselineSpeedMph: 40 },
-  12: { baselineMinutes: 12, baselineSpeedMph: 28 },
-  11: { baselineMinutes: 11, baselineSpeedMph: 28 },
-  211: { baselineMinutes: 20, baselineSpeedMph: 18 },
-  212: { baselineMinutes: 17, baselineSpeedMph: 20 },
-  verrazzano: {
-    ToNY: { baselineMinutes: 24, baselineSpeedMph: 34 },
-    ToNJ: { baselineMinutes: 10.5, baselineSpeedMph: 42 },
-  },
-})
+/** @typedef {import('./bridgeTrafficProfiles.js').BridgeTrafficProfile} BridgeTrafficProfile */
 
 /**
  * @param {unknown} v
@@ -51,9 +35,9 @@ function medianSorted(sorted) {
 
 /**
  * @param {Array<{ m?: number, s?: number }> | null | undefined} series
- * @param {number} [minPoints=12]
+ * @param {number} [minPoints=24]
  */
-export function medianFromSeries(series, minPoints = 12) {
+export function medianFromSeries(series, minPoints = 24) {
   if (!Array.isArray(series) || series.length < minPoints) return null
   const minutes = series
     .map((p) => (p && typeof p === 'object' ? p.m : NaN))
@@ -73,99 +57,140 @@ export function medianFromSeries(series, minPoints = 12) {
 }
 
 /**
- * @param {string} routeId
- * @param {'ToNY' | 'ToNJ' | ''} [travelDirection]
+ * Build a profile from live series percentiles when no static profile exists.
+ * @param {Array<{ m?: number, s?: number }>} series
+ * @returns {BridgeTrafficProfile | null}
  */
-export function staticBaselineForRoute(routeId, travelDirection = '') {
-  const id = String(routeId ?? '').trim()
-  if (!id) return null
-  if (id === 'verrazzano') {
-    const dir =
-      travelDirection === 'ToNY' || travelDirection === 'ToNJ' ? travelDirection : 'ToNY'
-    const row = /** @type {Record<string, { baselineMinutes: number, baselineSpeedMph: number }>} */ (
-      BRIDGE_TRAFFIC_STATIC_BASELINES.verrazzano
-    )[dir]
-    return row ?? null
+function profileFromSeries(series) {
+  const med = medianFromSeries(series, 24)
+  if (!med) return null
+  const minutes = series
+    .map((p) => p.m)
+    .filter(Number.isFinite)
+    .sort((a, b) => a - b)
+  const speeds = series
+    .map((p) => p.s)
+    .filter(Number.isFinite)
+    .sort((a, b) => a - b)
+  const pct = (arr, p) => {
+    if (!arr.length) return med.baselineMinutes
+    const i = (arr.length - 1) * p
+    const lo = Math.floor(i)
+    const hi = Math.ceil(i)
+    if (lo === hi) return arr[lo]
+    return arr[lo] + (arr[hi] - arr[lo]) * (i - lo)
   }
-  const row = BRIDGE_TRAFFIC_STATIC_BASELINES[id]
-  return row ?? null
+  const p75t = pct(minutes, 0.75)
+  const p90t = pct(minutes, 0.9)
+  const p95t = pct(minutes, 0.95)
+  const p25s = pct(speeds, 0.25)
+  const p10s = pct(speeds, 0.1)
+  const p50t = med.baselineMinutes
+  const p50s = med.baselineSpeedMph ?? p25s
+
+  return {
+    lowMaxMinutes: Math.round(p75t * 10) / 10,
+    lowMinSpeedMph: Math.max(8, Math.round(p25s * 0.85)),
+    mediumMaxMinutes: Math.round(p90t * 1.05 * 10) / 10,
+    mediumMinSpeedMph: Math.max(8, Math.round(p10s * 0.95)),
+    mediumMinMinutesIfSlow: Math.round(p75t * 0.9 * 10) / 10,
+    highMaxMinutes: Math.round(Math.max(p95t * 1.15, p90t * 1.2) * 10) / 10,
+    highMinMinutesIfSlow: Math.round(p90t * 10) / 10,
+    highMaxSpeedIfSlow: Math.max(8, Math.round(p25s * 0.65)),
+    standstillMinMinutes: Math.round(Math.max(p95t * 1.2, p50t * 2.2) * 10) / 10,
+    standstillMinMinutesIfSlow: Math.round(p90t * 10) / 10,
+    standstillMaxSpeedIfSlow: Math.max(8, Math.round(p25s * 0.55)),
+    standstillMaxSpeedMph: Math.max(6, Math.round(p10s * 0.75)),
+    standstillSpeedRequiresMinMinutes: Math.round(p75t * 10) / 10,
+  }
 }
 
 /**
  * @typedef {{
  *   routeId?: string | number,
  *   travelDirection?: string,
+ *   facilityModifier?: string,
+ *   deck?: string,
  *   routeTravelTime?: number | string | null,
  *   routeSpeed?: number | string | null,
- *   routeTravelTimeHist?: number | string | null,
- *   routeSpeedHist?: number | string | null,
  *   series?: Array<{ m?: number, s?: number }>,
  * }} BridgeTrafficInput
  */
 
 /**
- * Resolve typical crossing time + speed for a route.
- * @param {BridgeTrafficInput} input
+ * @param {number} minutes
+ * @param {number | null} speed
+ * @param {BridgeTrafficProfile} profile
+ * @returns {BridgeTrafficLevel}
  */
-export function resolveBridgeBaseline(input) {
-  const histM = finitePositive(input?.routeTravelTimeHist)
-  const histS = finitePositive(input?.routeSpeedHist)
-  if (histM != null) {
-    return {
-      baselineMinutes: histM,
-      baselineSpeedMph: histS,
-      source: /** @type {const} */ ('hist'),
-    }
+export function levelFromProfile(minutes, speed, profile) {
+  const sp = speed
+  const crawlMin = profile.standstillSpeedRequiresMinMinutes ?? 0
+
+  if (sp != null && sp <= profile.standstillMaxSpeedMph && minutes >= crawlMin) {
+    return 'standstill'
+  }
+  if (
+    sp != null &&
+    minutes >= profile.standstillMinMinutesIfSlow &&
+    sp <= profile.standstillMaxSpeedIfSlow
+  ) {
+    return 'standstill'
+  }
+  if (minutes >= profile.standstillMinMinutes) {
+    return 'standstill'
   }
 
-  const fromSeries = medianFromSeries(input?.series)
-  if (fromSeries) {
-    return {
-      baselineMinutes: fromSeries.baselineMinutes,
-      baselineSpeedMph: fromSeries.baselineSpeedMph,
-      source: /** @type {const} */ ('series'),
-    }
+  if (
+    sp != null &&
+    minutes >= profile.highMinMinutesIfSlow &&
+    sp <= profile.highMaxSpeedIfSlow
+  ) {
+    return 'high'
+  }
+  if (minutes > profile.highMaxMinutes) {
+    return 'high'
   }
 
-  const dir = normalizeTravelDir(input?.travelDirection)
-  const fromStatic = staticBaselineForRoute(String(input?.routeId ?? ''), dir)
-  if (fromStatic) {
-    return {
-      baselineMinutes: fromStatic.baselineMinutes,
-      baselineSpeedMph: fromStatic.baselineSpeedMph,
-      source: /** @type {const} */ ('static'),
-    }
+  const medSlowAt = profile.mediumMinMinutesIfSlow ?? 0
+  if (sp != null && minutes >= medSlowAt && sp < profile.mediumMinSpeedMph) {
+    return 'medium'
+  }
+  if (minutes > profile.mediumMaxMinutes) {
+    return 'medium'
   }
 
-  return null
+  if (sp != null) {
+    if (minutes <= profile.lowMaxMinutes && sp >= profile.lowMinSpeedMph) {
+      return 'low'
+    }
+    if (minutes <= profile.lowMaxMinutes) {
+      return 'medium'
+    }
+    return minutes <= profile.highMaxMinutes ? 'medium' : 'high'
+  }
+
+  if (minutes <= profile.lowMaxMinutes) return 'low'
+  if (minutes <= profile.mediumMaxMinutes) return 'medium'
+  return 'high'
 }
 
 /**
- * @param {unknown} v
- * @returns {'ToNY' | 'ToNJ' | ''}
+ * @param {BridgeTrafficInput} input
  */
-function normalizeTravelDir(v) {
-  const s = String(v ?? '')
-    .replace(/\s+/g, '')
-    .replace(/[–—-]/g, '')
-    .toUpperCase()
-  if (s === 'TONY' || s === 'TOWARDNY') return 'ToNY'
-  if (s === 'TONJ' || s === 'TOWARDNJ') return 'ToNJ'
-  if (s.includes('TO') && s.includes('NY') && !s.includes('NJ')) return 'ToNY'
-  if (s.includes('TO') && s.includes('NJ') && !s.includes('NY')) return 'ToNJ'
-  return ''
+function resolveProfile(input) {
+  const key = resolveTrafficProfileKey(input)
+  const staticProfile = trafficProfileForKey(key)
+  if (staticProfile) return { profile: staticProfile, profileKey: key, source: 'calibrated' }
+  if (input.series?.length) {
+    const fromSeries = profileFromSeries(input.series)
+    if (fromSeries) return { profile: fromSeries, profileKey: key, source: 'series' }
+  }
+  return { profile: null, profileKey: key, source: 'none' }
 }
 
 /**
  * @param {BridgeTrafficInput} input
- * @returns {{
- *   level: BridgeTrafficLevel,
- *   tier: BridgeDelayTier,
- *   baselineMinutes: number | null,
- *   baselineSpeedMph: number | null,
- *   timeRatio: number | null,
- *   speedRatio: number | null,
- * }}
  */
 export function classifyBridgeTraffic(input) {
   const minutes = finitePositive(input?.routeTravelTime)
@@ -173,96 +198,39 @@ export function classifyBridgeTraffic(input) {
     return {
       level: /** @type {const} */ ('medium'),
       tier: /** @type {const} */ ('orange'),
+      profileKey: null,
       baselineMinutes: null,
       baselineSpeedMph: null,
-      timeRatio: null,
-      speedRatio: null,
     }
   }
 
   const speed = finitePositive(input?.routeSpeed)
-  const baseline = resolveBridgeBaseline(input)
+  const { profile, profileKey, source } = resolveProfile(input)
 
-  if (!baseline) {
-    return classifyWithGlobalFallback(minutes, speed)
+  if (!profile) {
+    const fb = classifyWithGlobalFallback(minutes, speed)
+    return { ...fb, profileKey }
   }
 
-  const bm = Math.max(0.75, baseline.baselineMinutes)
-  const bs =
-    baseline.baselineSpeedMph != null && baseline.baselineSpeedMph > 0
-      ? baseline.baselineSpeedMph
-      : null
-
-  const timeRatio = minutes / bm
-  const speedRatio = speed != null && bs != null ? speed / bs : null
-
-  const level = levelFromRatios({
-    minutes,
-    speed,
-    baselineMinutes: bm,
-    timeRatio,
-    speedRatio,
-  })
+  const level = levelFromProfile(minutes, speed, profile)
 
   return {
     level,
     tier: tierFromLevel(level),
-    baselineMinutes: bm,
-    baselineSpeedMph: bs,
-    timeRatio,
-    speedRatio,
+    profileKey,
+    profileSource: source,
+    baselineMinutes: profile.lowMaxMinutes,
+    baselineSpeedMph: profile.lowMinSpeedMph,
   }
 }
 
 /**
- * @param {{
- *   minutes: number,
- *   speed: number | null,
- *   baselineMinutes: number,
- *   timeRatio: number,
- *   speedRatio: number | null,
- * }} p
- * @returns {BridgeTrafficLevel}
- */
-function levelFromRatios(p) {
-  const { minutes, speed, baselineMinutes, timeRatio, speedRatio } = p
-  const sr = speedRatio ?? 1
-
-  const standstill =
-    (speed != null && speed <= 8) ||
-    timeRatio >= 3.25 ||
-    (timeRatio >= 2.35 && speed != null && speed <= 12) ||
-    (minutes >= baselineMinutes + 20 && timeRatio >= 2)
-
-  if (standstill) return 'standstill'
-
-  const high =
-    timeRatio >= 1.85 ||
-    (timeRatio >= 1.55 && sr < 0.68) ||
-    (timeRatio >= 1.4 && sr < 0.55) ||
-    minutes >= baselineMinutes + 14
-
-  if (high) return 'high'
-
-  const medium =
-    timeRatio >= 1.28 ||
-    (timeRatio >= 1.14 && sr < 0.8) ||
-    sr < 0.62 ||
-    minutes >= baselineMinutes + 5
-
-  if (medium) return 'medium'
-
-  return 'low'
-}
-
-/**
- * Legacy global bands when no bridge baseline exists.
  * @param {number} minutes
  * @param {number | null} speed
  */
 function classifyWithGlobalFallback(minutes, speed) {
   let level = /** @type {BridgeTrafficLevel} */ ('low')
-  if (speed != null && speed <= 8) level = 'standstill'
+  if (speed != null && speed <= 8 && minutes >= 10) level = 'standstill'
   else if (minutes >= 25) level = 'standstill'
   else if (minutes >= 12) level = 'high'
   else if (minutes >= 5) level = 'medium'
@@ -272,8 +240,6 @@ function classifyWithGlobalFallback(minutes, speed) {
     tier: tierFromLevel(level),
     baselineMinutes: null,
     baselineSpeedMph: null,
-    timeRatio: null,
-    speedRatio: null,
   }
 }
 
@@ -298,7 +264,7 @@ export function trafficLevelLabel(level) {
 }
 
 /**
- * @param {unknown} row PANYNJ live row or synthetic Verrazzano row
+ * @param {unknown} row
  * @param {{ series?: Array<{ m?: number, s?: number }> }} [opts]
  * @returns {BridgeDelayTier}
  */
@@ -308,10 +274,9 @@ export function bridgeDelayTierForRow(row, opts = {}) {
   const { tier } = classifyBridgeTraffic({
     routeId: o.routeId,
     travelDirection: o.travelDirection,
+    facilityModifier: o.facilityModifier,
     routeTravelTime: o.routeTravelTime,
     routeSpeed: o.routeSpeed,
-    routeTravelTimeHist: o.routeTravelTimeHist,
-    routeSpeedHist: o.routeSpeedHist,
     series: opts.series,
   })
   return tier
@@ -330,3 +295,5 @@ export function bridgeDelayTier(minutes, ctx) {
   if (!Number.isFinite(m)) return 'orange'
   return classifyWithGlobalFallback(m, null).tier
 }
+
+export { normalizeTravelDir, resolveTrafficProfileKey, trafficProfileForKey }
