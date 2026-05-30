@@ -98,6 +98,12 @@ import {
   writeCheckInFlowFromMerged,
 } from './check-in-flow-store.mjs'
 import { startPoll, stopPoll, getPollStatus } from './poll.mjs'
+import {
+  readThreadCache,
+  syncThreadCache,
+  fetchWahaMessageMedia,
+  fetchWahaContacts,
+} from './wahaChatCache.mjs'
 import { readAssignment, writeAssignment } from './assignment-store.mjs'
 import {
   getCredentialsMeta,
@@ -459,6 +465,68 @@ app.post('/api/waha/*', wahaProxyHandler)
 app.put('/api/waha/*', wahaProxyHandler)
 app.delete('/api/waha/*', wahaProxyHandler)
 app.patch('/api/waha/*', wahaProxyHandler)
+
+app.get('/api/whatsapp/thread', async (req, reply) => {
+  reply.header('Cache-Control', 'no-store')
+  const chatId = String(req.query?.chatId ?? '').trim()
+  if (!chatId) return reply.code(400).send({ ok: false, error: 'chatId required' })
+  const cache = await readThreadCache(chatId)
+  return {
+    ok: true,
+    cached: Boolean(cache?.messages?.length),
+    chatId,
+    messages: cache?.messages ?? [],
+    updatedAt: cache?.updatedAt ?? 0,
+    contacts: cache?.contacts ?? [],
+  }
+})
+
+app.post('/api/whatsapp/thread/sync', async (req, reply) => {
+  reply.header('Cache-Control', 'no-store')
+  const chatId = String(req.body?.chatId ?? '').trim()
+  if (!chatId) return reply.code(400).send({ ok: false, error: 'chatId required' })
+  const limit = Number(req.body?.limit) || 60
+  const downloadMedia = req.body?.downloadMedia === true
+  let contacts = []
+  try {
+    const cr = await fetchWahaContacts({ limit: 500 })
+    if (cr.ok && Array.isArray(cr.body)) contacts = cr.body
+  } catch {
+    /* optional */
+  }
+  const r = await syncThreadCache(chatId, { limit, downloadMedia, contacts })
+  if (!r.ok) {
+    return reply.code(r.status || 502).send({
+      ok: false,
+      error: 'WAHA sync failed',
+      status: r.status,
+      messages: [],
+      updatedAt: 0,
+      contacts,
+    })
+  }
+  return {
+    ok: true,
+    chatId,
+    messages: r.messages,
+    updatedAt: r.updatedAt,
+    contacts,
+  }
+})
+
+app.post('/api/whatsapp/thread/media', async (req, reply) => {
+  reply.header('Cache-Control', 'no-store')
+  const chatId = String(req.body?.chatId ?? '').trim()
+  const messageId = String(req.body?.messageId ?? '').trim()
+  if (!chatId || !messageId) {
+    return reply.code(400).send({ ok: false, error: 'chatId and messageId required' })
+  }
+  const r = await fetchWahaMessageMedia(chatId, messageId)
+  if (!r.ok) {
+    return reply.code(r.status || 502).send({ ok: false, status: r.status, message: null })
+  }
+  return { ok: true, message: r.body }
+})
 
 /** Public: which Vite bundle the running container serves (compare after deploy / vs browser Sources). */
 app.get('/api/build-info', async (req, reply) => {

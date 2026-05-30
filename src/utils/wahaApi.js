@@ -497,7 +497,7 @@ export async function fetchChatMessagesForChat(chatId, limit = 50, opts = {}) {
   const session = getWahaSessionName()
   const id = normalizeWahaChatId(chatId)
   if (!id) return { ok: false, status: 0, body: null }
-  const downloadMedia = opts.downloadMedia !== false
+  const downloadMedia = opts.downloadMedia === true
   const r = await fetch(
     wahaUrl(`/api/${encodeURIComponent(session)}/chats/${encodeURIComponent(id)}/messages?limit=${limit}&downloadMedia=${downloadMedia}`),
     { headers: wahaHeaders() },

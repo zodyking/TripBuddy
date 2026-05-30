@@ -15,6 +15,7 @@ const {
   chatsLoading,
   displayMessages,
   loading,
+  syncing,
   sending,
   error,
   wahaChatKindLabel,
@@ -213,6 +214,7 @@ function openMedia(url) {
     <template v-else>
       <p v-if="error" class="chat-banner chat-banner--err" role="alert">{{ error }}</p>
       <p v-else-if="loading && !displayMessages.length" class="chat-banner">Loading messages…</p>
+      <p v-else-if="syncing" class="chat-banner chat-banner--sync">Updating…</p>
 
       <div ref="scrollEl" class="chat-thread" role="log" aria-live="polite" aria-relevant="additions">
         <p v-if="!loading && !displayMessages.length" class="chat-thread-empty">
@@ -268,7 +270,7 @@ function openMedia(url) {
                 <p v-if="item.msg.media.error" class="chat-media-err">{{ item.msg.media.error }}</p>
               </div>
               <p v-else-if="item.msg.hasMedia && !item.msg.media?.url" class="chat-bubble-text chat-bubble-text--muted">
-                Media unavailable
+                Loading media…
               </p>
               <p v-if="item.msg.text" class="chat-bubble-text">{{ item.msg.text }}</p>
               <time class="chat-bubble-time" :datetime="new Date(item.msg.ts).toISOString()">{{ fmtTime(item.msg.ts) }}</time>
@@ -529,6 +531,11 @@ function openMedia(url) {
 .chat-banner--err {
   color: var(--color-error, #ef4444);
   background: var(--color-error-muted, rgba(239, 68, 68, 0.15));
+}
+
+.chat-banner--sync {
+  color: var(--color-accent-purple-light, #9d6fd7);
+  background: rgba(123, 77, 181, 0.12);
 }
 
 .chat-thread {

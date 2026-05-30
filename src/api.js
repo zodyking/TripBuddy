@@ -1197,3 +1197,37 @@ export async function putTrailerNumber(p) {
   })
   return handleJson(r)
 }
+
+/** Cached WhatsApp thread (server disk) — fast open. */
+export async function getWhatsAppThreadCache(chatId) {
+  const id = encodeURIComponent(String(chatId || '').trim())
+  const r = await apiFetch(`/api/whatsapp/thread?chatId=${id}`)
+  return handleJson(r)
+}
+
+/** Sync WhatsApp thread from WAHA into server cache. */
+export async function syncWhatsAppThread(chatId, opts = {}) {
+  const r = await apiFetch('/api/whatsapp/thread/sync', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      chatId: String(chatId || '').trim(),
+      limit: opts.limit ?? 60,
+      downloadMedia: opts.downloadMedia === true,
+    }),
+  })
+  return handleJson(r)
+}
+
+/** Fetch one message with media attached (lazy load). */
+export async function fetchWhatsAppMessageMedia(chatId, messageId) {
+  const r = await apiFetch('/api/whatsapp/thread/media', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      chatId: String(chatId || '').trim(),
+      messageId: String(messageId || '').trim(),
+    }),
+  })
+  return handleJson(r)
+}
