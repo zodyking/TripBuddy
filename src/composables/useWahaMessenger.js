@@ -12,6 +12,9 @@ import {
   listChats,
   listContacts,
   buildContactNameMap,
+  buildLidPhoneMap,
+  listLids,
+  getWahaMessageId,
   normalizeWahaMessage,
   normalizeWahaChat,
   wahaChatKindLabel,
@@ -28,6 +31,8 @@ import {
   setCachedChats,
   getCachedContactsMap,
   setCachedContactsMap,
+  getCachedLidMap,
+  setCachedLidMap,
 } from '../stores/wahaChatStore.js'
 
 /**
@@ -46,6 +51,10 @@ export function useWahaMessenger(opts = {}) {
   const chatsLoading = ref(false)
   /** @type {import('vue').Ref<Map<string, string>>} */
   const contactMap = ref(new Map())
+  /** @type {import('vue').Ref<Map<string, string>>} lid @lid -> pn @c.us */
+  const lidMap = ref(new Map())
+  /** @type {import('vue').Ref<unknown[]>} */
+  const rawThreadMessages = ref([])
 
   /** @type {ReturnType<typeof setInterval> | null} */
   let pollTimer = null
@@ -75,12 +84,14 @@ export function useWahaMessenger(opts = {}) {
   function applyContactsRecord(rec) {
     contactMap.value = contactsFromRecord(rec)
     setCachedContactsMap(rec)
+    reapplySenderNames()
   }
 
   function applyContactsList(list) {
     const map = buildContactNameMap(list)
     contactMap.value = map
     setCachedContactsMap(Object.fromEntries(map))
+    reapplySenderNames()
   }
 
   async function resolveChatTitle() {
@@ -97,19 +108,37 @@ export function useWahaMessenger(opts = {}) {
     chatTitle.value = id.split('@')[0] || id
   }
 
+  function normalizeOpts(chatId) {
+    return {
+      contactMap: contactMap.value,
+      lidMap: lidMap.value,
+      activeChatId: chatId,
+    }
+  }
+
   function normalizeList(raw, chatId) {
     return raw
-      .map((m) => normalizeWahaMessage(m, { contactMap: contactMap.value, activeChatId: chatId }))
+      .map((m) => normalizeWahaMessage(m, normalizeOpts(chatId)))
       .filter((m) => m.id && (m.text || m.hasMedia))
   }
 
-  function applyMessages(normalized, chatId, updatedAt) {
+  function applyMessages(normalized, chatId, updatedAt, rawMessages) {
     messages.value = normalized
-    setCachedThread(chatId, normalized, updatedAt)
+    if (Array.isArray(rawMessages) && rawMessages.length) {
+      rawThreadMessages.value = rawMessages
+      setCachedThread(chatId, rawMessages, updatedAt)
+    }
     if (normalized.length > 0) {
       const newest = [...normalized].sort((a, b) => b.ts - a.ts)[0]
       lastSeenId = newest.id
     }
+  }
+
+  function reapplySenderNames() {
+    const chatId = activeChatId.value
+    if (!chatId || !rawThreadMessages.value.length) return
+    const normalized = normalizeList(rawThreadMessages.value, chatId)
+    messages.value = normalized
   }
 
   function hydrateContactsFromCache() {
@@ -125,14 +154,26 @@ export function useWahaMessenger(opts = {}) {
    */
   function hydrateThreadFromClientCache(chatId, opts = {}) {
     const cached = getCachedThread(chatId)
-    if (!cached?.messages?.length) return false
-    const normalized = cached.messages.every((m) => m && typeof m.id === 'string' && 'fromMe' in m)
-      ? cached.messages
-      : normalizeList(cached.messages, chatId)
-    applyMessages(normalized, chatId, cached.updatedAt)
+    const raw = cached?.rawMessages?.length
+      ? cached.rawMessages
+      : pickLegacyRaw(cached?.messages)
+    if (!raw?.length) return false
+    rawThreadMessages.value = raw
+    const normalized = normalizeList(raw, chatId)
+    applyMessages(normalized, chatId, cached.updatedAt, raw)
     loading.value = false
     if (opts.scroll) void scrollToBottom()
     return true
+  }
+
+  /** @param {unknown[] | undefined} messages */
+  function pickLegacyRaw(messages) {
+    if (!Array.isArray(messages) || !messages.length) return []
+    const first = messages[0]
+    if (first && typeof first === 'object' && ('body' in first || '_data' in first)) {
+      return messages
+    }
+    return []
   }
 
   /**
@@ -146,11 +187,43 @@ export function useWahaMessenger(opts = {}) {
     return normalized
   }
 
+  function applyLidMap(map) {
+    lidMap.value = map
+    setCachedLidMap(Object.fromEntries(map))
+    reapplySenderNames()
+  }
+
+  function hydrateLidsFromCache() {
+    const rec = getCachedLidMap()
+    if (Object.keys(rec).length) {
+      lidMap.value = new Map(Object.entries(rec))
+    }
+  }
+
+  function applyLidsList(list) {
+    const incoming = buildLidPhoneMap(list)
+    const merged = new Map(lidMap.value)
+    for (const [k, v] of incoming) merged.set(k, v)
+    if (merged.size) applyLidMap(merged)
+    else reapplySenderNames()
+  }
+
   async function loadContacts() {
     try {
       const r = await listContacts({ limit: 500 })
       if (r.ok && Array.isArray(r.body)) {
         applyContactsList(r.body)
+      }
+    } catch {
+      /* optional */
+    }
+  }
+
+  async function loadLids() {
+    try {
+      const r = await listLids({ limit: 500 })
+      if (r.ok && Array.isArray(r.body)) {
+        applyLidsList(r.body)
       }
     } catch {
       /* optional */
@@ -189,16 +262,21 @@ export function useWahaMessenger(opts = {}) {
       try {
         const r = await fetchWhatsAppMessageMedia(chatId, m.id)
         if (gen !== mediaGen || !r.ok || !r.message) continue
-        const updated = normalizeWahaMessage(r.message, {
-          contactMap: contactMap.value,
-          activeChatId: chatId,
-        })
+        const updated = normalizeWahaMessage(r.message, normalizeOpts(chatId))
         const idx = messages.value.findIndex((x) => x.id === m.id)
         if (idx >= 0) {
           const next = [...messages.value]
           next[idx] = { ...next[idx], ...updated, media: updated.media }
           messages.value = next
-          setCachedThread(chatId, next, Date.now())
+          const rawIdx = rawThreadMessages.value.findIndex(
+            (x) => getWahaMessageId(x) === m.id,
+          )
+          if (rawIdx >= 0) {
+            const rawNext = [...rawThreadMessages.value]
+            rawNext[rawIdx] = r.message
+            rawThreadMessages.value = rawNext
+            setCachedThread(chatId, rawNext, Date.now())
+          }
         }
       } catch {
         /* skip */
@@ -220,6 +298,9 @@ export function useWahaMessenger(opts = {}) {
       if (Array.isArray(serverCache.contacts) && serverCache.contacts.length) {
         applyContactsList(serverCache.contacts)
       }
+      if (Array.isArray(serverCache.lids) && serverCache.lids.length) {
+        applyLidsList(serverCache.lids)
+      }
       if (serverCache.cached && Array.isArray(serverCache.messages) && serverCache.messages.length) {
         if (!messages.value.length) {
           applyRawThread(chatId, serverCache.messages, serverCache.updatedAt)
@@ -235,6 +316,9 @@ export function useWahaMessenger(opts = {}) {
       if (synced.ok && Array.isArray(synced.messages)) {
         if (Array.isArray(synced.contacts) && synced.contacts.length) {
           applyContactsList(synced.contacts)
+        }
+        if (Array.isArray(synced.lids) && synced.lids.length) {
+          applyLidsList(synced.lids)
         }
         applyRawThread(chatId, synced.messages, synced.updatedAt)
         if (opts.scroll) await scrollToBottom()
@@ -285,7 +369,16 @@ export function useWahaMessenger(opts = {}) {
       }
       const merged = [...byId.values()]
       messages.value = merged
-      setCachedThread(activeChatId.value, merged, Date.now())
+      const rawById = new Map(
+        rawThreadMessages.value.map((m) => [getWahaMessageId(m), m]),
+      )
+      for (const raw of r.body) {
+        const id = getWahaMessageId(raw)
+        if (id) rawById.set(id, raw)
+      }
+      const rawMerged = [...rawById.values()]
+      rawThreadMessages.value = rawMerged
+      setCachedThread(activeChatId.value, rawMerged, Date.now())
       if (incoming.length > 0) {
         const newest = [...incoming].sort((a, b) => b.ts - a.ts)[0]
         if (newest.id !== lastSeenId) {
@@ -343,6 +436,7 @@ export function useWahaMessenger(opts = {}) {
     chatTitle.value = chat.name || chat.id
     lastSeenId = ''
     mediaGen++
+    rawThreadMessages.value = []
     const had = hydrateThreadFromClientCache(chat.id, { scroll: true })
     if (!had) loading.value = true
     void syncThread(chat.id, { scroll: !had }).then(() => startPolling())
@@ -352,10 +446,18 @@ export function useWahaMessenger(opts = {}) {
     void resolveChatTitle()
   })
 
+  watch(
+    () => [contactMap.value.size, lidMap.value.size],
+    () => reapplySenderNames(),
+  )
+
   onMounted(() => {
     syncActiveFromStorage()
     if (!configured.value) return
     hydrateContactsFromCache()
+    hydrateLidsFromCache()
+    void loadContacts()
+    void loadLids()
     const memChats = getCachedChats()
     if (memChats.length) {
       chats.value = memChats.map(normalizeWahaChat).filter((c) => c.id)

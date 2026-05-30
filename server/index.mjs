@@ -105,6 +105,7 @@ import {
   syncThreadCache,
   fetchWahaMessageMedia,
   fetchWahaContacts,
+  fetchWahaLids,
 } from './wahaChatCache.mjs'
 import { generateDailyBriefing } from './waha-daily-briefing.mjs'
 import { readAssignment, writeAssignment } from './assignment-store.mjs'
@@ -481,6 +482,7 @@ app.get('/api/whatsapp/thread', async (req, reply) => {
     messages: cache?.messages ?? [],
     updatedAt: cache?.updatedAt ?? 0,
     contacts: cache?.contacts ?? [],
+    lids: cache?.lids ?? [],
   }
 })
 
@@ -491,13 +493,20 @@ app.post('/api/whatsapp/thread/sync', async (req, reply) => {
   const limit = Number(req.body?.limit) || 60
   const downloadMedia = req.body?.downloadMedia === true
   let contacts = []
+  let lids = []
   try {
     const cr = await fetchWahaContacts({ limit: 500 })
     if (cr.ok && Array.isArray(cr.body)) contacts = cr.body
   } catch {
     /* optional */
   }
-  const r = await syncThreadCache(chatId, { limit, downloadMedia, contacts })
+  try {
+    const lr = await fetchWahaLids({ limit: 500 })
+    if (lr.ok && Array.isArray(lr.body)) lids = lr.body
+  } catch {
+    /* optional */
+  }
+  const r = await syncThreadCache(chatId, { limit, downloadMedia, contacts, lids })
   if (!r.ok) {
     const stale = await readThreadCache(chatId)
     if (stale?.messages?.length) {
@@ -509,6 +518,7 @@ app.post('/api/whatsapp/thread/sync', async (req, reply) => {
         messages: stale.messages,
         updatedAt: stale.updatedAt ?? 0,
         contacts: stale.contacts?.length ? stale.contacts : contacts,
+        lids: stale.lids?.length ? stale.lids : lids,
         status: r.status,
       }
     }
@@ -519,6 +529,7 @@ app.post('/api/whatsapp/thread/sync', async (req, reply) => {
       messages: [],
       updatedAt: 0,
       contacts,
+      lids,
     })
   }
   return {
@@ -527,6 +538,7 @@ app.post('/api/whatsapp/thread/sync', async (req, reply) => {
     messages: r.messages,
     updatedAt: r.updatedAt,
     contacts,
+    lids,
   }
 })
 

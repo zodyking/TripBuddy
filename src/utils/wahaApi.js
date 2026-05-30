@@ -345,16 +345,84 @@ function isWhatsAppJid(value) {
   return /@(c\.us|g\.us|lid|broadcast)$/i.test(s)
 }
 
+function messageKeyObject(msg) {
+  const data = msg?._data && typeof msg._data === 'object' ? msg._data : {}
+  if (msg?.key && typeof msg.key === 'object') return msg.key
+  if (data?.key && typeof data.key === 'object') return data.key
+  return {}
+}
+
+/**
+ * True when payload is a WAHA API message (not our normalized shape).
+ * @param {unknown} msg
+ */
+export function isRawWahaMessage(msg) {
+  if (!msg || typeof msg !== 'object') return false
+  const m = /** @type {Record<string, unknown>} */ (msg)
+  if ('isGroupChat' in m && 'senderName' in m && 'text' in m) return false
+  return (
+    'body' in m
+    || '_data' in m
+    || m.id != null && typeof m.id === 'object'
+    || 'participant' in m
+    || 'author' in m
+  )
+}
+
 function extractParticipantJid(msg) {
   const data = msg?._data && typeof msg._data === 'object' ? msg._data : {}
+  const key = messageKeyObject(msg)
+
+  const phoneJid = [
+    msg?.participantPn,
+    data?.participantPn,
+    key?.participantPn,
+  ]
+    .map((v) => normalizeWahaChatId(v))
+    .find((j) => j && j.endsWith('@c.us'))
+  if (phoneJid) return phoneJid
+
   const raw =
     msg?.author
     || msg?.participant
+    || key?.participant
     || data?.author
     || data?.participant
     || data?.id?.participant
     || ''
-  return normalizeWahaChatId(raw)
+  const jid = normalizeWahaChatId(raw)
+  if (jid) return jid
+
+  const from = normalizeWahaChatId(msg?.from || data?.from)
+  if (from && (from.endsWith('@c.us') || from.endsWith('@lid'))) return from
+  return ''
+}
+
+/**
+ * @param {string} jid
+ * @param {Map<string, string>} [contactMap]
+ * @param {Map<string, string>} [lidMap] lid @lid -> pn @c.us
+ */
+function resolveJidToDisplayName(jid, contactMap, lidMap) {
+  if (!jid) return ''
+  const direct = contactMap?.get(jid)
+  if (direct) return direct
+  if (jid.endsWith('@lid') && lidMap?.size) {
+    const pn = lidMap.get(jid)
+    if (pn) {
+      const fromPn = contactMap?.get(pn)
+      if (fromPn) return fromPn
+      if (pn.endsWith('@c.us')) {
+        const phone = pn.split('@')[0]
+        if (phone && /^\d{6,}$/.test(phone)) return phone
+      }
+    }
+  }
+  if (jid.endsWith('@c.us')) {
+    const phone = jid.split('@')[0]
+    if (phone && /^\d{6,}$/.test(phone)) return phone
+  }
+  return ''
 }
 
 /**
@@ -406,7 +474,13 @@ export function normalizeWahaMedia(msg) {
  * @param {Map<string, string>} [contactMap]
  * @param {string} [activeChatId]
  */
-export function resolveWahaSenderName(msg, contactMap, activeChatId = '') {
+/**
+ * @param {Record<string, unknown>} msg
+ * @param {Map<string, string>} [contactMap]
+ * @param {string} [activeChatId]
+ * @param {Map<string, string>} [lidMap]
+ */
+export function resolveWahaSenderName(msg, contactMap, activeChatId = '', lidMap) {
   if (msg?.fromMe) return ''
   const data = msg?._data && typeof msg._data === 'object' ? msg._data : {}
   const candidates = [
@@ -415,29 +489,26 @@ export function resolveWahaSenderName(msg, contactMap, activeChatId = '') {
     msg?.pushName,
     msg?.senderName,
     data?.verifiedName,
+    data?.senderName,
   ]
   for (const c of candidates) {
     const name = String(c ?? '').trim()
     if (name && !isWhatsAppJid(name) && name !== activeChatId) return name
   }
   const participant = extractParticipantJid(msg)
-  if (participant && contactMap?.get(participant)) {
-    return contactMap.get(participant) || ''
-  }
-  if (participant && participant.endsWith('@c.us')) {
-    const phone = participant.split('@')[0]
-    if (phone && /^\d{6,}$/.test(phone)) return phone
-  }
-  const from = normalizeWahaChatId(msg?.from)
-  if (from && from !== activeChatId && contactMap?.get(from)) {
-    return contactMap.get(from) || ''
+  const fromParticipant = resolveJidToDisplayName(participant, contactMap, lidMap)
+  if (fromParticipant) return fromParticipant
+  const from = normalizeWahaChatId(msg?.from || data?.from)
+  if (from && from !== activeChatId) {
+    const fromName = resolveJidToDisplayName(from, contactMap, lidMap)
+    if (fromName) return fromName
   }
   return ''
 }
 
 /**
  * @param {Record<string, unknown>} msg
- * @param {{ contactMap?: Map<string, string>, activeChatId?: string }} [opts]
+ * @param {{ contactMap?: Map<string, string>, lidMap?: Map<string, string>, activeChatId?: string }} [opts]
  * @returns {{
  *   id: string,
  *   text: string,
@@ -450,16 +521,18 @@ export function resolveWahaSenderName(msg, contactMap, activeChatId = '') {
  * }}
  */
 export function normalizeWahaMessage(msg, opts = {}) {
-  const { contactMap, activeChatId = '' } = opts
-  const id = getWahaMessageId(msg)
-  const text = String(msg?.body ?? msg?.text ?? msg?.caption ?? '').trim()
-  const fromMe = Boolean(msg?.fromMe)
-  let ts = Number(msg?.timestamp)
+  const { contactMap, lidMap, activeChatId = '' } = opts
+  const raw = isRawWahaMessage(msg) ? msg : null
+  const src = raw || msg
+  const id = getWahaMessageId(src)
+  const text = String(src?.body ?? src?.text ?? src?.caption ?? '').trim()
+  const fromMe = Boolean(src?.fromMe)
+  let ts = Number(src?.timestamp ?? src?.ts)
   if (!Number.isFinite(ts)) ts = Date.now()
   else if (ts < 1e12) ts *= 1000
-  const media = normalizeWahaMedia(msg)
-  const hasMedia = Boolean(msg?.hasMedia || media?.url)
-  const senderName = resolveWahaSenderName(msg, contactMap, activeChatId)
+  const media = normalizeWahaMedia(src)
+  const hasMedia = Boolean(src?.hasMedia || media?.url)
+  const senderName = resolveWahaSenderName(src, contactMap, activeChatId, lidMap)
   const isGroupChat = activeChatId.endsWith('@g.us')
   return {
     id,
@@ -484,9 +557,47 @@ export function buildContactNameMap(contacts) {
     const id = normalizeWahaChatId(c?.id)
     if (!id) continue
     const name = String(c?.name || c?.pushname || c?.pushName || c?.shortName || '').trim()
-    if (name) map.set(id, name)
+    if (!name) continue
+    map.set(id, name)
+    if (id.endsWith('@c.us')) {
+      const digits = id.split('@')[0]
+      if (digits) map.set(`${digits}@c.us`, name)
+    }
+    const num = String(c?.number ?? '').replace(/\D/g, '')
+    if (num) map.set(`${num}@c.us`, name)
   }
   return map
+}
+
+/**
+ * @param {Array<{ lid?: string, pn?: string | null }>} entries
+ * @returns {Map<string, string>} lid @lid -> pn @c.us
+ */
+export function buildLidPhoneMap(entries) {
+  const map = new Map()
+  if (!Array.isArray(entries)) return map
+  for (const row of entries) {
+    const lid = normalizeWahaChatId(row?.lid)
+    const pn = normalizeWahaChatId(row?.pn)
+    if (lid && pn) map.set(lid, pn)
+  }
+  return map
+}
+
+/** @param {{ limit?: number, offset?: number }} [opts] */
+export async function listLids(opts = {}) {
+  const session = getWahaSessionName()
+  const qs = new URLSearchParams({
+    limit: String(opts.limit ?? 500),
+    offset: String(opts.offset ?? 0),
+  })
+  const r = await fetch(
+    wahaUrl(`/api/${encodeURIComponent(session)}/lids?${qs}`),
+    { headers: wahaHeaders() },
+  )
+  if (!r.ok) return { ok: false, status: r.status, body: [] }
+  const body = await r.json().catch(() => [])
+  return { ok: true, status: r.status, body: Array.isArray(body) ? body : [] }
 }
 
 /** @param {{ limit?: number, offset?: number }} [opts] */

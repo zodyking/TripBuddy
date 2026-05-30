@@ -1,18 +1,23 @@
 /**
  * In-memory + sessionStorage cache for WhatsApp chat UI (instant reopen).
+ * v2 stores raw WAHA payloads so sender names can be re-resolved when contacts/LIDs load.
  */
 
-const SESSION_PREFIX = 'waha-thread-v1:'
+const SESSION_PREFIX_V2 = 'waha-thread-v2:'
+const SESSION_PREFIX_V1 = 'waha-thread-v1:'
 const CHATS_KEY = 'waha-chats-v1'
 const CONTACTS_KEY = 'waha-contacts-v1'
+const LIDS_KEY = 'waha-lids-v1'
 
-/** @type {Map<string, { messages: unknown[], updatedAt: number }>} */
+/** @type {Map<string, { rawMessages: unknown[], updatedAt: number }>} */
 const threadMemory = new Map()
 
 /** @type {unknown[]} */
 let chatsMemory = []
 /** @type {Record<string, string>} */
 let contactsMemory = {}
+/** @type {Record<string, string>} */
+let lidsMemory = {}
 
 function readJson(key, fallback) {
   if (typeof sessionStorage === 'undefined') return fallback
@@ -35,36 +40,65 @@ function writeJson(key, value) {
 }
 
 /**
+ * @param {unknown[]} messages
+ * @returns {unknown[]}
+ */
+function pickRawMessages(messages) {
+  if (!Array.isArray(messages) || !messages.length) return []
+  if (messages.every((m) => m && typeof m === 'object' && ('body' in m || '_data' in m))) {
+    return messages
+  }
+  return []
+}
+
+/**
  * @param {string} chatId
- * @returns {{ messages: unknown[], updatedAt: number } | null}
+ * @returns {{ rawMessages: unknown[], messages?: unknown[], updatedAt: number } | null}
  */
 export function getCachedThread(chatId) {
   const id = String(chatId || '').trim()
   if (!id) return null
   const mem = threadMemory.get(id)
-  if (mem?.messages?.length) return mem
-  const stored = readJson(`${SESSION_PREFIX}${id}`, null)
-  if (stored?.messages?.length) {
-    threadMemory.set(id, stored)
-    return stored
+  if (mem?.rawMessages?.length) {
+    return { rawMessages: mem.rawMessages, updatedAt: mem.updatedAt }
+  }
+  const storedV2 = readJson(`${SESSION_PREFIX_V2}${id}`, null)
+  if (storedV2?.rawMessages?.length) {
+    const payload = {
+      rawMessages: storedV2.rawMessages,
+      updatedAt: Number(storedV2.updatedAt) || Date.now(),
+    }
+    threadMemory.set(id, payload)
+    return payload
+  }
+  const storedV1 = readJson(`${SESSION_PREFIX_V1}${id}`, null)
+  if (storedV1?.messages?.length) {
+    const raw = pickRawMessages(storedV1.messages)
+    const payload = {
+      rawMessages: raw,
+      messages: storedV1.messages,
+      updatedAt: Number(storedV1.updatedAt) || Date.now(),
+    }
+    if (raw.length) threadMemory.set(id, { rawMessages: raw, updatedAt: payload.updatedAt })
+    return payload
   }
   return null
 }
 
 /**
  * @param {string} chatId
- * @param {unknown[]} messages
+ * @param {unknown[]} rawMessages
  * @param {number} [updatedAt]
  */
-export function setCachedThread(chatId, messages, updatedAt = Date.now()) {
+export function setCachedThread(chatId, rawMessages, updatedAt = Date.now()) {
   const id = String(chatId || '').trim()
   if (!id) return
   const payload = {
-    messages: Array.isArray(messages) ? messages : [],
+    rawMessages: Array.isArray(rawMessages) ? rawMessages : [],
     updatedAt: Number(updatedAt) || Date.now(),
   }
   threadMemory.set(id, payload)
-  writeJson(`${SESSION_PREFIX}${id}`, payload)
+  writeJson(`${SESSION_PREFIX_V2}${id}`, payload)
 }
 
 export function getCachedChats() {
@@ -90,4 +124,16 @@ export function getCachedContactsMap() {
 export function setCachedContactsMap(map) {
   contactsMemory = map && typeof map === 'object' ? map : {}
   writeJson(CONTACTS_KEY, contactsMemory)
+}
+
+export function getCachedLidMap() {
+  if (Object.keys(lidsMemory).length) return lidsMemory
+  lidsMemory = readJson(LIDS_KEY, {})
+  return lidsMemory
+}
+
+/** @param {Record<string, string>} map lid -> pn */
+export function setCachedLidMap(map) {
+  lidsMemory = map && typeof map === 'object' ? map : {}
+  writeJson(LIDS_KEY, lidsMemory)
 }

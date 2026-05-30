@@ -1,4 +1,10 @@
-import { readThreadCache, syncThreadCache, fetchWahaContacts } from './wahaChatCache.mjs'
+import {
+  readThreadCache,
+  syncThreadCache,
+  fetchWahaContacts,
+  fetchWahaLids,
+  buildLidPhoneMap,
+} from './wahaChatCache.mjs'
 import {
   openRouterComplete,
   buildBriefingPrompt,
@@ -50,21 +56,55 @@ function calendarDayInTz(d, timeZone) {
  * @param {Map<string, string>} contactMap
  * @param {string} activeChatId
  */
-function resolveSenderName(msg, contactMap, activeChatId) {
+function resolveJidName(jid, contactMap, lidMap) {
+  if (!jid) return ''
+  if (contactMap.has(jid)) return contactMap.get(jid) || ''
+  if (jid.endsWith('@lid') && lidMap.has(jid)) {
+    const pn = lidMap.get(jid)
+    if (pn && contactMap.has(pn)) return contactMap.get(pn) || ''
+    if (pn?.endsWith('@c.us')) {
+      const phone = pn.split('@')[0]
+      if (phone && /^\d{6,}$/.test(phone)) return phone
+    }
+  }
+  if (jid.endsWith('@c.us')) {
+    const phone = jid.split('@')[0]
+    if (phone && /^\d{6,}$/.test(phone)) return phone
+  }
+  return ''
+}
+
+function resolveSenderName(msg, contactMap, activeChatId, lidMap) {
   if (msg?.fromMe) return ''
   const data = msg?._data && typeof msg._data === 'object' ? msg._data : {}
-  const candidates = [data?.notifyName, data?.pushName, msg?.pushName, msg?.senderName, data?.verifiedName]
+  const key = msg?.key && typeof msg.key === 'object' ? msg.key : data?.key || {}
+  const candidates = [
+    data?.notifyName,
+    data?.pushName,
+    msg?.pushName,
+    msg?.senderName,
+    data?.verifiedName,
+  ]
   for (const c of candidates) {
     const name = String(c ?? '').trim()
     if (name && !name.includes('@')) return name
   }
-  const participant = String(msg?.author || msg?.participant || '').trim()
-  if (participant && contactMap.has(participant)) {
-    return contactMap.get(participant) || ''
+  const pnJid = [msg?.participantPn, data?.participantPn, key?.participantPn]
+    .map((v) => String(v ?? '').trim())
+    .find((j) => j.endsWith('@c.us'))
+  if (pnJid) {
+    const n = resolveJidName(pnJid, contactMap, lidMap)
+    if (n) return n
   }
-  const from = String(msg?.from || '').trim()
-  if (from && from !== activeChatId && contactMap.has(from)) {
-    return contactMap.get(from) || ''
+  const participant = String(
+    msg?.author || msg?.participant || key?.participant || data?.participant || '',
+  ).trim()
+  const fromParticipant = resolveJidName(participant, contactMap, lidMap)
+  if (fromParticipant) return fromParticipant
+  const from = String(msg?.from || data?.from || '').trim()
+  if (from && from !== activeChatId) {
+    const fromName = resolveJidName(from, contactMap, lidMap)
+    if (fromName) return fromName
   }
   return ''
 }
@@ -122,7 +162,18 @@ export async function collectTodayMessages(chatId, timeZone, opts = {}) {
     /* optional */
   }
 
+  let lidEntries = []
+  try {
+    const lr = await fetchWahaLids({ limit: 500 })
+    if (lr.ok && Array.isArray(lr.body)) lidEntries = lr.body
+  } catch {
+    /* optional */
+  }
+  const cache = await readThreadCache(id)
+  if (!lidEntries.length && Array.isArray(cache?.lids)) lidEntries = cache.lids
+
   const contactMap = buildContactMap(contacts)
+  const lidMap = buildLidPhoneMap(lidEntries)
   const today = calendarDayInTz(new Date(), timeZone)
 
   const todayMsgs = rawMessages
@@ -130,7 +181,7 @@ export async function collectTodayMessages(chatId, timeZone, opts = {}) {
     .map((m) => ({
       id: getMessageId(m),
       ts: messageTimestampMs(m),
-      sender: resolveSenderName(m, contactMap, id),
+      sender: resolveSenderName(m, contactMap, id, lidMap),
       text: messageBody(m),
     }))
     .filter((m) => m.text && m.ts > 0)
