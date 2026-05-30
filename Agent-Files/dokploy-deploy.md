@@ -52,10 +52,18 @@ Set Dokploy to map host port → `3847` (or change via `FEDEX_TOOL_API_PORT`).
 
 ### Bad Gateway (502) from Traefik
 
-If the site loads **Bad Gateway** but the container is running, the reverse proxy is almost always pointing at the **wrong internal port**.
+502 means Traefik cannot reach a healthy process on the **container port**. Check in this order:
 
-- In **Domains** (or routing) for this app, the **container / internal port** must be **`3847`** — the port Fastify listens on inside the image (`EXPOSE 3847` in the Dockerfile).
-- Do **not** use `5173` (Vite dev), `3000`, or a random value like `5137`. Those will return **502 Bad Gateway** because nothing is listening there.
+1. **Container logs** (Dokploy → Logs, or `docker logs <container>` on the host). Common crash lines:
+   - `[postgres] DATABASE_URL is required` → add `DATABASE_URL` in the app environment.
+   - `[postgres] PostgreSQL connection failed` → DB not reachable (wrong host, DB still starting, or app and Postgres not on the same Docker network). The app retries ~30s on boot; if Postgres needs longer, start Postgres first, then redeploy TripBuddy.
+   - `[data-migration]` then exit → same as Postgres; fix `DATABASE_URL` first.
+
+2. **Internal port** — In **Domains** (or routing), **container port** must be **`3847`** (`EXPOSE 3847` in the Dockerfile). Do **not** use `5173` (Vite dev), `3000`, or `5137`.
+
+3. **Listen address** — Do **not** set `FEDEX_TOOL_API_HOST=127.0.0.1` in production. Use **`0.0.0.0`** (default in the Dockerfile) so Traefik can reach the app inside the container.
+
+4. **Deploy finished but old site** — If build logs show `index-RnkvBmFg.js` (or newer) but the site 502s, the **new** container is probably crash-looping; the old working container may have been replaced. Fix logs first, then redeploy.
 
 If you intentionally change the listen port, set `FEDEX_TOOL_API_PORT` in the container env **and** set the same value as the internal port on the domain route.
 

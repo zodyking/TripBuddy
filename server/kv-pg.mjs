@@ -72,17 +72,40 @@ export async function getPostgresPool() {
   return canUse ? pool : null
 }
 
-/** Boot-time: fail fast if app cannot connect when DATABASE is required */
-export async function requirePostgresOrThrow() {
+/**
+ * Boot-time: require PostgreSQL with retries (Dokploy often restarts app + DB together).
+ * @param {{ attempts?: number, delayMs?: number }} [opts]
+ */
+export async function requirePostgresOrThrow(opts = {}) {
+  const attempts = Math.max(1, Math.min(30, Math.floor(opts.attempts ?? 12)))
+  const delayMs = Math.max(500, Math.min(15_000, Math.floor(opts.delayMs ?? 2500)))
   if (!isPostgresConfigured()) {
     throw new Error(
       'DATABASE_URL is required. Set it to a PostgreSQL connection string (Dokploy service or managed DB).',
     )
   }
-  const p = await getPostgresPool()
-  if (!p || !canUse) {
-    throw new Error('PostgreSQL connection failed. Check DATABASE_URL and network access.')
+  let lastErr = ''
+  for (let i = 1; i <= attempts; i += 1) {
+    if (pool && !canUse) {
+      await pool.end().catch(() => {})
+      pool = null
+      schemaReady = false
+      canUse = false
+    }
+    const p = await getPostgresPool()
+    if (p && canUse) {
+      if (i > 1) {
+        console.log(`[postgres] Connected after ${i} attempt(s)`)
+      }
+      return
+    }
+    lastErr = 'PostgreSQL connection failed. Check DATABASE_URL and network access.'
+    if (i < attempts) {
+      console.warn(`[postgres] Attempt ${i}/${attempts} failed; retrying in ${delayMs}ms…`)
+      await new Promise((r) => setTimeout(r, delayMs))
+    }
   }
+  throw new Error(lastErr)
 }
 
 /**

@@ -2288,7 +2288,19 @@ if (distExists) {
 }
 
 const host = process.env.FEDEX_TOOL_API_HOST ?? '127.0.0.1'
+if (process.env.NODE_ENV === 'production' && host === '127.0.0.1') {
+  console.warn(
+    '[startup] FEDEX_TOOL_API_HOST is 127.0.0.1 — Traefik/Dokploy need 0.0.0.0 or the container will return 502.',
+  )
+}
 
+try {
+  await requirePostgresOrThrow({ attempts: 12, delayMs: 2500 })
+  await ensureUserProfileTable()
+} catch (e) {
+  console.error('[postgres]', (e && e.message) || e)
+  process.exit(1)
+}
 try {
   await runDataMigrationOnStartup()
 } catch (e) {
@@ -2299,13 +2311,6 @@ try {
   await mergeFedexGroundDirectorySeed()
 } catch (e) {
   console.error('[fedex-ground-seed]', (e && e.message) || e)
-}
-try {
-  await requirePostgresOrThrow()
-  await ensureUserProfileTable()
-} catch (e) {
-  console.error('[postgres]', (e && e.message) || e)
-  process.exit(1)
 }
 
 /* ═══════════════════ Pre-entered trailer numbers ═══════════════════ */

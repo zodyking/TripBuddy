@@ -52,7 +52,7 @@ ENV FEDEX_TOOL_API_PORT=3847
 ENV NODE_ENV=production
 
 # Healthcheck so Docker/Dokploy knows the container is healthy
-HEALTHCHECK --interval=30s --timeout=10s --start-period=15s --retries=3 \
+HEALTHCHECK --interval=30s --timeout=10s --start-period=90s --retries=5 \
   CMD node -e "fetch('http://127.0.0.1:3847/api/health').then(r => r.ok ? process.exit(0) : process.exit(1)).catch(() => process.exit(1))"
 
 EXPOSE 3847
