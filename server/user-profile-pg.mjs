@@ -550,27 +550,43 @@ export async function setWahaPrefsForAccount(accountKey, prefs) {
     return
   }
 
-  await p.query(
-    `INSERT INTO ${TABLE} (account_key, waha_chat_id, updated_at)
-     VALUES ($1, $2, now())
-     ON CONFLICT (account_key) DO UPDATE SET
-       waha_chat_id = EXCLUDED.waha_chat_id,
-       updated_at = now()`,
-    [ak, chatId || null],
-  )
+  const hasUrl = prefs && Object.prototype.hasOwnProperty.call(prefs, 'wahaUrl')
+  const hasKey = prefs && Object.prototype.hasOwnProperty.call(prefs, 'wahaApiKey')
+  const hasChatId = prefs && Object.prototype.hasOwnProperty.call(prefs, 'chatId')
 
-  if (prefs && Object.prototype.hasOwnProperty.call(prefs, 'wahaUrl')) {
+  if (!hasTts && !hasBriefing && !hasChatId && !hasUrl && !hasKey) return
+
+  if (hasChatId) {
+    await p.query(
+      `INSERT INTO ${TABLE} (account_key, waha_chat_id, updated_at)
+       VALUES ($1, $2, now())
+       ON CONFLICT (account_key) DO UPDATE SET
+         waha_chat_id = EXCLUDED.waha_chat_id,
+         updated_at = now()`,
+      [ak, chatId || null],
+    )
+  }
+
+  if (hasUrl) {
     const url = String(prefs.wahaUrl ?? '').trim().slice(0, 500)
     await p.query(
-      `UPDATE ${TABLE} SET waha_url = $2, updated_at = now() WHERE account_key = $1`,
+      `INSERT INTO ${TABLE} (account_key, waha_url, updated_at)
+       VALUES ($1, $2, now())
+       ON CONFLICT (account_key) DO UPDATE SET
+         waha_url = EXCLUDED.waha_url,
+         updated_at = now()`,
       [ak, url || null],
     )
   }
-  if (prefs && Object.prototype.hasOwnProperty.call(prefs, 'wahaApiKey')) {
+  if (hasKey) {
     const raw = String(prefs.wahaApiKey ?? '').trim()
     const enc = raw ? encryptString(raw) : null
     await p.query(
-      `UPDATE ${TABLE} SET waha_api_key_enc = $2::jsonb, updated_at = now() WHERE account_key = $1`,
+      `INSERT INTO ${TABLE} (account_key, waha_api_key_enc, updated_at)
+       VALUES ($1, $2::jsonb, now())
+       ON CONFLICT (account_key) DO UPDATE SET
+         waha_api_key_enc = EXCLUDED.waha_api_key_enc,
+         updated_at = now()`,
       [ak, enc ? JSON.stringify(enc) : null],
     )
   }
