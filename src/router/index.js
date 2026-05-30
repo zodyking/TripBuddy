@@ -4,6 +4,7 @@ import MainDashboard from '../views/MainDashboard.vue'
 import SettingsView from '../views/SettingsView.vue'
 import HistoryView from '../views/HistoryView.vue'
 import TrafficView from '../views/TrafficView.vue'
+import ChatView from '../views/ChatView.vue'
 import TrailerGpsMapView from '../views/TrailerGpsMapView.vue'
 import LoginView from '../views/LoginView.vue'
 import { getAuthStatus } from '../api.js'
@@ -28,6 +29,12 @@ export const router = createRouter({
           name: 'home',
           component: MainDashboard,
           meta: { title: 'Dispatch' },
+        },
+        {
+          path: 'chat',
+          name: 'chat',
+          component: ChatView,
+          meta: { title: 'Chat' },
         },
         {
           path: 'directory',

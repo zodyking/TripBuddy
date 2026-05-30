@@ -1,5 +1,5 @@
 <script setup>
-import { onMounted, onUnmounted, watch, nextTick } from 'vue'
+import { computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
   startAppGeolocationWatch,
@@ -86,6 +86,11 @@ async function logoutApp() {
 
 const headerAriaLabel = 'FedExTool — Linehaul'
 
+const headerTitle = computed(() => {
+  if (route.name === 'chat') return 'Chat'
+  return 'Linehaul'
+})
+
 onMounted(() => {
   startAppGeolocationWatch()
   connectLiveLogStream()
@@ -120,7 +125,7 @@ onUnmounted(() => {
         </div>
 
         <div class="header-center">
-          <span class="header-title header-title--center">Linehaul</span>
+          <span class="header-title header-title--center">{{ headerTitle }}</span>
         </div>
 
         <div class="header-right">
@@ -192,6 +197,7 @@ onUnmounted(() => {
           class="app-main"
           :class="{
             'app-main--home': route.name === 'home' || route.name === 'dispatch',
+            'app-main--chat': route.name === 'chat',
             'app-main--directory': route.name === 'directory',
             'app-main--traffic': route.name === 'traffic',
             'app-main--trailer-map': route.name === 'trailer-map',
@@ -216,14 +222,13 @@ onUnmounted(() => {
       </RouterLink>
       <RouterLink
         class="nav-item"
-        :class="{ 'is-active': route.name === 'directory' }"
-        to="/directory"
+        :class="{ 'is-active': route.name === 'chat' }"
+        to="/chat"
       >
         <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/>
-          <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/>
+          <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
         </svg>
-        <span class="nav-label">Directory</span>
+        <span class="nav-label">Chat</span>
       </RouterLink>
       <RouterLink
         class="nav-item"
@@ -235,6 +240,17 @@ onUnmounted(() => {
           <path d="M12 6v6l4 2"/>
         </svg>
         <span class="nav-label">History</span>
+      </RouterLink>
+      <RouterLink
+        class="nav-item"
+        :class="{ 'is-active': route.name === 'directory' }"
+        to="/directory"
+      >
+        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/>
+          <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/>
+        </svg>
+        <span class="nav-label">Directory</span>
       </RouterLink>
       <RouterLink
         class="nav-item"
@@ -716,6 +732,28 @@ onUnmounted(() => {
   flex-direction: column;
 }
 
+/* Chat: full-height messenger (no page scroll) */
+.app-main.app-main--chat {
+  flex: 1;
+  min-height: 0;
+  max-width: none;
+  width: 100%;
+  margin-inline: 0;
+  padding: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.app-main.app-main--chat > * {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 0;
+  width: 100%;
+  min-width: 0;
+  min-height: 0;
+}
+
 /* Traffic (crossings): full-bleed like directory */
 .app-main.app-main--traffic {
   flex: 1;
@@ -798,11 +836,13 @@ onUnmounted(() => {
 /* Directory + Traffic: fill viewport height in landscape (no scroll on app-main) */
 @media (orientation: landscape) and (min-width: 700px) {
   .app-scroll:has(.app-main--directory),
+  .app-scroll:has(.app-main--chat),
   .app-scroll:has(.app-main--traffic),
   .app-scroll:has(.app-main--trailer-map) {
     overflow-y: hidden;
   }
   .app-main.app-main--directory,
+  .app-main.app-main--chat,
   .app-main.app-main--traffic,
   .app-main.app-main--trailer-map {
     flex: 1;
@@ -916,7 +956,13 @@ onUnmounted(() => {
   }
 
   .nav-label {
-    font-size: 0.625rem;
+    font-size: 0.58rem;
+    letter-spacing: 0.02em;
+  }
+
+  .nav-icon {
+    width: 1.2rem;
+    height: 1.2rem;
   }
 }
 

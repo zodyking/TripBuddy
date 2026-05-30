@@ -316,21 +316,63 @@ export async function sendChatMessage(text) {
 /** @deprecated use sendChatMessage */
 export const sendGroupMessage = sendChatMessage
 
+export function getWahaMessageId(msg) {
+  if (!msg) return ''
+  if (typeof msg.id === 'string') return msg.id
+  if (msg.id && typeof msg.id === 'object') {
+    return String(msg.id._serialized || msg.id.id || '').trim()
+  }
+  return ''
+}
+
 /**
- * Fetch recent messages from the configured chat.
+ * @param {Record<string, unknown>} msg
+ * @returns {{ id: string, text: string, fromMe: boolean, ts: number, senderName: string, hasMedia: boolean }}
+ */
+export function normalizeWahaMessage(msg) {
+  const id = getWahaMessageId(msg)
+  const text = String(msg?.body ?? msg?.text ?? '').trim()
+  const fromMe = Boolean(msg?.fromMe)
+  let ts = Number(msg?.timestamp)
+  if (!Number.isFinite(ts)) ts = Date.now()
+  else if (ts < 1e12) ts *= 1000
+  const senderName = String(
+    msg?._data?.notifyName || msg?.senderName || msg?.from || '',
+  ).trim()
+  return {
+    id,
+    text,
+    fromMe,
+    ts,
+    senderName,
+    hasMedia: Boolean(msg?.hasMedia),
+  }
+}
+
+/**
+ * Fetch recent messages for a chat.
+ * @param {string} chatId
  * @param {number} [limit]
  */
-export async function fetchChatMessages(limit = 20) {
+export async function fetchChatMessagesForChat(chatId, limit = 50) {
   const session = getWahaSessionName()
-  const chatId = getWahaChatId()
-  if (!chatId) return { ok: false, status: 0, body: null }
+  const id = normalizeWahaChatId(chatId)
+  if (!id) return { ok: false, status: 0, body: null }
   const r = await fetch(
-    wahaUrl(`/api/${encodeURIComponent(session)}/chats/${encodeURIComponent(chatId)}/messages?limit=${limit}&downloadMedia=false`),
+    wahaUrl(`/api/${encodeURIComponent(session)}/chats/${encodeURIComponent(id)}/messages?limit=${limit}&downloadMedia=false`),
     { headers: wahaHeaders() },
   )
   if (!r.ok) return { ok: false, status: r.status, body: null }
   const body = await r.json().catch(() => null)
   return { ok: true, status: r.status, body: Array.isArray(body) ? body : [] }
+}
+
+/**
+ * Fetch recent messages from the configured chat.
+ * @param {number} [limit]
+ */
+export async function fetchChatMessages(limit = 20) {
+  return fetchChatMessagesForChat(getWahaChatId(), limit)
 }
 
 /** @deprecated use fetchChatMessages */

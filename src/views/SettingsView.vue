@@ -1370,6 +1370,14 @@ onMounted(async () => {
 
 watch(() => route.hash, () => applySettingsRouteFragment())
 
+watch(
+  () => route.query.tab,
+  (tab) => {
+    if (tab === 'whatsapp') settingsTab.value = 'whatsapp'
+  },
+  { immediate: true },
+)
+
 watch(settingsTab, (tab) => {
   if (tab === 'audio') {
     tripAlertMode.value = getTripAlertMode()
