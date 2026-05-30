@@ -24,8 +24,10 @@ import {
   linehaulBearerCaptureProgress,
 } from '../stores/linehaulBearerCaptureOverlay.js'
 import DailyBriefingModal from './DailyBriefingModal.vue'
+import DailyBriefingNarrator from './DailyBriefingNarrator.vue'
 import { useDailyBriefing } from '../composables/useDailyBriefing.js'
 import { hydrateOpenrouterApiKeyFromServer } from '../stores/trafficTileKey.js'
+import { hydrateWahaPrefsFromServer } from '../utils/wahaPrefs.js'
 
 const route = useRoute()
 const { apiOk, refreshHealth } = useApiHealth()
@@ -35,9 +37,12 @@ const {
   briefingText: dailyBriefingText,
   messageCount: dailyBriefingCount,
   loading: dailyBriefingLoading,
+  narratorActive: dailyBriefingNarratorActive,
+  narratorWordIndex: dailyBriefingNarratorWordIndex,
   maybeOfferDailyBriefing,
   playBriefing: playDailyBriefing,
   dismiss: dismissDailyBriefing,
+  stopNarrator: stopDailyBriefingNarrator,
 } = useDailyBriefing()
 
 function fmtNotifTime(ts) {
@@ -96,11 +101,14 @@ onMounted(() => {
   connectLiveLogStream()
   void fetchInAppInbox()
   if (route.name !== 'login') {
-    void hydrateOpenrouterApiKeyFromServer().then(() => {
-      setTimeout(() => {
-        void maybeOfferDailyBriefing()
-      }, 1200)
-    })
+    void (async () => {
+      await Promise.all([
+        hydrateOpenrouterApiKeyFromServer(),
+        hydrateWahaPrefsFromServer(),
+      ])
+      await new Promise((r) => setTimeout(r, 900))
+      void maybeOfferDailyBriefing()
+    })()
   }
   for (const ms of [500, 1500, 3500]) {
     setTimeout(() => {
@@ -318,6 +326,12 @@ onUnmounted(() => {
       :busy="dailyBriefingLoading"
       @play="playDailyBriefing"
       @dismiss="dismissDailyBriefing"
+    />
+    <DailyBriefingNarrator
+      :active="dailyBriefingNarratorActive"
+      :text="dailyBriefingText"
+      :word-index="dailyBriefingNarratorWordIndex"
+      @close="stopDailyBriefingNarrator"
     />
   </div>
 </template>

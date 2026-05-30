@@ -7,9 +7,12 @@ import {
   getWahaChatId,
   isWahaConfigured,
   isWahaDailyBriefingEnabled,
+  isWahaTtsEnabled,
 } from '../utils/wahaApi.js'
-import { getOpenrouterKeyEffective } from '../stores/trafficTileKey.js'
-import { enqueueAnnouncement } from '../utils/alertAudioQueue.js'
+import {
+  speakDailyBriefing,
+  cancelDailyBriefingPlayback,
+} from '../utils/dailyBriefingPlayback.js'
 
 const SESSION_KEY = 'tripbuddy_daily_briefing_offered_v1'
 
@@ -19,6 +22,8 @@ export function useDailyBriefing() {
   const briefingText = ref('')
   const messageCount = ref(0)
   const error = ref('')
+  const narratorActive = ref(false)
+  const narratorWordIndex = ref(-1)
 
   function markOffered() {
     try {
@@ -41,7 +46,13 @@ export function useDailyBriefing() {
     markOffered()
   }
 
-  async function playBriefing() {
+  function stopNarrator() {
+    cancelDailyBriefingPlayback()
+    narratorActive.value = false
+    narratorWordIndex.value = -1
+  }
+
+  function playBriefing() {
     const text = briefingText.value.trim()
     if (!text) {
       dismiss()
@@ -49,7 +60,22 @@ export function useDailyBriefing() {
     }
     markOffered()
     modalOpen.value = false
-    enqueueAnnouncement(`Daily briefing. ${text}`, { category: 'daily-briefing' })
+    narratorActive.value = true
+    narratorWordIndex.value = -1
+
+    speakDailyBriefing(text, {
+      onWordIndex: (i) => {
+        narratorWordIndex.value = i
+      },
+      onEnd: () => {
+        narratorActive.value = false
+        narratorWordIndex.value = -1
+      },
+      onError: () => {
+        narratorActive.value = false
+        narratorWordIndex.value = -1
+      },
+    })
   }
 
   /**
@@ -58,8 +84,8 @@ export function useDailyBriefing() {
   async function maybeOfferDailyBriefing(opts = {}) {
     if (wasOfferedThisSession()) return
     if (!isWahaDailyBriefingEnabled()) return
+    if (!isWahaTtsEnabled()) return
     if (!isWahaConfigured()) return
-    if (!getOpenrouterKeyEffective().trim()) return
 
     const chatId = getWahaChatId()
     if (!chatId) return
@@ -74,18 +100,19 @@ export function useDailyBriefing() {
         chatId,
         chatLabel: opts.chatLabel || 'WhatsApp chat',
       })
-      markOffered()
       if (!result.ok) {
+        error.value = typeof result.error === 'string' ? result.error : 'Briefing failed.'
         return
       }
       if (result.empty || !result.briefing) {
+        markOffered()
         return
       }
       briefingText.value = result.briefing
       messageCount.value = Number(result.messageCount) || 0
       modalOpen.value = true
-    } catch {
-      markOffered()
+    } catch (e) {
+      error.value = e instanceof Error ? e.message : 'Briefing failed.'
     } finally {
       loading.value = false
     }
@@ -97,8 +124,11 @@ export function useDailyBriefing() {
     briefingText,
     messageCount,
     error,
+    narratorActive,
+    narratorWordIndex,
     maybeOfferDailyBriefing,
     playBriefing,
     dismiss,
+    stopNarrator,
   }
 }

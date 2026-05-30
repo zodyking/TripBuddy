@@ -23,10 +23,18 @@ const emit = defineEmits(['play', 'dismiss'])
         aria-modal="true"
         aria-labelledby="daily-briefing-title"
       >
-        <h2 id="daily-briefing-title" class="daily-briefing-title">Daily briefing</h2>
+        <h2 id="daily-briefing-title" class="daily-briefing-title">
+          Would you like a briefing?
+        </h2>
         <p class="daily-briefing-lead">
-          Play today’s WhatsApp briefing? ({{ messageCount }} message{{ messageCount === 1 ? '' : 's' }} summarized.)
+          <template v-if="messageCount > 0">
+            We summarized {{ messageCount }} message{{ messageCount === 1 ? '' : 's' }} from today’s chat.
+          </template>
+          <template v-else>
+            Hear a spoken summary of today’s WhatsApp chat.
+          </template>
         </p>
+        <p v-if="preview" class="daily-briefing-preview">{{ preview }}</p>
         <div class="daily-briefing-actions">
           <button type="button" class="btn ghost tap" :disabled="busy" @click="emit('dismiss')">
             Not now
