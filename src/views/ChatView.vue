@@ -173,20 +173,12 @@ function openMedia(url) {
   <!-- Conversation -->
   <template v-else>
     <header class="chat-toolbar">
-      <button type="button" class="chat-icon-btn tap" aria-label="All chats" @click="openChatList">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-          <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" stroke-linecap="round" stroke-linejoin="round" />
-        </svg>
-      </button>
-      <div class="chat-toolbar-center">
-        <h1 class="chat-toolbar-title">{{ chatTitle || 'Chat' }}</h1>
-        <p v-if="activeChatId" class="chat-toolbar-sub">{{ activeChatId }}</p>
-      </div>
       <button
         type="button"
         class="chat-icon-btn tap"
+        :class="{ 'is-spinning': loading || syncing }"
         aria-label="Refresh messages"
-        :disabled="loading"
+        :disabled="loading || syncing"
         @click="refreshMessages"
       >
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
@@ -194,6 +186,9 @@ function openMedia(url) {
           <path d="M21 3v6h-6" stroke-linecap="round" stroke-linejoin="round" />
         </svg>
       </button>
+      <div class="chat-toolbar-center">
+        <h1 class="chat-toolbar-title">{{ chatTitle || 'Chat' }}</h1>
+      </div>
       <RouterLink
         class="chat-icon-btn tap"
         aria-label="WhatsApp settings"
@@ -208,7 +203,9 @@ function openMedia(url) {
 
     <div v-if="!hasActiveChat" class="chat-pick-prompt">
       <p>No chat selected.</p>
-      <button type="button" class="btn primary tap" @click="openChatList">Choose a chat</button>
+      <RouterLink class="btn primary tap" :to="{ path: '/settings', query: { tab: 'whatsapp' } }">
+        Choose chat in Settings
+      </RouterLink>
     </div>
 
     <template v-else>
@@ -376,17 +373,9 @@ function openMedia(url) {
 
 .chat-toolbar-title {
   margin: 0;
-  font-size: var(--text-base, 0.9375rem);
+  font-size: 1.0625rem;
   font-weight: var(--weight-bold, 700);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.chat-toolbar-sub {
-  margin: 0.1rem 0 0;
-  font-size: var(--text-xs, 0.6875rem);
-  color: var(--color-text-tertiary, #6e6e7e);
+  line-height: 1.25;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -394,8 +383,8 @@ function openMedia(url) {
 
 .chat-icon-btn {
   flex-shrink: 0;
-  width: 2.5rem;
-  height: 2.5rem;
+  width: 2.75rem;
+  height: 2.75rem;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -408,8 +397,18 @@ function openMedia(url) {
 }
 
 .chat-icon-btn svg {
-  width: 1.25rem;
-  height: 1.25rem;
+  width: 1.35rem;
+  height: 1.35rem;
+}
+
+.chat-icon-btn.is-spinning svg {
+  animation: chat-refresh-spin 0.85s linear infinite;
+}
+
+@keyframes chat-refresh-spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .chat-icon-btn:active {
@@ -521,8 +520,8 @@ function openMedia(url) {
 .chat-banner {
   flex-shrink: 0;
   margin: 0;
-  padding: 0.4rem 0.75rem;
-  font-size: var(--text-xs, 0.6875rem);
+  padding: 0.5rem 0.85rem;
+  font-size: 0.875rem;
   text-align: center;
   background: var(--color-bg-elevated, #0f0f14);
   color: var(--color-text-secondary, #a8a8b8);
@@ -545,10 +544,10 @@ function openMedia(url) {
   overflow-x: hidden;
   -webkit-overflow-scrolling: touch;
   overscroll-behavior: contain;
-  padding: 0.65rem 0.55rem 0.5rem;
+  padding: 0.75rem 0.65rem 0.55rem;
   display: flex;
   flex-direction: column;
-  gap: 0.2rem;
+  gap: 0.45rem;
   background:
     var(--gradient-glow-purple, radial-gradient(ellipse at 30% 0%, rgba(123, 77, 181, 0.12) 0%, transparent 55%)),
     var(--color-bg-base, #08080a);
@@ -564,9 +563,10 @@ function openMedia(url) {
 .chat-day-divider {
   align-self: center;
   margin: 0.5rem 0;
-  padding: 0.2rem 0.55rem;
+  padding: 0.28rem 0.7rem;
   border-radius: var(--radius-md, 0.5rem);
-  font-size: var(--text-xs, 0.6875rem);
+  font-size: 0.8125rem;
+  font-weight: 600;
   background: var(--color-bg-surface, #16161d);
   border: 1px solid var(--color-border-subtle, rgba(255, 255, 255, 0.04));
   color: var(--color-text-tertiary, #6e6e7e);
@@ -586,9 +586,9 @@ function openMedia(url) {
 }
 
 .chat-bubble {
-  max-width: min(85%, 22rem);
-  padding: 0.4rem 0.55rem 0.3rem;
-  border-radius: var(--radius-lg, 0.75rem);
+  max-width: min(92%, 26rem);
+  padding: 0.55rem 0.7rem 0.42rem;
+  border-radius: var(--radius-xl, 1rem);
   position: relative;
   border: 1px solid var(--color-border-subtle, rgba(255, 255, 255, 0.04));
   box-shadow: var(--shadow-sm, 0 2px 4px rgba(0, 0, 0, 0.25));
@@ -606,10 +606,11 @@ function openMedia(url) {
 }
 
 .chat-bubble-sender {
-  margin: 0 0 0.2rem;
-  font-size: var(--text-xs, 0.6875rem);
+  margin: 0 0 0.28rem;
+  font-size: 0.875rem;
   font-weight: var(--weight-bold, 700);
   color: var(--color-accent-orange, #ff6b1a);
+  line-height: 1.2;
 }
 
 .chat-bubble-media {
@@ -654,8 +655,9 @@ function openMedia(url) {
 
 .chat-bubble-text {
   margin: 0;
-  font-size: var(--text-sm, 0.8125rem);
-  line-height: var(--leading-normal, 1.5);
+  font-size: 1.0625rem;
+  line-height: 1.45;
+  letter-spacing: 0.01em;
   white-space: pre-wrap;
   word-break: break-word;
 }
@@ -667,10 +669,12 @@ function openMedia(url) {
 
 .chat-bubble-time {
   display: block;
-  margin-top: 0.15rem;
-  font-size: 0.62rem;
+  margin-top: 0.28rem;
+  font-size: 0.75rem;
+  font-weight: 500;
   text-align: right;
   color: var(--color-text-tertiary, #6e6e7e);
+  opacity: 0.9;
 }
 
 .chat-compose {
@@ -689,15 +693,15 @@ function openMedia(url) {
 .chat-compose-input {
   flex: 1;
   min-width: 0;
-  min-height: 2.5rem;
-  max-height: 6.5rem;
+  min-height: 3rem;
+  max-height: 7rem;
   resize: none;
   border: 1px solid var(--color-border, rgba(255, 255, 255, 0.08));
   border-radius: var(--radius-full, 9999px);
-  padding: 0.55rem 0.85rem;
+  padding: 0.65rem 1rem;
   font: inherit;
-  font-size: var(--text-base, 0.9375rem);
-  line-height: 1.35;
+  font-size: 1.0625rem;
+  line-height: 1.4;
   color: var(--color-text-primary, #f4f4f8);
   background: var(--color-bg-elevated, #0f0f14);
 }
@@ -714,8 +718,8 @@ function openMedia(url) {
 
 .chat-compose-send {
   flex-shrink: 0;
-  width: 2.75rem;
-  height: 2.75rem;
+  width: 3rem;
+  height: 3rem;
   border: none;
   border-radius: var(--radius-full, 9999px);
   display: flex;
@@ -749,7 +753,17 @@ function openMedia(url) {
   }
 
   .chat-bubble {
-    max-width: min(70%, 28rem);
+    max-width: min(75%, 32rem);
+  }
+
+  .chat-bubble-text {
+    font-size: 1.125rem;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chat-icon-btn.is-spinning svg {
+    animation: none;
   }
 }
 </style>
