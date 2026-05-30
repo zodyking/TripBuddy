@@ -5,16 +5,23 @@ WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm install
 
-# Cache-bust: change this value to force a fresh UI build
-ARG CACHE_BUST=2026-05-30-waha-prefs-chat-loader-v1
-RUN echo "Build cache key: $CACHE_BUST"
+# Dokploy → Build → Build Args (recommended):
+#   GIT_COMMIT = commit SHA from your deploy (or ${{COMMIT_SHA}} if your template supports it)
+# Also enable "Disable build cache" / clean build when UI still looks stale.
+ARG GIT_COMMIT=unknown
+ARG BUILD_TIMESTAMP=
 
 COPY vite.config.js vite-plugin-fedextool-api.mjs ./
 COPY src ./src
 COPY public ./public
 COPY index.html ./
 
-RUN npm run build
+RUN set -e; \
+  TS="${BUILD_TIMESTAMP:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}"; \
+  echo "TripBuddy UI build git=${GIT_COMMIT} at=${TS}"; \
+  npm run build; \
+  printf '{"gitCommit":"%s","builtAt":"%s"}\n' "${GIT_COMMIT}" "${TS}" > dist/build-meta.json; \
+  cat dist/build-meta.json
 
 # ---------- Stage 2: Runtime (API + static UI) ----------
 FROM mcr.microsoft.com/playwright:v1.51.0-noble

@@ -52,18 +52,43 @@ const DIST_DIR = path.join(__dirname, '..', 'dist')
 
 /** For deploy verification: hashes baked into Vite-built `dist/index.html`. */
 async function getSpaDistFingerprints() {
+  /** @type {Record<string, unknown>} */
+  let buildMeta = {}
+  try {
+    const raw = await fs.readFile(path.join(DIST_DIR, 'build-meta.json'), 'utf8')
+    buildMeta = JSON.parse(raw)
+  } catch {
+    /* optional — written by Dockerfile UI stage */
+  }
   try {
     const htmlPath = path.join(DIST_DIR, 'index.html')
     const html = await fs.readFile(htmlPath, 'utf8')
     const js = html.match(/\/assets\/(index-[a-zA-Z0-9_-]+\.js)/)
     const css = html.match(/\/assets\/(index-[a-zA-Z0-9_-]+\.css)/)
+    const gitCommit =
+      typeof buildMeta.gitCommit === 'string' ? buildMeta.gitCommit : null
+    const builtAt = typeof buildMeta.builtAt === 'string' ? buildMeta.builtAt : null
     return {
       indexHtmlExists: true,
       mainScript: js?.[1] ?? null,
       mainCss: css?.[1] ?? null,
+      gitCommit,
+      builtAt,
+      buildLabel:
+        gitCommit && builtAt
+          ? `${gitCommit.slice(0, 7)} · ${builtAt}`
+          : js?.[1] ?? null,
     }
   } catch {
-    return { indexHtmlExists: false, mainScript: null, mainCss: null }
+    return {
+      indexHtmlExists: false,
+      mainScript: null,
+      mainCss: null,
+      gitCommit:
+        typeof buildMeta.gitCommit === 'string' ? buildMeta.gitCommit : null,
+      builtAt: typeof buildMeta.builtAt === 'string' ? buildMeta.builtAt : null,
+      buildLabel: null,
+    }
   }
 }
 import { logBus, emitLog } from './log-bus.mjs'
@@ -431,20 +456,28 @@ app.post('/api/visit', async (req) => {
 /** Internal WAHA URL for `/api/waha` proxy (separate Dokploy/docker service). */
 const WAHA_INTERNAL_URL = process.env.WAHA_BASE_URL || 'http://waha:3000'
 
-app.get('/api/health', async () => ({
-  ok: true,
-  busy:
-    isRunnerBusy() || isBlockRunnerBusy() || isLinehaulCaptureBusy(),
-  /** When null, API uses ephemeral `server/.local` — set FEDEX_TOOL_DATA_DIR for durable shared storage. */
-  dataDir: PERSISTENCE_DATA_ROOT,
-  localDataPath: LOCAL_DIR,
-  waha: {
-    proxy: true,
-    baseUrlConfigured: !!process.env.WAHA_BASE_URL,
-    apiKeyConfigured: !!process.env.WAHA_API_KEY,
-    internalUrl: WAHA_INTERNAL_URL,
-  },
-}))
+app.get('/api/health', async () => {
+  const dist = await getSpaDistFingerprints()
+  return {
+    ok: true,
+    busy:
+      isRunnerBusy() || isBlockRunnerBusy() || isLinehaulCaptureBusy(),
+    /** When null, API uses ephemeral `server/.local` — set FEDEX_TOOL_DATA_DIR for durable shared storage. */
+    dataDir: PERSISTENCE_DATA_ROOT,
+    localDataPath: LOCAL_DIR,
+    ui: {
+      mainScript: dist.mainScript,
+      gitCommit: dist.gitCommit,
+      builtAt: dist.builtAt,
+    },
+    waha: {
+      proxy: true,
+      baseUrlConfigured: !!process.env.WAHA_BASE_URL,
+      apiKeyConfigured: !!process.env.WAHA_API_KEY,
+      internalUrl: WAHA_INTERNAL_URL,
+    },
+  }
+})
 
 /**
  * WAHA proxy — forward requests from /api/waha/* to the WAHA container.
@@ -2227,6 +2260,15 @@ if (distExists) {
   await app.register(fastifyStatic, {
     root: DIST_DIR,
     prefix: '/',
+    setHeaders(res, filePath) {
+      const base = path.basename(filePath)
+      if (base === 'index.html' || base === 'build-meta.json') {
+        res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate')
+        res.setHeader('Pragma', 'no-cache')
+      } else if (filePath.includes(`${path.sep}assets${path.sep}`)) {
+        res.setHeader('Cache-Control', 'public, max-age=31536000, immutable')
+      }
+    },
   })
   app.setNotFoundHandler(async (req, reply) => {
     if (req.method === 'GET' && !req.url.startsWith('/api')) {

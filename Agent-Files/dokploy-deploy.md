@@ -73,11 +73,38 @@ After each deploy, the running app serves Vite-built files from `dist/`. Compare
 
 ```
 GET /api/build-info
+GET /api/health
 ```
 
-Response includes `mainScript` and `mainCss` (filenames under `/assets/`, e.g. `index-DhW1B_kH.js`). Open the site’s **View source** on `(index)` and confirm the same script name appears. If they differ, the browser or a CDN is still serving an old `index.html`, or traffic is not hitting the new container.
+Response includes `mainScript`, `mainCss`, `gitCommit`, `builtAt`, and `buildLabel` (short summary). **Settings → General → API** shows **App build:** with the same label.
 
-This endpoint is public (no auth) and sends `Cache-Control: no-store`.
+Open the site’s **View source** on `(index)` and confirm the same `index-….js` script name as `mainScript`. If they differ, the browser or a CDN is still serving an old `index.html`, or traffic is not hitting the new container.
+
+These endpoints are public (no auth) and send `Cache-Control: no-store`. `index.html` is also served with `no-store` so a normal refresh should pick up new bundles.
+
+## Still seeing a stale UI after redeploy?
+
+Work through this list in order:
+
+1. **Confirm Dokploy used the Dockerfile** — Build logs must show `FROM node:20-bookworm-slim AS ui` and `RUN npm run build`. If you see `Starting nixpacks build...` or Caddy, change **Build type** to **Dockerfile** (see top of this doc).
+
+2. **Force a clean image build** — In Dokploy application → **Build**, enable **disable cache** / **no cache** (wording varies by version), then deploy again. Docker layer cache can reuse an old `dist/` even when git has new commits.
+
+3. **Set build arg `GIT_COMMIT`** — Application → **Build** → **Build args**:
+   - Name: `GIT_COMMIT`
+   - Value: your git commit SHA for that deploy (any non-empty string that changes per deploy is enough to bust the UI layer when combined with a clean build).
+
+4. **Compare server vs browser**
+   - On phone/desktop: open `https://<your-host>/api/build-info`
+   - Note `mainScript` (e.g. `index-CbNaV9kK.js`)
+   - View page source on the app — the `<script type="module">` src must match.
+   - If `/api/build-info` is new but the page source is old → browser cache or reverse proxy in front of Dokploy; hard refresh or try a private window.
+
+5. **Confirm the new container is live** — On the Dokploy host: `docker ps` and check **Created** time on the TripBuddy container. If Created is old, the deploy did not replace the container.
+
+6. **Wrong app / domain** — Multiple TripBuddy apps in Dokploy can point at different images; verify the domain you open is the app you redeployed.
+
+7. **PWA / installed app** — If the site was added to the home screen, remove it and open in Safari/Chrome again (there is no service worker in this repo, but OS-level caching can still bite).
 
 ## Log files and `tail` on the Dokploy host
 

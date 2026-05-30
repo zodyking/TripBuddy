@@ -622,8 +622,12 @@ async function refreshUiBuildLabel() {
     const r = await fetch('/api/build-info', { credentials: 'include' })
     if (!r.ok) return
     const data = await r.json().catch(() => ({}))
-    const parts = [data.mainScript, data.mainCss].filter(Boolean)
-    uiBuildLabel.value = parts.length ? parts.join(' · ') : 'unknown'
+    if (typeof data.buildLabel === 'string' && data.buildLabel.trim()) {
+      uiBuildLabel.value = data.buildLabel.trim()
+    } else {
+      const parts = [data.gitCommit, data.builtAt, data.mainScript].filter(Boolean)
+      uiBuildLabel.value = parts.length ? parts.join(' · ') : 'unknown'
+    }
   } catch {
     /* optional */
   }
