@@ -12,7 +12,7 @@ services:
       - WAHA_BASE_URL=http://waha:3000
     depends_on:
       waha:
-        condition: service_healthy
+        condition: service_started
     volumes:
       - app_data:/data
     restart: unless-stopped
@@ -33,11 +33,11 @@ services:
     volumes:
       - waha_sessions:/app/.sessions
     healthcheck:
-      test: ["CMD", "wget", "--spider", "-q", "http://localhost:3000/api/health"]
-      interval: 15s
-      timeout: 5s
-      start_period: 10s
-      retries: 3
+      test: ["CMD-SHELL", "curl -f http://localhost:3000/api/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      start_period: 60s
+      retries: 5
     restart: unless-stopped
 
 volumes:
