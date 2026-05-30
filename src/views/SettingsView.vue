@@ -66,9 +66,12 @@ import {
 import AutomationList from '../components/automation/AutomationList.vue'
 import AutomationEditor from '../components/automation/AutomationEditor.vue'
 import {
-  getWahaBaseUrl, setWahaBaseUrl,
+  getWahaUrlForSettings, setWahaBaseUrl,
+  getWahaApiKeyForSettings, setWahaApiKey,
+  isWahaProxyMode,
   getWahaGroupId, setWahaGroupId,
   isWahaTtsEnabled, setWahaTtsEnabled,
+  wahaAuthErrorHint,
   getSessionStatus, ensureSession, getQr, listGroups, sendGroupMessage,
 } from '../utils/wahaApi.js'
 import {
@@ -649,7 +652,9 @@ async function resetApiQuotaToday() {
 }
 
 /** WhatsApp (WAHA) settings */
-const wahaUrlDraft = ref(getWahaBaseUrl())
+const wahaUrlDraft = ref(getWahaUrlForSettings())
+const wahaApiKeyDraft = ref(getWahaApiKeyForSettings())
+const wahaUsesServerProxy = computed(() => isWahaProxyMode())
 const wahaGroupIdDraft = ref(getWahaGroupId())
 const wahaTtsDraft = ref(isWahaTtsEnabled())
 const wahaConnMsg = ref('')
@@ -663,13 +668,16 @@ const wahaQrUrl = ref('')
 
 async function testWahaConnection() {
   setWahaBaseUrl(wahaUrlDraft.value)
+  setWahaApiKey(wahaApiKeyDraft.value)
   wahaConnMsg.value = 'Checking…'
   wahaQrUrl.value = ''
   try {
     await ensureSession()
     const r = await getSessionStatus()
     if (!r.ok) {
-      wahaConnMsg.value = `Cannot reach WAHA (${r.status}). Is the container running?`
+      const authHint = wahaAuthErrorHint(r.status)
+      wahaConnMsg.value = authHint
+        || `Cannot reach WAHA (${r.status}). Is the container running?`
       return
     }
     const status = String(r.body?.status || 'UNKNOWN').toUpperCase()
@@ -700,6 +708,8 @@ function saveWahaGroup() {
 }
 
 async function loadWahaGroups() {
+  setWahaBaseUrl(wahaUrlDraft.value)
+  setWahaApiKey(wahaApiKeyDraft.value)
   wahaGroupsLoading.value = true
   wahaGroupMsg.value = ''
   try {
@@ -711,7 +721,9 @@ async function loadWahaGroups() {
       })).filter((g) => g.id)
       wahaGroupMsg.value = `${wahaGroupsList.value.length} group(s) found.`
     } else {
-      wahaGroupMsg.value = `Failed (${r.status}). Session may not be linked — tap "Check connection" first.`
+      const authHint = wahaAuthErrorHint(r.status)
+      wahaGroupMsg.value = authHint
+        || `Failed (${r.status}). Session may not be linked — tap "Check connection" first.`
     }
   } catch (e) {
     wahaGroupMsg.value = e instanceof Error ? e.message : String(e)
@@ -728,6 +740,8 @@ function saveWahaTts() {
 async function sendWahaMessage() {
   const text = wahaSendText.value.trim()
   if (!text) return
+  setWahaBaseUrl(wahaUrlDraft.value)
+  setWahaApiKey(wahaApiKeyDraft.value)
   wahaSendMsg.value = 'Sending…'
   try {
     const r = await sendGroupMessage(text)
@@ -735,7 +749,7 @@ async function sendWahaMessage() {
       wahaSendMsg.value = 'Sent.'
       wahaSendText.value = ''
     } else {
-      wahaSendMsg.value = `Failed (${r.status}).`
+      wahaSendMsg.value = wahaAuthErrorHint(r.status) || `Failed (${r.status}).`
     }
   } catch (e) {
     wahaSendMsg.value = e instanceof Error ? e.message : String(e)
@@ -2312,23 +2326,42 @@ onUnmounted(() => {
         <p class="cred-hint">
           Send and receive WhatsApp group messages via
           <a href="https://github.com/devlikeapro/waha" target="_blank" rel="noopener noreferrer" class="ext-link">WAHA</a>.
-          Incoming messages are read aloud via TTS. Deploy WAHA as a separate Docker service
-          (<code>devlikeapro/waha</code> image) and enter its URL below.
+          Incoming messages are read aloud via TTS. Deploy WAHA as a separate Dokploy service
+          (<code>devlikeapro/waha</code> image) with <code>WAHA_API_KEY</code> set.
         </p>
 
         <h4 class="api-sub-heading" style="margin-top:0;padding-top:0;border-top:none">Connection</h4>
-        <label class="lbl" for="waha-url">WAHA URL</label>
+        <p v-if="wahaUsesServerProxy" class="cred-hint">
+          Using the TripBuddy server proxy (<code>/api/waha</code>). Set on the TripBuddy container:
+          <code>WAHA_BASE_URL</code> (internal WAHA URL, e.g. <code>http://waha:3000</code>) and
+          <code>WAHA_API_KEY</code> (same plain key as on the WAHA service). No URL or key needed here.
+        </p>
+        <label class="lbl" for="waha-url">WAHA URL override (optional)</label>
         <input
           id="waha-url"
           v-model="wahaUrlDraft"
           class="inp tap"
           type="url"
           autocomplete="off"
-          placeholder="http://your-waha-server:3000"
+          placeholder="Leave empty — use server proxy (recommended)"
         />
         <p class="cred-hint">
-          Deploy WAHA as a separate Dokploy service (<code>devlikeapro/waha</code> image, port 3000).
-          Enter its URL here.
+          Leave empty when WAHA is reached via TripBuddy’s proxy. Only set a public URL if the browser
+          must call WAHA directly (you will also need the API key below).
+        </p>
+        <label class="lbl" for="waha-api-key">WAHA API key (direct URL only)</label>
+        <input
+          id="waha-api-key"
+          v-model="wahaApiKeyDraft"
+          class="inp tap"
+          type="password"
+          autocomplete="off"
+          placeholder="Only if using a direct WAHA URL above"
+          :disabled="wahaUsesServerProxy && !wahaUrlDraft.trim()"
+        />
+        <p class="cred-hint">
+          WAHA expects the <code>X-Api-Key</code> header. When using the server proxy, configure
+          <code>WAHA_API_KEY</code> on TripBuddy instead — the key is not stored in the browser.
         </p>
         <div class="btn-row">
           <button type="button" class="btn tap" @click="testWahaConnection">Check connection</button>

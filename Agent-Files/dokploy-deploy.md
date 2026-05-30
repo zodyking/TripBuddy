@@ -13,15 +13,32 @@ Dokploy defaults to **Nixpacks** auto-detection, which will **not** work for thi
 
 ## WhatsApp (WAHA) — Separate Service
 
-WAHA runs as a **separate Docker service** in Dokploy (not bundled with the app).
+WAHA runs as a **separate Docker service** in Dokploy (not bundled with the app). WAHA requires an API key (`X-Api-Key` header); URL alone is not enough.
 
-1. In Dokploy, create a new **Docker** service
+### WAHA service (Dokploy)
+
+1. Create a new **Docker** service
 2. Image: `devlikeapro/waha`
-3. Environment variables:
+3. Environment variables (example):
    - `WHATSAPP_DEFAULT_ENGINE=NOWEB`
    - `WHATSAPP_START_SESSION=default`
-4. Expose port 3000 or assign a domain
-5. In the TripBuddy app → Settings → WhatsApp → enter the WAHA URL
+   - `WAHA_API_KEY=<generate-a-plain-key>` (or `sha512:…` hash — send the **plain** key in requests)
+4. Expose port 3000 on the Dokploy internal network (or a private URL)
+
+### TripBuddy app (same Dokploy project)
+
+On the **TripBuddy** container, set:
+
+| Variable | Example | Description |
+|----------|---------|-------------|
+| `WAHA_BASE_URL` | `http://<waha-service-name>:3000` | Internal URL reachable from TripBuddy (Docker/Dokploy network) |
+| `WAHA_API_KEY` | same plain key as WAHA | Injected as `X-Api-Key` on `/api/waha/*` proxy requests |
+
+In the app → **Settings → WhatsApp**: leave **WAHA URL** empty (uses `/api/waha` proxy). Tap **Check connection**, scan QR if needed, pick a group.
+
+Verify after deploy: `GET /api/health` includes `waha.apiKeyConfigured: true` and `waha.baseUrlConfigured: true`.
+
+Optional: set a **WAHA URL override** and API key in Settings only if the browser must call WAHA directly (not recommended).
 
 The repo includes a [`nixpacks.toml`](../nixpacks.toml) that disables Nixpacks phases as a fallback, but explicitly selecting "Dockerfile" build type is the reliable fix.
 
@@ -125,6 +142,8 @@ See also [nixpacks.toml](../nixpacks.toml) (fallback only; explicit Dockerfile i
 | `FEDEX_DISPATCH_URL` | No | FedEx default | Override Ground Linehaul dispatch entry URL |
 | `FEDEX_OKTA_AUTHORIZE_URL` | No | (none) | PurpleID authorize URL for session start |
 | `FEDEX_POLL_INTERVAL_MS` | No | `120000` | Poll interval for assignment changes |
+| `WAHA_BASE_URL` | For WhatsApp | `http://waha:3000` | Internal URL of your WAHA Dokploy service |
+| `WAHA_API_KEY` | For WhatsApp | (none) | Plain WAHA API key (same value as on the WAHA container) |
 
 ## Volume mount
 

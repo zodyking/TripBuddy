@@ -409,6 +409,9 @@ app.post('/api/visit', async (req) => {
   return { ok: true, id: entry.id }
 })
 
+/** Internal WAHA URL for `/api/waha` proxy (separate Dokploy/docker service). */
+const WAHA_INTERNAL_URL = process.env.WAHA_BASE_URL || 'http://waha:3000'
+
 app.get('/api/health', async () => ({
   ok: true,
   busy:
@@ -416,21 +419,26 @@ app.get('/api/health', async () => ({
   /** When null, API uses ephemeral `server/.local` — set FEDEX_TOOL_DATA_DIR for durable shared storage. */
   dataDir: PERSISTENCE_DATA_ROOT,
   localDataPath: LOCAL_DIR,
+  waha: {
+    proxy: true,
+    baseUrlConfigured: !!process.env.WAHA_BASE_URL,
+    apiKeyConfigured: !!process.env.WAHA_API_KEY,
+    internalUrl: WAHA_INTERNAL_URL,
+  },
 }))
 
 /**
  * WAHA proxy — forward requests from /api/waha/* to the WAHA container.
  * The WAHA container runs as a sibling in docker-compose at http://waha:3000.
  */
-const WAHA_INTERNAL_URL = process.env.WAHA_BASE_URL || 'http://waha:3000'
 
 async function wahaProxyHandler(req, reply) {
   const subPath = req.url.replace(/^\/api\/waha/, '') || '/'
   const target = `${WAHA_INTERNAL_URL}${subPath}`
   try {
-    const headers = {}
+    const headers = { Accept: 'application/json' }
     const wahaKey = process.env.WAHA_API_KEY
-    if (wahaKey) headers['Authorization'] = `Bearer ${wahaKey}`
+    if (wahaKey) headers['X-Api-Key'] = wahaKey
     const opts = { method: req.method, headers }
     if (req.method !== 'GET' && req.method !== 'HEAD' && req.body != null) {
       headers['Content-Type'] = 'application/json'

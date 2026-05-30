@@ -2,10 +2,14 @@
  * WAHA (WhatsApp HTTP API) client.
  * Connects to a WAHA instance for sending/receiving WhatsApp group messages.
  * Deploy WAHA as a separate service (Dokploy service or docker-compose).
+ *
+ * Recommended (API key on server only): set TripBuddy env `WAHA_BASE_URL` + `WAHA_API_KEY`,
+ * leave URL empty in Settings — requests go through `/api/waha` proxy.
  * @see https://github.com/devlikeapro/waha
  */
 
 const WAHA_URL_KEY = 'wahaBaseUrl'
+const WAHA_API_KEY_KEY = 'wahaApiKey'
 const WAHA_GROUP_ID_KEY = 'wahaGroupId'
 const WAHA_TTS_ENABLED_KEY = 'wahaTtsEnabled'
 const WAHA_POLL_INTERVAL_KEY = 'wahaPollIntervalMs'
@@ -13,26 +17,62 @@ const WAHA_POLL_INTERVAL_KEY = 'wahaPollIntervalMs'
 const DEFAULT_SESSION = 'default'
 const DEFAULT_POLL_INTERVAL = 10_000
 
+function defaultWahaProxyUrl() {
+  if (typeof window === 'undefined') return ''
+  return `${window.location.origin}/api/waha`
+}
+
 /**
- * WAHA base URL.
- * Priority: localStorage override > VITE env > server proxy fallback.
+ * User override stored in localStorage (empty = use env or server proxy).
+ */
+export function getWahaUrlForSettings() {
+  if (typeof window === 'undefined') return ''
+  return (window.localStorage.getItem(WAHA_URL_KEY) ?? '').trim()
+}
+
+/**
+ * WAHA base URL for API calls.
+ * Priority: localStorage override > VITE env > same-origin `/api/waha` proxy.
  */
 export function getWahaBaseUrl() {
   if (typeof window === 'undefined') return ''
-  const stored = (window.localStorage.getItem(WAHA_URL_KEY) ?? '').trim()
+  const stored = getWahaUrlForSettings()
   if (stored) return stored
   const env = (import.meta.env.VITE_WAHA_URL || '').trim()
   if (env) return env
-  return `${window.location.origin}/api/waha`
+  return defaultWahaProxyUrl()
 }
 
 export function setWahaBaseUrl(url) {
   if (typeof window === 'undefined' || !window.localStorage) return
-  window.localStorage.setItem(WAHA_URL_KEY, String(url ?? '').trim())
+  const trimmed = String(url ?? '').trim()
+  if (!trimmed) window.localStorage.removeItem(WAHA_URL_KEY)
+  else window.localStorage.setItem(WAHA_URL_KEY, trimmed)
+}
+
+export function getWahaApiKeyForSettings() {
+  if (typeof window === 'undefined') return ''
+  return (window.localStorage.getItem(WAHA_API_KEY_KEY) ?? '').trim()
 }
 
 export function getWahaApiKey() {
-  return ''
+  if (typeof window === 'undefined') return ''
+  const stored = getWahaApiKeyForSettings()
+  if (stored) return stored
+  return (import.meta.env.VITE_WAHA_API_KEY || '').trim()
+}
+
+export function setWahaApiKey(key) {
+  if (typeof window === 'undefined' || !window.localStorage) return
+  const trimmed = String(key ?? '').trim()
+  if (!trimmed) window.localStorage.removeItem(WAHA_API_KEY_KEY)
+  else window.localStorage.setItem(WAHA_API_KEY_KEY, trimmed)
+}
+
+/** True when the browser talks to TripBuddy's server proxy (key is injected server-side). */
+export function isWahaProxyMode() {
+  const base = getWahaBaseUrl().replace(/\/+$/, '')
+  return base === defaultWahaProxyUrl().replace(/\/+$/, '')
 }
 
 export function getWahaSessionName() {
@@ -76,15 +116,25 @@ export function isWahaConfigured() {
 }
 
 function wahaHeaders() {
-  const h = { 'Content-Type': 'application/json' }
+  const h = { 'Content-Type': 'application/json', Accept: 'application/json' }
+  if (isWahaProxyMode()) return h
   const key = getWahaApiKey()
-  if (key) h['Authorization'] = `Bearer ${key}`
+  if (key) h['X-Api-Key'] = key
   return h
 }
 
 function wahaUrl(path) {
   const base = getWahaBaseUrl().replace(/\/+$/, '')
   return `${base}${path}`
+}
+
+/** Human-readable hint when WAHA returns 401/403. */
+export function wahaAuthErrorHint(status) {
+  if (status !== 401 && status !== 403) return ''
+  if (isWahaProxyMode()) {
+    return 'Unauthorized — set WAHA_API_KEY on the TripBuddy server (same plain key as WAHA) and WAHA_BASE_URL to your WAHA service URL.'
+  }
+  return 'Unauthorized — enter your WAHA API key below (X-Api-Key), or clear the URL to use the server proxy.'
 }
 
 /**
