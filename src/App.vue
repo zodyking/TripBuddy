@@ -556,22 +556,26 @@ body {
   border-color: rgba(196, 181, 253, 0.45);
 }
 
-/* Trailer beacon circle markers */
+/* Trailer beacon circle markers — radar wave style */
 .map-marker-beacon-div-icon {
   background: transparent !important;
   border: none !important;
+  overflow: visible !important;
 }
 
 .map-beacon-root {
   display: flex;
   flex-direction: column;
   align-items: center;
+  justify-content: center;
   gap: 2px;
+  overflow: visible;
 }
 
 .map-beacon-circle {
-  width: 28px;
-  height: 28px;
+  position: relative;
+  width: 22px;
+  height: 22px;
   border-radius: 50%;
   border: 3px solid currentColor;
   box-sizing: border-box;
@@ -579,44 +583,96 @@ body {
 
 .map-beacon-circle--heavy {
   color: #ef4444;
-  background: rgba(239, 68, 68, 0.25);
-  box-shadow: 0 0 0 4px rgba(239, 68, 68, 0.15);
+  background: rgba(239, 68, 68, 0.35);
+  box-shadow: 0 0 8px rgba(239, 68, 68, 0.6);
 }
 
 .map-beacon-circle--light {
   color: #22c55e;
-  background: rgba(34, 197, 94, 0.2);
-  box-shadow: 0 0 0 4px rgba(34, 197, 94, 0.12);
+  background: rgba(34, 197, 94, 0.3);
+  box-shadow: 0 0 8px rgba(34, 197, 94, 0.5);
 }
 
-@keyframes beacon-pulse-heavy {
-  0%, 100% {
-    box-shadow: 0 0 0 4px rgba(239, 68, 68, 0.15), 0 0 6px rgba(239, 68, 68, 0.3);
-    transform: scale(1);
+.map-beacon-circle::before,
+.map-beacon-circle::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  border: 2px solid currentColor;
+  transform: translate(-50%, -50%) scale(1);
+  opacity: 0;
+}
+
+/* Radar wave 1 */
+.map-marker-trailer-pulse-heavy .map-beacon-circle::before {
+  animation: radar-wave-heavy 2s cubic-bezier(0, 0.4, 0.6, 1) infinite;
+}
+.map-marker-trailer-pulse-light .map-beacon-circle::before {
+  animation: radar-wave-light 2.2s cubic-bezier(0, 0.4, 0.6, 1) infinite;
+}
+
+/* Radar wave 2 — offset by half cycle */
+.map-marker-trailer-pulse-heavy .map-beacon-circle::after {
+  animation: radar-wave-heavy 2s cubic-bezier(0, 0.4, 0.6, 1) infinite 1s;
+}
+.map-marker-trailer-pulse-light .map-beacon-circle::after {
+  animation: radar-wave-light 2.2s cubic-bezier(0, 0.4, 0.6, 1) infinite 1.1s;
+}
+
+@keyframes radar-wave-heavy {
+  0% {
+    transform: translate(-50%, -50%) scale(1);
+    opacity: 0.7;
+    border-color: rgba(239, 68, 68, 0.8);
   }
-  50% {
-    box-shadow: 0 0 0 8px rgba(239, 68, 68, 0.08), 0 0 18px rgba(239, 68, 68, 0.5);
-    transform: scale(1.12);
+  100% {
+    transform: translate(-50%, -50%) scale(3.2);
+    opacity: 0;
+    border-color: rgba(239, 68, 68, 0);
   }
 }
 
-@keyframes beacon-pulse-light {
-  0%, 100% {
-    box-shadow: 0 0 0 4px rgba(34, 197, 94, 0.12), 0 0 6px rgba(34, 197, 94, 0.25);
-    transform: scale(1);
+@keyframes radar-wave-light {
+  0% {
+    transform: translate(-50%, -50%) scale(1);
+    opacity: 0.6;
+    border-color: rgba(34, 197, 94, 0.75);
   }
-  50% {
-    box-shadow: 0 0 0 8px rgba(34, 197, 94, 0.06), 0 0 16px rgba(34, 197, 94, 0.45);
-    transform: scale(1.1);
+  100% {
+    transform: translate(-50%, -50%) scale(3);
+    opacity: 0;
+    border-color: rgba(34, 197, 94, 0);
   }
 }
 
+/* Core dot glow pulse */
 .map-marker-trailer-pulse-heavy .map-beacon-circle {
-  animation: beacon-pulse-heavy 1.4s ease-in-out infinite;
+  animation: core-glow-heavy 2s ease-in-out infinite;
+}
+.map-marker-trailer-pulse-light .map-beacon-circle {
+  animation: core-glow-light 2.2s ease-in-out infinite;
 }
 
-.map-marker-trailer-pulse-light .map-beacon-circle {
-  animation: beacon-pulse-light 1.6s ease-in-out infinite;
+@keyframes core-glow-heavy {
+  0%, 100% {
+    box-shadow: 0 0 6px rgba(239, 68, 68, 0.5), 0 0 12px rgba(239, 68, 68, 0.2);
+  }
+  50% {
+    box-shadow: 0 0 12px rgba(239, 68, 68, 0.8), 0 0 24px rgba(239, 68, 68, 0.4);
+  }
+}
+
+@keyframes core-glow-light {
+  0%, 100% {
+    box-shadow: 0 0 6px rgba(34, 197, 94, 0.45), 0 0 12px rgba(34, 197, 94, 0.18);
+  }
+  50% {
+    box-shadow: 0 0 10px rgba(34, 197, 94, 0.7), 0 0 22px rgba(34, 197, 94, 0.35);
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -624,11 +680,18 @@ body {
   .map-marker-trailer-pulse-light .map-beacon-circle {
     animation: none;
   }
+  .map-marker-trailer-pulse-heavy .map-beacon-circle::before,
+  .map-marker-trailer-pulse-heavy .map-beacon-circle::after,
+  .map-marker-trailer-pulse-light .map-beacon-circle::before,
+  .map-marker-trailer-pulse-light .map-beacon-circle::after {
+    animation: none;
+    display: none;
+  }
   .map-marker-trailer-pulse-heavy .map-beacon-circle {
-    box-shadow: 0 0 0 5px rgba(239, 68, 68, 0.2), 0 0 12px rgba(239, 68, 68, 0.4);
+    box-shadow: 0 0 8px rgba(239, 68, 68, 0.7), 0 0 16px rgba(239, 68, 68, 0.3);
   }
   .map-marker-trailer-pulse-light .map-beacon-circle {
-    box-shadow: 0 0 0 5px rgba(34, 197, 94, 0.18), 0 0 10px rgba(34, 197, 94, 0.35);
+    box-shadow: 0 0 7px rgba(34, 197, 94, 0.65), 0 0 14px rgba(34, 197, 94, 0.28);
   }
 }
 

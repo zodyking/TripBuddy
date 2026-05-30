@@ -236,21 +236,21 @@ function trailerBeaconDivIcon(trailerNumber = '', opts = {}) {
           labelRaw,
         )}</div>`
       : ''
-  const circleSize = 28
-  const boxH = labelRaw !== '' ? circleSize + chipH + gap : circleSize
+  const iconW = 66
+  const iconH = labelRaw !== '' ? 66 + chipH + gap : 66
   const pulse = opts.pulseHeavy
     ? 'map-marker-trailer-pulse-heavy'
     : 'map-marker-trailer-pulse-light'
   const colorClass = opts.pulseHeavy
     ? 'map-beacon-circle--heavy'
     : 'map-beacon-circle--light'
-  const html = `<div class="map-beacon-root ${pulse}" style="width:${circleSize}px;height:${boxH}px"><div class="map-beacon-circle ${colorClass}"></div>${chipHtml}</div>`
+  const html = `<div class="map-beacon-root ${pulse}" style="width:${iconW}px;height:${iconH}px"><div class="map-beacon-circle ${colorClass}"></div>${chipHtml}</div>`
   return L.divIcon({
     html,
     className: 'map-marker-beacon-div-icon',
-    iconSize: [circleSize, boxH],
-    iconAnchor: [Math.round(circleSize / 2), Math.round(circleSize / 2)],
-    popupAnchor: [0, -Math.round(circleSize / 2)],
+    iconSize: [iconW, iconH],
+    iconAnchor: [Math.round(iconW / 2), Math.round(iconW / 2)],
+    popupAnchor: [0, -Math.round(iconW / 2)],
   })
 }
 
