@@ -72,10 +72,10 @@ import {
 } from '../stores/trafficTileKey.js'
 import {
   OPENROUTER_DEFAULT_MODEL,
-  OPENROUTER_MODEL_OPTIONS,
   OPENROUTER_BRIEFING_SYSTEM_PROMPT,
   sanitizeOpenrouterModel,
 } from '../constants/openrouterModels.js'
+import OpenRouterModelPicker from '../components/OpenRouterModelPicker.vue'
 import AutomationList from '../components/automation/AutomationList.vue'
 import AutomationEditor from '../components/automation/AutomationEditor.vue'
 import {
@@ -613,7 +613,6 @@ const openrouterApiDraft = ref('')
 const openrouterModelDraft = ref(OPENROUTER_DEFAULT_MODEL)
 const openrouterApiMsg = ref('')
 const openrouterApiBusy = ref(false)
-const openrouterModelOptions = OPENROUTER_MODEL_OPTIONS
 const openrouterBriefingSystemPrompt = OPENROUTER_BRIEFING_SYSTEM_PROMPT
 const uiBuildLabel = ref('')
 
@@ -1925,22 +1924,21 @@ onUnmounted(() => {
             {{ openrouterApiBusy ? 'Saving…' : 'Save' }}
           </button>
         </div>
-        <div class="api-key-row">
+        <div class="api-key-row api-key-row--model">
           <label class="lbl api-key-lbl" for="openrouter-model">AI model</label>
-          <select
-            id="openrouter-model"
+          <OpenRouterModelPicker
             v-model="openrouterModelDraft"
-            class="inp tap api-key-inp api-model-select"
+            input-id="openrouter-model"
             :disabled="openrouterApiBusy"
-          >
-            <option v-for="opt in openrouterModelOptions" :key="opt.value" :value="opt.value">
-              {{ opt.label }}
-            </option>
-          </select>
+          />
           <button type="button" class="btn primary tap api-key-save" :disabled="openrouterApiBusy" @click="saveOpenrouterApiKey">
             {{ openrouterApiBusy ? 'Saving…' : 'Save' }}
           </button>
         </div>
+        <p class="cred-hint api-model-hint">
+          Search the live OpenRouter catalog (text models). Pick from the list or type a model id such as
+          <code>openai/gpt-4o-mini</code>.
+        </p>
         <p class="api-key-foot">
           <span class="cred-hint">Status: {{ openrouterApiKeyOverride ? 'saved' : 'empty' }}</span>
           <span class="cred-hint">Model: {{ openrouterModelDraft || OPENROUTER_DEFAULT_MODEL }}</span>
@@ -2779,8 +2777,20 @@ onUnmounted(() => {
 .api-key-foot .cred-msg {
   margin: 0;
 }
-.api-model-select {
-  min-height: var(--touch-target, 2.75rem);
+.api-key-row--model {
+  align-items: flex-start;
+}
+.api-key-row--model .api-key-lbl {
+  padding-top: 0.65rem;
+}
+.api-model-hint {
+  margin: 0 0 var(--space-2, 0.5rem);
+  padding-left: 5.25rem;
+}
+@media (max-width: 520px) {
+  .api-model-hint {
+    padding-left: 0;
+  }
 }
 .api-build-label {
   margin: 0 0 0.65rem;

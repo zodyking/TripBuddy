@@ -510,6 +510,19 @@ export async function putOpenrouterApiKey(body) {
 }
 
 /**
+ * OpenRouter text models for Settings autocomplete (live catalog).
+ * @param {{ q?: string, limit?: number }} [opts]
+ */
+export async function getOpenrouterModels(opts = {}) {
+  const q = new URLSearchParams()
+  if (opts.q) q.set('q', String(opts.q))
+  if (opts.limit != null) q.set('limit', String(opts.limit))
+  const qs = q.toString()
+  const r = await apiFetch(`/api/openrouter/models${qs ? `?${qs}` : ''}`)
+  return handleJson(r)
+}
+
+/**
  * Translate non-English sender display names to English (cached server-side by original text).
  * @param {{ items: Array<{ id: string, text: string }> }} body
  */

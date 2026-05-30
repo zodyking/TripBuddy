@@ -140,6 +140,10 @@ import {
 } from './wahaChatCache.mjs'
 import { generateDailyBriefing } from './waha-daily-briefing.mjs'
 import { sanitizeOpenrouterModel, OPENROUTER_DEFAULT_MODEL } from './openrouter-briefing.mjs'
+import {
+  fetchOpenrouterModelsCatalog,
+  filterOpenrouterModels,
+} from './openrouter-models.mjs'
 import { translateSenderNamesToEnglish } from './google-translate.mjs'
 import { needsEnglishSenderNameTranslation } from '../src/utils/senderNameLocale.js'
 import { readAssignment, writeAssignment } from './assignment-store.mjs'
@@ -1091,6 +1095,34 @@ app.put('/api/settings/ny511-api-key', async (req, reply) => {
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e)
     return reply.code(400).send({ error: msg })
+  }
+})
+
+app.get('/api/openrouter/models', async (req, reply) => {
+  reply.header('Cache-Control', 'private, max-age=300')
+  try {
+    const q = String(req.query?.q ?? req.query?.query ?? '').trim()
+    const limitRaw = Number(req.query?.limit)
+    const limit = Number.isFinite(limitRaw) && limitRaw > 0
+      ? Math.min(500, Math.floor(limitRaw))
+      : q
+        ? 40
+        : 400
+    let apiKey = ''
+    const ak = req.credentialAccountKey
+    if (typeof ak === 'string' && ak.trim()) {
+      apiKey = (await getOpenrouterApiKeyForAccount(ak.trim())) || ''
+    }
+    const models = await fetchOpenrouterModelsCatalog(apiKey)
+    const listed = q ? filterOpenrouterModels(models, q, limit) : models
+    return {
+      ok: true,
+      count: models.length,
+      models: listed,
+    }
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e)
+    return reply.code(502).send({ ok: false, error: msg, models: [] })
   }
 })
 
