@@ -37,6 +37,7 @@ const {
   briefingText: dailyBriefingText,
   messageCount: dailyBriefingCount,
   loading: dailyBriefingLoading,
+  error: dailyBriefingError,
   narratorActive: dailyBriefingNarratorActive,
   narratorWordIndex: dailyBriefingNarratorWordIndex,
   maybeOfferDailyBriefing,
@@ -331,6 +332,7 @@ onUnmounted(() => {
       :message-count="dailyBriefingCount"
       :preview="dailyBriefingText"
       :busy="dailyBriefingLoading"
+      :error="dailyBriefingError"
       @play="acceptDailyBriefing"
       @dismiss="dismissDailyBriefing"
     />

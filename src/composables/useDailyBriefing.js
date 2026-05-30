@@ -84,13 +84,16 @@ export function useDailyBriefing() {
 
   async function acceptBriefing(opts = {}) {
     markOffered()
-    modalOpen.value = false
     loading.value = true
     error.value = ''
     briefingText.value = ''
 
     const chatId = getWahaChatId()
-    if (!chatId) { loading.value = false; return }
+    if (!chatId) {
+      loading.value = false
+      error.value = 'No chat configured.'
+      return
+    }
 
     try {
       const result = await postWhatsAppDailyBriefing({
@@ -102,9 +105,13 @@ export function useDailyBriefing() {
         error.value = typeof result.error === 'string' ? result.error : 'Briefing failed.'
         return
       }
-      if (result.empty || !result.briefing) return
+      if (result.empty || !result.briefing) {
+        error.value = 'No messages to summarize today.'
+        return
+      }
       briefingText.value = result.briefing
       messageCount.value = Number(result.messageCount) || 0
+      modalOpen.value = false
       narratorActive.value = true
       narratorWordIndex.value = -1
       speakDailyBriefing(result.briefing, {

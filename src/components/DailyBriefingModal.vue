@@ -4,6 +4,7 @@ defineProps({
   messageCount: { type: Number, default: 0 },
   preview: { type: String, default: '' },
   busy: { type: Boolean, default: false },
+  error: { type: String, default: '' },
 })
 
 const emit = defineEmits(['play', 'dismiss'])
@@ -15,7 +16,7 @@ const emit = defineEmits(['play', 'dismiss'])
       v-if="open"
       class="daily-briefing-backdrop"
       role="presentation"
-      @click.self="emit('dismiss')"
+      @click.self="!busy && emit('dismiss')"
     >
       <div
         class="daily-briefing-dialog"
@@ -24,23 +25,23 @@ const emit = defineEmits(['play', 'dismiss'])
         aria-labelledby="daily-briefing-title"
       >
         <h2 id="daily-briefing-title" class="daily-briefing-title">
-          Would you like a briefing?
+          {{ busy ? 'Generating briefing…' : 'Would you like a briefing?' }}
         </h2>
-        <p class="daily-briefing-lead">
-          <template v-if="messageCount > 0">
-            We summarized {{ messageCount }} message{{ messageCount === 1 ? '' : 's' }} from today’s chat.
-          </template>
-          <template v-else>
-            Hear a spoken summary of today’s WhatsApp chat.
-          </template>
+        <p v-if="busy" class="daily-briefing-lead daily-briefing-loading">
+          Fetching today's messages and summarizing with AI…
         </p>
-        <p v-if="preview" class="daily-briefing-preview">{{ preview }}</p>
-        <div class="daily-briefing-actions">
-          <button type="button" class="btn ghost tap" :disabled="busy" @click="emit('dismiss')">
-            Not now
+        <p v-else-if="error" class="daily-briefing-lead daily-briefing-error">
+          {{ error }}
+        </p>
+        <p v-else class="daily-briefing-lead">
+          Hear a spoken AI summary of today's WhatsApp group chat.
+        </p>
+        <div v-if="!busy" class="daily-briefing-actions">
+          <button type="button" class="btn ghost tap" @click="emit('dismiss')">
+            {{ error ? 'Close' : 'Not now' }}
           </button>
-          <button type="button" class="btn primary tap" :disabled="busy" @click="emit('play')">
-            Play briefing
+          <button v-if="!error" type="button" class="btn primary tap" @click="emit('play')">
+            Yes, brief me
           </button>
         </div>
       </div>
@@ -83,14 +84,12 @@ const emit = defineEmits(['play', 'dismiss'])
   color: var(--color-text-muted, #a1a1aa);
 }
 
-.daily-briefing-preview {
-  margin: 0 0 1rem;
-  max-height: 8rem;
-  overflow-y: auto;
-  font-size: 0.8125rem;
-  line-height: 1.4;
-  color: var(--color-text-muted, #a1a1aa);
-  opacity: 0.9;
+.daily-briefing-loading {
+  color: var(--color-accent-orange, #ff6b1a);
+}
+
+.daily-briefing-error {
+  color: #f87171;
 }
 
 .daily-briefing-actions {
