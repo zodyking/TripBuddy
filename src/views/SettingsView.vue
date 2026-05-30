@@ -82,7 +82,6 @@ import {
   getTripAlertMode,
   setTripAlertMode,
   speakTripTtsTest,
-  playTripBellTest,
   isTripStatusChangeEnabled,
   setTripStatusChangeEnabled,
   isTrailerStatusChangeEnabled,
@@ -394,14 +393,29 @@ function setTripAlertModeUi(
 }
 
 const ttsEnabled = computed(() => tripAlertMode.value !== 'off')
-const bellChimeEnabled = computed(() => tripAlertMode.value === 'both')
+
+const NEAR_TRAILER_PRESETS_FT = [150, 250, 312, 500]
+
+const nearTrailerApproachFeet = computed(() => nearTrailerRadiusFeet.value * 3)
 
 function toggleTts(enabled) {
   setTripAlertModeUi(enabled ? 'tts' : 'off')
 }
 
-function toggleBellChime(enabled) {
-  setTripAlertModeUi(enabled ? 'both' : 'tts')
+function clampNearTrailerFeet(n) {
+  const v = Number(n)
+  if (!Number.isFinite(v)) return getNearTrailerRadiusFeet()
+  return Math.min(3000, Math.max(15, Math.round(v)))
+}
+
+function setNearTrailerPreset(ft) {
+  nearTrailerRadiusFeet.value = clampNearTrailerFeet(ft)
+  saveNearTrailerRadius()
+}
+
+function stepNearTrailerFeet(delta) {
+  nearTrailerRadiusFeet.value = clampNearTrailerFeet(nearTrailerRadiusFeet.value + delta)
+  saveNearTrailerRadius()
 }
 
 function toggleTripStatusChange(enabled) {
@@ -1412,6 +1426,10 @@ watch(
 )
 
 watch(settingsTab, (tab) => {
+  if (tab === 'automation') {
+    settingsTab.value = 'general'
+    return
+  }
   if (tab === 'audio') {
     tripAlertMode.value = getTripAlertMode()
     tripStatusChangeOn.value = isTripStatusChangeEnabled()
@@ -1463,16 +1481,6 @@ onUnmounted(() => {
         @click="settingsTab = 'helpers'"
       >
         Helpers
-      </button>
-      <button
-        type="button"
-        class="tab-btn tap"
-        role="tab"
-        :aria-selected="settingsTab === 'automation'"
-        :class="{ active: settingsTab === 'automation' }"
-        @click="settingsTab = 'automation'"
-      >
-        Automation
       </button>
       <button
         type="button"
@@ -1691,14 +1699,6 @@ onUnmounted(() => {
         </div>
       </SettingsSection>
 
-      <SettingsSection title="Compass calibration">
-        <p class="cred-hint">
-          On any map that shows the compass control, <strong>press and hold</strong> the compass button to open the
-          calibration panel (live heading preview, offset slider, and reset). A short tap still toggles heading-up
-          mode on or off. Your offset is saved on this device automatically.
-        </p>
-      </SettingsSection>
-
       <SettingsSection title="API" section-id="settings-api">
         <!-- TomTom -->
         <h4 class="api-sub-heading">TomTom Traffic</h4>
@@ -1776,7 +1776,7 @@ onUnmounted(() => {
         </p>
 
         <!-- OpenRouter -->
-        <h4 class="api-sub-heading">OpenRouter (Daily briefing)</h4>
+        <h4 class="api-sub-heading">OpenRouter</h4>
         <p class="cred-hint">
           Summarizes today’s monitored WhatsApp chat into a spoken briefing on login.
           <a href="https://openrouter.ai/" target="_blank" rel="noopener noreferrer" class="ext-link">OpenRouter API key</a>
@@ -2023,11 +2023,45 @@ onUnmounted(() => {
           <span class="audio-row-label">Near-trailer alerts (trailer map only)</span>
         </div>
 
-        <div v-if="ttsEnabled && trailerNearbyOn" class="audio-near-trailer audio-near-trailer--compact">
-          <label class="lbl audio-near-trailer-label" for="near-trailer-ft">Distance (feet)</label>
-          <div class="audio-near-trailer-row">
+        <div v-if="ttsEnabled && trailerNearbyOn" class="audio-near-trailer">
+          <div class="audio-near-trailer-head">
+            <label class="lbl audio-near-trailer-label" for="near-trailer-ft">Near-trailer radius</label>
+            <span class="audio-near-trailer-value">{{ nearTrailerRadiusFeet }} ft</span>
+          </div>
+          <div class="audio-near-trailer-stepper">
+            <button type="button" class="btn tap audio-step-btn" aria-label="Decrease radius by 25 feet" @click="stepNearTrailerFeet(-25)">−</button>
             <input
               id="near-trailer-ft"
+              v-model.number="nearTrailerRadiusFeet"
+              class="inp tap audio-near-trailer-slider"
+              type="range"
+              min="50"
+              max="1500"
+              step="25"
+              aria-valuemin="50"
+              aria-valuemax="1500"
+              :aria-valuenow="nearTrailerRadiusFeet"
+              @input="saveNearTrailerRadius"
+              @change="saveNearTrailerRadius"
+            />
+            <button type="button" class="btn tap audio-step-btn" aria-label="Increase radius by 25 feet" @click="stepNearTrailerFeet(25)">+</button>
+          </div>
+          <div class="audio-near-trailer-presets" role="group" aria-label="Radius presets">
+            <button
+              v-for="preset in NEAR_TRAILER_PRESETS_FT"
+              :key="preset"
+              type="button"
+              class="btn tap audio-preset-btn"
+              :class="{ 'is-active': nearTrailerRadiusFeet === preset }"
+              @click="setNearTrailerPreset(preset)"
+            >
+              {{ preset }} ft
+            </button>
+          </div>
+          <label class="lbl audio-near-trailer-fine" for="near-trailer-ft-exact">Exact distance (feet)</label>
+          <div class="audio-near-trailer-row">
+            <input
+              id="near-trailer-ft-exact"
               v-model.number="nearTrailerRadiusFeet"
               class="inp tap audio-near-trailer-input"
               type="number"
@@ -2036,15 +2070,13 @@ onUnmounted(() => {
               step="5"
               inputmode="numeric"
               autocomplete="off"
-              @input="saveNearTrailerRadius"
-              @blur="saveNearTrailerRadius"
+              @change="saveNearTrailerRadius"
             />
             <span class="audio-near-trailer-unit" aria-hidden="true">ft</span>
           </div>
           <p class="audio-near-trailer-hint">
-            While a trailer location map is open: “Approaching trailer …” at three times this distance (left/right
-            when GPS course is available), then “You are near trailer …” inside the radius. Open the map from a trailer
-            card pin.
+            On the trailer map: “Approaching trailer …” at about {{ nearTrailerApproachFeet }} ft (3× this radius),
+            then “You are near trailer …” inside {{ nearTrailerRadiusFeet }} ft. Open the map from a trailer card pin.
           </p>
         </div>
 
@@ -2058,15 +2090,6 @@ onUnmounted(() => {
             {{ audioMoreExpanded ? '▼' : '▶' }} More alert types
           </button>
           <div v-show="audioMoreExpanded" class="alert-types-section alert-types-section--more">
-            <div class="audio-row">
-              <label class="toggle-switch">
-                <input type="checkbox" :checked="bellChimeEnabled" @change="toggleBellChime($event.target.checked)" />
-                <span class="toggle-slider"></span>
-              </label>
-              <span class="audio-row-label">Play bell chime before alerts</span>
-              <button type="button" class="audio-test-btn tap" @click="playTripBellTest">Test</button>
-            </div>
-
             <p class="alert-types-heading">Alert Types</p>
 
             <div class="audio-row">
@@ -2834,7 +2857,61 @@ onUnmounted(() => {
 }
 .audio-near-trailer-label {
   display: block;
+  margin-bottom: 0;
+}
+.audio-near-trailer-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.5rem;
   margin-bottom: 0.45rem;
+}
+.audio-near-trailer-value {
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--color-accent, #a78bfa);
+}
+.audio-near-trailer-stepper {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.5rem;
+}
+.audio-step-btn {
+  flex-shrink: 0;
+  width: 2.25rem;
+  height: 2.25rem;
+  padding: 0;
+  font-size: 1.125rem;
+  line-height: 1;
+}
+.audio-near-trailer-slider {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 2rem;
+  padding: 0;
+  accent-color: var(--color-accent, #8b5cf6);
+}
+.audio-near-trailer-presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin-bottom: 0.5rem;
+}
+.audio-preset-btn {
+  font-size: 0.75rem;
+  padding: 0.25rem 0.55rem;
+  border-radius: 999px;
+}
+.audio-preset-btn.is-active {
+  background: rgba(139, 92, 246, 0.35);
+  border-color: rgba(139, 92, 246, 0.65);
+}
+.audio-near-trailer-fine {
+  display: block;
+  margin-top: 0.15rem;
+  margin-bottom: 0.35rem;
+  font-size: 0.75rem;
 }
 .audio-near-trailer-row {
   display: flex;

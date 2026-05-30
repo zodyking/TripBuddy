@@ -881,8 +881,7 @@ watch([geoTracking, compassModeActive], () => {
       <p v-if="geoPending" class="bridge-map-hint">Location…</p>
       <p v-else-if="geoDenied" class="bridge-map-hint is-warn">Location denied</p>
       <p v-if="compassError" class="bridge-map-hint is-warn">{{ compassError }}</p>
-    </div>
-    <div class="bridge-map-toolbar" role="toolbar" aria-label="Map display">
+      <div class="map-controls-stack bridge-map-controls" role="toolbar" aria-label="Map display">
       <button
         type="button"
         class="map-control-btn map-control-btn--traffic map-control-btn--pill tap"
@@ -998,6 +997,7 @@ watch([geoTracking, compassModeActive], () => {
         </svg>
         <span class="sr-only">Open heading offset and calibration</span>
       </button>
+      </div>
     </div>
     <CompassCalibrationModal
       v-model="calibrationModalOpen"
@@ -1020,8 +1020,11 @@ watch([geoTracking, compassModeActive], () => {
 
 .bridge-map-root.is-fill {
   min-height: 0;
-  flex: 1;
+  flex: 1 1 auto;
   height: 100%;
+  display: flex;
+  flex-direction: column;
+  border-bottom: none;
 }
 
 .bridge-map-stage {
@@ -1048,22 +1051,12 @@ watch([geoTracking, compassModeActive], () => {
   height: 100%;
 }
 
-.bridge-map-toolbar {
-  display: flex;
-  flex-direction: row;
-  align-items: center;
-  justify-content: center;
-  flex-wrap: wrap;
-  gap: 0.45rem;
-  padding: 0.45rem 0.5rem;
-  border-top: 1px solid rgba(255, 255, 255, 0.06);
-  background: rgba(10, 10, 15, 0.96);
-  pointer-events: auto;
+.bridge-map-controls {
+  max-width: min(14rem, calc(100% - 1.5rem));
 }
 
-.bridge-map-toolbar .map-control-btn {
-  position: relative;
-  flex-shrink: 0;
+.bridge-map-controls .map-control-btn--pill {
+  min-width: 3.25rem;
 }
 
 .sr-only {

@@ -10,6 +10,9 @@ import {
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 import 'leaflet-rotate'
+import 'leaflet.markercluster'
+import 'leaflet.markercluster/dist/MarkerCluster.css'
+import 'leaflet.markercluster/dist/MarkerCluster.Default.css'
 import { directoryBuildingIcon, userLocationTruckIcon } from '../utils/mapMarkers.js'
 import { useCompassOrientation } from '../composables/useCompassOrientation.js'
 import { useMapCompassLongPress } from '../composables/useMapCompassLongPress.js'
@@ -20,9 +23,11 @@ import {
   applyUserTruckMarkerDomRotation,
 } from '../composables/useMapFollowControls.js'
 
-/** Default view when there are no directory pins (Manhattan). */
-const DEFAULT_CENTER = Object.freeze([40.7128, -74.006])
-const DEFAULT_ZOOM = 11
+/** Default view: NYC–NJ metro (avoid fitting all US pins on load). */
+const DEFAULT_CENTER = Object.freeze([40.735, -74.172])
+const DEFAULT_ZOOM = 10
+/** Above this count, keep metro default instead of fitBounds(all pins). */
+const AUTO_FIT_PIN_THRESHOLD = 40
 
 /**
  * @typedef {{ locationId: string, lat: number, lng: number }} MapPin
@@ -110,7 +115,7 @@ let streetLayer = null
 /** @type {L.TileLayer | null} */
 let satelliteLayer = null
 const activeBaseLayer = ref(/** @type {'street' | 'satellite'} */ ('street'))
-/** @type {L.LayerGroup | null} */
+/** @type {L.MarkerClusterGroup | null} */
 let markerLayer = null
 /** @type {L.LayerGroup | null} */
 let userLayer = null
@@ -167,16 +172,50 @@ function allBoundsLatLngs() {
   return pts
 }
 
+function countValidPins() {
+  let n = 0
+  for (const p of props.pins) {
+    const la = Number(p.lat)
+    const ln = Number(p.lng)
+    if (Number.isFinite(la) && Number.isFinite(ln)) n++
+  }
+  return n
+}
+
+function applyMetroDefaultView(animate) {
+  if (!map) return
+  const motion = prefersReducedMotion()
+  map.setView(DEFAULT_CENTER, DEFAULT_ZOOM, {
+    animate: animate && !motion,
+  })
+}
+
 function applyDefaultOrFitView(pinsChanged) {
   if (!map) return
   const motion = prefersReducedMotion()
-  const pts = allBoundsLatLngs()
 
-  if (pts.length === 0) {
-    map.setView(DEFAULT_CENTER, DEFAULT_ZOOM, { animate: false })
+  if (props.highlightId) {
+    const m = markersById.get(props.highlightId)
+    if (m) {
+      map.panTo(m.getLatLng(), { animate: pinsChanged && !motion })
+      return
+    }
+  }
+
+  const pinCount = countValidPins()
+  if (pinCount === 0) {
+    applyMetroDefaultView(false)
     return
   }
 
+  if (pinCount > AUTO_FIT_PIN_THRESHOLD) {
+    if (!geoTracking.value) {
+      applyMetroDefaultView(pinsChanged)
+    }
+    return
+  }
+
+  const pts = allBoundsLatLngs()
   if (pts.length === 1) {
     map.setView(pts[0], 13, { animate: pinsChanged && !motion })
     return
@@ -492,7 +531,16 @@ function initMap() {
   activeBaseLayer.value = 'street'
   streetLayer.addTo(map)
 
-  markerLayer = L.layerGroup().addTo(map)
+  markerLayer = L.markerClusterGroup({
+    maxClusterRadius: 56,
+    spiderfyOnMaxZoom: true,
+    showCoverageOnHover: false,
+    disableClusteringAtZoom: 14,
+    chunkedLoading: true,
+    chunkInterval: 80,
+    chunkDelay: 30,
+  })
+  map.addLayer(markerLayer)
   userLayer = L.layerGroup().addTo(map)
 
   syncMarkers()

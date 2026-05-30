@@ -1464,7 +1464,6 @@ onUnmounted(() => {
   flex-direction: column;
   min-width: 0;
   min-height: 0;
-  flex-shrink: 0;
 }
 
 .bridges-page.is-split .bridges-map-column {
@@ -1473,15 +1472,19 @@ onUnmounted(() => {
 }
 
 .bridges-map-shell {
+  flex: 1 1 auto;
+  min-height: 0;
   display: flex;
   flex-direction: column;
-  flex: 0 0 auto;
-  min-height: min(42vh, 19rem);
+}
+
+.bridges-page:not(.is-split) .bridges-map-shell {
+  flex: none;
+  min-height: clamp(19rem, min(52vh, 100dvh - 14rem), 32rem);
   height: clamp(19rem, min(52vh, 100dvh - 14rem), 32rem);
 }
 
 .bridges-page.is-split .bridges-map-shell {
-  height: auto;
   min-height: min(42vh, 19rem);
 }
 
