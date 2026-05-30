@@ -439,8 +439,6 @@ function setTripAlertModeUi(
 
 const ttsEnabled = computed(() => tripAlertMode.value !== 'off')
 
-const NEAR_TRAILER_PRESETS_FT = [150, 250, 312, 500]
-
 const nearTrailerApproachFeet = computed(() => nearTrailerRadiusFeet.value * 3)
 
 function toggleTts(enabled) {
@@ -450,12 +448,8 @@ function toggleTts(enabled) {
 function clampNearTrailerFeet(n) {
   const v = Number(n)
   if (!Number.isFinite(v)) return getNearTrailerRadiusFeet()
-  return Math.min(3000, Math.max(15, Math.round(v)))
-}
-
-function setNearTrailerPreset(ft) {
-  nearTrailerRadiusFeet.value = clampNearTrailerFeet(ft)
-  saveNearTrailerRadius()
+  const clamped = Math.min(3000, Math.max(50, v))
+  return Math.round(clamped / 10) * 10
 }
 
 function stepNearTrailerFeet(delta) {
@@ -2261,7 +2255,7 @@ onUnmounted(() => {
             <span class="audio-near-trailer-value">{{ nearTrailerRadiusFeet }} ft</span>
           </div>
           <div class="audio-near-trailer-stepper">
-            <button type="button" class="btn tap audio-step-btn" aria-label="Decrease radius by 25 feet" @click="stepNearTrailerFeet(-25)">−</button>
+            <button type="button" class="btn tap audio-step-btn" aria-label="Decrease radius by 10 feet" @click="stepNearTrailerFeet(-10)">−</button>
             <input
               id="near-trailer-ft"
               v-model.number="nearTrailerRadiusFeet"
@@ -2269,42 +2263,14 @@ onUnmounted(() => {
               type="range"
               min="50"
               max="1500"
-              step="25"
+              step="10"
               aria-valuemin="50"
               aria-valuemax="1500"
               :aria-valuenow="nearTrailerRadiusFeet"
               @input="saveNearTrailerRadius"
               @change="saveNearTrailerRadius"
             />
-            <button type="button" class="btn tap audio-step-btn" aria-label="Increase radius by 25 feet" @click="stepNearTrailerFeet(25)">+</button>
-          </div>
-          <div class="audio-near-trailer-presets" role="group" aria-label="Radius presets">
-            <button
-              v-for="preset in NEAR_TRAILER_PRESETS_FT"
-              :key="preset"
-              type="button"
-              class="btn tap audio-preset-btn"
-              :class="{ 'is-active': nearTrailerRadiusFeet === preset }"
-              @click="setNearTrailerPreset(preset)"
-            >
-              {{ preset }} ft
-            </button>
-          </div>
-          <label class="lbl audio-near-trailer-fine" for="near-trailer-ft-exact">Exact distance (feet)</label>
-          <div class="audio-near-trailer-row">
-            <input
-              id="near-trailer-ft-exact"
-              v-model.number="nearTrailerRadiusFeet"
-              class="inp tap audio-near-trailer-input"
-              type="number"
-              min="15"
-              max="3000"
-              step="5"
-              inputmode="numeric"
-              autocomplete="off"
-              @change="saveNearTrailerRadius"
-            />
-            <span class="audio-near-trailer-unit" aria-hidden="true">ft</span>
+            <button type="button" class="btn tap audio-step-btn" aria-label="Increase radius by 10 feet" @click="stepNearTrailerFeet(10)">+</button>
           </div>
           <p class="audio-near-trailer-hint">
             On the trailer map: “Approaching trailer …” at about {{ nearTrailerApproachFeet }} ft (3× this radius),
@@ -3245,7 +3211,7 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   gap: 0.5rem;
-  margin-bottom: 0.5rem;
+  margin-bottom: 0.35rem;
 }
 .audio-step-btn {
   flex-shrink: 0;
@@ -3261,42 +3227,6 @@ onUnmounted(() => {
   height: 2rem;
   padding: 0;
   accent-color: var(--color-accent, #8b5cf6);
-}
-.audio-near-trailer-presets {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.35rem;
-  margin-bottom: 0.5rem;
-}
-.audio-preset-btn {
-  font-size: 0.75rem;
-  padding: 0.25rem 0.55rem;
-  border-radius: 999px;
-}
-.audio-preset-btn.is-active {
-  background: rgba(139, 92, 246, 0.35);
-  border-color: rgba(139, 92, 246, 0.65);
-}
-.audio-near-trailer-fine {
-  display: block;
-  margin-top: 0.15rem;
-  margin-bottom: 0.35rem;
-  font-size: 0.75rem;
-}
-.audio-near-trailer-row {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  flex-wrap: wrap;
-}
-.audio-near-trailer-input {
-  max-width: 7rem;
-  min-height: 2.5rem;
-}
-.audio-near-trailer-unit {
-  font-size: 0.9rem;
-  color: var(--color-text-tertiary, #a8a8b8);
-  font-weight: 600;
 }
 .audio-near-trailer-hint {
   margin: 0.45rem 0 0;

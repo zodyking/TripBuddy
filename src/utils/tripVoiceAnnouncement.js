@@ -134,7 +134,11 @@ export function setTrailerGpsTtsEnabled(enabled) {
 function clampNearTrailerRadiusFeet(feet) {
   const n = Number(feet)
   if (!Number.isFinite(n)) return DEFAULT_NEAR_TRAILER_RADIUS_FEET
-  return Math.round(Math.min(MAX_NEAR_TRAILER_RADIUS_FEET, Math.max(MIN_NEAR_TRAILER_RADIUS_FEET, n)))
+  const clamped = Math.min(
+    MAX_NEAR_TRAILER_RADIUS_FEET,
+    Math.max(MIN_NEAR_TRAILER_RADIUS_FEET, n),
+  )
+  return Math.round(clamped / 10) * 10
 }
 
 /** @returns {number} Radius in feet (default ~312 ≈ 95 m). */
