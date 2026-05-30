@@ -529,6 +529,14 @@ const nearTrailerCooldown = new Map()
 /** @type {Map<string, number>} trlrOrder → last farther “approaching” announce */
 const approachingTrailerCooldown = new Map()
 
+/** @type {Map<string, number>} trlrOrder → first-entered-proximity timestamp */
+const dwellStartTime = new Map()
+
+/** @type {Set<string>} trailers suppressed (user stayed near for 60s, won’t re-announce until they leave) */
+const dwellSuppressed = new Set()
+
+const DWELL_SUPPRESS_MS = 60_000
+
 /** Outer ring for “approaching” speech = this × configured near radius. */
 const APPROACHING_TRAILER_RADIUS_MULT = 2.2
 
@@ -719,6 +727,29 @@ export function maybeAnnounceNearTrailer(userLat, userLng, trailers, opts) {
       ? order === heavyOrder ? 'lead' : 'rear'
       : ''
 
+    const inProximity = d <= outerR
+
+    if (!inProximity) {
+      if (dwellSuppressed.has(order)) {
+        dwellSuppressed.delete(order)
+        dwellStartTime.delete(order)
+        nearTrailerCooldown.delete(order)
+        approachingTrailerCooldown.delete(order)
+      } else {
+        dwellStartTime.delete(order)
+      }
+      continue
+    }
+
+    if (!dwellStartTime.has(order)) {
+      dwellStartTime.set(order, now)
+    } else if (!dwellSuppressed.has(order) && now - dwellStartTime.get(order) >= DWELL_SUPPRESS_MS) {
+      dwellSuppressed.add(order)
+      pushLiveLog({ type: 'info', message: `[TripVoice] dwell suppressed: trailer ${order} (near >60s)`, ts: Date.now() })
+    }
+
+    if (dwellSuppressed.has(order)) continue
+
     if (d <= innerR) {
       const last = nearTrailerCooldown.get(order) ?? 0
       if (now - last < NEAR_COOLDOWN_MS) continue
@@ -762,6 +793,8 @@ export function clearTrailerGpsTracking() {
   prevTrailerGps.clear()
   nearTrailerCooldown.clear()
   approachingTrailerCooldown.clear()
+  dwellStartTime.clear()
+  dwellSuppressed.clear()
 }
 
 /**
