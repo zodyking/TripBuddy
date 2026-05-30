@@ -2,9 +2,20 @@ import fs from 'node:fs/promises'
 import path from 'node:path'
 import { LOCAL_DIR } from './config.mjs'
 
-const WAHA_INTERNAL_URL = (process.env.WAHA_BASE_URL || 'http://waha:3000').replace(/\/+$/, '')
 const WAHA_SESSION = process.env.WAHA_SESSION_NAME || 'default'
 const CACHE_DIR = path.join(LOCAL_DIR, 'waha-chat-cache')
+
+/** Resolve WAHA URL: env var > user account pref > fallback */
+let _accountWahaUrl = ''
+export function setAccountWahaUrl(url) {
+  _accountWahaUrl = String(url || '').trim().replace(/\/+$/, '')
+}
+function getWahaUrl() {
+  const env = (process.env.WAHA_BASE_URL || '').trim().replace(/\/+$/, '')
+  if (env) return env
+  if (_accountWahaUrl) return _accountWahaUrl
+  return 'http://waha:3000'
+}
 
 /** @type {Map<string, { updatedAt: number, messages: unknown[] }>} */
 const memoryCache = new Map()
@@ -72,7 +83,7 @@ async function wahaFetch(urlPath, query = '') {
   const headers = { Accept: 'application/json' }
   const key = process.env.WAHA_API_KEY
   if (key) headers['X-Api-Key'] = key
-  const url = `${WAHA_INTERNAL_URL}${urlPath}${query}`
+  const url = `${getWahaUrl()}${urlPath}${query}`
   const r = await fetch(url, { headers })
   const text = await r.text()
   let body = null

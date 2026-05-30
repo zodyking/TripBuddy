@@ -137,6 +137,7 @@ import {
   fetchWahaMessageMedia,
   fetchWahaContacts,
   fetchWahaLids,
+  setAccountWahaUrl,
 } from './wahaChatCache.mjs'
 import { generateDailyBriefing } from './waha-daily-briefing.mjs'
 import { sanitizeOpenrouterModel, OPENROUTER_DEFAULT_MODEL } from './openrouter-briefing.mjs'
@@ -464,7 +465,11 @@ app.post('/api/visit', async (req) => {
 })
 
 /** Internal WAHA URL for `/api/waha` proxy (separate Dokploy/docker service). */
-const WAHA_INTERNAL_URL = process.env.WAHA_BASE_URL || 'http://waha:3000'
+function getWahaInternalUrl() {
+  const env = (process.env.WAHA_BASE_URL || '').trim().replace(/\/+$/, '')
+  if (env) return env
+  return 'http://waha:3000'
+}
 
 app.get('/api/health', async () => {
   const dist = await getSpaDistFingerprints()
@@ -484,7 +489,7 @@ app.get('/api/health', async () => {
       proxy: true,
       baseUrlConfigured: !!process.env.WAHA_BASE_URL,
       apiKeyConfigured: !!process.env.WAHA_API_KEY,
-      internalUrl: WAHA_INTERNAL_URL,
+      internalUrl: getWahaInternalUrl(),
     },
   }
 })
@@ -496,7 +501,7 @@ app.get('/api/health', async () => {
 
 async function wahaProxyHandler(req, reply) {
   const subPath = req.url.replace(/^\/api\/waha/, '') || '/'
-  const target = `${WAHA_INTERNAL_URL}${subPath}`
+  const target = `${getWahaInternalUrl()}${subPath}`
   try {
     const headers = { Accept: 'application/json' }
     const wahaKey = process.env.WAHA_API_KEY
@@ -544,6 +549,13 @@ app.post('/api/whatsapp/thread/sync', async (req, reply) => {
   if (!chatId) return reply.code(400).send({ ok: false, error: 'chatId required' })
   const limit = Number(req.body?.limit) || 60
   const downloadMedia = req.body?.downloadMedia === true
+  const ak = req.credentialAccountKey
+  if (typeof ak === 'string' && ak.trim()) {
+    try {
+      const prefs = await getWahaPrefsForAccount(ak.trim())
+      if (prefs.wahaUrl) setAccountWahaUrl(prefs.wahaUrl)
+    } catch { /* ignore */ }
+  }
   let contacts = []
   let lids = []
   try {
