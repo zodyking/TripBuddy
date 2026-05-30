@@ -1665,24 +1665,24 @@ onUnmounted(() => {
           Traffic map overlay + Corridors route monitoring.
           <a href="https://developer.tomtom.com/" target="_blank" rel="noopener noreferrer" class="ext-link">Free developer key</a>
         </p>
-        <label class="lbl" for="tomtom-traffic-key">TomTom API key</label>
-        <input
-          id="tomtom-traffic-key"
-          v-model="tomtomTrafficDraft"
-          class="inp tap"
-          type="password"
-          autocomplete="off"
-          placeholder="Paste API key"
-        />
-        <p class="cred-hint">
-          Status: {{ trafficTomtomKeyOverride ? 'saved' : 'empty' }}
-        </p>
-        <p v-if="tomtomTrafficMsg" class="cred-msg">{{ tomtomTrafficMsg }}</p>
-        <div class="btn-row">
-          <button type="button" class="btn primary tap" :disabled="tomtomTrafficBusy" @click="saveTomtomTrafficKey">
+        <div class="api-key-row">
+          <label class="lbl api-key-lbl" for="tomtom-traffic-key">TomTom</label>
+          <input
+            id="tomtom-traffic-key"
+            v-model="tomtomTrafficDraft"
+            class="inp tap api-key-inp"
+            type="password"
+            autocomplete="off"
+            placeholder="API key"
+          />
+          <button type="button" class="btn primary tap api-key-save" :disabled="tomtomTrafficBusy" @click="saveTomtomTrafficKey">
             {{ tomtomTrafficBusy ? 'Saving…' : 'Save' }}
           </button>
         </div>
+        <p class="api-key-foot">
+          <span class="cred-hint">Status: {{ trafficTomtomKeyOverride ? 'saved' : 'empty' }}</span>
+          <span v-if="tomtomTrafficMsg" class="cred-msg">{{ tomtomTrafficMsg }}</span>
+        </p>
 
         <!-- HERE -->
         <h4 class="api-sub-heading">HERE Traffic</h4>
@@ -1690,24 +1690,24 @@ onUnmounted(() => {
           Corridors traffic flow monitoring.
           <a href="https://platform.here.com/" target="_blank" rel="noopener noreferrer" class="ext-link">Free HERE platform key</a>
         </p>
-        <label class="lbl" for="here-api-key">HERE API key</label>
-        <input
-          id="here-api-key"
-          v-model="hereApiDraft"
-          class="inp tap"
-          type="password"
-          autocomplete="off"
-          placeholder="Paste HERE API key"
-        />
-        <p class="cred-hint">
-          Status: {{ hereApiKeyOverride ? 'saved' : 'empty' }}
-        </p>
-        <p v-if="hereApiMsg" class="cred-msg">{{ hereApiMsg }}</p>
-        <div class="btn-row">
-          <button type="button" class="btn primary tap" :disabled="hereApiBusy" @click="saveHereApiKey">
+        <div class="api-key-row">
+          <label class="lbl api-key-lbl" for="here-api-key">HERE</label>
+          <input
+            id="here-api-key"
+            v-model="hereApiDraft"
+            class="inp tap api-key-inp"
+            type="password"
+            autocomplete="off"
+            placeholder="API key"
+          />
+          <button type="button" class="btn primary tap api-key-save" :disabled="hereApiBusy" @click="saveHereApiKey">
             {{ hereApiBusy ? 'Saving…' : 'Save' }}
           </button>
         </div>
+        <p class="api-key-foot">
+          <span class="cred-hint">Status: {{ hereApiKeyOverride ? 'saved' : 'empty' }}</span>
+          <span v-if="hereApiMsg" class="cred-msg">{{ hereApiMsg }}</span>
+        </p>
 
         <!-- 511NY -->
         <h4 class="api-sub-heading">511NY</h4>
@@ -1715,45 +1715,45 @@ onUnmounted(() => {
           Bridge cameras + NY511 traffic events.
           <a href="https://511ny.org/my511/register" target="_blank" rel="noopener noreferrer" class="ext-link">Free 511NY key</a>
         </p>
-        <label class="lbl" for="ny511-api-key">511NY API key</label>
-        <input
-          id="ny511-api-key"
-          v-model="ny511ApiDraft"
-          class="inp tap"
-          type="password"
-          autocomplete="off"
-          placeholder="Paste 511NY API key"
-        />
-        <p class="cred-hint">
-          Status: {{ ny511ApiKeyOverride ? 'saved' : 'empty' }}
-        </p>
-        <p v-if="ny511ApiMsg" class="cred-msg">{{ ny511ApiMsg }}</p>
-        <div class="btn-row">
-          <button type="button" class="btn primary tap" :disabled="ny511ApiBusy" @click="saveNy511ApiKey">
+        <div class="api-key-row">
+          <label class="lbl api-key-lbl" for="ny511-api-key">511NY</label>
+          <input
+            id="ny511-api-key"
+            v-model="ny511ApiDraft"
+            class="inp tap api-key-inp"
+            type="password"
+            autocomplete="off"
+            placeholder="API key"
+          />
+          <button type="button" class="btn primary tap api-key-save" :disabled="ny511ApiBusy" @click="saveNy511ApiKey">
             {{ ny511ApiBusy ? 'Saving…' : 'Save' }}
           </button>
         </div>
+        <p class="api-key-foot">
+          <span class="cred-hint">Status: {{ ny511ApiKeyOverride ? 'saved' : 'empty' }}</span>
+          <span v-if="ny511ApiMsg" class="cred-msg">{{ ny511ApiMsg }}</span>
+        </p>
 
         <!-- GWB Camera -->
         <h4 class="api-sub-heading">GWB Upper Camera</h4>
         <p class="cred-hint">
           GWB upper deck live view (YouTube link).
         </p>
-        <label class="lbl" for="gwb-upper-cam-youtube-url">YouTube URL</label>
-        <input
-          id="gwb-upper-cam-youtube-url"
-          v-model="gwbUpperCamYoutubeDraft"
-          class="inp tap"
-          type="url"
-          autocomplete="off"
-          placeholder="https://www.youtube.com/watch?v=…"
-        />
-        <p v-if="gwbUpperCamYoutubeMsg" class="cred-msg">{{ gwbUpperCamYoutubeMsg }}</p>
-        <div class="btn-row">
-          <button type="button" class="btn primary tap" :disabled="gwbUpperCamYoutubeBusy" @click="saveGwbUpperCamYoutubeUrl">
+        <div class="api-key-row">
+          <label class="lbl api-key-lbl" for="gwb-upper-cam-youtube-url">YouTube</label>
+          <input
+            id="gwb-upper-cam-youtube-url"
+            v-model="gwbUpperCamYoutubeDraft"
+            class="inp tap api-key-inp"
+            type="url"
+            autocomplete="off"
+            placeholder="https://www.youtube.com/watch?v=…"
+          />
+          <button type="button" class="btn primary tap api-key-save" :disabled="gwbUpperCamYoutubeBusy" @click="saveGwbUpperCamYoutubeUrl">
             {{ gwbUpperCamYoutubeBusy ? 'Saving…' : 'Save' }}
           </button>
         </div>
+        <p v-if="gwbUpperCamYoutubeMsg" class="api-key-foot cred-msg">{{ gwbUpperCamYoutubeMsg }}</p>
 
         <!-- Usage & Limits -->
         <h4 class="api-sub-heading">Usage &amp; Limits</h4>
@@ -2471,6 +2471,46 @@ onUnmounted(() => {
   margin-top: 0;
   padding-top: 0;
   border-top: none;
+}
+.api-key-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2, 0.5rem);
+  margin-bottom: var(--space-1, 0.25rem);
+}
+.api-key-lbl {
+  flex: 0 0 4.75rem;
+  margin-bottom: 0;
+  font-size: var(--text-sm, 0.8125rem);
+}
+.api-key-inp {
+  flex: 1 1 10rem;
+  min-width: 0;
+  width: auto;
+  margin-bottom: 0;
+}
+.api-key-save {
+  flex: 0 0 auto;
+  min-height: var(--touch-target, 2.75rem);
+}
+.api-key-foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.35rem 0.75rem;
+  margin: 0 0 var(--space-2, 0.5rem);
+}
+.api-key-foot .cred-hint {
+  margin-bottom: 0;
+}
+.api-key-foot .cred-msg {
+  margin: 0;
+}
+@media (max-width: 420px) {
+  .api-key-lbl {
+    flex: 1 1 100%;
+  }
 }
 .work-week-row {
   display: grid;
