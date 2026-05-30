@@ -10,6 +10,8 @@ import {
   fetchChatMessagesForChat,
   sendChatMessage,
   listChats,
+  listContacts,
+  buildContactNameMap,
   normalizeWahaMessage,
   normalizeWahaChat,
   wahaChatKindLabel,
@@ -28,6 +30,8 @@ export function useWahaMessenger(opts = {}) {
   const chatTitle = ref('')
   const chats = ref(/** @type {ReturnType<typeof normalizeWahaChat>[]} */ ([]))
   const chatsLoading = ref(false)
+  /** @type {import('vue').Ref<Map<string, string>>} */
+  const contactMap = ref(new Map())
 
   /** @type {ReturnType<typeof setInterval> | null} */
   let pollTimer = null
@@ -54,6 +58,23 @@ export function useWahaMessenger(opts = {}) {
       return
     }
     chatTitle.value = id.split('@')[0] || id
+  }
+
+  function normalizeList(raw, chatId) {
+    return raw
+      .map((m) => normalizeWahaMessage(m, { contactMap: contactMap.value, activeChatId: chatId }))
+      .filter((m) => m.id && (m.text || m.hasMedia))
+  }
+
+  async function loadContacts() {
+    try {
+      const r = await listContacts({ limit: 500 })
+      if (r.ok && Array.isArray(r.body)) {
+        contactMap.value = buildContactNameMap(r.body)
+      }
+    } catch {
+      /* optional */
+    }
   }
 
   async function loadChats() {
@@ -83,15 +104,14 @@ export function useWahaMessenger(opts = {}) {
     }
     loading.value = true
     error.value = ''
+    await loadContacts()
     try {
       const r = await fetchChatMessagesForChat(chatId, 60)
       if (!r.ok || !Array.isArray(r.body)) {
         error.value = r.status ? `Could not load messages (${r.status})` : 'Could not load messages'
         return
       }
-      const normalized = r.body
-        .map((m) => normalizeWahaMessage(m))
-        .filter((m) => m.id && (m.text || m.hasMedia))
+      const normalized = normalizeList(r.body, chatId)
       messages.value = normalized
       if (normalized.length > 0) {
         const newest = [...normalized].sort((a, b) => b.ts - a.ts)[0]
@@ -111,7 +131,7 @@ export function useWahaMessenger(opts = {}) {
       const r = await fetchChatMessagesForChat(activeChatId.value, 40)
       if (!r.ok || !Array.isArray(r.body)) return
       error.value = ''
-      const incoming = r.body.map((m) => normalizeWahaMessage(m)).filter((m) => m.id)
+      const incoming = normalizeList(r.body, activeChatId.value).filter((m) => m.id)
       const byId = new Map(messages.value.map((m) => [m.id, m]))
       let hasNew = false
       for (const m of incoming) {
@@ -183,13 +203,15 @@ export function useWahaMessenger(opts = {}) {
   onMounted(() => {
     syncActiveFromStorage()
     if (!configured.value) return
-    void loadChats().then(() => {
-      if (activeChatId.value) {
-        void refreshMessages().then(() => {
-          startPolling()
-        })
-      }
-    })
+    void loadContacts().then(() =>
+      loadChats().then(() => {
+        if (activeChatId.value) {
+          void refreshMessages().then(() => {
+            startPolling()
+          })
+        }
+      }),
+    )
   })
 
   onBeforeUnmount(() => {
@@ -212,6 +234,7 @@ export function useWahaMessenger(opts = {}) {
     refreshMessages,
     sendText,
     selectChat,
+    loadContacts,
     stopPolling,
     startPolling,
     syncActiveFromStorage,

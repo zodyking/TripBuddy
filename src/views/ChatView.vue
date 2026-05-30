@@ -98,6 +98,10 @@ function onComposeKeydown(e) {
 watch(showChatList, (open) => {
   if (open) void loadChats()
 })
+
+function openMedia(url) {
+  if (url) window.open(url, '_blank', 'noopener,noreferrer')
+}
 </script>
 
 <template>
@@ -222,9 +226,51 @@ watch(showChatList, (open) => {
             :class="item.msg.fromMe ? 'chat-bubble-row--out' : 'chat-bubble-row--in'"
           >
             <div class="chat-bubble" :class="item.msg.fromMe ? 'chat-bubble--out' : 'chat-bubble--in'">
-              <p v-if="!item.msg.fromMe && item.msg.senderName" class="chat-bubble-sender">{{ item.msg.senderName }}</p>
+              <p
+                v-if="!item.msg.fromMe && item.msg.isGroupChat && item.msg.senderName"
+                class="chat-bubble-sender"
+              >
+                {{ item.msg.senderName }}
+              </p>
+              <div v-if="item.msg.media?.url" class="chat-bubble-media">
+                <img
+                  v-if="item.msg.media.kind === 'image'"
+                  :src="item.msg.media.url"
+                  class="chat-media-img tap"
+                  alt=""
+                  loading="lazy"
+                  @click="openMedia(item.msg.media.url)"
+                />
+                <video
+                  v-else-if="item.msg.media.kind === 'video'"
+                  class="chat-media-video"
+                  :src="item.msg.media.url"
+                  controls
+                  playsinline
+                  preload="metadata"
+                />
+                <audio
+                  v-else-if="item.msg.media.kind === 'audio'"
+                  class="chat-media-audio"
+                  :src="item.msg.media.url"
+                  controls
+                  preload="metadata"
+                />
+                <a
+                  v-else
+                  class="chat-media-file tap"
+                  :href="item.msg.media.url"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  {{ item.msg.media.filename || 'Download file' }}
+                </a>
+                <p v-if="item.msg.media.error" class="chat-media-err">{{ item.msg.media.error }}</p>
+              </div>
+              <p v-else-if="item.msg.hasMedia && !item.msg.media?.url" class="chat-bubble-text chat-bubble-text--muted">
+                Media unavailable
+              </p>
               <p v-if="item.msg.text" class="chat-bubble-text">{{ item.msg.text }}</p>
-              <p v-else-if="item.msg.hasMedia" class="chat-bubble-text chat-bubble-text--muted">[Media]</p>
               <time class="chat-bubble-time" :datetime="new Date(item.msg.ts).toISOString()">{{ fmtTime(item.msg.ts) }}</time>
             </div>
           </div>
@@ -265,8 +311,8 @@ watch(showChatList, (open) => {
   width: 100%;
   display: flex;
   flex-direction: column;
-  background: #0b141a;
-  color: #e9edef;
+  background: var(--color-bg-base, #08080a);
+  color: var(--color-text-primary, #f4f4f8);
   overflow: hidden;
 }
 
@@ -282,22 +328,23 @@ watch(showChatList, (open) => {
   max-width: 22rem;
   text-align: center;
   padding: 1.5rem 1.25rem;
-  border-radius: 1rem;
-  background: #111b21;
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: var(--radius-xl, 1rem);
+  background: var(--color-bg-surface, #16161d);
+  border: 1px solid var(--color-glass-border, rgba(255, 255, 255, 0.06));
+  box-shadow: var(--shadow-md, 0 4px 8px rgba(0, 0, 0, 0.3));
 }
 
 .chat-empty-title {
   margin: 0 0 0.5rem;
-  font-size: 1.05rem;
-  font-weight: 700;
+  font-size: var(--text-lg, 1.125rem);
+  font-weight: var(--weight-bold, 700);
 }
 
 .chat-empty-hint {
   margin: 0 0 1rem;
-  font-size: 0.85rem;
+  font-size: var(--text-sm, 0.8125rem);
   line-height: 1.45;
-  color: #8696a0;
+  color: var(--color-text-secondary, #a8a8b8);
 }
 
 .chat-empty-btn {
@@ -312,9 +359,10 @@ watch(showChatList, (open) => {
   align-items: center;
   gap: 0.35rem;
   padding: 0.45rem 0.5rem;
-  padding-top: max(0.45rem, env(safe-area-inset-top, 0px));
-  background: #202c33;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  background: var(--color-glass, rgba(22, 22, 29, 0.72));
+  backdrop-filter: blur(var(--blur-md, 12px));
+  -webkit-backdrop-filter: blur(var(--blur-md, 12px));
+  border-bottom: 1px solid var(--color-glass-border, rgba(255, 255, 255, 0.06));
   min-height: 3.25rem;
 }
 
@@ -326,8 +374,8 @@ watch(showChatList, (open) => {
 
 .chat-toolbar-title {
   margin: 0;
-  font-size: 0.95rem;
-  font-weight: 700;
+  font-size: var(--text-base, 0.9375rem);
+  font-weight: var(--weight-bold, 700);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -335,8 +383,8 @@ watch(showChatList, (open) => {
 
 .chat-toolbar-sub {
   margin: 0.1rem 0 0;
-  font-size: 0.62rem;
-  color: #8696a0;
+  font-size: var(--text-xs, 0.6875rem);
+  color: var(--color-text-tertiary, #6e6e7e);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -350,9 +398,9 @@ watch(showChatList, (open) => {
   align-items: center;
   justify-content: center;
   border: none;
-  border-radius: 50%;
+  border-radius: var(--radius-full, 9999px);
   background: transparent;
-  color: #aebac1;
+  color: var(--color-text-secondary, #a8a8b8);
   text-decoration: none;
   cursor: pointer;
 }
@@ -363,7 +411,8 @@ watch(showChatList, (open) => {
 }
 
 .chat-icon-btn:active {
-  background: rgba(255, 255, 255, 0.08);
+  background: var(--color-hover, rgba(255, 255, 255, 0.04));
+  color: var(--color-text-primary, #f4f4f8);
 }
 
 .chat-list-screen {
@@ -384,8 +433,8 @@ watch(showChatList, (open) => {
 .chat-list-status {
   margin: 1rem;
   text-align: center;
-  font-size: 0.8rem;
-  color: #8696a0;
+  font-size: var(--text-sm, 0.8125rem);
+  color: var(--color-text-tertiary, #6e6e7e);
 }
 
 .chat-list-item {
@@ -395,7 +444,7 @@ watch(showChatList, (open) => {
   width: 100%;
   padding: 0.65rem 0.85rem;
   border: none;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+  border-bottom: 1px solid var(--color-border-subtle, rgba(255, 255, 255, 0.04));
   background: transparent;
   color: inherit;
   text-align: left;
@@ -403,21 +452,21 @@ watch(showChatList, (open) => {
 }
 
 .chat-list-item.is-active {
-  background: rgba(0, 168, 132, 0.12);
+  background: rgba(123, 77, 181, 0.15);
 }
 
 .chat-list-avatar {
   flex-shrink: 0;
   width: 2.75rem;
   height: 2.75rem;
-  border-radius: 50%;
+  border-radius: var(--radius-full, 9999px);
   display: flex;
   align-items: center;
   justify-content: center;
-  font-weight: 700;
-  font-size: 1rem;
-  background: #374248;
-  color: #e9edef;
+  font-weight: var(--weight-bold, 700);
+  font-size: var(--text-md, 1rem);
+  background: var(--color-accent-purple-dark, #5c2d91);
+  color: var(--color-text-primary, #f4f4f8);
 }
 
 .chat-list-body {
@@ -429,8 +478,8 @@ watch(showChatList, (open) => {
 }
 
 .chat-list-name {
-  font-size: 0.9rem;
-  font-weight: 600;
+  font-size: var(--text-sm, 0.8125rem);
+  font-weight: var(--weight-semibold, 600);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -440,19 +489,19 @@ watch(showChatList, (open) => {
   display: flex;
   flex-wrap: wrap;
   gap: 0.35rem;
-  font-size: 0.68rem;
-  color: #8696a0;
+  font-size: var(--text-xs, 0.6875rem);
+  color: var(--color-text-tertiary, #6e6e7e);
 }
 
 .chat-list-kind {
-  color: #00a884;
-  font-weight: 600;
+  color: var(--color-accent-purple-light, #9d6fd7);
+  font-weight: var(--weight-semibold, 600);
   text-transform: uppercase;
   letter-spacing: 0.03em;
 }
 
 .chat-list-id {
-  font-family: ui-monospace, monospace;
+  font-family: var(--font-mono, ui-monospace, monospace);
   word-break: break-all;
 }
 
@@ -463,23 +512,23 @@ watch(showChatList, (open) => {
   align-items: center;
   justify-content: center;
   gap: 0.75rem;
-  color: #8696a0;
-  font-size: 0.9rem;
+  color: var(--color-text-secondary, #a8a8b8);
+  font-size: var(--text-sm, 0.8125rem);
 }
 
 .chat-banner {
   flex-shrink: 0;
   margin: 0;
   padding: 0.4rem 0.75rem;
-  font-size: 0.75rem;
+  font-size: var(--text-xs, 0.6875rem);
   text-align: center;
-  background: rgba(0, 0, 0, 0.25);
-  color: #8696a0;
+  background: var(--color-bg-elevated, #0f0f14);
+  color: var(--color-text-secondary, #a8a8b8);
 }
 
 .chat-banner--err {
-  color: #ffb4b4;
-  background: rgba(239, 68, 68, 0.15);
+  color: var(--color-error, #ef4444);
+  background: var(--color-error-muted, rgba(239, 68, 68, 0.15));
 }
 
 .chat-thread {
@@ -494,25 +543,26 @@ watch(showChatList, (open) => {
   flex-direction: column;
   gap: 0.2rem;
   background:
-    radial-gradient(circle at 20% 20%, rgba(0, 168, 132, 0.04), transparent 45%),
-    #0b141a;
+    var(--gradient-glow-purple, radial-gradient(ellipse at 30% 0%, rgba(123, 77, 181, 0.12) 0%, transparent 55%)),
+    var(--color-bg-base, #08080a);
 }
 
 .chat-thread-empty {
   margin: auto;
   text-align: center;
-  font-size: 0.85rem;
-  color: #8696a0;
+  font-size: var(--text-sm, 0.8125rem);
+  color: var(--color-text-tertiary, #6e6e7e);
 }
 
 .chat-day-divider {
   align-self: center;
   margin: 0.5rem 0;
   padding: 0.2rem 0.55rem;
-  border-radius: 0.45rem;
-  font-size: 0.68rem;
-  background: #182229;
-  color: #8696a0;
+  border-radius: var(--radius-md, 0.5rem);
+  font-size: var(--text-xs, 0.6875rem);
+  background: var(--color-bg-surface, #16161d);
+  border: 1px solid var(--color-border-subtle, rgba(255, 255, 255, 0.04));
+  color: var(--color-text-tertiary, #6e6e7e);
 }
 
 .chat-bubble-row {
@@ -530,40 +580,82 @@ watch(showChatList, (open) => {
 
 .chat-bubble {
   max-width: min(85%, 22rem);
-  padding: 0.35rem 0.5rem 0.25rem;
-  border-radius: 0.55rem;
+  padding: 0.4rem 0.55rem 0.3rem;
+  border-radius: var(--radius-lg, 0.75rem);
   position: relative;
-  box-shadow: 0 1px 0.5px rgba(0, 0, 0, 0.13);
+  border: 1px solid var(--color-border-subtle, rgba(255, 255, 255, 0.04));
+  box-shadow: var(--shadow-sm, 0 2px 4px rgba(0, 0, 0, 0.25));
 }
 
 .chat-bubble--in {
-  background: #202c33;
-  border-top-left-radius: 0.15rem;
+  background: var(--color-bg-surface, #16161d);
+  border-top-left-radius: var(--radius-sm, 0.375rem);
 }
 
 .chat-bubble--out {
-  background: #005c4b;
-  border-top-right-radius: 0.15rem;
+  background: var(--color-accent-purple-dark, #5c2d91);
+  border-color: rgba(123, 77, 181, 0.35);
+  border-top-right-radius: var(--radius-sm, 0.375rem);
 }
 
 .chat-bubble-sender {
-  margin: 0 0 0.15rem;
-  font-size: 0.72rem;
-  font-weight: 700;
-  color: #53bdeb;
+  margin: 0 0 0.2rem;
+  font-size: var(--text-xs, 0.6875rem);
+  font-weight: var(--weight-bold, 700);
+  color: var(--color-accent-orange, #ff6b1a);
+}
+
+.chat-bubble-media {
+  margin-bottom: 0.25rem;
+  max-width: 100%;
+}
+
+.chat-media-img {
+  display: block;
+  max-width: 100%;
+  max-height: 16rem;
+  border-radius: var(--radius-md, 0.5rem);
+  object-fit: cover;
+  cursor: pointer;
+}
+
+.chat-media-video {
+  display: block;
+  max-width: 100%;
+  max-height: 14rem;
+  border-radius: var(--radius-md, 0.5rem);
+}
+
+.chat-media-audio {
+  width: min(100%, 16rem);
+  height: 2.25rem;
+}
+
+.chat-media-file {
+  display: inline-block;
+  font-size: var(--text-sm, 0.8125rem);
+  color: var(--color-accent-purple-light, #9d6fd7);
+  text-decoration: underline;
+  word-break: break-all;
+}
+
+.chat-media-err {
+  margin: 0.25rem 0 0;
+  font-size: var(--text-xs, 0.6875rem);
+  color: var(--color-error, #ef4444);
 }
 
 .chat-bubble-text {
   margin: 0;
-  font-size: 0.9rem;
-  line-height: 1.35;
+  font-size: var(--text-sm, 0.8125rem);
+  line-height: var(--leading-normal, 1.5);
   white-space: pre-wrap;
   word-break: break-word;
 }
 
 .chat-bubble-text--muted {
   font-style: italic;
-  color: #8696a0;
+  color: var(--color-text-tertiary, #6e6e7e);
 }
 
 .chat-bubble-time {
@@ -571,7 +663,7 @@ watch(showChatList, (open) => {
   margin-top: 0.15rem;
   font-size: 0.62rem;
   text-align: right;
-  color: rgba(255, 255, 255, 0.55);
+  color: var(--color-text-tertiary, #6e6e7e);
 }
 
 .chat-compose {
@@ -581,8 +673,10 @@ watch(showChatList, (open) => {
   gap: 0.45rem;
   padding: 0.45rem 0.55rem;
   padding-bottom: max(0.45rem, env(safe-area-inset-bottom, 0px));
-  background: #202c33;
-  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  background: var(--color-glass, rgba(22, 22, 29, 0.72));
+  backdrop-filter: blur(var(--blur-md, 12px));
+  -webkit-backdrop-filter: blur(var(--blur-md, 12px));
+  border-top: 1px solid var(--color-glass-border, rgba(255, 255, 255, 0.06));
 }
 
 .chat-compose-input {
@@ -591,23 +685,24 @@ watch(showChatList, (open) => {
   min-height: 2.5rem;
   max-height: 6.5rem;
   resize: none;
-  border: none;
-  border-radius: 1.25rem;
+  border: 1px solid var(--color-border, rgba(255, 255, 255, 0.08));
+  border-radius: var(--radius-full, 9999px);
   padding: 0.55rem 0.85rem;
   font: inherit;
-  font-size: 0.95rem;
+  font-size: var(--text-base, 0.9375rem);
   line-height: 1.35;
-  color: #e9edef;
-  background: #2a3942;
+  color: var(--color-text-primary, #f4f4f8);
+  background: var(--color-bg-elevated, #0f0f14);
 }
 
 .chat-compose-input:focus {
-  outline: 2px solid rgba(0, 168, 132, 0.45);
-  outline-offset: 0;
+  outline: none;
+  border-color: var(--color-accent-purple, #7b4db5);
+  box-shadow: 0 0 0 3px rgba(123, 77, 181, 0.2);
 }
 
 .chat-compose-input::placeholder {
-  color: #8696a0;
+  color: var(--color-text-tertiary, #6e6e7e);
 }
 
 .chat-compose-send {
@@ -615,13 +710,14 @@ watch(showChatList, (open) => {
   width: 2.75rem;
   height: 2.75rem;
   border: none;
-  border-radius: 50%;
+  border-radius: var(--radius-full, 9999px);
   display: flex;
   align-items: center;
   justify-content: center;
-  background: #00a884;
-  color: #111b21;
+  background: var(--color-accent-purple, #7b4db5);
+  color: var(--color-text-primary, #f4f4f8);
   cursor: pointer;
+  box-shadow: var(--shadow-sm, 0 2px 4px rgba(0, 0, 0, 0.25));
 }
 
 .chat-compose-send:disabled {

@@ -48,7 +48,13 @@ export function useWhatsAppGroup() {
           newMsgs.push(msg)
         }
         for (const msg of newMsgs.reverse()) {
-          const sender = msg._data?.notifyName || msg.senderName || msg.from || 'Someone'
+          const sender =
+            msg._data?.notifyName
+            || msg._data?.pushName
+            || msg.pushName
+            || msg.senderName
+            || (typeof msg.from === 'string' && !msg.from.endsWith('@g.us') ? msg.from : '')
+            || 'Someone'
           const text = msg.body || msg.text || ''
           if (!text) continue
           const speech = `${sender} says: ${text}`

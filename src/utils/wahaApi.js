@@ -325,28 +325,167 @@ export function getWahaMessageId(msg) {
   return ''
 }
 
+function isWhatsAppJid(value) {
+  const s = String(value ?? '').trim()
+  return /@(c\.us|g\.us|lid|broadcast)$/i.test(s)
+}
+
+function extractParticipantJid(msg) {
+  const data = msg?._data && typeof msg._data === 'object' ? msg._data : {}
+  const raw =
+    msg?.author
+    || msg?.participant
+    || data?.author
+    || data?.participant
+    || data?.id?.participant
+    || ''
+  return normalizeWahaChatId(raw)
+}
+
+/**
+ * Rewrite WAHA file URLs so the browser can load them (proxy or direct base).
+ * @param {string} mediaUrl
+ */
+export function resolveWahaMediaUrl(mediaUrl) {
+  const raw = String(mediaUrl ?? '').trim()
+  if (!raw) return ''
+  const base = getWahaBaseUrl().replace(/\/+$/, '')
+  if (raw.startsWith('/')) return `${base}${raw}`
+  try {
+    const parsed = new URL(raw)
+    if (parsed.pathname.startsWith('/api/')) {
+      return `${base}${parsed.pathname}${parsed.search}`
+    }
+    return raw
+  } catch {
+    return raw
+  }
+}
+
 /**
  * @param {Record<string, unknown>} msg
- * @returns {{ id: string, text: string, fromMe: boolean, ts: number, senderName: string, hasMedia: boolean }}
+ * @returns {{ url: string, mimetype: string, filename: string, kind: string, error: string | null } | null}
  */
-export function normalizeWahaMessage(msg) {
+export function normalizeWahaMedia(msg) {
+  if (!msg?.hasMedia && !msg?.media) return null
+  const m = msg?.media && typeof msg.media === 'object' ? msg.media : {}
+  const url = resolveWahaMediaUrl(m.url || m.URL || '')
+  const mimetype = String(m.mimetype || m.mimeType || '').toLowerCase()
+  const filename = String(m.filename || m.fileName || '').trim()
+  if (!url && !msg?.hasMedia) return null
+  let kind = 'file'
+  if (mimetype.startsWith('image/')) kind = 'image'
+  else if (mimetype.startsWith('video/')) kind = 'video'
+  else if (mimetype.startsWith('audio/') || mimetype === 'audio/ogg') kind = 'audio'
+  return {
+    url,
+    mimetype,
+    filename,
+    kind,
+    error: m.error ? String(m.error) : null,
+  }
+}
+
+/**
+ * @param {Record<string, unknown>} msg
+ * @param {Map<string, string>} [contactMap]
+ * @param {string} [activeChatId]
+ */
+export function resolveWahaSenderName(msg, contactMap, activeChatId = '') {
+  if (msg?.fromMe) return ''
+  const data = msg?._data && typeof msg._data === 'object' ? msg._data : {}
+  const candidates = [
+    data?.notifyName,
+    data?.pushName,
+    msg?.pushName,
+    msg?.senderName,
+    data?.verifiedName,
+  ]
+  for (const c of candidates) {
+    const name = String(c ?? '').trim()
+    if (name && !isWhatsAppJid(name) && name !== activeChatId) return name
+  }
+  const participant = extractParticipantJid(msg)
+  if (participant && contactMap?.get(participant)) {
+    return contactMap.get(participant) || ''
+  }
+  if (participant && participant.endsWith('@c.us')) {
+    const phone = participant.split('@')[0]
+    if (phone && /^\d{6,}$/.test(phone)) return phone
+  }
+  const from = normalizeWahaChatId(msg?.from)
+  if (from && from !== activeChatId && contactMap?.get(from)) {
+    return contactMap.get(from) || ''
+  }
+  return ''
+}
+
+/**
+ * @param {Record<string, unknown>} msg
+ * @param {{ contactMap?: Map<string, string>, activeChatId?: string }} [opts]
+ * @returns {{
+ *   id: string,
+ *   text: string,
+ *   fromMe: boolean,
+ *   ts: number,
+ *   senderName: string,
+ *   hasMedia: boolean,
+ *   media: ReturnType<typeof normalizeWahaMedia>,
+ *   isGroupChat: boolean,
+ * }}
+ */
+export function normalizeWahaMessage(msg, opts = {}) {
+  const { contactMap, activeChatId = '' } = opts
   const id = getWahaMessageId(msg)
-  const text = String(msg?.body ?? msg?.text ?? '').trim()
+  const text = String(msg?.body ?? msg?.text ?? msg?.caption ?? '').trim()
   const fromMe = Boolean(msg?.fromMe)
   let ts = Number(msg?.timestamp)
   if (!Number.isFinite(ts)) ts = Date.now()
   else if (ts < 1e12) ts *= 1000
-  const senderName = String(
-    msg?._data?.notifyName || msg?.senderName || msg?.from || '',
-  ).trim()
+  const media = normalizeWahaMedia(msg)
+  const hasMedia = Boolean(msg?.hasMedia || media?.url)
+  const senderName = resolveWahaSenderName(msg, contactMap, activeChatId)
+  const isGroupChat = activeChatId.endsWith('@g.us')
   return {
     id,
     text,
     fromMe,
     ts,
     senderName,
-    hasMedia: Boolean(msg?.hasMedia),
+    hasMedia,
+    media,
+    isGroupChat,
   }
+}
+
+/**
+ * @param {Array<Record<string, unknown>>} contacts
+ * @returns {Map<string, string>}
+ */
+export function buildContactNameMap(contacts) {
+  const map = new Map()
+  if (!Array.isArray(contacts)) return map
+  for (const c of contacts) {
+    const id = normalizeWahaChatId(c?.id)
+    if (!id) continue
+    const name = String(c?.name || c?.pushname || c?.pushName || c?.shortName || '').trim()
+    if (name) map.set(id, name)
+  }
+  return map
+}
+
+/** @param {{ limit?: number, offset?: number }} [opts] */
+export async function listContacts(opts = {}) {
+  const session = getWahaSessionName()
+  const qs = new URLSearchParams({
+    session,
+    limit: String(opts.limit ?? 500),
+    offset: String(opts.offset ?? 0),
+  })
+  const r = await fetch(wahaUrl(`/api/contacts/all?${qs}`), { headers: wahaHeaders() })
+  if (!r.ok) return { ok: false, status: r.status, body: [] }
+  const body = await r.json().catch(() => [])
+  return { ok: true, status: r.status, body: Array.isArray(body) ? body : [] }
 }
 
 /**
@@ -354,12 +493,13 @@ export function normalizeWahaMessage(msg) {
  * @param {string} chatId
  * @param {number} [limit]
  */
-export async function fetchChatMessagesForChat(chatId, limit = 50) {
+export async function fetchChatMessagesForChat(chatId, limit = 50, opts = {}) {
   const session = getWahaSessionName()
   const id = normalizeWahaChatId(chatId)
   if (!id) return { ok: false, status: 0, body: null }
+  const downloadMedia = opts.downloadMedia !== false
   const r = await fetch(
-    wahaUrl(`/api/${encodeURIComponent(session)}/chats/${encodeURIComponent(id)}/messages?limit=${limit}&downloadMedia=false`),
+    wahaUrl(`/api/${encodeURIComponent(session)}/chats/${encodeURIComponent(id)}/messages?limit=${limit}&downloadMedia=${downloadMedia}`),
     { headers: wahaHeaders() },
   )
   if (!r.ok) return { ok: false, status: r.status, body: null }
