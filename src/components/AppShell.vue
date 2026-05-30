@@ -40,6 +40,7 @@ const {
   narratorActive: dailyBriefingNarratorActive,
   narratorWordIndex: dailyBriefingNarratorWordIndex,
   maybeOfferDailyBriefing,
+  acceptBriefing: acceptDailyBriefing,
   playBriefing: playDailyBriefing,
   dismiss: dismissDailyBriefing,
   stopNarrator: stopDailyBriefingNarrator,
@@ -324,7 +325,7 @@ onUnmounted(() => {
       :message-count="dailyBriefingCount"
       :preview="dailyBriefingText"
       :busy="dailyBriefingLoading"
-      @play="playDailyBriefing"
+      @play="acceptDailyBriefing"
       @dismiss="dismissDailyBriefing"
     />
     <DailyBriefingNarrator

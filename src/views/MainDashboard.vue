@@ -132,7 +132,7 @@ import {
 
 const router = useRouter()
 const { startPolling: startWhatsAppPolling } = useWhatsAppGroup()
-const { maybeOfferDailyBriefing: retryBriefingAfterUnlock } = useDailyBriefing()
+const { offerBriefingNow: offerBriefingAfterUnlock } = useDailyBriefing()
 
 const PORTAL_Z_MODAL = 2_147_483_001
 const PORTAL_Z_LOCATION_MODAL = 2_147_483_002
@@ -1094,7 +1094,7 @@ function syncTripVoiceUnlockHint() {
 function onUnlockTripVoiceTap() {
   unlockTripVoiceFromUserGesture()
   syncTripVoiceUnlockHint()
-  setTimeout(() => void retryBriefingAfterUnlock(), 1200)
+  setTimeout(() => offerBriefingAfterUnlock(), 1200)
 }
 
 async function loadQuickActions() {

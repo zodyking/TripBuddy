@@ -78,6 +78,49 @@ export function useDailyBriefing() {
     })
   }
 
+  function offerBriefingNow() {
+    if (wasOfferedThisSession()) return
+    if (!isWahaConfigured()) return
+    if (!getWahaChatId()) return
+    modalOpen.value = true
+  }
+
+  async function acceptBriefing(opts = {}) {
+    markOffered()
+    modalOpen.value = false
+    loading.value = true
+    error.value = ''
+    briefingText.value = ''
+
+    const chatId = getWahaChatId()
+    if (!chatId) { loading.value = false; return }
+
+    try {
+      const result = await postWhatsAppDailyBriefing({
+        chatId,
+        chatLabel: opts.chatLabel || 'WhatsApp chat',
+      })
+      loading.value = false
+      if (!result.ok) {
+        error.value = typeof result.error === 'string' ? result.error : 'Briefing failed.'
+        return
+      }
+      if (result.empty || !result.briefing) return
+      briefingText.value = result.briefing
+      messageCount.value = Number(result.messageCount) || 0
+      narratorActive.value = true
+      narratorWordIndex.value = -1
+      speakDailyBriefing(result.briefing, {
+        onWordIndex: (i) => { narratorWordIndex.value = i },
+        onEnd: () => { narratorActive.value = false; narratorWordIndex.value = -1 },
+        onError: () => { narratorActive.value = false; narratorWordIndex.value = -1 },
+      })
+    } catch (e) {
+      loading.value = false
+      error.value = e instanceof Error ? e.message : 'Briefing failed.'
+    }
+  }
+
   /**
    * @param {{ chatLabel?: string }} [opts]
    */
@@ -127,6 +170,8 @@ export function useDailyBriefing() {
     narratorActive,
     narratorWordIndex,
     maybeOfferDailyBriefing,
+    offerBriefingNow,
+    acceptBriefing,
     playBriefing,
     dismiss,
     stopNarrator,
