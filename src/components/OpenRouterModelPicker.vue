@@ -3,6 +3,7 @@ import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import { getOpenrouterModels } from '../api.js'
 import {
   OPENROUTER_DEFAULT_MODEL,
+  isValidOpenrouterModelId,
   sanitizeOpenrouterModel,
 } from '../constants/openrouterModels.js'
 
@@ -20,21 +21,24 @@ const listOpen = ref(false)
 const inputFocused = ref(false)
 const loading = ref(false)
 const loadError = ref('')
+/** Free-typed filter text — not sanitized until pick or blur commit. */
+const filterQuery = ref('')
 /** @type {import('vue').Ref<Array<{ id: string, name: string, description: string }>>} */
 const catalog = ref([])
 const activeIndex = ref(-1)
 const catalogLoaded = ref(false)
+let blurCloseTimer = null
+let selectingFromList = false
 
-const displayValue = computed({
-  get: () => props.modelValue,
-  set: (v) => emit('update:modelValue', sanitizeOpenrouterModel(v)),
-})
+const committedModel = computed(
+  () => sanitizeOpenrouterModel(props.modelValue || OPENROUTER_DEFAULT_MODEL),
+)
 
 const filtered = computed(() => {
-  const q = String(displayValue.value ?? '').trim().toLowerCase()
+  const q = filterQuery.value.trim().toLowerCase()
   if (!catalog.value.length) {
-    const v = displayValue.value?.trim()
-    if (v && /^[a-z0-9][\w.-]*\/[\w.-]+$/i.test(v)) {
+    const v = filterQuery.value.trim()
+    if (v && isValidOpenrouterModelId(v)) {
       return [{ id: v, name: v, description: '' }]
     }
     return []
@@ -47,13 +51,14 @@ const filtered = computed(() => {
       return false
     })
   }
-  const out = hits.slice(0, 120)
+  const out = q ? hits.slice(0, 120) : hits
+  const exact = filterQuery.value.trim()
   if (
-    q &&
-    /^[a-z0-9][\w.-]*\/[\w.-]+$/i.test(q) &&
-    !out.some((m) => m.id.toLowerCase() === q)
+    exact &&
+    isValidOpenrouterModelId(exact) &&
+    !out.some((m) => m.id.toLowerCase() === exact.toLowerCase())
   ) {
-    out.unshift({ id: q, name: q, description: 'Custom model id' })
+    out.unshift({ id: exact, name: exact, description: 'Custom model id' })
   }
   return out
 })
@@ -63,10 +68,14 @@ const listSummary = computed(() => {
   if (!catalogLoaded.value || !catalog.value.length) return ''
   const shown = filtered.value.length
   const total = catalog.value.length
-  const q = String(displayValue.value ?? '').trim()
+  const q = filterQuery.value.trim()
   if (!q) return `${total} text models — type to filter`
   return `${shown} match${shown === 1 ? '' : 'es'} · ${total} total`
 })
+
+function syncFilterFromCommitted() {
+  filterQuery.value = committedModel.value
+}
 
 async function loadCatalog() {
   if (loading.value) return
@@ -90,7 +99,7 @@ async function loadCatalog() {
 function openList() {
   if (props.disabled) return
   listOpen.value = true
-  activeIndex.value = filtered.value.length ? 0 : -1
+  activeIndex.value = -1
   if (!catalogLoaded.value && !loading.value) {
     void loadCatalog()
   }
@@ -101,24 +110,46 @@ function closeList() {
   activeIndex.value = -1
 }
 
-function toggleList() {
-  if (listOpen.value) {
-    closeList()
-    inputEl.value?.blur()
-  } else {
-    openList()
-    inputEl.value?.focus()
-  }
+function commitModel(id) {
+  const next = sanitizeOpenrouterModel(id)
+  filterQuery.value = next
+  emit('update:modelValue', next)
 }
 
 function selectModel(m) {
   if (!m?.id) return
-  displayValue.value = m.id
+  selectingFromList = true
+  commitModel(m.id)
   closeList()
+  void nextTick(() => {
+    selectingFromList = false
+    inputEl.value?.blur()
+  })
+}
+
+function toggleList() {
+  if (listOpen.value) {
+    closeList()
+    revertFilterIfNeeded()
+    inputEl.value?.blur()
+  } else {
+    filterQuery.value = ''
+    openList()
+    void nextTick(() => {
+      inputEl.value?.focus()
+    })
+  }
+}
+
+function revertFilterIfNeeded() {
+  const q = filterQuery.value.trim()
+  if (!q || !isValidOpenrouterModelId(q)) {
+    syncFilterFromCommitted()
+  }
 }
 
 function onInput() {
-  openList()
+  if (!listOpen.value) openList()
   if (!catalogLoaded.value && !loading.value) {
     void loadCatalog()
   }
@@ -126,38 +157,55 @@ function onInput() {
 
 function onFocus() {
   inputFocused.value = true
+  if (blurCloseTimer) {
+    clearTimeout(blurCloseTimer)
+    blurCloseTimer = null
+  }
+  filterQuery.value = ''
   openList()
 }
 
 function onBlur() {
   inputFocused.value = false
+  if (selectingFromList) return
+  blurCloseTimer = setTimeout(() => {
+    blurCloseTimer = null
+    if (selectingFromList) return
+    const q = filterQuery.value.trim()
+    if (isValidOpenrouterModelId(q)) {
+      commitModel(q)
+    } else {
+      syncFilterFromCommitted()
+    }
+    closeList()
+  }, 180)
 }
 
 function onKeydown(e) {
-  if (!listOpen.value && (e.key === 'ArrowDown' || e.key === 'Enter')) {
-    openList()
+  if (e.key === 'ArrowDown') {
+    if (!listOpen.value) openList()
+    if (filtered.value.length) {
+      e.preventDefault()
+      activeIndex.value =
+        activeIndex.value < 0 ? 0 : (activeIndex.value + 1) % filtered.value.length
+      scrollActiveIntoView()
+    }
     return
   }
-  if (!listOpen.value) return
-  const n = filtered.value.length
+  if (e.key === 'ArrowUp' && listOpen.value && filtered.value.length) {
+    e.preventDefault()
+    activeIndex.value =
+      activeIndex.value <= 0 ? filtered.value.length - 1 : activeIndex.value - 1
+    scrollActiveIntoView()
+    return
+  }
   if (e.key === 'Escape') {
     e.preventDefault()
+    syncFilterFromCommitted()
     closeList()
     return
   }
-  if (e.key === 'ArrowDown' && n) {
-    e.preventDefault()
-    activeIndex.value = (activeIndex.value + 1) % n
-    scrollActiveIntoView()
-    return
-  }
-  if (e.key === 'ArrowUp' && n) {
-    e.preventDefault()
-    activeIndex.value = activeIndex.value <= 0 ? n - 1 : activeIndex.value - 1
-    scrollActiveIntoView()
-    return
-  }
-  if (e.key === 'Enter' && n && activeIndex.value >= 0) {
+  if (e.key === 'Enter' && listOpen.value && activeIndex.value >= 0 && filtered.value.length) {
     e.preventDefault()
     selectModel(filtered.value[activeIndex.value])
   }
@@ -175,31 +223,34 @@ function scrollActiveIntoView() {
 function onDocPointer(e) {
   const root = rootEl.value
   if (!root || !(e.target instanceof Node)) return
-  if (!root.contains(e.target)) closeList()
+  if (!root.contains(e.target)) {
+    if (!inputFocused.value) closeList()
+  }
 }
-
-onMounted(() => {
-  document.addEventListener('pointerdown', onDocPointer, true)
-})
-
-onBeforeUnmount(() => {
-  document.removeEventListener('pointerdown', onDocPointer, true)
-})
 
 watch(
   () => props.modelValue,
-  (v) => {
-    if (!v) emit('update:modelValue', OPENROUTER_DEFAULT_MODEL)
+  () => {
+    if (!inputFocused.value && !listOpen.value) {
+      syncFilterFromCommitted()
+    }
   },
   { immediate: true },
 )
 
-watch(filtered, async () => {
+watch(filterQuery, () => {
   if (!listOpen.value) return
-  await nextTick()
-  if (activeIndex.value >= filtered.value.length) {
-    activeIndex.value = filtered.value.length ? 0 : -1
-  }
+  activeIndex.value = -1
+})
+
+onMounted(() => {
+  document.addEventListener('pointerdown', onDocPointer, true)
+  syncFilterFromCommitted()
+})
+
+onBeforeUnmount(() => {
+  document.removeEventListener('pointerdown', onDocPointer, true)
+  if (blurCloseTimer) clearTimeout(blurCloseTimer)
 })
 </script>
 
@@ -213,7 +264,7 @@ watch(filtered, async () => {
       <input
         :id="inputId"
         ref="inputEl"
-        v-model="displayValue"
+        v-model="filterQuery"
         class="or-model-input tap"
         type="text"
         role="combobox"
@@ -239,9 +290,9 @@ watch(filtered, async () => {
         class="or-model-toggle tap"
         tabindex="-1"
         :disabled="disabled"
-        :aria-label="listOpen ? 'Close model list' : 'Open model list'"
+        :aria-label="listOpen ? 'Close model list' : 'Browse all models'"
         :aria-expanded="listOpen"
-        @click="toggleList"
+        @mousedown.prevent="toggleList"
       >
         <svg
           class="or-model-chevron"
@@ -277,9 +328,12 @@ watch(filtered, async () => {
           :id="`${inputId}-opt-${i}`"
           class="or-model-item tap"
           role="option"
-          :aria-selected="displayValue === m.id"
-          :class="{ 'is-active': i === activeIndex, 'is-selected': displayValue === m.id }"
-          @pointerdown.prevent="selectModel(m)"
+          :aria-selected="committedModel === m.id"
+          :class="{
+            'is-active': i === activeIndex,
+            'is-selected': committedModel === m.id,
+          }"
+          @mousedown.prevent="selectModel(m)"
         >
           <span class="or-model-name">{{ m.name }}</span>
           <span class="or-model-id">{{ m.id }}</span>
@@ -297,7 +351,6 @@ watch(filtered, async () => {
 </template>
 
 <style scoped>
-/* Match SettingsView `.inp` / `.api-key-inp` (parent styles are scoped and do not reach this child). */
 .or-model-picker {
   position: relative;
   flex: 1 1 10rem;
@@ -424,8 +477,7 @@ watch(filtered, async () => {
   text-align: left;
 }
 
-.or-model-item.is-active,
-.or-model-item:hover {
+.or-model-item.is-active {
   background: var(--color-hover, rgba(255, 255, 255, 0.04));
 }
 

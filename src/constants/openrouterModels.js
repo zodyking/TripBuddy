@@ -12,12 +12,22 @@ If nothing important happened, say so in one short sentence.`
 
 /**
  * @param {string} raw
+ * @returns {boolean}
+ */
+export function isValidOpenrouterModelId(raw) {
+  const v = String(raw ?? '').trim()
+  if (!v || v.length > 120) return false
+  return /^[a-z0-9][\w.-]*\/[\w.-]+$/i.test(v)
+}
+
+/**
+ * @param {string} raw
  * @returns {string}
  */
 export function sanitizeOpenrouterModel(raw) {
   const v = String(raw ?? '').trim()
   if (!v) return OPENROUTER_DEFAULT_MODEL
   if (v.length > 120) return OPENROUTER_DEFAULT_MODEL
-  if (/^[a-z0-9][\w.-]*\/[\w.-]+$/i.test(v)) return v
+  if (isValidOpenrouterModelId(v)) return v
   return OPENROUTER_DEFAULT_MODEL
 }
