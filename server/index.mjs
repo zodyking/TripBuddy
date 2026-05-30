@@ -219,6 +219,7 @@ import {
   startPanynjBridgePoll,
 } from './bridge-panynj.mjs'
 import { getVerrazzanoResponsePayload } from './bridge-verrazzano-traffic.mjs'
+import { buildBridgeTrafficExport } from './bridge-traffic-export.mjs'
 import { getNy511TruckNycPayload } from './ny511-traffic-feeds.mjs'
 import { registerTrafficMonitoredRoutes } from './traffic-monitored-routes-routes.mjs'
 import {
@@ -1427,6 +1428,16 @@ app.delete('/api/settings/credentials', async () => {
 app.get('/api/settings/access-log', async () => {
   const entries = await listAccessEntries()
   return { ok: true, entries }
+})
+
+app.get('/api/settings/bridge-traffic-export', async (_req, reply) => {
+  try {
+    const data = await buildBridgeTrafficExport()
+    return { ok: true, ...data }
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e)
+    return reply.code(500).send({ ok: false, error: msg })
+  }
 })
 
 function isValidHttpUrl(url) {

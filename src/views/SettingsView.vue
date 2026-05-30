@@ -20,6 +20,7 @@ import {
   fetchFedexLinehaulTripStatus,
   fetchFedexLinehaulTrips,
   getSettingsAccessLog,
+  getBridgeTrafficExport,
   getSettingsGeoFence,
   putSettingsGeoFence,
   postSettingsGeoFencePreview,
@@ -143,7 +144,7 @@ const SECRET_SAVED_MASK = '••••••••••••••••'
 const router = useRouter()
 const route = useRoute()
 
-/** @type {import('vue').Ref<'general' | 'automation' | 'audio' | 'security' | 'directory' | 'helpers'>} */
+/** @type {import('vue').Ref<'general' | 'automation' | 'audio' | 'security' | 'directory' | 'traffic' | 'helpers' | 'whatsapp'>} */
 const settingsTab = ref('general')
 const settingsTabsEl = ref(/** @type {HTMLElement | null} */ (null))
 const signOutBusy = ref(false)
@@ -1343,6 +1344,37 @@ async function runLinehaulTest() {
 }
 
 // ---------------------------------------------------------------------------
+const trafficExportBusy = ref(false)
+const trafficExportMsg = ref('')
+const trafficExportError = ref('')
+
+async function downloadBridgeTrafficExport() {
+  if (trafficExportBusy.value) return
+  trafficExportBusy.value = true
+  trafficExportMsg.value = ''
+  trafficExportError.value = ''
+  try {
+    const data = await getBridgeTrafficExport()
+    const blob = new Blob([JSON.stringify(data, null, 2)], {
+      type: 'application/json;charset=utf-8',
+    })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)
+    a.href = url
+    a.download = `bridge-traffic-export-${stamp}.json`
+    document.body.appendChild(a)
+    a.click()
+    a.remove()
+    URL.revokeObjectURL(url)
+    trafficExportMsg.value = 'Export downloaded.'
+  } catch (e) {
+    trafficExportError.value = e instanceof Error ? e.message : String(e)
+  } finally {
+    trafficExportBusy.value = false
+  }
+}
+
 // Directory settings state
 // ---------------------------------------------------------------------------
 
@@ -1639,6 +1671,16 @@ onUnmounted(() => {
         @click="settingsTab = 'directory'"
       >
         Directory
+      </button>
+      <button
+        type="button"
+        class="tab-btn tap"
+        role="tab"
+        :aria-selected="settingsTab === 'traffic'"
+        :class="{ active: settingsTab === 'traffic' }"
+        @click="settingsTab = 'traffic'"
+      >
+        Traffic
       </button>
       <button
         type="button"
@@ -2601,6 +2643,27 @@ onUnmounted(() => {
             </button>
           </div>
         </div>
+      </SettingsSection>
+    </main>
+
+    <main v-show="settingsTab === 'traffic'" class="stack traffic-panel">
+      <SettingsSection title="Bridge traffic history">
+        <p class="cred-hint">
+          Download the full crossing-time and speed series stored in Postgres (up to
+          <strong>500 samples per route</strong>, not the 24-hour chart cap). PANYNJ bridges poll every
+          5 minutes; Verrazzano when HERE/TomTom is refreshed. JSON is grouped
+          <strong>per bridge → ToNY / ToNJ</strong> with ISO timestamps.
+        </p>
+        <p v-if="trafficExportError" class="cred-msg cred-msg--error">{{ trafficExportError }}</p>
+        <p v-else-if="trafficExportMsg" class="cred-msg">{{ trafficExportMsg }}</p>
+        <button
+          type="button"
+          class="btn primary tap"
+          :disabled="trafficExportBusy"
+          @click="downloadBridgeTrafficExport"
+        >
+          {{ trafficExportBusy ? 'Preparing export…' : 'Export bridge traffic JSON' }}
+        </button>
       </SettingsSection>
     </main>
 
