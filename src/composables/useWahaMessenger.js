@@ -239,11 +239,12 @@ export function useWahaMessenger(opts = {}) {
         applyRawThread(chatId, synced.messages, synced.updatedAt)
         if (opts.scroll) await scrollToBottom()
         void hydrateMediaLazy(chatId)
+        error.value = ''
       } else if (!messages.value.length) {
         error.value = synced.error || 'Could not sync messages'
       }
     } catch (e) {
-      if (gen === syncGen) {
+      if (gen === syncGen && !messages.value.length) {
         error.value = e instanceof Error ? e.message : String(e)
       }
     } finally {
@@ -269,7 +270,10 @@ export function useWahaMessenger(opts = {}) {
       const r = await fetchChatMessagesForChat(activeChatId.value, 30, {
         downloadMedia: false,
       })
-      if (!r.ok || !Array.isArray(r.body)) return
+      if (!r.ok || !Array.isArray(r.body)) {
+        if (messages.value.length) error.value = ''
+        return
+      }
       error.value = ''
       const incoming = normalizeList(r.body, activeChatId.value).filter((m) => m.id)
       const byId = new Map(messages.value.map((m) => [m.id, m]))

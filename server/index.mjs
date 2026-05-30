@@ -17,6 +17,8 @@ import {
   setHereApiKeyForAccount,
   getNy511ApiKeyForAccount,
   setNy511ApiKeyForAccount,
+  getOpenrouterApiKeyForAccount,
+  setOpenrouterApiKeyForAccount,
   getGwbUpperCamYoutubeUrlForAccount,
   setGwbUpperCamYoutubeUrlForAccount,
   getHelpersAutoArrivePrefsForAccount,
@@ -104,6 +106,7 @@ import {
   fetchWahaMessageMedia,
   fetchWahaContacts,
 } from './wahaChatCache.mjs'
+import { generateDailyBriefing } from './waha-daily-briefing.mjs'
 import { readAssignment, writeAssignment } from './assignment-store.mjs'
 import {
   getCredentialsMeta,
@@ -496,6 +499,19 @@ app.post('/api/whatsapp/thread/sync', async (req, reply) => {
   }
   const r = await syncThreadCache(chatId, { limit, downloadMedia, contacts })
   if (!r.ok) {
+    const stale = await readThreadCache(chatId)
+    if (stale?.messages?.length) {
+      return {
+        ok: true,
+        stale: true,
+        warning: 'Using cached messages; live WAHA sync unavailable.',
+        chatId,
+        messages: stale.messages,
+        updatedAt: stale.updatedAt ?? 0,
+        contacts: stale.contacts?.length ? stale.contacts : contacts,
+        status: r.status,
+      }
+    }
     return reply.code(r.status || 502).send({
       ok: false,
       error: 'WAHA sync failed',
@@ -881,10 +897,12 @@ app.get('/api/settings/credentials', async (req) => {
   const includeTomtom = req.query?.includeTomtomApiKey === '1'
   const includeHere = req.query?.includeHereApiKey === '1'
   const includeNy511 = req.query?.includeNy511ApiKey === '1'
+  const includeOpenrouter = req.query?.includeOpenrouterApiKey === '1'
   const ak = req.credentialAccountKey
   let tomtomApiKey = undefined
   let hereApiKey = undefined
   let ny511ApiKey = undefined
+  let openrouterApiKey = undefined
   if (includeTomtom && typeof ak === 'string' && ak.trim()) {
     tomtomApiKey = (await getTomtomApiKeyForAccount(ak)) || ''
   }
@@ -893,6 +911,9 @@ app.get('/api/settings/credentials', async (req) => {
   }
   if (includeNy511 && typeof ak === 'string' && ak.trim()) {
     ny511ApiKey = (await getNy511ApiKeyForAccount(ak)) || ''
+  }
+  if (includeOpenrouter && typeof ak === 'string' && ak.trim()) {
+    openrouterApiKey = (await getOpenrouterApiKeyForAccount(ak)) || ''
   }
   let gwbUpperCamYoutubeUrl = ''
   /** @type {{ enabled: boolean, radiusNm: number } | null} */
@@ -908,6 +929,7 @@ app.get('/api/settings/credentials', async (req) => {
     ...(includeTomtom ? { tomtomApiKey } : {}),
     ...(includeHere ? { hereApiKey } : {}),
     ...(includeNy511 ? { ny511ApiKey } : {}),
+    ...(includeOpenrouter ? { openrouterApiKey } : {}),
     gwbUpperCamYoutubeUrl,
     ...(helpersAutoArrivePrefs
       ? {
@@ -1001,6 +1023,68 @@ app.put('/api/settings/ny511-api-key', async (req, reply) => {
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e)
     return reply.code(400).send({ error: msg })
+  }
+})
+
+app.put('/api/settings/openrouter-api-key', async (req, reply) => {
+  try {
+    const ak = req.credentialAccountKey
+    if (typeof ak !== 'string' || !ak.trim()) {
+      return reply.code(400).send({ error: 'No account in session.' })
+    }
+    const body = req.body ?? {}
+    const raw =
+      typeof body.openrouterApiKey === 'string'
+        ? body.openrouterApiKey
+        : typeof body.key === 'string'
+          ? body.key
+          : ''
+    const sanitized = raw.trim()
+    if (raw.trim() && sanitized.length < 8) {
+      return reply.code(400).send({ error: 'Invalid OpenRouter API key format.' })
+    }
+    await setOpenrouterApiKeyForAccount(ak, sanitized)
+    return { ok: true, hasOpenrouterApiKey: Boolean(sanitized) }
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e)
+    return reply.code(400).send({ error: msg })
+  }
+})
+
+app.post('/api/whatsapp/daily-briefing', async (req, reply) => {
+  reply.header('Cache-Control', 'no-store')
+  try {
+    const ak = req.credentialAccountKey
+    if (typeof ak !== 'string' || !ak.trim()) {
+      return reply.code(401).send({ ok: false, error: 'Sign in required.' })
+    }
+    const body = req.body ?? {}
+    const chatId = String(body.chatId ?? '').trim()
+    if (!chatId) {
+      return reply.code(400).send({ ok: false, error: 'chatId required' })
+    }
+    const openRouterApiKey = await getOpenrouterApiKeyForAccount(ak.trim())
+    if (!openRouterApiKey) {
+      return reply.code(400).send({
+        ok: false,
+        error: 'OpenRouter API key not configured. Add it in Settings → API.',
+      })
+    }
+    const timeZone = String(body.timeZone ?? 'UTC').trim() || 'UTC'
+    const chatLabel = String(body.chatLabel ?? chatId).trim()
+    const result = await generateDailyBriefing({
+      chatId,
+      chatLabel,
+      timeZone,
+      openRouterApiKey,
+    })
+    if (!result.ok) {
+      return reply.code(502).send(result)
+    }
+    return result
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e)
+    return reply.code(500).send({ ok: false, error: msg })
   }
 })
 

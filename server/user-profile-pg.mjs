@@ -66,6 +66,9 @@ export async function ensureUserProfileTable() {
       ALTER TABLE ${TABLE} ADD COLUMN IF NOT EXISTS ny511_api_key_enc JSONB
     `)
     await client.query(`
+      ALTER TABLE ${TABLE} ADD COLUMN IF NOT EXISTS openrouter_api_key_enc JSONB
+    `)
+    await client.query(`
       ALTER TABLE ${TABLE} ADD COLUMN IF NOT EXISTS api_quota_state JSONB
     `)
     await client.query(`
@@ -212,6 +215,51 @@ export async function setNy511ApiKeyForAccount(accountKey, rawKey) {
      VALUES ($1, $2::jsonb, now())
      ON CONFLICT (account_key) DO UPDATE SET
        ny511_api_key_enc = EXCLUDED.ny511_api_key_enc,
+       updated_at = now()`,
+    [ak, enc ? JSON.stringify(enc) : null],
+  )
+}
+
+/**
+ * @param {string} accountKey
+ * @returns {Promise<string>}
+ */
+export async function getOpenrouterApiKeyForAccount(accountKey) {
+  const ak = String(accountKey || '').trim()
+  if (!ak) return ''
+  const p = await getPostgresPool()
+  if (!p) return ''
+  await ensureUserProfileTable()
+  const { rows } = await p.query(
+    `SELECT openrouter_api_key_enc FROM ${TABLE} WHERE account_key = $1`,
+    [ak],
+  )
+  const enc = rows[0]?.openrouter_api_key_enc
+  if (!enc || typeof enc !== 'object') return ''
+  try {
+    return decryptString(enc).trim()
+  } catch {
+    return ''
+  }
+}
+
+/**
+ * @param {string} accountKey
+ * @param {string} rawKey
+ */
+export async function setOpenrouterApiKeyForAccount(accountKey, rawKey) {
+  const ak = String(accountKey || '').trim()
+  if (!ak) throw new Error('account_key required')
+  const p = await getPostgresPool()
+  if (!p) throw new Error('Database not available')
+  await ensureUserProfileTable()
+  const v = String(rawKey ?? '').trim()
+  const enc = v ? encryptString(v) : null
+  await p.query(
+    `INSERT INTO ${TABLE} (account_key, openrouter_api_key_enc, updated_at)
+     VALUES ($1, $2::jsonb, now())
+     ON CONFLICT (account_key) DO UPDATE SET
+       openrouter_api_key_enc = EXCLUDED.openrouter_api_key_enc,
        updated_at = now()`,
     [ak, enc ? JSON.stringify(enc) : null],
   )

@@ -25,10 +25,23 @@ import {
   linehaulBearerCaptureOverlayVisible,
   linehaulBearerCaptureProgress,
 } from '../stores/linehaulBearerCaptureOverlay.js'
+import DailyBriefingModal from './DailyBriefingModal.vue'
+import { useDailyBriefing } from '../composables/useDailyBriefing.js'
+import { hydrateOpenrouterApiKeyFromServer } from '../stores/trafficTileKey.js'
 
 const route = useRoute()
 const router = useRouter()
 const { apiOk, refreshHealth } = useApiHealth()
+
+const {
+  modalOpen: dailyBriefingOpen,
+  briefingText: dailyBriefingText,
+  messageCount: dailyBriefingCount,
+  loading: dailyBriefingLoading,
+  maybeOfferDailyBriefing,
+  playBriefing: playDailyBriefing,
+  dismiss: dismissDailyBriefing,
+} = useDailyBriefing()
 
 function fmtNotifTime(ts) {
   if (typeof ts !== 'number') return '—'
@@ -95,6 +108,13 @@ onMounted(() => {
   startAppGeolocationWatch()
   connectLiveLogStream()
   void fetchInAppInbox()
+  if (route.name !== 'login') {
+    void hydrateOpenrouterApiKeyFromServer().then(() => {
+      setTimeout(() => {
+        void maybeOfferDailyBriefing()
+      }, 1200)
+    })
+  }
   for (const ms of [500, 1500, 3500]) {
     setTimeout(() => {
       void refreshHealth().then(() => {
@@ -311,6 +331,15 @@ onUnmounted(() => {
         </div>
       </div>
     </Teleport>
+
+    <DailyBriefingModal
+      :open="dailyBriefingOpen"
+      :message-count="dailyBriefingCount"
+      :preview="dailyBriefingText"
+      :busy="dailyBriefingLoading"
+      @play="playDailyBriefing"
+      @dismiss="dismissDailyBriefing"
+    />
   </div>
 </template>
 

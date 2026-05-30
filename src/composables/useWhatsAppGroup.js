@@ -8,9 +8,62 @@ import {
   isWahaTtsEnabled,
   getWahaPollInterval,
   getWahaChatId,
+  listContacts,
+  buildContactNameMap,
+  normalizeWahaMessage,
 } from '../utils/wahaApi.js'
 import { enqueueAnnouncement } from '../utils/alertAudioQueue.js'
 import { pushLiveLog } from '../stores/liveLogStore.js'
+
+/** @type {Map<string, string>} */
+let contactMap = new Map()
+let contactsLoaded = false
+
+function getMsgId(msg) {
+  if (!msg) return ''
+  if (typeof msg.id === 'string') return msg.id
+  if (msg.id && typeof msg.id === 'object') return msg.id._serialized || msg.id.id || ''
+  return ''
+}
+
+/**
+ * @param {ReturnType<typeof normalizeWahaMessage>} norm
+ */
+function messageTextForSpeech(norm) {
+  const text = String(norm.text || '').trim()
+  if (text) return text
+  if (norm.hasMedia) {
+    const kind = norm.media?.kind
+    if (kind === 'image') return 'sent an image'
+    if (kind === 'video') return 'sent a video'
+    if (kind === 'audio') return 'sent an audio message'
+    return 'sent an attachment'
+  }
+  return ''
+}
+
+/**
+ * @param {ReturnType<typeof normalizeWahaMessage>} norm
+ */
+function buildNewMessageSpeech(norm) {
+  const body = messageTextForSpeech(norm)
+  if (!body) return ''
+  const sender = String(norm.senderName || '').trim() || 'someone'
+  return `New message from ${sender}, ${body}`
+}
+
+async function ensureContacts() {
+  if (contactsLoaded) return
+  try {
+    const r = await listContacts({ limit: 500 })
+    if (r.ok && Array.isArray(r.body)) {
+      contactMap = buildContactNameMap(r.body)
+    }
+  } catch {
+    /* optional */
+  }
+  contactsLoaded = true
+}
 
 export function useWhatsAppGroup() {
   const messages = ref([])
@@ -21,13 +74,6 @@ export function useWhatsAppGroup() {
   /** Track last seen message ID to only speak new ones */
   let lastSeenId = ''
 
-  function getMsgId(msg) {
-    if (!msg) return ''
-    if (typeof msg.id === 'string') return msg.id
-    if (msg.id && typeof msg.id === 'object') return msg.id._serialized || msg.id.id || ''
-    return ''
-  }
-
   async function pollOnce() {
     if (!isWahaConfigured()) return
     try {
@@ -37,9 +83,11 @@ export function useWhatsAppGroup() {
         return
       }
       error.value = ''
+      const chatId = getWahaChatId()
       const incoming = r.body
 
       if (lastSeenId && isWahaTtsEnabled()) {
+        await ensureContacts()
         const newMsgs = []
         for (const msg of incoming) {
           const msgId = getMsgId(msg)
@@ -47,19 +95,12 @@ export function useWhatsAppGroup() {
           if (msg.fromMe) continue
           newMsgs.push(msg)
         }
-        for (const msg of newMsgs.reverse()) {
-          const sender =
-            msg._data?.notifyName
-            || msg._data?.pushName
-            || msg.pushName
-            || msg.senderName
-            || (typeof msg.from === 'string' && !msg.from.endsWith('@g.us') ? msg.from : '')
-            || 'Someone'
-          const text = msg.body || msg.text || ''
-          if (!text) continue
-          const speech = `${sender} says: ${text}`
+        for (const raw of newMsgs.reverse()) {
+          const norm = normalizeWahaMessage(raw, { contactMap, activeChatId: chatId })
+          const speech = buildNewMessageSpeech(norm)
+          if (!speech) continue
           pushLiveLog({ type: 'info', message: `[WhatsApp] TTS: ${speech}`, ts: Date.now() })
-          enqueueAnnouncement(speech, { category: `whatsapp:${getMsgId(msg)}` })
+          enqueueAnnouncement(speech, { category: `whatsapp:${norm.id}` })
         }
       }
 
@@ -77,6 +118,7 @@ export function useWhatsAppGroup() {
     if (!isWahaConfigured()) return
     polling.value = true
     lastSeenId = ''
+    contactsLoaded = false
     pollOnce().then(() => {
       if (!pollTimer) {
         pollTimer = setInterval(pollOnce, getWahaPollInterval())
@@ -94,7 +136,7 @@ export function useWhatsAppGroup() {
 
   function seedLastSeen() {
     if (messages.value.length > 0) {
-      lastSeenId = messages.value[0].id || ''
+      lastSeenId = getMsgId(messages.value[0])
     }
   }
 

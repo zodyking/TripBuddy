@@ -8,6 +8,7 @@ import {
   putTomtomApiKey,
   putHereApiKey,
   putNy511ApiKey,
+  putOpenrouterApiKey,
   putGwbUpperCamYoutubeUrl,
   putHelpersAutoArrivePrefs,
   deleteCredentials,
@@ -62,6 +63,8 @@ import {
   setHereApiKey,
   ny511ApiKeyOverride,
   setNy511ApiKey,
+  openrouterApiKeyOverride,
+  setOpenrouterApiKey,
 } from '../stores/trafficTileKey.js'
 import AutomationList from '../components/automation/AutomationList.vue'
 import AutomationEditor from '../components/automation/AutomationEditor.vue'
@@ -547,6 +550,26 @@ async function saveNy511ApiKey() {
   }
 }
 
+/** OpenRouter API key (WhatsApp daily briefing). Register: openrouter.ai */
+const openrouterApiDraft = ref('')
+const openrouterApiMsg = ref('')
+const openrouterApiBusy = ref(false)
+
+async function saveOpenrouterApiKey() {
+  if (!(await requireApi())) return
+  openrouterApiBusy.value = true
+  openrouterApiMsg.value = ''
+  try {
+    await putOpenrouterApiKey({ openrouterApiKey: openrouterApiDraft.value })
+    setOpenrouterApiKey(openrouterApiDraft.value)
+    openrouterApiMsg.value = 'OpenRouter key saved to your account (encrypted on the server).'
+  } catch (e) {
+    openrouterApiMsg.value = e instanceof Error ? e.message : String(e)
+  } finally {
+    openrouterApiBusy.value = false
+  }
+}
+
 /** GWB upper deck camera: full YouTube URL saved on server (no YouTube API key required). */
 const gwbUpperCamYoutubeDraft = ref('')
 const gwbUpperCamYoutubeMsg = ref('')
@@ -824,6 +847,7 @@ async function loadCredentials() {
       includeTomtomApiKey: true,
       includeHereApiKey: true,
       includeNy511ApiKey: true,
+      includeOpenrouterApiKey: true,
     })
     credUser.value = credMeta.value.username || ''
     credTractor.value = String(credMeta.value.tractorNumber ?? '')
@@ -879,6 +903,12 @@ async function loadCredentials() {
       typeof credMeta.value.ny511ApiKey === 'string' ? credMeta.value.ny511ApiKey.trim() : ''
     if (nk) setNy511ApiKey(nk)
     ny511ApiDraft.value = ny511ApiKeyOverride.value
+    const ork =
+      typeof credMeta.value.openrouterApiKey === 'string'
+        ? credMeta.value.openrouterApiKey.trim()
+        : ''
+    if (ork) setOpenrouterApiKey(ork)
+    openrouterApiDraft.value = openrouterApiKeyOverride.value
     gwbUpperCamYoutubeDraft.value =
       typeof credMeta.value.gwbUpperCamYoutubeUrl === 'string'
         ? credMeta.value.gwbUpperCamYoutubeUrl
@@ -960,6 +990,8 @@ async function clearCredentials() {
     hereApiDraft.value = ''
     setNy511ApiKey('')
     ny511ApiDraft.value = ''
+    setOpenrouterApiKey('')
+    openrouterApiDraft.value = ''
     gwbUpperCamYoutubeDraft.value = ''
     await loadCredentials()
     pushLiveLog({ type: 'info', message: 'Credentials cleared', ts: Date.now() })
@@ -1365,6 +1397,7 @@ onMounted(async () => {
   tomtomTrafficDraft.value = trafficTomtomKeyOverride.value
   hereApiDraft.value = hereApiKeyOverride.value
   ny511ApiDraft.value = ny511ApiKeyOverride.value
+  openrouterApiDraft.value = openrouterApiKeyOverride.value
   applySettingsRouteFragment()
 })
 
@@ -1740,6 +1773,31 @@ onUnmounted(() => {
         <p class="api-key-foot">
           <span class="cred-hint">Status: {{ ny511ApiKeyOverride ? 'saved' : 'empty' }}</span>
           <span v-if="ny511ApiMsg" class="cred-msg">{{ ny511ApiMsg }}</span>
+        </p>
+
+        <!-- OpenRouter -->
+        <h4 class="api-sub-heading">OpenRouter (Daily briefing)</h4>
+        <p class="cred-hint">
+          Summarizes today’s monitored WhatsApp chat into a spoken briefing on login.
+          <a href="https://openrouter.ai/" target="_blank" rel="noopener noreferrer" class="ext-link">OpenRouter API key</a>
+        </p>
+        <div class="api-key-row">
+          <label class="lbl api-key-lbl" for="openrouter-api-key">OpenRouter</label>
+          <input
+            id="openrouter-api-key"
+            v-model="openrouterApiDraft"
+            class="inp tap api-key-inp"
+            type="password"
+            autocomplete="off"
+            placeholder="API key"
+          />
+          <button type="button" class="btn primary tap api-key-save" :disabled="openrouterApiBusy" @click="saveOpenrouterApiKey">
+            {{ openrouterApiBusy ? 'Saving…' : 'Save' }}
+          </button>
+        </div>
+        <p class="api-key-foot">
+          <span class="cred-hint">Status: {{ openrouterApiKeyOverride ? 'saved' : 'empty' }}</span>
+          <span v-if="openrouterApiMsg" class="cred-msg">{{ openrouterApiMsg }}</span>
         </p>
 
         <!-- GWB Camera -->

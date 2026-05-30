@@ -21,6 +21,10 @@ const hereOverride = ref('')
 const LS_NY511 = 'fedextool_ny511_api_key'
 const ny511Override = ref('')
 
+// OpenRouter key (WhatsApp daily briefing summaries)
+const LS_OPENROUTER = 'fedextool_openrouter_api_key'
+const openrouterOverride = ref('')
+
 if (typeof window !== 'undefined') {
   try {
     const tomtomVal = localStorage.getItem(LS_TOMTOM)
@@ -31,6 +35,9 @@ if (typeof window !== 'undefined') {
     
     const ny511Val = localStorage.getItem(LS_NY511)
     if (ny511Val) ny511Override.value = ny511Val.trim()
+
+    const openrouterVal = localStorage.getItem(LS_OPENROUTER)
+    if (openrouterVal) openrouterOverride.value = openrouterVal.trim()
   } catch {
     /* private mode */
   }
@@ -194,6 +201,51 @@ export function getNy511KeyEffective() {
 
 export const ny511KeyEffective = computed(() => ny511Override.value)
 
+export const openrouterApiKeyOverride = openrouterOverride
+
+/**
+ * @param {string} key
+ */
+export function setOpenrouterApiKey(key) {
+  const v = String(key ?? '').trim()
+  if (typeof window === 'undefined') {
+    openrouterOverride.value = v
+    return
+  }
+  try {
+    if (v) {
+      localStorage.setItem(LS_OPENROUTER, v)
+    } else {
+      localStorage.removeItem(LS_OPENROUTER)
+    }
+  } catch {
+    /* ignore */
+  }
+  openrouterOverride.value = v
+}
+
+export async function hydrateOpenrouterApiKeyFromServer() {
+  if (typeof window === 'undefined') return
+  try {
+    const r = await fetch('/api/settings/credentials?includeOpenrouterApiKey=1', {
+      credentials: 'include',
+    })
+    if (!r.ok) return
+    const data = await r.json().catch(() => ({}))
+    if (typeof data.openrouterApiKey === 'string') {
+      setOpenrouterApiKey(data.openrouterApiKey)
+    }
+  } catch {
+    /* ignore */
+  }
+}
+
+export function getOpenrouterKeyEffective() {
+  return openrouterOverride.value
+}
+
+export const openrouterKeyEffective = computed(() => openrouterOverride.value)
+
 /**
  * Hydrate all traffic API keys from server.
  */
@@ -202,5 +254,6 @@ export async function hydrateAllTrafficKeysFromServer() {
     hydrateTomtomTrafficKeyFromServer(),
     hydrateHereApiKeyFromServer(),
     hydrateNy511ApiKeyFromServer(),
+    hydrateOpenrouterApiKeyFromServer(),
   ])
 }

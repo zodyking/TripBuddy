@@ -212,7 +212,7 @@ function openMedia(url) {
     </div>
 
     <template v-else>
-      <p v-if="error" class="chat-banner chat-banner--err" role="alert">{{ error }}</p>
+      <p v-if="error && !displayMessages.length" class="chat-banner chat-banner--err" role="alert">{{ error }}</p>
       <p v-else-if="loading && !displayMessages.length" class="chat-banner">Loading messages…</p>
       <p v-else-if="syncing" class="chat-banner chat-banner--sync">Updating…</p>
 

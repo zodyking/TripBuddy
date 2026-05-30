@@ -436,7 +436,7 @@ export async function getPublicGeoFenceCheck() {
 }
 
 /**
- * @param {{ includeLinehaulBearer?: boolean, includeTomtomApiKey?: boolean, includeHereApiKey?: boolean, includeNy511ApiKey?: boolean }} [opts]
+ * @param {{ includeLinehaulBearer?: boolean, includeTomtomApiKey?: boolean, includeHereApiKey?: boolean, includeNy511ApiKey?: boolean, includeOpenrouterApiKey?: boolean }} [opts]
  * When includeLinehaulBearer, response includes decrypted Linehaul JWT for Settings only.
  * When includeTomtomApiKey, response includes decrypted TomTom key for Settings only.
  * When includeHereApiKey, response includes decrypted HERE key for Settings only.
@@ -450,6 +450,7 @@ export async function getCredentials(opts = {}) {
   if (opts.includeTomtomApiKey) q.set('includeTomtomApiKey', '1')
   if (opts.includeHereApiKey) q.set('includeHereApiKey', '1')
   if (opts.includeNy511ApiKey) q.set('includeNy511ApiKey', '1')
+  if (opts.includeOpenrouterApiKey) q.set('includeOpenrouterApiKey', '1')
   const qs = q.toString()
   const r = await apiFetch(`/api/settings/credentials${qs ? `?${qs}` : ''}`)
   return handleJson(r)
@@ -490,6 +491,40 @@ export async function putNy511ApiKey(body) {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body ?? {}),
+  })
+  return handleJson(r)
+}
+
+/**
+ * Persist OpenRouter API key for daily WhatsApp briefing (encrypted server-side).
+ * @param {{ openrouterApiKey?: string }} body
+ */
+export async function putOpenrouterApiKey(body) {
+  const r = await apiFetch('/api/settings/openrouter-api-key', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body ?? {}),
+  })
+  return handleJson(r)
+}
+
+/**
+ * Generate spoken daily briefing from today's WhatsApp messages (OpenRouter).
+ * @param {{ chatId: string, chatLabel?: string, timeZone?: string }} body
+ */
+export async function postWhatsAppDailyBriefing(body) {
+  const r = await apiFetch('/api/whatsapp/daily-briefing', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      chatId: String(body.chatId || '').trim(),
+      chatLabel: body.chatLabel,
+      timeZone:
+        body.timeZone ||
+        (typeof Intl !== 'undefined'
+          ? Intl.DateTimeFormat().resolvedOptions().timeZone
+          : 'UTC'),
+    }),
   })
   return handleJson(r)
 }
