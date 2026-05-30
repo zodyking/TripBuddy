@@ -2,6 +2,7 @@
 import { ref, computed, watch } from 'vue'
 import { RouterLink } from 'vue-router'
 import { useWahaMessenger } from '../composables/useWahaMessenger.js'
+import { wahaPrefsHydrated } from '../utils/wahaPrefs.js'
 
 const scrollEl = ref(/** @type {HTMLElement | null} */ (null))
 const draft = ref('')
@@ -26,6 +27,8 @@ const {
 } = useWahaMessenger({ scrollEl, poll: true })
 
 const hasActiveChat = computed(() => !!activeChatId.value)
+const threadBusy = computed(() => loading.value || syncing.value)
+const showThreadLoader = computed(() => threadBusy.value)
 
 function fmtTime(ts) {
   if (!ts) return ''
@@ -107,8 +110,16 @@ function openMedia(url) {
 
 <template>
   <div class="chat-page">
+  <!-- Hydrating account WhatsApp prefs from server -->
+  <div v-if="!wahaPrefsHydrated" class="chat-empty">
+    <div class="chat-thread-loader" role="status" aria-live="polite">
+      <span class="chat-thread-spinner" aria-hidden="true" />
+      <p class="chat-thread-loader-label">Loading chat…</p>
+    </div>
+  </div>
+
   <!-- Not configured -->
-  <div v-if="!configured" class="chat-empty">
+  <div v-else-if="!configured" class="chat-empty">
     <div class="chat-empty-card">
       <p class="chat-empty-title">WhatsApp not set up</p>
       <p class="chat-empty-hint">
@@ -209,12 +220,21 @@ function openMedia(url) {
     </div>
 
     <template v-else>
-      <p v-if="error && !displayMessages.length" class="chat-banner chat-banner--err" role="alert">{{ error }}</p>
-      <p v-else-if="loading && !displayMessages.length" class="chat-banner">Loading messages…</p>
-      <p v-else-if="syncing" class="chat-banner chat-banner--sync">Updating…</p>
+      <p v-if="error && !displayMessages.length && !showThreadLoader" class="chat-banner chat-banner--err" role="alert">{{ error }}</p>
 
-      <div ref="scrollEl" class="chat-thread" role="log" aria-live="polite" aria-relevant="additions">
-        <p v-if="!loading && !displayMessages.length" class="chat-thread-empty">
+      <div class="chat-thread-wrap">
+        <div
+          v-if="showThreadLoader"
+          class="chat-thread-loader"
+          :class="{ 'chat-thread-loader--overlay': displayMessages.length > 0 }"
+          role="status"
+          aria-live="polite"
+          aria-label="Loading messages"
+        >
+          <span class="chat-thread-spinner" aria-hidden="true" />
+        </div>
+        <div ref="scrollEl" class="chat-thread" role="log" aria-live="polite" aria-relevant="additions">
+        <p v-if="!threadBusy && !displayMessages.length && !error" class="chat-thread-empty">
           No messages yet. Say hello below.
         </p>
         <template v-for="item in threadItems" :key="item.type === 'day' ? `d-${item.key}` : item.msg.id">
@@ -274,6 +294,7 @@ function openMedia(url) {
             </div>
           </div>
         </template>
+        </div>
       </div>
 
       <form class="chat-compose" @submit.prevent="onSend">
@@ -532,13 +553,62 @@ function openMedia(url) {
   background: var(--color-error-muted, rgba(239, 68, 68, 0.15));
 }
 
-.chat-banner--sync {
-  color: var(--color-accent-purple-light, #9d6fd7);
-  background: rgba(123, 77, 181, 0.12);
+.chat-thread-wrap {
+  flex: 1 1 0;
+  min-height: 0;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+}
+
+.chat-thread-loader {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.75rem;
+  min-height: 8rem;
+}
+
+.chat-thread-loader--overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  flex: none;
+  min-height: 0;
+  background: rgba(8, 8, 10, 0.55);
+  backdrop-filter: blur(2px);
+  -webkit-backdrop-filter: blur(2px);
+}
+
+.chat-thread-spinner {
+  width: 2rem;
+  height: 2rem;
+  border: 2px solid var(--color-border, rgba(255, 255, 255, 0.08));
+  border-top-color: var(--color-accent-purple, #7b4db5);
+  border-radius: 50%;
+  animation: chat-spin 0.8s linear infinite;
+}
+
+.chat-thread-loader-label {
+  margin: 0;
+  font-size: var(--text-sm, 0.8125rem);
+  color: var(--color-text-secondary, #a8a8b8);
+}
+
+@keyframes chat-spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .chat-thread {
-  flex: 1 1 0;
+  flex: 1 1 auto;
+  width: 100%;
   min-height: 0;
   overflow-y: auto;
   overflow-x: hidden;

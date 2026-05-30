@@ -443,6 +443,7 @@ export async function getPublicGeoFenceCheck() {
  * When includeNy511ApiKey, response includes decrypted 511NY key for Settings only.
  * Response includes `gwbUpperCamYoutubeUrl` when signed in (PostgreSQL profile).
  * Response includes `helpersAutoArriveNearDestEnabled` and `helpersAutoArriveRadiusNm` when signed in (PostgreSQL profile).
+ * Response includes `wahaChatId`, `wahaTtsEnabled`, and `wahaDailyBriefingEnabled` when signed in (PostgreSQL profile).
  */
 export async function getCredentials(opts = {}) {
   const q = new URLSearchParams()
@@ -577,6 +578,19 @@ export async function putHelpersAutoArrivePrefs(body) {
   } finally {
     resumeApplyHelpersLocationPrefsFromCredentials()
   }
+}
+
+/**
+ * Persist WhatsApp chat + speech prefs for the signed-in user (PostgreSQL).
+ * @param {{ chatId?: string, ttsEnabled?: boolean, dailyBriefingEnabled?: boolean }} body
+ */
+export async function putWahaPrefs(body) {
+  const r = await apiFetch('/api/settings/waha-prefs', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body ?? {}),
+  })
+  return handleJson(r)
 }
 
 /** Per-account API usage counters and limits (server / PostgreSQL). */

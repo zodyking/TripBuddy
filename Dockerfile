@@ -6,7 +6,7 @@ COPY package.json package-lock.json ./
 RUN npm install
 
 # Cache-bust: change this value to force a fresh UI build
-ARG CACHE_BUST=2026-05-30-openrouter-model-v2
+ARG CACHE_BUST=2026-05-30-waha-prefs-chat-loader-v1
 RUN echo "Build cache key: $CACHE_BUST"
 
 COPY vite.config.js vite-plugin-fedextool-api.mjs ./

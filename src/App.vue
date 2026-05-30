@@ -4,6 +4,7 @@ import { useRoute } from 'vue-router'
 import { postVisitPing, getAuthStatus, getPublicGeoFenceCheck } from './api.js'
 import { hydrateAllTrafficKeysFromServer } from './stores/trafficTileKey.js'
 import { hydrateSenderTextEnFromServer } from './utils/senderNameTranslateClient.js'
+import { hydrateWahaPrefsFromServer } from './utils/wahaPrefs.js'
 
 /** One IP capture per tab session when the SPA loads (security audit). */
 const VISIT_PING_KEY = 'fedextool-visit-ping-v1'
@@ -22,6 +23,7 @@ onMounted(() => {
   void postVisitPing().catch(() => {})
   void hydrateAllTrafficKeysFromServer()
   void hydrateSenderTextEnFromServer()
+  void hydrateWahaPrefsFromServer()
 
   void (async () => {
     try {

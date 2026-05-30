@@ -125,6 +125,10 @@ import {
   applyHelpersLocationPrefsFromCredentials,
 } from '../utils/helpersLocationPrefs.js'
 import {
+  applyWahaPrefsFromCredentials,
+  saveWahaPrefsToServer,
+} from '../utils/wahaPrefs.js'
+import {
   appGeoLat,
   appGeoLng,
   appGeoAccuracyM,
@@ -807,9 +811,20 @@ async function testWahaConnection() {
   }
 }
 
-function saveWahaChat() {
-  setWahaChatId(wahaChatIdDraft.value)
-  wahaChatMsg.value = 'Chat saved — TripBuddy will monitor and send to this chat.'
+async function saveWahaChat() {
+  const chatId = wahaChatIdDraft.value.trim()
+  setWahaChatId(chatId)
+  wahaChatMsg.value = 'Saving…'
+  try {
+    await saveWahaPrefsToServer({
+      chatId,
+      ttsEnabled: wahaChatSpeechOn.value,
+      dailyBriefingEnabled: wahaDailyBriefingOn.value,
+    })
+    wahaChatMsg.value = 'Chat saved — synced to your account for all devices.'
+  } catch (e) {
+    wahaChatMsg.value = e instanceof Error ? e.message : String(e)
+  }
 }
 
 async function loadWahaChats() {
@@ -848,11 +863,21 @@ function syncWahaSpeechPrefsFromStorage() {
 function onWahaChatSpeechToggle(enabled) {
   wahaChatSpeechOn.value = enabled
   setWahaTtsEnabled(enabled)
+  void saveWahaPrefsToServer({
+    chatId: wahaChatIdDraft.value.trim() || getWahaChatId(),
+    ttsEnabled: enabled,
+    dailyBriefingEnabled: wahaDailyBriefingOn.value,
+  }).catch(() => {})
 }
 
 function onWahaDailyBriefingToggle(enabled) {
   wahaDailyBriefingOn.value = enabled
   setWahaDailyBriefingEnabled(enabled)
+  void saveWahaPrefsToServer({
+    chatId: wahaChatIdDraft.value.trim() || getWahaChatId(),
+    ttsEnabled: wahaChatSpeechOn.value,
+    dailyBriefingEnabled: enabled,
+  }).catch(() => {})
 }
 
 async function sendWahaMessage() {
@@ -1013,6 +1038,9 @@ async function loadCredentials() {
         ? credMeta.value.gwbUpperCamYoutubeUrl
         : ''
     applyHelpersLocationPrefsFromCredentials(credMeta.value)
+    applyWahaPrefsFromCredentials(credMeta.value)
+    wahaChatIdDraft.value = getWahaChatId()
+    syncWahaSpeechPrefsFromStorage()
     syncHelpersPrefsFromStorage()
     await refreshApiQuota()
   } catch (e) {

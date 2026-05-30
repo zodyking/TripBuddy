@@ -2,6 +2,7 @@
  * WAHA messenger: instant cache hydrate + background server sync + lazy media.
  */
 import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
+import { ensureWahaPrefsHydrated, syncCurrentWahaChatIdToServer } from '../utils/wahaPrefs.js'
 import {
   getWahaChatId,
   setWahaChatId,
@@ -608,6 +609,7 @@ export function useWahaMessenger(opts = {}) {
   function selectChat(chat) {
     if (!chat?.id) return
     setWahaChatId(chat.id)
+    void syncCurrentWahaChatIdToServer().catch(() => {})
     activeChatId.value = chat.id
     chatTitle.value = chat.name || chat.id
     lastSeenId = ''
@@ -631,25 +633,28 @@ export function useWahaMessenger(opts = {}) {
   )
 
   onMounted(() => {
-    syncActiveFromStorage()
-    if (!configured.value) return
-    hydrateContactsFromCache()
-    hydrateLidsFromCache()
-    if (activeChatId.value) hydrateParticipantNames(activeChatId.value)
-    void loadContacts()
-    void loadLids()
-    const memChats = getCachedChats()
-    if (memChats.length) {
-      chats.value = memChats.map(normalizeWahaChat).filter((c) => c.id)
-    }
-    void hydrateSenderTextEnFromServer().then(() => {
-      void loadChats().then(() => {
-        if (!activeChatId.value) return
-        const had = hydrateThreadFromClientCache(activeChatId.value, { scroll: true })
-        if (!had) loading.value = true
-        void syncThread(activeChatId.value, { scroll: !had }).then(() => startPolling())
+    void (async () => {
+      await ensureWahaPrefsHydrated()
+      syncActiveFromStorage()
+      if (!configured.value) return
+      hydrateContactsFromCache()
+      hydrateLidsFromCache()
+      if (activeChatId.value) hydrateParticipantNames(activeChatId.value)
+      void loadContacts()
+      void loadLids()
+      const memChats = getCachedChats()
+      if (memChats.length) {
+        chats.value = memChats.map(normalizeWahaChat).filter((c) => c.id)
+      }
+      void hydrateSenderTextEnFromServer().then(() => {
+        void loadChats().then(() => {
+          if (!activeChatId.value) return
+          const had = hydrateThreadFromClientCache(activeChatId.value, { scroll: true })
+          if (!had) loading.value = true
+          void syncThread(activeChatId.value, { scroll: !had }).then(() => startPolling())
+        })
       })
-    })
+    })()
   })
 
   onBeforeUnmount(() => {

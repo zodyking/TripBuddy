@@ -27,6 +27,8 @@ import {
   setGwbUpperCamYoutubeUrlForAccount,
   getHelpersAutoArrivePrefsForAccount,
   setHelpersAutoArrivePrefsForAccount,
+  getWahaPrefsForAccount,
+  setWahaPrefsForAccount,
 } from './user-profile-pg.mjs'
 import { sanitizeTomtomApiKey } from './tomtom-key.mjs'
 import { sanitizeHereApiKey } from './here-traffic-api.mjs'
@@ -941,10 +943,13 @@ app.get('/api/settings/credentials', async (req) => {
   let gwbUpperCamYoutubeUrl = ''
   /** @type {{ enabled: boolean, radiusNm: number } | null} */
   let helpersAutoArrivePrefs = null
+  /** @type {{ chatId: string, ttsEnabled: boolean | null, dailyBriefingEnabled: boolean | null } | null} */
+  let wahaPrefs = null
   if (typeof ak === 'string' && ak.trim()) {
     const akTrim = ak.trim()
     gwbUpperCamYoutubeUrl = (await getGwbUpperCamYoutubeUrlForAccount(akTrim)) || ''
     helpersAutoArrivePrefs = await getHelpersAutoArrivePrefsForAccount(akTrim)
+    wahaPrefs = await getWahaPrefsForAccount(akTrim)
   }
   return {
     ...meta,
@@ -958,6 +963,13 @@ app.get('/api/settings/credentials', async (req) => {
       ? {
           helpersAutoArriveNearDestEnabled: helpersAutoArrivePrefs.enabled,
           helpersAutoArriveRadiusNm: helpersAutoArrivePrefs.radiusNm,
+        }
+      : {}),
+    ...(wahaPrefs
+      ? {
+          wahaChatId: wahaPrefs.chatId,
+          wahaTtsEnabled: wahaPrefs.ttsEnabled,
+          wahaDailyBriefingEnabled: wahaPrefs.dailyBriefingEnabled,
         }
       : {}),
     secretHint: process.env.FEDEX_TOOL_SECRET ? null : TOOL_SECRET_HINT,
@@ -1225,6 +1237,48 @@ app.put('/api/settings/gwb-upper-cam-youtube-url', async (req, reply) => {
 
 const HELPERS_RADIUS_NM_MIN = 0.25
 const HELPERS_RADIUS_NM_MAX = 25
+
+const WAHA_CHAT_ID_MAX = 256
+
+app.put('/api/settings/waha-prefs', async (req, reply) => {
+  try {
+    const ak = req.credentialAccountKey
+    if (typeof ak !== 'string' || !ak.trim()) {
+      return reply.code(400).send({ error: 'No account in session.' })
+    }
+    const body = req.body ?? {}
+    /** @type {{ chatId?: string, ttsEnabled?: boolean | null, dailyBriefingEnabled?: boolean | null }} */
+    const prefs = {}
+    if (Object.prototype.hasOwnProperty.call(body, 'chatId')) {
+      const chatId = String(body.chatId ?? '').trim().slice(0, WAHA_CHAT_ID_MAX)
+      prefs.chatId = chatId
+    }
+    if (Object.prototype.hasOwnProperty.call(body, 'ttsEnabled')) {
+      prefs.ttsEnabled = body.ttsEnabled === true
+    }
+    if (Object.prototype.hasOwnProperty.call(body, 'dailyBriefingEnabled')) {
+      prefs.dailyBriefingEnabled = body.dailyBriefingEnabled === true
+    }
+    if (
+      !Object.prototype.hasOwnProperty.call(prefs, 'chatId') &&
+      !Object.prototype.hasOwnProperty.call(prefs, 'ttsEnabled') &&
+      !Object.prototype.hasOwnProperty.call(prefs, 'dailyBriefingEnabled')
+    ) {
+      return reply.code(400).send({ error: 'Provide chatId, ttsEnabled, and/or dailyBriefingEnabled.' })
+    }
+    await setWahaPrefsForAccount(ak.trim(), prefs)
+    const stored = await getWahaPrefsForAccount(ak.trim())
+    return {
+      ok: true,
+      wahaChatId: stored.chatId,
+      wahaTtsEnabled: stored.ttsEnabled,
+      wahaDailyBriefingEnabled: stored.dailyBriefingEnabled,
+    }
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e)
+    return reply.code(400).send({ error: msg })
+  }
+})
 
 app.put('/api/settings/helpers-auto-arrive', async (req, reply) => {
   try {

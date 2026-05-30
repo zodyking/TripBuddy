@@ -86,10 +86,21 @@ export async function ensureUserProfileTable() {
     await client.query(`
       ALTER TABLE ${TABLE} ADD COLUMN IF NOT EXISTS helpers_auto_arrive_radius_nm DOUBLE PRECISION
     `)
+    await client.query(`
+      ALTER TABLE ${TABLE} ADD COLUMN IF NOT EXISTS waha_chat_id TEXT
+    `)
+    await client.query(`
+      ALTER TABLE ${TABLE} ADD COLUMN IF NOT EXISTS waha_tts_enabled BOOLEAN
+    `)
+    await client.query(`
+      ALTER TABLE ${TABLE} ADD COLUMN IF NOT EXISTS waha_daily_briefing_enabled BOOLEAN
+    `)
   } finally {
     client.release()
   }
 }
+
+const WAHA_CHAT_ID_MAX = 256
 
 /**
  * @param {string} accountKey
@@ -424,6 +435,117 @@ export async function setHelpersAutoArrivePrefsForAccount(accountKey, prefs) {
        helpers_auto_arrive_radius_nm = EXCLUDED.helpers_auto_arrive_radius_nm,
        updated_at = now()`,
     [ak, enabled, radiusNm],
+  )
+}
+
+/**
+ * @param {string} accountKey
+ * @returns {Promise<{ chatId: string, ttsEnabled: boolean | null, dailyBriefingEnabled: boolean | null }>}
+ */
+export async function getWahaPrefsForAccount(accountKey) {
+  const ak = String(accountKey || '').trim()
+  if (!ak) {
+    return { chatId: '', ttsEnabled: null, dailyBriefingEnabled: null }
+  }
+  const p = await getPostgresPool()
+  if (!p) {
+    return { chatId: '', ttsEnabled: null, dailyBriefingEnabled: null }
+  }
+  await ensureUserProfileTable()
+  const { rows } = await p.query(
+    `SELECT waha_chat_id, waha_tts_enabled, waha_daily_briefing_enabled
+     FROM ${TABLE} WHERE account_key = $1`,
+    [ak],
+  )
+  const row = rows[0]
+  const chatId =
+    typeof row?.waha_chat_id === 'string' ? row.waha_chat_id.trim().slice(0, WAHA_CHAT_ID_MAX) : ''
+  const ttsEnabled =
+    row?.waha_tts_enabled === true
+      ? true
+      : row?.waha_tts_enabled === false
+        ? false
+        : null
+  const dailyBriefingEnabled =
+    row?.waha_daily_briefing_enabled === true
+      ? true
+      : row?.waha_daily_briefing_enabled === false
+        ? false
+        : null
+  return { chatId, ttsEnabled, dailyBriefingEnabled }
+}
+
+/**
+ * @param {string} accountKey
+ * @param {{ chatId?: string, ttsEnabled?: boolean | null, dailyBriefingEnabled?: boolean | null }} prefs
+ */
+export async function setWahaPrefsForAccount(accountKey, prefs) {
+  const ak = String(accountKey || '').trim()
+  if (!ak) throw new Error('account_key required')
+  const p = await getPostgresPool()
+  if (!p) throw new Error('Database not available')
+  await ensureUserProfileTable()
+  const chatId = String(prefs?.chatId ?? '').trim().slice(0, WAHA_CHAT_ID_MAX)
+  const hasTts = prefs && Object.prototype.hasOwnProperty.call(prefs, 'ttsEnabled')
+  const hasBriefing =
+    prefs && Object.prototype.hasOwnProperty.call(prefs, 'dailyBriefingEnabled')
+  const ttsEnabled = hasTts && prefs.ttsEnabled === true
+  const ttsNull = hasTts && prefs.ttsEnabled == null
+  const dailyBriefingEnabled = hasBriefing && prefs.dailyBriefingEnabled === true
+  const briefingNull = hasBriefing && prefs.dailyBriefingEnabled == null
+
+  if (hasTts && hasBriefing) {
+    await p.query(
+      `INSERT INTO ${TABLE} (account_key, waha_chat_id, waha_tts_enabled, waha_daily_briefing_enabled, updated_at)
+       VALUES ($1, $2, $3, $4, now())
+       ON CONFLICT (account_key) DO UPDATE SET
+         waha_chat_id = EXCLUDED.waha_chat_id,
+         waha_tts_enabled = EXCLUDED.waha_tts_enabled,
+         waha_daily_briefing_enabled = EXCLUDED.waha_daily_briefing_enabled,
+         updated_at = now()`,
+      [
+        ak,
+        chatId || null,
+        ttsNull ? null : ttsEnabled,
+        briefingNull ? null : dailyBriefingEnabled,
+      ],
+    )
+    return
+  }
+
+  if (hasTts) {
+    await p.query(
+      `INSERT INTO ${TABLE} (account_key, waha_chat_id, waha_tts_enabled, updated_at)
+       VALUES ($1, $2, $3, now())
+       ON CONFLICT (account_key) DO UPDATE SET
+         waha_chat_id = COALESCE(EXCLUDED.waha_chat_id, ${TABLE}.waha_chat_id),
+         waha_tts_enabled = EXCLUDED.waha_tts_enabled,
+         updated_at = now()`,
+      [ak, chatId || null, ttsNull ? null : ttsEnabled],
+    )
+    return
+  }
+
+  if (hasBriefing) {
+    await p.query(
+      `INSERT INTO ${TABLE} (account_key, waha_chat_id, waha_daily_briefing_enabled, updated_at)
+       VALUES ($1, $2, $3, now())
+       ON CONFLICT (account_key) DO UPDATE SET
+         waha_chat_id = COALESCE(EXCLUDED.waha_chat_id, ${TABLE}.waha_chat_id),
+         waha_daily_briefing_enabled = EXCLUDED.waha_daily_briefing_enabled,
+         updated_at = now()`,
+      [ak, chatId || null, briefingNull ? null : dailyBriefingEnabled],
+    )
+    return
+  }
+
+  await p.query(
+    `INSERT INTO ${TABLE} (account_key, waha_chat_id, updated_at)
+     VALUES ($1, $2, now())
+     ON CONFLICT (account_key) DO UPDATE SET
+       waha_chat_id = EXCLUDED.waha_chat_id,
+       updated_at = now()`,
+    [ak, chatId || null],
   )
 }
 
