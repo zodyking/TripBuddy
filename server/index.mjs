@@ -399,15 +399,6 @@ app.post('/api/auth/login', async (req, reply) => {
     sameSite: 'lax',
     maxAge: 7 * 24 * 60 * 60,
   })
-  try {
-    await publishInAppForAccount(accountKey, {
-      type: 'info',
-      message: 'Signed in — trip and dispatch alerts appear here.',
-      source: 'session',
-    })
-  } catch {
-    /* non-fatal */
-  }
   return { ok: true }
 })
 
