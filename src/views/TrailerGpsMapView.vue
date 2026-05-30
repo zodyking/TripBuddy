@@ -64,12 +64,14 @@ function tryStartTripProximityWatch() {
   }
   if (typeof navigator === 'undefined' || !navigator.geolocation?.watchPosition) return
   stopTripProximityWatch()
+  const heavyOrder = String(sessionMeta.value?.heavyTrailerOrder ?? '').trim()
   tripProximityWatchId = navigator.geolocation.watchPosition(
     (pos) => {
       const tr = proximityTrailers.value
       if (!Array.isArray(tr)) return
       maybeAnnounceNearTrailer(pos.coords.latitude, pos.coords.longitude, tr, {
         mapOpen: true,
+        heavyTrailerOrder: heavyOrder,
         userHeadingDeg:
           typeof pos.coords.heading === 'number' && Number.isFinite(pos.coords.heading) && pos.coords.heading >= 0
             ? pos.coords.heading
@@ -79,7 +81,7 @@ function tryStartTripProximityWatch() {
       })
     },
     () => {},
-    { enableHighAccuracy: true, maximumAge: 5000, timeout: 20000 },
+    { enableHighAccuracy: true, maximumAge: 1000, timeout: 8000 },
   )
 }
 

@@ -207,7 +207,8 @@ function onOpenMap() {
 <template>
   <div class="trip-od-progress" role="group" :aria-label="ariaGroupLabel">
     <div class="trip-od-progress__head">
-      <span class="trip-od-progress__title">Leg progress</span>
+      <span v-if="remainingNmDisplay" class="trip-od-progress__remaining">{{ remainingNmDisplay }}</span>
+      <span v-else class="trip-od-progress__remaining trip-od-progress__remaining--muted">— NM left</span>
       <div class="trip-od-progress__head-right">
         <span class="trip-od-progress__stat" aria-hidden="true">
           <template v-if="nmRatioText">
@@ -218,7 +219,6 @@ function onOpenMap() {
             <span class="trip-od-progress__ratio trip-od-progress__ratio--muted">—/—</span>
             <span class="trip-od-progress__unit trip-od-progress__unit--muted">NM</span>
           </template>
-          <span v-if="remainingNmDisplay" class="trip-od-progress__remaining">{{ remainingNmDisplay }}</span>
         </span>
         <button
           v-if="mapAvailable"
@@ -263,8 +263,8 @@ function onOpenMap() {
 
 <style scoped>
 .trip-od-progress {
-  margin-top: 0.55rem;
-  padding-top: 0.45rem;
+  margin-top: 0.4rem;
+  padding-top: 0.35rem;
   border-top: 1px solid var(--color-border, rgba(255, 255, 255, 0.08));
 }
 
@@ -272,37 +272,43 @@ function onOpenMap() {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 0.5rem;
+  gap: 0.4rem;
   margin-bottom: 0.3rem;
 }
 
-.trip-od-progress__title {
-  font-size: var(--text-xs, 0.72rem);
-  font-weight: var(--weight-semibold, 600);
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
+.trip-od-progress__remaining {
+  font-size: 1.05rem;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  color: var(--color-accent-orange, #ff6b1a);
+  letter-spacing: 0.01em;
+  line-height: 1.1;
+}
+
+.trip-od-progress__remaining--muted {
   color: var(--color-text-tertiary, #8b8b98);
+  font-weight: 700;
 }
 
 .trip-od-progress__head-right {
   display: inline-flex;
   align-items: center;
-  gap: 0.35rem;
+  gap: 0.4rem;
   flex-shrink: 0;
 }
 
 .trip-od-progress__stat {
   display: inline-flex;
   align-items: baseline;
-  gap: 0.28rem;
+  gap: 0.2rem;
   white-space: nowrap;
 }
 
 .trip-od-progress__ratio {
-  font-size: var(--text-xs, 0.78rem);
-  font-weight: 700;
+  font-size: 0.82rem;
+  font-weight: 800;
   font-variant-numeric: tabular-nums;
-  color: var(--color-accent-orange, #ff6b1a);
+  color: var(--color-text-secondary, #c8c8d4);
 }
 
 .trip-od-progress__ratio--muted {
@@ -311,7 +317,7 @@ function onOpenMap() {
 }
 
 .trip-od-progress__unit {
-  font-size: 0.62rem;
+  font-size: 0.6rem;
   font-weight: 700;
   letter-spacing: 0.06em;
   text-transform: uppercase;
@@ -322,20 +328,12 @@ function onOpenMap() {
   opacity: 0.85;
 }
 
-.trip-od-progress__remaining {
-  font-size: 0.68rem;
-  font-weight: 600;
-  color: var(--color-accent-orange-soft, #ffa366);
-  margin-left: 0.35rem;
-  font-variant-numeric: tabular-nums;
-}
-
 .trip-od-progress__map-btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 1.85rem;
-  height: 1.85rem;
+  width: 2rem;
+  height: 2rem;
   padding: 0;
   border: 1px solid var(--color-border, rgba(255, 255, 255, 0.1));
   border-radius: var(--radius-md, 0.5rem);
@@ -350,19 +348,19 @@ function onOpenMap() {
 }
 
 .trip-od-progress__map-ico {
-  width: 1rem;
-  height: 1rem;
+  width: 1.1rem;
+  height: 1.1rem;
   display: block;
 }
 
 .trip-od-progress__viz {
   position: relative;
-  padding-bottom: 1.75rem;
+  padding-bottom: 1.6rem;
 }
 
 .trip-od-progress__track {
   position: relative;
-  height: 11px;
+  height: 16px;
   border-radius: var(--radius-full, 9999px);
   background: linear-gradient(
     180deg,
@@ -384,8 +382,8 @@ function onOpenMap() {
     #ffb38a 100%
   );
   box-shadow:
-    0 0 10px rgba(123, 77, 181, 0.35),
-    inset 0 1px 0 rgba(255, 255, 255, 0.18);
+    0 0 12px rgba(123, 77, 181, 0.4),
+    inset 0 1px 0 rgba(255, 255, 255, 0.2);
   transition: width 0.25s var(--ease-out, cubic-bezier(0.22, 1, 0.36, 1));
 }
 
@@ -400,11 +398,11 @@ function onOpenMap() {
 }
 
 .trip-od-progress__marker-dot {
-  width: 8px;
-  height: 8px;
+  width: 10px;
+  height: 10px;
   border-radius: 50%;
   background: var(--color-text-primary, #f4f4f8);
-  border: 1px solid rgba(10, 10, 14, 0.65);
+  border: 1.5px solid rgba(10, 10, 14, 0.65);
   box-shadow: 0 0 0 2px rgba(123, 77, 181, 0.4);
 }
 
@@ -415,7 +413,7 @@ function onOpenMap() {
 
 .trip-od-progress__marker-cap {
   position: absolute;
-  top: calc(50% + 8px);
+  top: calc(50% + 10px);
   left: 50%;
   transform: translateX(-50%);
   display: flex;
@@ -424,9 +422,10 @@ function onOpenMap() {
   gap: 1px;
   min-width: 3.25rem;
   text-align: center;
-  font-size: 0.62rem;
+  font-size: 0.65rem;
   line-height: 1.15;
   color: var(--color-text-secondary, #c8c8d4);
+  font-weight: 600;
 }
 
 .trip-od-progress__marker-cap em {
@@ -435,6 +434,6 @@ function onOpenMap() {
   letter-spacing: 0.06em;
   text-transform: uppercase;
   color: var(--color-text-tertiary, #9a9aa8);
-  font-size: 0.58rem;
+  font-size: 0.62rem;
 }
 </style>

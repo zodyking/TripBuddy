@@ -1971,6 +1971,7 @@ function openTrailerGpsModal(card) {
     tripOriginLocationId: tripOriginLocationId.value,
     tripDestLocationId: tripDestLocationId.value,
     proximityTrailers: extractProximityTrailersForTrailerMap(tripDetailsBodyForSlide.value),
+    heavyTrailerOrder,
   }
 
   writeTrailerGpsSession({ map, meta })

@@ -1530,40 +1530,14 @@ onUnmounted(() => {
         </p>
       </SettingsSection>
 
-      <SettingsSection title="Map: TomTom traffic overlay" section-id="settings-tomtom">
+      <SettingsSection title="API" section-id="settings-api">
+        <!-- TomTom -->
+        <h4 class="api-sub-heading">TomTom Traffic</h4>
         <p class="cred-hint">
-          Live road traffic tiles on the <strong>Traffic</strong> map use
-          <a
-            href="https://developer.tomtom.com/traffic-api/documentation/product-information/introduction"
-            target="_blank"
-            rel="noopener noreferrer"
-            class="ext-link"
-          >TomTom Traffic</a>
-          (free developer tier, API key). Your key is stored encrypted for your account on the server and cached in this browser for faster map loads.
+          Traffic map overlay + Corridors route monitoring.
+          <a href="https://developer.tomtom.com/" target="_blank" rel="noopener noreferrer" class="ext-link">Free developer key</a>
         </p>
-        <p class="cred-hint">
-          <strong>Traffic → Corridors</strong> uses the same key for
-          <a
-            href="https://developer.tomtom.com/route-monitoring/documentation/routes-service/routes"
-            target="_blank"
-            rel="noopener noreferrer"
-            class="ext-link"
-          >Route Monitoring</a>
-          (create monitored routes). The map preview may use
-          <a
-            href="https://developer.tomtom.com/routing-api/documentation/routing/calculate-route"
-            target="_blank"
-            rel="noopener noreferrer"
-            class="ext-link"
-          >Routing calculateRoute</a>
-          when Route Monitoring preview is unavailable — your key still needs Route Monitoring for saving routes.
-        </p>
-        <p class="cred-hint">
-          <strong>403 “not allowed” with Corridors but tiles work?</strong>
-          Map tiles run in your browser (TomTom sees your site as referrer); Route Monitoring and Routing run on this app’s server (no referrer).
-          In the TomTom dashboard, open your key and relax <strong>allowed URLs / domain</strong> restrictions for server-side use, or create a second key without referrer locking for Corridors.
-        </p>
-        <label class="lbl" for="tomtom-traffic-key">TomTom API key (optional)</label>
+        <label class="lbl" for="tomtom-traffic-key">TomTom API key</label>
         <input
           id="tomtom-traffic-key"
           v-model="tomtomTrafficDraft"
@@ -1571,43 +1545,24 @@ onUnmounted(() => {
           type="password"
           autocomplete="off"
           placeholder="Paste API key"
-          :aria-describedby="'tomtom-hint'"
         />
-        <p id="tomtom-hint" class="cred-hint">
-          Active key: {{ trafficTomtomKeyOverride ? 'saved (server + this browser)' : 'empty' }}
+        <p class="cred-hint">
+          Status: {{ trafficTomtomKeyOverride ? 'saved' : 'empty' }}
         </p>
         <p v-if="tomtomTrafficMsg" class="cred-msg">{{ tomtomTrafficMsg }}</p>
         <div class="btn-row">
-          <button
-            type="button"
-            class="btn primary tap"
-            :disabled="tomtomTrafficBusy"
-            @click="saveTomtomTrafficKey"
-          >
-            {{ tomtomTrafficBusy ? 'Saving…' : 'Save TomTom key' }}
+          <button type="button" class="btn primary tap" :disabled="tomtomTrafficBusy" @click="saveTomtomTrafficKey">
+            {{ tomtomTrafficBusy ? 'Saving…' : 'Save' }}
           </button>
         </div>
-      </SettingsSection>
 
-      <SettingsSection title="HERE Traffic API (Route Monitoring)" section-id="settings-here">
+        <!-- HERE -->
+        <h4 class="api-sub-heading">HERE Traffic</h4>
         <p class="cred-hint">
-          <strong>Traffic → Corridors</strong> uses
-          <a
-            href="https://platform.here.com/"
-            target="_blank"
-            rel="noopener noreferrer"
-            class="ext-link"
-          >HERE Traffic API v7</a>
-          for real-time traffic flow monitoring along your routes. Create a free account at HERE Platform.
+          Corridors traffic flow monitoring.
+          <a href="https://platform.here.com/" target="_blank" rel="noopener noreferrer" class="ext-link">Free HERE platform key</a>
         </p>
-        <p class="cred-hint">
-          HERE provides: <strong>speed</strong> (current vs free-flow), <strong>jam factor</strong> (0–10), <strong>travel time</strong> estimates, and segment-level detail.
-          Real-time <strong>Traffic</strong> on the free plan is billed in small monthly transaction bundles (on the order of a few thousand per month for flow data); this app batches refreshes and enforces a monthly cap server-side (see <strong>API usage & limits</strong> below).
-        </p>
-        <p class="cred-hint">
-          To set up: Go to <a href="https://platform.here.com/" target="_blank" rel="noopener noreferrer" class="ext-link">platform.here.com</a> → Access Manager → Apps → Register new app → Create API Key. Enable <strong>Traffic API</strong> and <strong>Routing API</strong>.
-        </p>
-        <label class="lbl" for="here-api-key">HERE API key (for Route Monitoring)</label>
+        <label class="lbl" for="here-api-key">HERE API key</label>
         <input
           id="here-api-key"
           v-model="hereApiDraft"
@@ -1615,55 +1570,83 @@ onUnmounted(() => {
           type="password"
           autocomplete="off"
           placeholder="Paste HERE API key"
-          :aria-describedby="'here-hint'"
         />
-        <p id="here-hint" class="cred-hint">
-          Active key: {{ hereApiKeyOverride ? 'saved (server + this browser)' : 'empty' }}
+        <p class="cred-hint">
+          Status: {{ hereApiKeyOverride ? 'saved' : 'empty' }}
         </p>
         <p v-if="hereApiMsg" class="cred-msg">{{ hereApiMsg }}</p>
         <div class="btn-row">
-          <button
-            type="button"
-            class="btn primary tap"
-            :disabled="hereApiBusy"
-            @click="saveHereApiKey"
-          >
-            {{ hereApiBusy ? 'Saving…' : 'Save HERE key' }}
+          <button type="button" class="btn primary tap" :disabled="hereApiBusy" @click="saveHereApiKey">
+            {{ hereApiBusy ? 'Saving…' : 'Save' }}
           </button>
         </div>
-      </SettingsSection>
 
-      <SettingsSection title="API usage & limits" section-id="settings-api-quota">
+        <!-- 511NY -->
+        <h4 class="api-sub-heading">511NY</h4>
         <p class="cred-hint">
-          Outbound API calls are counted per account and saved in the database. Caps apply per
-          <strong>UTC calendar day</strong>, per rolling minute (burst protection), and for
-          <strong>HERE</strong> also per <strong>UTC calendar month</strong> (default 4800 calls, aligned
-          with HERE Traffic free-tier monthly transactions). When a cap is hit, requests are blocked until
-          the period resets or you raise the limit (daily caps in this table; HERE monthly default via
-          server env <code>API_QUOTA_HERE_MONTH</code> or optional
-          <code>limits.here_month</code> in the quota API).
+          Bridge cameras + NY511 traffic events.
+          <a href="https://511ny.org/my511/register" target="_blank" rel="noopener noreferrer" class="ext-link">Free 511NY key</a>
+        </p>
+        <label class="lbl" for="ny511-api-key">511NY API key</label>
+        <input
+          id="ny511-api-key"
+          v-model="ny511ApiDraft"
+          class="inp tap"
+          type="password"
+          autocomplete="off"
+          placeholder="Paste 511NY API key"
+        />
+        <p class="cred-hint">
+          Status: {{ ny511ApiKeyOverride ? 'saved' : 'empty' }}
+        </p>
+        <p v-if="ny511ApiMsg" class="cred-msg">{{ ny511ApiMsg }}</p>
+        <div class="btn-row">
+          <button type="button" class="btn primary tap" :disabled="ny511ApiBusy" @click="saveNy511ApiKey">
+            {{ ny511ApiBusy ? 'Saving…' : 'Save' }}
+          </button>
+        </div>
+
+        <!-- GWB Camera -->
+        <h4 class="api-sub-heading">GWB Upper Camera</h4>
+        <p class="cred-hint">
+          GWB upper deck live view (YouTube link).
+        </p>
+        <label class="lbl" for="gwb-upper-cam-youtube-url">YouTube URL</label>
+        <input
+          id="gwb-upper-cam-youtube-url"
+          v-model="gwbUpperCamYoutubeDraft"
+          class="inp tap"
+          type="url"
+          autocomplete="off"
+          placeholder="https://www.youtube.com/watch?v=…"
+        />
+        <p v-if="gwbUpperCamYoutubeMsg" class="cred-msg">{{ gwbUpperCamYoutubeMsg }}</p>
+        <div class="btn-row">
+          <button type="button" class="btn primary tap" :disabled="gwbUpperCamYoutubeBusy" @click="saveGwbUpperCamYoutubeUrl">
+            {{ gwbUpperCamYoutubeBusy ? 'Saving…' : 'Save' }}
+          </button>
+        </div>
+
+        <!-- Usage & Limits -->
+        <h4 class="api-sub-heading">Usage &amp; Limits</h4>
+        <p class="cred-hint">
+          Outbound API calls counted per UTC day. HERE also capped monthly.
         </p>
         <p v-if="apiQuotaDayKey" class="cred-hint">
-          Current UTC day: <strong>{{ apiQuotaDayKey }}</strong>
-        </p>
-        <p v-if="apiQuotaMonthKey" class="cred-hint">
-          Current UTC month (HERE): <strong>{{ apiQuotaMonthKey }}</strong>
+          UTC day: <strong>{{ apiQuotaDayKey }}</strong>
+          <template v-if="apiQuotaMonthKey"> · Month: <strong>{{ apiQuotaMonthKey }}</strong></template>
         </p>
         <div v-if="apiQuotaRows.length" class="api-quota-table-wrap">
           <table class="api-quota-table">
             <thead>
               <tr>
                 <th scope="col">API</th>
-                <th scope="col">Calls today</th>
-                <th scope="col">Daily limit</th>
-                <th v-if="apiQuotaHasMonthCols" scope="col">
-                  HERE this month
-                </th>
-                <th v-if="apiQuotaHasMonthCols" scope="col">
-                  HERE monthly cap
-                </th>
-                <th scope="col">Calls last min</th>
-                <th scope="col">Max / min</th>
+                <th scope="col">Today</th>
+                <th scope="col">Limit</th>
+                <th v-if="apiQuotaHasMonthCols" scope="col">Month</th>
+                <th v-if="apiQuotaHasMonthCols" scope="col">Cap</th>
+                <th scope="col">/min</th>
+                <th scope="col">Max</th>
               </tr>
             </thead>
             <tbody>
@@ -1695,87 +1678,12 @@ onUnmounted(() => {
         <p v-else-if="!apiQuotaMsg" class="cred-hint">Loading usage…</p>
         <p v-if="apiQuotaMsg" class="cred-msg">{{ apiQuotaMsg }}</p>
         <div class="btn-row">
-          <button type="button" class="btn tap" :disabled="apiQuotaBusy" @click="refreshApiQuota">
-            Refresh
-          </button>
-          <button
-            type="button"
-            class="btn primary tap"
-            :disabled="apiQuotaBusy"
-            @click="saveApiQuotaLimitsFromUi"
-          >
-            Save limits
-          </button>
-          <button type="button" class="btn tap" :disabled="apiQuotaBusy" @click="resetApiQuotaToday">
-            Reset today's counts
-          </button>
+          <button type="button" class="btn tap" :disabled="apiQuotaBusy" @click="refreshApiQuota">Refresh</button>
+          <button type="button" class="btn primary tap" :disabled="apiQuotaBusy" @click="saveApiQuotaLimitsFromUi">Save limits</button>
+          <button type="button" class="btn tap" :disabled="apiQuotaBusy" @click="resetApiQuotaToday">Reset today</button>
         </div>
       </SettingsSection>
 
-      <SettingsSection title="511NY API (Cameras + NY511 traffic)" section-id="settings-ny511">
-        <p class="cred-hint">
-          <strong>Traffic → Crossings</strong> uses this key for live bridge cameras (Bayonne, Goethals, Outerbridge, Verrazzano).
-          <strong>Traffic → NY511</strong> loads official 511NY events, construction, incidents, and road conditions filtered to NYC-region truck routes (same key; server caches ~5 minutes).
-        </p>
-        <p class="cred-hint">
-          To get your free key: <a href="https://511ny.org/my511/register" target="_blank" rel="noopener noreferrer" class="ext-link">511ny.org/my511/register</a>
-          → create an account → <strong>Manage Account</strong> → enable the Developer API → use the key from your approval email.
-        </p>
-        <p class="cred-hint">
-          <strong>Rate limit:</strong> respect 511NY limits; this app batches feeds and caches responses server-side.
-        </p>
-        <label class="lbl" for="ny511-api-key">511NY API key</label>
-        <input
-          id="ny511-api-key"
-          v-model="ny511ApiDraft"
-          class="inp tap"
-          type="password"
-          autocomplete="off"
-          placeholder="Paste 511NY API key"
-          :aria-describedby="'ny511-hint'"
-        />
-        <p id="ny511-hint" class="cred-hint">
-          Active key: {{ ny511ApiKeyOverride ? 'saved (server + this browser)' : 'empty' }}
-        </p>
-        <p v-if="ny511ApiMsg" class="cred-msg">{{ ny511ApiMsg }}</p>
-        <div class="btn-row">
-          <button
-            type="button"
-            class="btn primary tap"
-            :disabled="ny511ApiBusy"
-            @click="saveNy511ApiKey"
-          >
-            {{ ny511ApiBusy ? 'Saving…' : 'Save 511NY key' }}
-          </button>
-        </div>
-      </SettingsSection>
-
-      <SettingsSection title="GWB upper camera (YouTube)" section-id="settings-gwb-youtube">
-        <p class="cred-hint">
-          <strong>Traffic → Crossings</strong> uses this for the George Washington Bridge <strong>upper deck</strong> live view.
-          Paste any standard YouTube link (watch, Shorts, embed, or youtu.be). Leave empty to hide the embed.
-        </p>
-        <label class="lbl" for="gwb-upper-cam-youtube-url">YouTube URL</label>
-        <input
-          id="gwb-upper-cam-youtube-url"
-          v-model="gwbUpperCamYoutubeDraft"
-          class="inp tap"
-          type="url"
-          autocomplete="off"
-          placeholder="https://www.youtube.com/watch?v=…"
-        />
-        <p v-if="gwbUpperCamYoutubeMsg" class="cred-msg">{{ gwbUpperCamYoutubeMsg }}</p>
-        <div class="btn-row">
-          <button
-            type="button"
-            class="btn primary tap"
-            :disabled="gwbUpperCamYoutubeBusy"
-            @click="saveGwbUpperCamYoutubeUrl"
-          >
-            {{ gwbUpperCamYoutubeBusy ? 'Saving…' : 'Save GWB camera link' }}
-          </button>
-        </div>
-      </SettingsSection>
 
       <SettingsSection title="App Logs">
         <div class="log-actions">
@@ -2308,6 +2216,20 @@ onUnmounted(() => {
   color: var(--color-text-tertiary, #6e6e7e);
   margin: 0 0 0.5rem;
   max-width: 36rem;
+}
+.api-sub-heading {
+  margin: 1.1rem 0 0.35rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: var(--color-text-primary, #f4f4f8);
+  letter-spacing: 0.02em;
+}
+.api-sub-heading:first-of-type {
+  margin-top: 0;
+  padding-top: 0;
+  border-top: none;
 }
 .work-week-row {
   display: grid;

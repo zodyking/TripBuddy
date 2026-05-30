@@ -533,7 +533,7 @@ const approachingTrailerCooldown = new Map()
 const APPROACHING_TRAILER_RADIUS_MULT = 2.2
 
 const RELOC_MIN_MOVE_M = 12
-const NEAR_COOLDOWN_MS = 25_000
+const NEAR_COOLDOWN_MS = 15_000
 
 function haversineM(lat1, lng1, lat2, lng2) {
   const R = 6371000
@@ -677,6 +677,7 @@ export function maybeAnnounceTrailerRelocated(trailers) {
  * @param {unknown[]} trailers
  * @param {{
  *   mapOpen?: boolean,
+ *   heavyTrailerOrder?: string,
  *   userHeadingDeg?: number | null,
  *   speedMps?: number | null,
  * }} [opts]
@@ -698,6 +699,10 @@ export function maybeAnnounceNearTrailer(userLat, userLng, trailers, opts) {
   const cogOk =
     typeof cog === 'number' && Number.isFinite(cog) && cog >= 0 && cog <= 360
   const speedOk = spd == null || !Number.isFinite(spd) || spd >= 0.45
+  const heavyOrder = String(opts?.heavyTrailerOrder ?? '').trim()
+  const multiTrailer = trailers.filter(
+    (x) => x && typeof x === 'object' && x.latitude != null && x.longitude != null,
+  ).length > 1
 
   const now = Date.now()
   for (const t of trailers) {
@@ -713,15 +718,23 @@ export function maybeAnnounceNearTrailer(userLat, userLng, trailers, opts) {
     const nbr = String(tr.trlrNbr ?? '').trim() || order
     const idSpeech = trailerNumberForSpeech(nbr)
 
+    const roleLabel = multiTrailer && heavyOrder
+      ? order === heavyOrder ? 'lead' : 'rear'
+      : ''
+
     if (d <= innerR) {
       const last = nearTrailerCooldown.get(order) ?? 0
       if (now - last < NEAR_COOLDOWN_MS) continue
       nearTrailerCooldown.set(order, now)
-      let text = `Near trailer ${idSpeech}.`
+      let text = roleLabel
+        ? `Near your ${roleLabel} trailer ${idSpeech}.`
+        : `Near trailer ${idSpeech}.`
       if (cogOk && speedOk) {
         const brg = initialBearingDeg(userLat, userLng, lat, lng)
         const side = sideRelativeToUserCourse(brg, /** @type {number} */ (cog))
-        text = `Trailer ${idSpeech}, ${side}.`
+        text = roleLabel
+          ? `Your ${roleLabel} trailer ${idSpeech}, ${side}.`
+          : `Trailer ${idSpeech}, ${side}.`
       }
       pushLiveLog({ type: 'info', message: `[TripVoice] ${text}`, ts: Date.now() })
       enqueueAnnouncement(text, { bell: mode === 'both', category: `nearTrailer:${order}` })
@@ -732,11 +745,15 @@ export function maybeAnnounceNearTrailer(userLat, userLng, trailers, opts) {
       const lastA = approachingTrailerCooldown.get(order) ?? 0
       if (now - lastA < NEAR_COOLDOWN_MS) continue
       approachingTrailerCooldown.set(order, now)
-      let text = `Trailer ${idSpeech} nearby.`
+      let text = roleLabel
+        ? `Approaching your ${roleLabel} trailer ${idSpeech}.`
+        : `Approaching trailer ${idSpeech}.`
       if (cogOk && speedOk) {
         const brg = initialBearingDeg(userLat, userLng, lat, lng)
         const side = sideRelativeToUserCourse(brg, /** @type {number} */ (cog))
-        text = `Trailer ${idSpeech}, ${side}.`
+        text = roleLabel
+          ? `Your ${roleLabel} trailer ${idSpeech}, ${side}.`
+          : `Trailer ${idSpeech}, ${side}.`
       }
       pushLiveLog({ type: 'info', message: `[TripVoice] ${text}`, ts: Date.now() })
       enqueueAnnouncement(text, { bell: mode === 'both', category: `approachTrailer:${order}` })
