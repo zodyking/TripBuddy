@@ -1,21 +1,27 @@
 # Deploying FedExTool on Dokploy
 
-## Deployment Type: Docker Compose (REQUIRED)
+## Build Type (IMPORTANT)
 
-This app deploys **two containers** (app + WAHA WhatsApp server) via `docker-compose.yml`.
+Dokploy defaults to **Nixpacks** auto-detection, which will **not** work for this app (it builds a static-only Caddy site and skips the Node API server).
 
-**You MUST use Docker Compose deployment type in Dokploy:**
+**You must set the build type to "Dockerfile":**
 
-1. In Dokploy, **delete the existing "Application" service** (or create a new one)
-2. Click **"+ Create Service"** → select **"Compose"**
-3. Connect your GitHub repo (`zodyking/TripBuddy`, branch `main`)
-4. Set **Compose Path** to `docker-compose.yml` (the repo root)
-5. Deploy — Dokploy will build the app from the Dockerfile AND pull `devlikeapro/waha`
+1. In Dokploy, go to your application settings
+2. Find **Build Type** or **Builder** setting
+3. Change from "Nixpacks" / "Auto" to **"Dockerfile"**
+4. Ensure **Dockerfile Path** is set to `Dockerfile` (the repo root)
 
-Both containers start together. The app connects to WAHA internally at `http://waha:3000`.
+## WhatsApp (WAHA) — Separate Service
 
-### If you previously used "Dockerfile" / "Application" type:
-That only builds one container. Switch to Compose to get both.
+WAHA runs as a **separate Docker service** in Dokploy (not bundled with the app).
+
+1. In Dokploy, create a new **Docker** service
+2. Image: `devlikeapro/waha`
+3. Environment variables:
+   - `WHATSAPP_DEFAULT_ENGINE=NOWEB`
+   - `WHATSAPP_START_SESSION=default`
+4. Expose port 3000 or assign a domain
+5. In the TripBuddy app → Settings → WhatsApp → enter the WAHA URL
 
 The repo includes a [`nixpacks.toml`](../nixpacks.toml) that disables Nixpacks phases as a fallback, but explicitly selecting "Dockerfile" build type is the reliable fix.
 
