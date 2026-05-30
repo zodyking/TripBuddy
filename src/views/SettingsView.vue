@@ -2011,36 +2011,38 @@ onUnmounted(() => {
           Stay inside the zone ~40s with good GPS (blocks bad fixes).
         </p>
         <p v-if="helpersProximityMsg" class="cred-msg cred-msg--error">{{ helpersProximityMsg }}</p>
-        <div class="audio-row">
-          <label class="toggle-switch">
+        <div class="helpers-proximity-row">
+          <div class="helpers-proximity-field">
+            <label class="lbl" for="helpers-radius-nm">Trigger (NM)</label>
             <input
-              type="checkbox"
-              :checked="helpersAutoArriveEnabled"
+              id="helpers-radius-nm"
+              v-model.number="helpersRadiusNm"
+              class="inp tap helpers-proximity-input"
+              type="number"
+              :min="HELPERS_RADIUS_NM_MIN"
+              :max="HELPERS_RADIUS_NM_MAX"
+              step="0.25"
+              inputmode="decimal"
               :disabled="helpersProximityBusy"
-              @change="onHelpersProximityToggle($event.target.checked)"
+              @blur="onHelpersRadiusBlur"
             />
-            <span class="toggle-slider"></span>
-          </label>
-          <span class="audio-row-label">Enabled</span>
+          </div>
+          <div class="helpers-proximity-toggle">
+            <label class="toggle-switch">
+              <input
+                type="checkbox"
+                :checked="helpersAutoArriveEnabled"
+                :disabled="helpersProximityBusy"
+                @change="onHelpersProximityToggle($event.target.checked)"
+              />
+              <span class="toggle-slider"></span>
+            </label>
+            <span class="audio-row-label">Enabled</span>
+          </div>
         </div>
-        <div class="helpers-field">
-          <label class="lbl" for="helpers-radius-nm">Trigger (NM)</label>
-          <input
-            id="helpers-radius-nm"
-            v-model.number="helpersRadiusNm"
-            class="inp tap"
-            type="number"
-            :min="HELPERS_RADIUS_NM_MIN"
-            :max="HELPERS_RADIUS_NM_MAX"
-            step="0.25"
-            inputmode="decimal"
-            :disabled="helpersProximityBusy"
-            @blur="onHelpersRadiusBlur"
-          />
-          <p class="helpers-hint">
-            {{ HELPERS_RADIUS_NM_MIN }}–{{ HELPERS_RADIUS_NM_MAX }} NM · default 2 NM
-          </p>
-        </div>
+        <p class="helpers-hint helpers-proximity-hint">
+          {{ HELPERS_RADIUS_NM_MIN }}–{{ HELPERS_RADIUS_NM_MAX }} NM · default 2 NM
+        </p>
       </SettingsSection>
 
       <SettingsSection title="WhatsApp speech">
@@ -2982,6 +2984,30 @@ onUnmounted(() => {
   margin: 0.5rem 0 0.75rem;
 }
 .helpers-field {
+  margin-top: 0.35rem;
+}
+.helpers-proximity-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 0.75rem;
+  margin-top: 0.5rem;
+}
+.helpers-proximity-field {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.helpers-proximity-input {
+  width: 100%;
+  min-height: 2.5rem;
+}
+.helpers-proximity-toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-shrink: 0;
+  padding-bottom: 0.15rem;
+}
+.helpers-proximity-hint {
   margin-top: 0.35rem;
 }
 
