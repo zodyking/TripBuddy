@@ -127,6 +127,24 @@ export async function getBridgeTrafficExport() {
   return handleJson(r)
 }
 
+/** Saved per-bridge / per-direction delay tier overrides. */
+export async function getBridgeTrafficProfileSettings() {
+  const r = await apiFetch('/api/settings/bridge-traffic-profiles')
+  return handleJson(r)
+}
+
+/**
+ * @param {{ overrides: Record<string, object> }} body
+ */
+export async function putBridgeTrafficProfileSettings(body) {
+  const r = await apiFetch('/api/settings/bridge-traffic-profiles', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+  return handleJson(r)
+}
+
 /** @returns {Promise<{ ok: boolean, enabled: boolean, redirectUrl: string, polygon: Array<{ lat: number, lng: number }> }>} */
 export async function getSettingsGeoFence() {
   const r = await apiFetch('/api/settings/geo-fence')

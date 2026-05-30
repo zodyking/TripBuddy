@@ -221,6 +221,10 @@ import {
 } from './bridge-panynj.mjs'
 import { getVerrazzanoResponsePayload } from './bridge-verrazzano-traffic.mjs'
 import { buildBridgeTrafficExport } from './bridge-traffic-export.mjs'
+import {
+  readBridgeTrafficProfileOverrides,
+  writeBridgeTrafficProfileOverrides,
+} from './bridge-traffic-profiles-store.mjs'
 import { getNy511TruckNycPayload } from './ny511-traffic-feeds.mjs'
 import { registerTrafficMonitoredRoutes } from './traffic-monitored-routes-routes.mjs'
 import {
@@ -1463,6 +1467,33 @@ app.get('/api/settings/bridge-traffic-export', async (_req, reply) => {
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e)
     return reply.code(500).send({ ok: false, error: msg })
+  }
+})
+
+app.get('/api/settings/bridge-traffic-profiles', async (req) => {
+  const ak = /** @type {any} */ (req).credentialAccountKey
+  if (!ak) {
+    return { ok: true, overrides: {}, updatedAt: null }
+  }
+  const { overrides, updatedAt } = await readBridgeTrafficProfileOverrides(ak)
+  return { ok: true, overrides, updatedAt }
+})
+
+app.put('/api/settings/bridge-traffic-profiles', async (req, reply) => {
+  const ak = /** @type {any} */ (req).credentialAccountKey
+  if (!ak) {
+    return reply.code(401).send({ error: 'Not signed in' })
+  }
+  const raw = req.body?.overrides
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+    return reply.code(400).send({ error: 'Provide { overrides: { profileKey: { ... } } }' })
+  }
+  try {
+    const doc = await writeBridgeTrafficProfileOverrides(ak, raw)
+    return { ok: true, overrides: doc.overrides, updatedAt: doc.updatedAt }
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e)
+    return reply.code(400).send({ error: msg })
   }
 })
 

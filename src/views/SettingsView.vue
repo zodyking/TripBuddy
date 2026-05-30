@@ -56,6 +56,7 @@ import {
   finishLinehaulBearerCaptureOverlay,
 } from '../stores/linehaulBearerCaptureOverlay.js'
 import SettingsSection from '../components/settings/SettingsSection.vue'
+import BridgeTrafficThresholdsEditor from '../components/settings/BridgeTrafficThresholdsEditor.vue'
 import LeafletPinModal from '../components/LeafletPinModal.vue'
 import GeoFenceEditor from '../components/GeoFenceEditor.vue'
 import ApiStatusBadge from '../components/ApiStatusBadge.vue'
@@ -2613,6 +2614,10 @@ onUnmounted(() => {
     </main>
 
     <main v-show="settingsTab === 'traffic'" class="stack traffic-panel">
+      <SettingsSection title="Crossing thresholds" section-id="settings-bridge-thresholds">
+        <BridgeTrafficThresholdsEditor />
+      </SettingsSection>
+
       <SettingsSection title="Bridge traffic history">
         <p class="cred-hint">
           Download the full crossing-time and speed series stored in Postgres (up to
