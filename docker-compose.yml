@@ -1,8 +1,8 @@
-version: "3.8"
-
 services:
   app:
-    build: .
+    build:
+      context: .
+      dockerfile: Dockerfile
     ports:
       - "3847:3847"
     environment:
@@ -10,23 +10,30 @@ services:
       - FEDEX_TOOL_API_PORT=3847
       - NODE_ENV=production
       - WAHA_BASE_URL=http://waha:3000
-      - WAHA_API_KEY=
     depends_on:
       waha:
         condition: service_healthy
+    volumes:
+      - app_data:/data
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3847/api/health').then(r=>r.ok?process.exit(0):process.exit(1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 10s
+      start_period: 15s
+      retries: 3
 
   waha:
     image: devlikeapro/waha
     ports:
       - "3000:3000"
     environment:
-      - WHATSAPP_HOOK_EVENTS=message,message.any
       - WHATSAPP_DEFAULT_ENGINE=NOWEB
       - WHATSAPP_START_SESSION=default
+      - WHATSAPP_HOOK_EVENTS=message,message.any
       - WAHA_PRINT_QR=true
     volumes:
-      - waha_data:/app/.sessions
+      - waha_sessions:/app/.sessions
     healthcheck:
       test: ["CMD", "wget", "--spider", "-q", "http://localhost:3000/api/health"]
       interval: 15s
@@ -36,4 +43,5 @@ services:
     restart: unless-stopped
 
 volumes:
-  waha_data:
+  app_data:
+  waha_sessions:

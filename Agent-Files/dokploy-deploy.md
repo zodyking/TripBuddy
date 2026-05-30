@@ -1,15 +1,21 @@
 # Deploying FedExTool on Dokploy
 
-## Build Type (IMPORTANT)
+## Deployment Type: Docker Compose (REQUIRED)
 
-Dokploy defaults to **Nixpacks** auto-detection, which will **not** work for this app (it builds a static-only Caddy site and skips the Node API server).
+This app deploys **two containers** (app + WAHA WhatsApp server) via `docker-compose.yml`.
 
-**You must set the build type to "Dockerfile":**
+**You MUST use Docker Compose deployment type in Dokploy:**
 
-1. In Dokploy, go to your application settings
-2. Find **Build Type** or **Builder** setting
-3. Change from "Nixpacks" / "Auto" to **"Dockerfile"**
-4. Ensure **Dockerfile Path** is set to `Dockerfile` (the repo root)
+1. In Dokploy, **delete the existing "Application" service** (or create a new one)
+2. Click **"+ Create Service"** → select **"Compose"**
+3. Connect your GitHub repo (`zodyking/TripBuddy`, branch `main`)
+4. Set **Compose Path** to `docker-compose.yml` (the repo root)
+5. Deploy — Dokploy will build the app from the Dockerfile AND pull `devlikeapro/waha`
+
+Both containers start together. The app connects to WAHA internally at `http://waha:3000`.
+
+### If you previously used "Dockerfile" / "Application" type:
+That only builds one container. Switch to Compose to get both.
 
 The repo includes a [`nixpacks.toml`](../nixpacks.toml) that disables Nixpacks phases as a fallback, but explicitly selecting "Dockerfile" build type is the reliable fix.
 
