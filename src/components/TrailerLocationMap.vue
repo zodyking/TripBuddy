@@ -1126,7 +1126,11 @@ watch(
           :title="`Map: ${activeBaseLayer} — tap to cycle`"
           @click="cycleBaseLayer"
         >
-          <span class="map-layer-label">{{ activeBaseLayer === 'dark' ? 'DK' : activeBaseLayer === 'street' ? 'ST' : 'SAT' }}</span>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <polygon points="1 6 1 22 8 18 16 22 23 18 23 2 16 6 8 2 1 6" />
+            <line x1="8" y1="2" x2="8" y2="18" />
+            <line x1="16" y1="6" x2="16" y2="22" />
+          </svg>
         </button>
       <button
         v-if="showCompassToggle"
@@ -1151,17 +1155,16 @@ watch(
         @pointercancel="onCompassPointerUp"
         @click="onCompassButtonClick"
       >
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-          <circle cx="12" cy="12" r="10" />
-          <polygon points="12,2 14,10 12,8 10,10" fill="currentColor" stroke="none" />
-          <polygon points="12,22 10,14 12,16 14,14" fill="currentColor" stroke="none" opacity="0.4" />
-          <circle cx="12" cy="12" r="2" />
+        <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="1.5" />
+          <path d="M12 2 L14.5 12 L12 10 L9.5 12 Z" fill="#ef4444" />
+          <path d="M12 22 L9.5 12 L12 14 L14.5 12 Z" fill="currentColor" opacity="0.5" />
         </svg>
         <span class="sr-only">
           {{
             compassModeActive
-              ? 'Exit compass mode. Heading offset: tap the sliders button below.'
-              : 'Compass mode. Heading offset: tap the sliders button below.'
+              ? 'Exit compass mode'
+              : 'Compass mode — rotate map to heading'
           }}
         </span>
       </button>
@@ -1174,26 +1177,11 @@ watch(
         @contextmenu.prevent
         @click.stop.prevent="onCalibrationControlClick"
       >
-        <svg
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          stroke-width="2"
-          stroke-linecap="round"
-          stroke-linejoin="round"
-          aria-hidden="true"
-        >
-          <line x1="4" y1="21" x2="4" y2="14" />
-          <line x1="4" y1="10" x2="4" y2="3" />
-          <line x1="12" y1="21" x2="12" y2="12" />
-          <line x1="12" y1="8" x2="12" y2="3" />
-          <line x1="20" y1="21" x2="20" y2="16" />
-          <line x1="20" y1="12" x2="20" y2="3" />
-          <line x1="1" y1="14" x2="7" y2="14" />
-          <line x1="9" y1="8" x2="15" y2="8" />
-          <line x1="17" y1="16" x2="23" y2="16" />
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <circle cx="12" cy="12" r="3" />
+          <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68 1.65 1.65 0 0 0 10 3.17V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
         </svg>
-        <span class="sr-only">Open heading offset and calibration</span>
+        <span class="sr-only">Calibration settings</span>
       </button>
       <button
         v-if="trailerGeoFollowActive"
@@ -1713,13 +1701,6 @@ watch(
   color: #fb923c;
 }
 
-.map-layer-label {
-  font-size: 0.55rem;
-  font-weight: 800;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  line-height: 1;
-}
 
 .map-control-btn--layer.is-on {
   color: #c4b5fd;

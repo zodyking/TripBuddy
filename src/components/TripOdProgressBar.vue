@@ -207,35 +207,34 @@ function onOpenMap() {
 <template>
   <div class="trip-od-progress" role="group" :aria-label="ariaGroupLabel">
     <div class="trip-od-progress__head">
-      <span v-if="remainingNmDisplay" class="trip-od-progress__remaining">{{ remainingNmDisplay }}</span>
-      <span v-else class="trip-od-progress__remaining trip-od-progress__remaining--muted">— NM left</span>
-      <div class="trip-od-progress__head-right">
-        <span class="trip-od-progress__stat" aria-hidden="true">
-          <template v-if="nmRatioText">
-            <span class="trip-od-progress__ratio">{{ nmRatioText }}</span>
-            <span class="trip-od-progress__unit">NM</span>
-          </template>
-          <template v-else>
-            <span class="trip-od-progress__ratio trip-od-progress__ratio--muted">—/—</span>
-            <span class="trip-od-progress__unit trip-od-progress__unit--muted">NM</span>
-          </template>
-        </span>
-        <button
-          v-if="mapAvailable"
-          type="button"
-          class="trip-od-progress__map-btn tap"
-          aria-label="Open leg route map"
-          title="Leg route map"
-          @click.stop="onOpenMap"
-        >
-          <svg class="trip-od-progress__map-ico" viewBox="0 0 24 24" aria-hidden="true">
-            <path
-              fill="currentColor"
-              d="M20.5 3l-.16.03L15 5.1 9 3 3.36 4.9c-.21.07-.36.25-.36.48V20.5c0 .28.22.5.5.5l.16-.03L9 18.9l6 2.1 5.64-1.9c.21-.07.36-.25.36-.48V3.5c0-.28-.22-.5-.5-.5zM10 5.47l4 1.4v11.66l-4-1.4V5.47zm-5 .99l3-1.01v11.7l-3 1.16V6.46zm14 11.08l-3 1.01V6.46l3-1.01v11.08z"
-            />
-          </svg>
-        </button>
-      </div>
+      <span class="trip-od-progress__stat" aria-hidden="true">
+        <template v-if="remainingNmDisplay">
+          <span class="trip-od-progress__remaining">{{ remainingNmDisplay }}</span>
+          <span v-if="nmRatioText" class="trip-od-progress__ratio">{{ nmRatioText }} NM</span>
+        </template>
+        <template v-else-if="nmRatioText">
+          <span class="trip-od-progress__ratio">{{ nmRatioText }}</span>
+          <span class="trip-od-progress__unit">NM</span>
+        </template>
+        <template v-else>
+          <span class="trip-od-progress__ratio trip-od-progress__ratio--muted">—/— NM</span>
+        </template>
+      </span>
+      <button
+        v-if="mapAvailable"
+        type="button"
+        class="trip-od-progress__map-btn tap"
+        aria-label="Open leg route map"
+        title="Leg route map"
+        @click.stop="onOpenMap"
+      >
+        <svg class="trip-od-progress__map-ico" viewBox="0 0 24 24" aria-hidden="true">
+          <path
+            fill="currentColor"
+            d="M20.5 3l-.16.03L15 5.1 9 3 3.36 4.9c-.21.07-.36.25-.36.48V20.5c0 .28.22.5.5.5l.16-.03L9 18.9l6 2.1 5.64-1.9c.21-.07.36-.25.36-.48V3.5c0-.28-.22-.5-.5-.5zM10 5.47l4 1.4v11.66l-4-1.4V5.47zm-5 .99l3-1.01v11.7l-3 1.16V6.46zm14 11.08l-3 1.01V6.46l3-1.01v11.08z"
+          />
+        </svg>
+      </button>
     </div>
 
     <div class="trip-od-progress__viz" aria-hidden="true">
@@ -276,39 +275,29 @@ function onOpenMap() {
   margin-bottom: 0.3rem;
 }
 
+.trip-od-progress__stat {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.4rem;
+  white-space: nowrap;
+  min-width: 0;
+  flex: 1;
+}
+
 .trip-od-progress__remaining {
-  font-size: 1.05rem;
+  font-size: 0.95rem;
   font-weight: 800;
   font-variant-numeric: tabular-nums;
   color: var(--color-accent-orange, #ff6b1a);
   letter-spacing: 0.01em;
-  line-height: 1.1;
-}
-
-.trip-od-progress__remaining--muted {
-  color: var(--color-text-tertiary, #8b8b98);
-  font-weight: 700;
-}
-
-.trip-od-progress__head-right {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.4rem;
-  flex-shrink: 0;
-}
-
-.trip-od-progress__stat {
-  display: inline-flex;
-  align-items: baseline;
-  gap: 0.2rem;
-  white-space: nowrap;
+  line-height: 1.15;
 }
 
 .trip-od-progress__ratio {
   font-size: 0.82rem;
-  font-weight: 800;
+  font-weight: 700;
   font-variant-numeric: tabular-nums;
-  color: var(--color-text-secondary, #c8c8d4);
+  color: var(--color-accent-orange-soft, #ffa366);
 }
 
 .trip-od-progress__ratio--muted {
@@ -317,15 +306,11 @@ function onOpenMap() {
 }
 
 .trip-od-progress__unit {
-  font-size: 0.6rem;
+  font-size: 0.65rem;
   font-weight: 700;
   letter-spacing: 0.06em;
   text-transform: uppercase;
-  color: var(--color-text-tertiary, #9a9aa8);
-}
-
-.trip-od-progress__unit--muted {
-  opacity: 0.85;
+  color: var(--color-accent-orange-soft, #ffa366);
 }
 
 .trip-od-progress__map-btn {

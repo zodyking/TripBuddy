@@ -66,6 +66,14 @@ import {
 import AutomationList from '../components/automation/AutomationList.vue'
 import AutomationEditor from '../components/automation/AutomationEditor.vue'
 import {
+  getWahaBaseUrl, setWahaBaseUrl,
+  getWahaApiKey, setWahaApiKey,
+  getWahaSessionName, setWahaSessionName,
+  getWahaGroupId, setWahaGroupId,
+  isWahaTtsEnabled, setWahaTtsEnabled,
+  getSessionStatus, listGroups, sendGroupMessage,
+} from '../utils/wahaApi.js'
+import {
   getTripAlertMode,
   setTripAlertMode,
   speakTripTtsTest,
@@ -639,6 +647,90 @@ async function resetApiQuotaToday() {
     apiQuotaMsg.value = e instanceof Error ? e.message : String(e)
   } finally {
     apiQuotaBusy.value = false
+  }
+}
+
+/** WhatsApp (WAHA) settings */
+const wahaUrlDraft = ref(getWahaBaseUrl())
+const wahaApiKeyDraft = ref(getWahaApiKey())
+const wahaSessionDraft = ref(getWahaSessionName())
+const wahaGroupIdDraft = ref(getWahaGroupId())
+const wahaTtsDraft = ref(isWahaTtsEnabled())
+const wahaConnMsg = ref('')
+const wahaGroupMsg = ref('')
+const wahaGroupsLoading = ref(false)
+const wahaGroupsList = ref([])
+const wahaSendText = ref('')
+const wahaSendMsg = ref('')
+
+function saveWahaConnection() {
+  setWahaBaseUrl(wahaUrlDraft.value)
+  setWahaApiKey(wahaApiKeyDraft.value)
+  setWahaSessionName(wahaSessionDraft.value)
+  wahaConnMsg.value = 'Connection saved.'
+}
+
+async function testWahaConnection() {
+  saveWahaConnection()
+  wahaConnMsg.value = 'Testing…'
+  try {
+    const r = await getSessionStatus()
+    if (r.ok) {
+      const status = r.body?.status || r.body?.state || 'connected'
+      wahaConnMsg.value = `Connected — session status: ${status}`
+    } else {
+      wahaConnMsg.value = `Failed (${r.status}). Check URL and credentials.`
+    }
+  } catch (e) {
+    wahaConnMsg.value = e instanceof Error ? e.message : String(e)
+  }
+}
+
+function saveWahaGroup() {
+  setWahaGroupId(wahaGroupIdDraft.value)
+  wahaGroupMsg.value = 'Group saved.'
+}
+
+async function loadWahaGroups() {
+  wahaGroupsLoading.value = true
+  wahaGroupMsg.value = ''
+  try {
+    const r = await listGroups()
+    if (r.ok && Array.isArray(r.body)) {
+      wahaGroupsList.value = r.body.map((g) => ({
+        id: g.id || g.chatId || '',
+        name: g.name || g.subject || '',
+      }))
+      wahaGroupMsg.value = `${wahaGroupsList.value.length} group(s) found.`
+    } else {
+      wahaGroupMsg.value = `Failed (${r.status}). Session may not be active.`
+    }
+  } catch (e) {
+    wahaGroupMsg.value = e instanceof Error ? e.message : String(e)
+  } finally {
+    wahaGroupsLoading.value = false
+  }
+}
+
+function saveWahaTts() {
+  setWahaTtsEnabled(wahaTtsDraft.value)
+  wahaGroupMsg.value = 'TTS preference saved.'
+}
+
+async function sendWahaMessage() {
+  const text = wahaSendText.value.trim()
+  if (!text) return
+  wahaSendMsg.value = 'Sending…'
+  try {
+    const r = await sendGroupMessage(text)
+    if (r.ok) {
+      wahaSendMsg.value = 'Sent.'
+      wahaSendText.value = ''
+    } else {
+      wahaSendMsg.value = `Failed (${r.status}).`
+    }
+  } catch (e) {
+    wahaSendMsg.value = e instanceof Error ? e.message : String(e)
   }
 }
 
@@ -1344,6 +1436,15 @@ onUnmounted(() => {
         @click="settingsTab = 'directory'"
       >
         Directory
+      </button>
+      <button
+        type="button"
+        role="tab"
+        :aria-selected="settingsTab === 'whatsapp'"
+        :class="{ active: settingsTab === 'whatsapp' }"
+        @click="settingsTab = 'whatsapp'"
+      >
+        WhatsApp
       </button>
     </div>
 
@@ -2194,6 +2295,107 @@ onUnmounted(() => {
             </button>
           </div>
         </div>
+      </SettingsSection>
+    </main>
+
+    <main v-show="settingsTab === 'whatsapp'" class="stack whatsapp-panel">
+      <SettingsSection title="WhatsApp Messenger" section-id="settings-whatsapp">
+        <p class="cred-hint">
+          Connect to a self-hosted
+          <a href="https://github.com/devlikeapro/waha" target="_blank" rel="noopener noreferrer" class="ext-link">WAHA</a>
+          instance to send/receive messages from a WhatsApp group. Incoming messages are read aloud via TTS.
+        </p>
+
+        <h4 class="api-sub-heading" style="margin-top:0;padding-top:0;border-top:none">Connection</h4>
+        <label class="lbl" for="waha-url">WAHA server URL</label>
+        <input
+          id="waha-url"
+          v-model="wahaUrlDraft"
+          class="inp tap"
+          type="url"
+          autocomplete="off"
+          placeholder="http://your-server:3000"
+        />
+        <label class="lbl" for="waha-api-key">API key (optional)</label>
+        <input
+          id="waha-api-key"
+          v-model="wahaApiKeyDraft"
+          class="inp tap"
+          type="password"
+          autocomplete="off"
+          placeholder="Bearer token"
+        />
+        <label class="lbl" for="waha-session">Session name</label>
+        <input
+          id="waha-session"
+          v-model="wahaSessionDraft"
+          class="inp tap"
+          type="text"
+          autocomplete="off"
+          placeholder="default"
+        />
+        <div class="btn-row">
+          <button type="button" class="btn primary tap" @click="saveWahaConnection">Save connection</button>
+          <button type="button" class="btn tap" @click="testWahaConnection">Test</button>
+        </div>
+        <p v-if="wahaConnMsg" class="cred-msg">{{ wahaConnMsg }}</p>
+
+        <h4 class="api-sub-heading">Group</h4>
+        <label class="lbl" for="waha-group-id">Group chat ID</label>
+        <input
+          id="waha-group-id"
+          v-model="wahaGroupIdDraft"
+          class="inp tap"
+          type="text"
+          autocomplete="off"
+          placeholder="120363xxxxxxxxx@g.us"
+        />
+        <p class="cred-hint">
+          Format: <code>120363…@g.us</code> — use "List groups" below to find yours.
+        </p>
+        <div class="btn-row">
+          <button type="button" class="btn primary tap" @click="saveWahaGroup">Save group</button>
+          <button type="button" class="btn tap" :disabled="wahaGroupsLoading" @click="loadWahaGroups">
+            {{ wahaGroupsLoading ? 'Loading…' : 'List groups' }}
+          </button>
+        </div>
+        <p v-if="wahaGroupMsg" class="cred-msg">{{ wahaGroupMsg }}</p>
+        <div v-if="wahaGroupsList.length" class="waha-groups-list">
+          <button
+            v-for="g in wahaGroupsList"
+            :key="g.id"
+            type="button"
+            class="waha-group-item tap"
+            :class="{ 'is-active': g.id === wahaGroupIdDraft }"
+            @click="wahaGroupIdDraft = g.id"
+          >
+            <span class="waha-group-name">{{ g.name || g.id }}</span>
+            <span class="waha-group-id">{{ g.id }}</span>
+          </button>
+        </div>
+
+        <h4 class="api-sub-heading">Messaging</h4>
+        <label class="waha-toggle-row">
+          <input type="checkbox" v-model="wahaTtsDraft" class="tap" />
+          <span>Read incoming group messages aloud (TTS)</span>
+        </label>
+        <div class="btn-row">
+          <button type="button" class="btn tap" @click="saveWahaTts">Save TTS preference</button>
+        </div>
+
+        <div class="waha-send-row">
+          <input
+            v-model="wahaSendText"
+            class="inp tap waha-send-input"
+            type="text"
+            placeholder="Type a message to the group…"
+            @keydown.enter.prevent="sendWahaMessage"
+          />
+          <button type="button" class="btn primary tap" :disabled="!wahaSendText.trim()" @click="sendWahaMessage">
+            Send
+          </button>
+        </div>
+        <p v-if="wahaSendMsg" class="cred-msg">{{ wahaSendMsg }}</p>
       </SettingsSection>
     </main>
 
@@ -3259,5 +3461,72 @@ code {
     animation: none;
     transform: none;
   }
+}
+
+/* WhatsApp panel */
+.whatsapp-panel {
+  max-width: 40rem;
+  margin-inline: auto;
+}
+.waha-groups-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  margin: 0.5rem 0;
+  max-height: 12rem;
+  overflow-y: auto;
+}
+.waha-group-item {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  padding: 0.4rem 0.55rem;
+  border-radius: 0.4rem;
+  border: 1px solid rgba(255,255,255,0.08);
+  background: rgba(255,255,255,0.03);
+  cursor: pointer;
+  text-align: left;
+  font: inherit;
+  color: inherit;
+}
+.waha-group-item:hover {
+  background: rgba(255,255,255,0.07);
+}
+.waha-group-item.is-active {
+  border-color: rgba(34,197,94,0.5);
+  background: rgba(34,197,94,0.08);
+}
+.waha-group-name {
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: var(--color-text-primary, #f4f4f8);
+}
+.waha-group-id {
+  font-size: 0.62rem;
+  color: var(--color-text-tertiary, #8b8b98);
+  font-family: monospace;
+}
+.waha-toggle-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.78rem;
+  color: var(--color-text-secondary, #c8c8d4);
+  cursor: pointer;
+  margin-bottom: 0.5rem;
+}
+.waha-toggle-row input[type="checkbox"] {
+  width: 1.1rem;
+  height: 1.1rem;
+  accent-color: var(--color-accent-purple, #7b4db5);
+}
+.waha-send-row {
+  display: flex;
+  gap: 0.4rem;
+  margin-top: 0.5rem;
+}
+.waha-send-input {
+  flex: 1;
+  min-width: 0;
 }
 </style>

@@ -88,6 +88,7 @@ import {
   extractLocationForDirectory,
 } from '../utils/linehaulLocationDisplay.js'
 import { writeTrailerGpsSession, patchTrailerGpsSessionMap } from '../utils/trailerGpsMapSession.js'
+import { useWhatsAppGroup } from '../composables/useWhatsAppGroup.js'
 import { copyTextToClipboard } from '../utils/copyToClipboard.js'
 import { vehicleIdForUserMapMarker } from '../utils/mapVehicleLabel.js'
 import {
@@ -121,6 +122,7 @@ import {
 } from '../utils/alertAudioQueue.js'
 
 const router = useRouter()
+const { startPolling: startWhatsAppPolling } = useWhatsAppGroup()
 
 const PORTAL_Z_MODAL = 2_147_483_001
 const PORTAL_Z_LOCATION_MODAL = 2_147_483_002
@@ -2164,6 +2166,7 @@ onMounted(async () => {
   void loadDollyRegistry()
   void loadTrailerNumbers()
   syncTripVoiceUnlockHint()
+  startWhatsAppPolling()
 })
 
 onActivated(() => {
