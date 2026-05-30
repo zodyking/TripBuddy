@@ -13,6 +13,7 @@ import {
   listContacts,
   buildContactNameMap,
   buildLidPhoneMap,
+  buildParticipantNameMap,
   listLids,
   getWahaMessageId,
   normalizeWahaMessage,
@@ -33,6 +34,8 @@ import {
   setCachedContactsMap,
   getCachedLidMap,
   setCachedLidMap,
+  getCachedParticipantNames,
+  setCachedParticipantNames,
 } from '../stores/wahaChatStore.js'
 
 /**
@@ -53,6 +56,8 @@ export function useWahaMessenger(opts = {}) {
   const contactMap = ref(new Map())
   /** @type {import('vue').Ref<Map<string, string>>} lid @lid -> pn @c.us */
   const lidMap = ref(new Map())
+  /** @type {import('vue').Ref<Map<string, string>>} participant JID -> display name */
+  const participantNameMap = ref(new Map())
   /** @type {import('vue').Ref<unknown[]>} */
   const rawThreadMessages = ref([])
 
@@ -112,13 +117,44 @@ export function useWahaMessenger(opts = {}) {
     return {
       contactMap: contactMap.value,
       lidMap: lidMap.value,
+      participantMap: participantNameMap.value,
       activeChatId: chatId,
     }
   }
 
+  function persistParticipantNames(chatId) {
+    if (!chatId) return
+    setCachedParticipantNames(chatId, Object.fromEntries(participantNameMap.value))
+  }
+
+  function hydrateParticipantNames(chatId) {
+    const rec = getCachedParticipantNames(chatId)
+    if (rec && typeof rec === 'object' && Object.keys(rec).length) {
+      participantNameMap.value = new Map(Object.entries(rec))
+    } else {
+      participantNameMap.value = new Map()
+    }
+  }
+
+  function absorbParticipantNames(raw, chatId) {
+    const opts = {
+      contactMap: contactMap.value,
+      lidMap: lidMap.value,
+      activeChatId: chatId,
+    }
+    const learned = buildParticipantNameMap(raw, opts)
+    if (!learned.size) return
+    const merged = new Map(participantNameMap.value)
+    for (const [k, v] of learned) merged.set(k, v)
+    participantNameMap.value = merged
+    persistParticipantNames(chatId)
+  }
+
   function normalizeList(raw, chatId) {
+    absorbParticipantNames(raw, chatId)
+    const opts = normalizeOpts(chatId)
     return raw
-      .map((m) => normalizeWahaMessage(m, normalizeOpts(chatId)))
+      .map((m) => normalizeWahaMessage(m, opts))
       .filter((m) => m.id && (m.text || m.hasMedia))
   }
 
@@ -137,8 +173,7 @@ export function useWahaMessenger(opts = {}) {
   function reapplySenderNames() {
     const chatId = activeChatId.value
     if (!chatId || !rawThreadMessages.value.length) return
-    const normalized = normalizeList(rawThreadMessages.value, chatId)
-    messages.value = normalized
+    messages.value = normalizeList(rawThreadMessages.value, chatId)
   }
 
   function hydrateContactsFromCache() {
@@ -159,6 +194,7 @@ export function useWahaMessenger(opts = {}) {
       : pickLegacyRaw(cached?.messages)
     if (!raw?.length) return false
     rawThreadMessages.value = raw
+    hydrateParticipantNames(chatId)
     const normalized = normalizeList(raw, chatId)
     applyMessages(normalized, chatId, cached.updatedAt, raw)
     loading.value = false
@@ -365,7 +401,11 @@ export function useWahaMessenger(opts = {}) {
       for (const m of incoming) {
         if (!byId.has(m.id)) hasNew = true
         const prev = byId.get(m.id)
-        byId.set(m.id, prev?.media?.url ? { ...m, media: prev.media } : m)
+        let merged = prev?.media?.url ? { ...m, media: prev.media } : m
+        if (!merged.senderName && prev?.senderName) {
+          merged = { ...merged, senderName: prev.senderName }
+        }
+        byId.set(m.id, merged)
       }
       const merged = [...byId.values()]
       messages.value = merged
@@ -437,6 +477,8 @@ export function useWahaMessenger(opts = {}) {
     lastSeenId = ''
     mediaGen++
     rawThreadMessages.value = []
+    participantNameMap.value = new Map()
+    hydrateParticipantNames(chat.id)
     const had = hydrateThreadFromClientCache(chat.id, { scroll: true })
     if (!had) loading.value = true
     void syncThread(chat.id, { scroll: !had }).then(() => startPolling())
@@ -456,6 +498,7 @@ export function useWahaMessenger(opts = {}) {
     if (!configured.value) return
     hydrateContactsFromCache()
     hydrateLidsFromCache()
+    if (activeChatId.value) hydrateParticipantNames(activeChatId.value)
     void loadContacts()
     void loadLids()
     const memChats = getCachedChats()

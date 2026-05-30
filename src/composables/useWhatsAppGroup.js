@@ -12,6 +12,7 @@ import {
   listLids,
   buildContactNameMap,
   buildLidPhoneMap,
+  buildParticipantNameMap,
   normalizeWahaMessage,
 } from '../utils/wahaApi.js'
 import { enqueueAnnouncement } from '../utils/alertAudioQueue.js'
@@ -21,6 +22,8 @@ import { pushLiveLog } from '../stores/liveLogStore.js'
 let contactMap = new Map()
 /** @type {Map<string, string>} */
 let lidMap = new Map()
+/** @type {Map<string, string>} */
+let participantNameMap = new Map()
 let contactsLoaded = false
 
 function getMsgId(msg) {
@@ -105,8 +108,18 @@ export function useWhatsAppGroup() {
           if (msg.fromMe) continue
           newMsgs.push(msg)
         }
+        participantNameMap = buildParticipantNameMap(incoming, {
+          contactMap,
+          lidMap,
+          activeChatId: chatId,
+        })
         for (const raw of newMsgs.reverse()) {
-          const norm = normalizeWahaMessage(raw, { contactMap, lidMap, activeChatId: chatId })
+          const norm = normalizeWahaMessage(raw, {
+            contactMap,
+            lidMap,
+            participantMap: participantNameMap,
+            activeChatId: chatId,
+          })
           const speech = buildNewMessageSpeech(norm)
           if (!speech) continue
           pushLiveLog({ type: 'info', message: `[WhatsApp] TTS: ${speech}`, ts: Date.now() })
@@ -130,6 +143,7 @@ export function useWhatsAppGroup() {
     lastSeenId = ''
     contactsLoaded = false
     lidMap = new Map()
+    participantNameMap = new Map()
     pollOnce().then(() => {
       if (!pollTimer) {
         pollTimer = setInterval(pollOnce, getWahaPollInterval())

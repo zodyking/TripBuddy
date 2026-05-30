@@ -8,6 +8,7 @@ const SESSION_PREFIX_V1 = 'waha-thread-v1:'
 const CHATS_KEY = 'waha-chats-v1'
 const CONTACTS_KEY = 'waha-contacts-v1'
 const LIDS_KEY = 'waha-lids-v1'
+const PARTICIPANTS_PREFIX = 'waha-participants-v1:'
 
 /** @type {Map<string, { rawMessages: unknown[], updatedAt: number }>} */
 const threadMemory = new Map()
@@ -136,4 +137,24 @@ export function getCachedLidMap() {
 export function setCachedLidMap(map) {
   lidsMemory = map && typeof map === 'object' ? map : {}
   writeJson(LIDS_KEY, lidsMemory)
+}
+
+/**
+ * @param {string} chatId
+ * @returns {Record<string, string>}
+ */
+export function getCachedParticipantNames(chatId) {
+  const id = String(chatId || '').trim()
+  if (!id) return {}
+  return readJson(`${PARTICIPANTS_PREFIX}${id}`, {})
+}
+
+/**
+ * @param {string} chatId
+ * @param {Record<string, string>} map
+ */
+export function setCachedParticipantNames(chatId, map) {
+  const id = String(chatId || '').trim()
+  if (!id) return
+  writeJson(`${PARTICIPANTS_PREFIX}${id}`, map && typeof map === 'object' ? map : {})
 }
