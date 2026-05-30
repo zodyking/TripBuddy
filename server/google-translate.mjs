@@ -1,71 +1,78 @@
 /**
- * Translate short display strings to English (sender names).
- * Uses Google Cloud Translation API when GOOGLE_TRANSLATE_API_KEY is set;
- * otherwise the public gtx client (best-effort, no key).
+ * Free English translation for short strings (e.g. WhatsApp sender names).
+ * Uses Google’s public translate endpoint (client=gtx) — no API key required.
  */
 
-const CLOUD_URL = 'https://translation.googleapis.com/language/translate/v2'
 const GTX_URL = 'https://translate.googleapis.com/translate_a/single'
+const MAX_TEXT_LEN = 200
+const BATCH_DELAY_MS = 80
 
 /**
- * @param {string} text
+ * @param {unknown} data
  */
-async function gtxTranslateOne(text) {
-  const q = encodeURIComponent(String(text).slice(0, 200))
-  const url = `${GTX_URL}?client=gtx&sl=auto&tl=en&dt=t&q=${q}`
-  const r = await fetch(url, { headers: { Accept: 'application/json' } })
-  if (!r.ok) return ''
-  const data = await r.json().catch(() => null)
-  const out = data?.[0]?.[0]?.[0]
-  return typeof out === 'string' ? out.trim() : ''
-}
-
-/**
- * @param {string[]} texts unique non-empty strings
- * @param {string} apiKey
- */
-async function cloudTranslateBatch(texts, apiKey) {
-  const r = await fetch(`${CLOUD_URL}?key=${encodeURIComponent(apiKey)}`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      q: texts,
-      target: 'en',
-      format: 'text',
-    }),
-  })
-  const body = await r.json().catch(() => null)
-  if (!r.ok) {
-    const msg = body?.error?.message || `Google Translate HTTP ${r.status}`
-    throw new Error(String(msg).slice(0, 300))
+function parseGtxResponse(data) {
+  if (!Array.isArray(data) || !Array.isArray(data[0])) return ''
+  const parts = []
+  for (const row of data[0]) {
+    if (Array.isArray(row) && typeof row[0] === 'string') parts.push(row[0])
   }
-  const translations = body?.data?.translations
-  if (!Array.isArray(translations)) return []
-  return translations.map((t) => String(t?.translatedText ?? '').trim())
+  return parts.join('').trim()
 }
 
 /**
  * @param {string} text
- * @param {string} [apiKey]
+ * @param {number} [retries]
  */
-export async function translateTextToEnglish(text, apiKey) {
+async function gtxTranslateOne(text, retries = 2) {
+  const raw = String(text ?? '').trim().slice(0, MAX_TEXT_LEN)
+  if (!raw) return ''
+
+  const url = `${GTX_URL}?client=gtx&sl=auto&tl=en&dt=t&q=${encodeURIComponent(raw)}`
+  const headers = {
+    'User-Agent': 'Mozilla/5.0 (compatible; TripBuddy/1.0)',
+    Accept: '*/*',
+  }
+
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      const r = await fetch(url, { headers })
+      if (!r.ok) {
+        if (attempt < retries) {
+          await sleep(120 * (attempt + 1))
+          continue
+        }
+        return ''
+      }
+      const data = await r.json().catch(() => null)
+      const out = parseGtxResponse(data)
+      if (out) return out
+    } catch {
+      /* retry */
+    }
+    if (attempt < retries) await sleep(120 * (attempt + 1))
+  }
+  return ''
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+/**
+ * @param {string} text
+ */
+export async function translateTextToEnglish(text) {
   const raw = String(text ?? '').trim()
   if (!raw) return ''
-  const key = String(apiKey ?? process.env.GOOGLE_TRANSLATE_API_KEY ?? '').trim()
-  if (key) {
-    const [out] = await cloudTranslateBatch([raw], key)
-    return out || raw
-  }
   const out = await gtxTranslateOne(raw)
   return out || raw
 }
 
 /**
  * @param {Array<{ id: string, text: string }>} items
- * @param {{ apiKey?: string }} [opts]
  * @returns {Promise<Record<string, string>>}
  */
-export async function translateSenderNamesToEnglish(items, opts = {}) {
+export async function translateSenderNamesToEnglish(items) {
   /** @type {Record<string, string>} */
   const result = {}
   const list = Array.isArray(items) ? items : []
@@ -82,32 +89,15 @@ export async function translateSenderNamesToEnglish(items, opts = {}) {
   }
 
   const uniqueTexts = [...byText.values()].map((v) => v.text)
-  if (!uniqueTexts.length) return result
-
-  const key = String(opts.apiKey ?? process.env.GOOGLE_TRANSLATE_API_KEY ?? '').trim()
-  /** @type {string[]} */
-  let translated = []
-
-  if (key) {
-    const batchSize = 50
-    for (let i = 0; i < uniqueTexts.length; i += batchSize) {
-      const chunk = uniqueTexts.slice(i, i + batchSize)
-      const part = await cloudTranslateBatch(chunk, key)
-      translated.push(...part)
-    }
-  } else {
-    translated = await Promise.all(
-      uniqueTexts.map((t) => gtxTranslateOne(t).catch(() => '')),
-    )
-  }
-
-  uniqueTexts.forEach((original, idx) => {
-    const en = String(translated[idx] ?? '').trim() || original
+  for (let i = 0; i < uniqueTexts.length; i++) {
+    const original = uniqueTexts[i]
+    const en = (await gtxTranslateOne(original)) || original
     const norm = original.toLowerCase()
     const entry = byText.get(norm)
-    if (!entry) return
+    if (!entry) continue
     for (const id of entry.ids) result[id] = en
-  })
+    if (i < uniqueTexts.length - 1) await sleep(BATCH_DELAY_MS)
+  }
 
   return result
 }
