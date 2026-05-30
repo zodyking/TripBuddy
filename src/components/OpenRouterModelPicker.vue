@@ -15,7 +15,9 @@ const props = defineProps({
 const emit = defineEmits(['update:modelValue'])
 
 const rootEl = ref(/** @type {HTMLElement | null} */ (null))
+const inputEl = ref(/** @type {HTMLInputElement | null} */ (null))
 const listOpen = ref(false)
+const inputFocused = ref(false)
 const loading = ref(false)
 const loadError = ref('')
 /** @type {import('vue').Ref<Array<{ id: string, name: string, description: string }>>} */
@@ -37,14 +39,17 @@ const filtered = computed(() => {
     }
     return []
   }
-  if (!q) return catalog.value.slice(0, 50)
-  const hits = catalog.value.filter((m) => {
-    if (m.id.toLowerCase().includes(q)) return true
-    if (m.name.toLowerCase().includes(q)) return true
-    return false
-  })
-  const out = hits.slice(0, 50)
+  let hits = catalog.value
+  if (q) {
+    hits = catalog.value.filter((m) => {
+      if (m.id.toLowerCase().includes(q)) return true
+      if (m.name.toLowerCase().includes(q)) return true
+      return false
+    })
+  }
+  const out = hits.slice(0, 120)
   if (
+    q &&
     /^[a-z0-9][\w.-]*\/[\w.-]+$/i.test(q) &&
     !out.some((m) => m.id.toLowerCase() === q)
   ) {
@@ -54,6 +59,14 @@ const filtered = computed(() => {
 })
 
 const listboxId = computed(() => `${props.inputId}-listbox`)
+const listSummary = computed(() => {
+  if (!catalogLoaded.value || !catalog.value.length) return ''
+  const shown = filtered.value.length
+  const total = catalog.value.length
+  const q = String(displayValue.value ?? '').trim()
+  if (!q) return `${total} text models — type to filter`
+  return `${shown} match${shown === 1 ? '' : 'es'} · ${total} total`
+})
 
 async function loadCatalog() {
   if (loading.value) return
@@ -88,6 +101,16 @@ function closeList() {
   activeIndex.value = -1
 }
 
+function toggleList() {
+  if (listOpen.value) {
+    closeList()
+    inputEl.value?.blur()
+  } else {
+    openList()
+    inputEl.value?.focus()
+  }
+}
+
 function selectModel(m) {
   if (!m?.id) return
   displayValue.value = m.id
@@ -99,6 +122,15 @@ function onInput() {
   if (!catalogLoaded.value && !loading.value) {
     void loadCatalog()
   }
+}
+
+function onFocus() {
+  inputFocused.value = true
+  openList()
+}
+
+function onBlur() {
+  inputFocused.value = false
 }
 
 function onKeydown(e) {
@@ -116,17 +148,28 @@ function onKeydown(e) {
   if (e.key === 'ArrowDown' && n) {
     e.preventDefault()
     activeIndex.value = (activeIndex.value + 1) % n
+    scrollActiveIntoView()
     return
   }
   if (e.key === 'ArrowUp' && n) {
     e.preventDefault()
     activeIndex.value = activeIndex.value <= 0 ? n - 1 : activeIndex.value - 1
+    scrollActiveIntoView()
     return
   }
   if (e.key === 'Enter' && n && activeIndex.value >= 0) {
     e.preventDefault()
     selectModel(filtered.value[activeIndex.value])
   }
+}
+
+function scrollActiveIntoView() {
+  void nextTick(() => {
+    const root = rootEl.value
+    if (!root || activeIndex.value < 0) return
+    const el = root.querySelector(`#${props.inputId}-opt-${activeIndex.value}`)
+    el?.scrollIntoView({ block: 'nearest' })
+  })
 }
 
 function onDocPointer(e) {
@@ -154,108 +197,230 @@ watch(
 watch(filtered, async () => {
   if (!listOpen.value) return
   await nextTick()
-  activeIndex.value = filtered.value.length ? Math.min(activeIndex.value, filtered.value.length - 1) : -1
-  if (activeIndex.value < 0 && filtered.value.length) activeIndex.value = 0
+  if (activeIndex.value >= filtered.value.length) {
+    activeIndex.value = filtered.value.length ? 0 : -1
+  }
 })
 </script>
 
 <template>
-  <div ref="rootEl" class="or-model-picker">
-    <input
-      :id="inputId"
-      v-model="displayValue"
-      class="inp tap or-model-input"
-      type="text"
-      role="combobox"
-      autocomplete="off"
-      spellcheck="false"
-      :disabled="disabled"
-      :aria-expanded="listOpen"
-      :aria-controls="listboxId"
-      :aria-activedescendant="
-        listOpen && activeIndex >= 0 && filtered[activeIndex]
-          ? `${inputId}-opt-${activeIndex}`
-          : undefined
-      "
-      aria-autocomplete="list"
-      placeholder="Search models (e.g. gpt-4o-mini)"
-      @focus="openList"
-      @input="onInput"
-      @keydown="onKeydown"
-    />
+  <div
+    ref="rootEl"
+    class="or-model-picker"
+    :class="{ 'is-open': listOpen, 'is-focused': inputFocused, 'is-disabled': disabled }"
+  >
+    <div class="or-model-field">
+      <input
+        :id="inputId"
+        ref="inputEl"
+        v-model="displayValue"
+        class="or-model-input tap"
+        type="text"
+        role="combobox"
+        autocomplete="off"
+        spellcheck="false"
+        :disabled="disabled"
+        :aria-expanded="listOpen"
+        :aria-controls="listboxId"
+        :aria-activedescendant="
+          listOpen && activeIndex >= 0 && filtered[activeIndex]
+            ? `${inputId}-opt-${activeIndex}`
+            : undefined
+        "
+        aria-autocomplete="list"
+        placeholder="Search OpenRouter models…"
+        @focus="onFocus"
+        @blur="onBlur"
+        @input="onInput"
+        @keydown="onKeydown"
+      />
+      <button
+        type="button"
+        class="or-model-toggle tap"
+        tabindex="-1"
+        :disabled="disabled"
+        :aria-label="listOpen ? 'Close model list' : 'Open model list'"
+        :aria-expanded="listOpen"
+        @click="toggleList"
+      >
+        <svg
+          class="or-model-chevron"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+          aria-hidden="true"
+        >
+          <path d="M6 9l6 6 6-6" stroke-linecap="round" stroke-linejoin="round" />
+        </svg>
+      </button>
+    </div>
+
     <ul
       v-if="listOpen"
       :id="listboxId"
       class="or-model-list"
       role="listbox"
-      :aria-label="'OpenRouter models'"
+      aria-label="OpenRouter models"
     >
+      <li v-if="listSummary" class="or-model-meta" role="presentation">{{ listSummary }}</li>
       <li v-if="loading" class="or-model-item or-model-item--muted" role="presentation">
         Loading models…
       </li>
       <li v-else-if="loadError" class="or-model-item or-model-item--err" role="presentation">
         {{ loadError }}
       </li>
-      <li
-        v-for="(m, i) in filtered"
-        :key="m.id"
-        :id="`${inputId}-opt-${i}`"
-        class="or-model-item tap"
-        role="option"
-        :aria-selected="displayValue === m.id"
-        :class="{ 'is-active': i === activeIndex, 'is-selected': displayValue === m.id }"
-        @pointerdown.prevent="selectModel(m)"
-      >
-        <span class="or-model-name">{{ m.name }}</span>
-        <span class="or-model-id">{{ m.id }}</span>
-      </li>
-      <li
-        v-if="!loading && !loadError && !filtered.length"
-        class="or-model-item or-model-item--muted"
-        role="presentation"
-      >
-        No models match. Type a model id (provider/model-name).
-      </li>
+      <template v-else>
+        <li
+          v-for="(m, i) in filtered"
+          :key="m.id"
+          :id="`${inputId}-opt-${i}`"
+          class="or-model-item tap"
+          role="option"
+          :aria-selected="displayValue === m.id"
+          :class="{ 'is-active': i === activeIndex, 'is-selected': displayValue === m.id }"
+          @pointerdown.prevent="selectModel(m)"
+        >
+          <span class="or-model-name">{{ m.name }}</span>
+          <span class="or-model-id">{{ m.id }}</span>
+        </li>
+        <li
+          v-if="!filtered.length"
+          class="or-model-item or-model-item--muted"
+          role="presentation"
+        >
+          No models match. Type a provider/model id (e.g. openai/gpt-4o-mini).
+        </li>
+      </template>
     </ul>
   </div>
 </template>
 
 <style scoped>
+/* Match SettingsView `.inp` / `.api-key-inp` (parent styles are scoped and do not reach this child). */
 .or-model-picker {
   position: relative;
-  flex: 1 1 12rem;
+  flex: 1 1 10rem;
   min-width: 0;
+  margin-bottom: 0;
+}
+
+.or-model-field {
+  display: flex;
+  align-items: stretch;
+  min-height: var(--touch-target, 2.75rem);
+  border-radius: var(--radius-md, 0.5rem);
+  border: 1px solid var(--color-border, rgba(255, 255, 255, 0.08));
+  background: var(--color-bg-elevated, #0f0f14);
+  transition: var(--transition-colors, border-color 0.2s ease, box-shadow 0.2s ease);
+}
+
+.or-model-picker.is-focused .or-model-field,
+.or-model-picker.is-open .or-model-field {
+  border-color: var(--color-accent-purple, #7b4db5);
+  box-shadow: 0 0 0 3px rgba(123, 77, 181, 0.15);
+}
+
+.or-model-picker.is-disabled .or-model-field {
+  opacity: 0.55;
 }
 
 .or-model-input {
+  flex: 1 1 auto;
+  min-width: 0;
   width: 100%;
+  margin: 0;
+  padding: var(--space-2-5, 0.625rem) var(--space-2, 0.5rem) var(--space-2-5, 0.625rem)
+    var(--space-3, 0.75rem);
+  border: none;
+  border-radius: var(--radius-md, 0.5rem) 0 0 var(--radius-md, 0.5rem);
+  background: transparent;
+  color: var(--color-text-primary, #f4f4f8);
+  font-size: var(--text-base, 0.9375rem);
+  line-height: 1.35;
+  min-height: var(--touch-target, 2.75rem);
+  box-sizing: border-box;
+}
+
+.or-model-input:focus {
+  outline: none;
+}
+
+.or-model-input::placeholder {
+  color: var(--color-text-tertiary, #6e6e7e);
+}
+
+.or-model-input:disabled {
+  cursor: not-allowed;
+}
+
+.or-model-toggle {
+  flex: 0 0 var(--touch-target, 2.75rem);
+  width: var(--touch-target, 2.75rem);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0;
+  padding: 0;
+  border: none;
+  border-left: 1px solid var(--color-border, rgba(255, 255, 255, 0.08));
+  border-radius: 0 var(--radius-md, 0.5rem) var(--radius-md, 0.5rem) 0;
+  background: transparent;
+  color: var(--color-text-secondary, #a8a8b8);
+  cursor: pointer;
+}
+
+.or-model-toggle:hover:not(:disabled) {
+  color: var(--color-text-primary, #f4f4f8);
+  background: var(--color-hover, rgba(255, 255, 255, 0.04));
+}
+
+.or-model-toggle:disabled {
+  cursor: not-allowed;
+}
+
+.or-model-chevron {
+  width: 1.125rem;
+  height: 1.125rem;
+  transition: transform 0.15s ease;
+}
+
+.or-model-picker.is-open .or-model-chevron {
+  transform: rotate(180deg);
 }
 
 .or-model-list {
   position: absolute;
-  z-index: 50;
+  z-index: var(--z-dropdown, 10);
   left: 0;
   right: 0;
   top: calc(100% + 4px);
   margin: 0;
-  padding: 0.25rem 0;
-  max-height: min(16rem, 45vh);
+  padding: 0.2rem 0;
+  max-height: min(18rem, 50vh);
   overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
   list-style: none;
   border-radius: var(--radius-md, 0.5rem);
   border: 1px solid var(--color-border, rgba(255, 255, 255, 0.08));
-  background: var(--color-bg-surface, #16161d);
+  background: var(--color-bg-elevated, #0f0f14);
   box-shadow: var(--shadow-lg, 0 8px 24px rgba(0, 0, 0, 0.35));
+}
+
+.or-model-meta {
+  padding: 0.35rem 0.75rem 0.45rem;
+  font-size: var(--text-xs, 0.6875rem);
+  font-weight: var(--weight-medium, 500);
+  color: var(--color-text-tertiary, #6e6e7e);
+  border-bottom: 1px solid var(--color-border-subtle, rgba(255, 255, 255, 0.04));
 }
 
 .or-model-item {
   display: flex;
   flex-direction: column;
-  gap: 0.1rem;
-  padding: 0.45rem 0.65rem;
+  gap: 0.12rem;
+  padding: 0.5rem 0.75rem;
   cursor: pointer;
-  border: none;
-  background: transparent;
   text-align: left;
 }
 
@@ -264,8 +429,12 @@ watch(filtered, async () => {
   background: var(--color-hover, rgba(255, 255, 255, 0.04));
 }
 
-.or-model-item.is-selected .or-model-id {
+.or-model-item.is-selected .or-model-name {
   color: var(--color-accent-purple-light, #9d6fd7);
+}
+
+.or-model-item.is-selected .or-model-id {
+  color: var(--color-accent-purple, #7b4db5);
 }
 
 .or-model-item--muted {
@@ -284,12 +453,12 @@ watch(filtered, async () => {
   font-size: var(--text-sm, 0.8125rem);
   font-weight: var(--weight-semibold, 600);
   color: var(--color-text-primary, #f4f4f8);
-  line-height: 1.25;
+  line-height: 1.3;
 }
 
 .or-model-id {
   font-family: var(--font-mono, ui-monospace, monospace);
-  font-size: 0.6875rem;
+  font-size: var(--text-xs, 0.6875rem);
   color: var(--color-text-tertiary, #6e6e7e);
   word-break: break-all;
 }

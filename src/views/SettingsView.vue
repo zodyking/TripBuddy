@@ -2778,10 +2778,7 @@ onUnmounted(() => {
   margin: 0;
 }
 .api-key-row--model {
-  align-items: flex-start;
-}
-.api-key-row--model .api-key-lbl {
-  padding-top: 0.65rem;
+  align-items: center;
 }
 .api-model-hint {
   margin: 0 0 var(--space-2, 0.5rem);
