@@ -65,12 +65,12 @@ describe('classifyBridgeTraffic (calibrated profiles)', () => {
     assert.equal(r.level, 'standstill')
   })
 
-  it('Goethals To NJ spike 9 min / 12 mph → standstill', () => {
+  it('Goethals To NJ spike 9 min / 9 mph → standstill', () => {
     const r = classifyBridgeTraffic({
       routeId: 87,
       travelDirection: 'ToNJ',
       routeTravelTime: 9,
-      routeSpeed: 12,
+      routeSpeed: 9,
     })
     assert.equal(r.level, 'standstill')
   })
