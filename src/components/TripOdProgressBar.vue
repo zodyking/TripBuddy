@@ -208,16 +208,13 @@ function onOpenMap() {
   <div class="trip-od-progress" role="group" :aria-label="ariaGroupLabel">
     <div class="trip-od-progress__head">
       <span class="trip-od-progress__stat" aria-hidden="true">
-        <template v-if="remainingNmDisplay">
-          <span class="trip-od-progress__remaining">{{ remainingNmDisplay }}</span>
-          <span v-if="nmRatioText" class="trip-od-progress__ratio">{{ nmRatioText }} NM</span>
-        </template>
-        <template v-else-if="nmRatioText">
+        <template v-if="nmRatioText">
           <span class="trip-od-progress__ratio">{{ nmRatioText }}</span>
           <span class="trip-od-progress__unit">NM</span>
         </template>
         <template v-else>
-          <span class="trip-od-progress__ratio trip-od-progress__ratio--muted">—/— NM</span>
+          <span class="trip-od-progress__ratio trip-od-progress__ratio--muted">—/—</span>
+          <span class="trip-od-progress__unit trip-od-progress__unit--muted">NM</span>
         </template>
       </span>
       <button
@@ -278,26 +275,18 @@ function onOpenMap() {
 .trip-od-progress__stat {
   display: inline-flex;
   align-items: baseline;
-  gap: 0.4rem;
+  gap: 0.25rem;
   white-space: nowrap;
   min-width: 0;
   flex: 1;
 }
 
-.trip-od-progress__remaining {
+.trip-od-progress__ratio {
   font-size: 0.95rem;
   font-weight: 800;
   font-variant-numeric: tabular-nums;
   color: var(--color-accent-orange, #ff6b1a);
   letter-spacing: 0.01em;
-  line-height: 1.15;
-}
-
-.trip-od-progress__ratio {
-  font-size: 0.82rem;
-  font-weight: 700;
-  font-variant-numeric: tabular-nums;
-  color: var(--color-accent-orange-soft, #ffa366);
 }
 
 .trip-od-progress__ratio--muted {
@@ -306,11 +295,15 @@ function onOpenMap() {
 }
 
 .trip-od-progress__unit {
-  font-size: 0.65rem;
+  font-size: 0.7rem;
   font-weight: 700;
-  letter-spacing: 0.06em;
+  letter-spacing: 0.04em;
   text-transform: uppercase;
-  color: var(--color-accent-orange-soft, #ffa366);
+  color: var(--color-accent-orange, #ff6b1a);
+}
+
+.trip-od-progress__unit--muted {
+  color: var(--color-text-tertiary, #8b8b98);
 }
 
 .trip-od-progress__map-btn {

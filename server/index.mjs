@@ -418,6 +418,33 @@ app.get('/api/health', async () => ({
   localDataPath: LOCAL_DIR,
 }))
 
+/**
+ * WAHA proxy — forward requests from /api/waha/* to the WAHA container.
+ * The WAHA container runs as a sibling in docker-compose at http://waha:3000.
+ */
+const WAHA_INTERNAL_URL = process.env.WAHA_BASE_URL || 'http://waha:3000'
+
+app.all('/api/waha/*', async (req, reply) => {
+  const subPath = req.url.replace(/^\/api\/waha/, '')
+  const target = `${WAHA_INTERNAL_URL}${subPath}`
+  try {
+    const headers = { 'Content-Type': 'application/json' }
+    const wahaKey = process.env.WAHA_API_KEY
+    if (wahaKey) headers['Authorization'] = `Bearer ${wahaKey}`
+    const opts = { method: req.method, headers }
+    if (req.method !== 'GET' && req.method !== 'HEAD') {
+      opts.body = JSON.stringify(req.body)
+    }
+    const r = await fetch(target, opts)
+    const ct = r.headers.get('content-type') || 'application/json'
+    reply.status(r.status).header('Content-Type', ct)
+    const body = await r.text()
+    return reply.send(body)
+  } catch (e) {
+    return reply.status(502).send({ error: 'WAHA proxy error', message: e.message || String(e) })
+  }
+})
+
 /** Public: which Vite bundle the running container serves (compare after deploy / vs browser Sources). */
 app.get('/api/build-info', async (req, reply) => {
   reply.header('Cache-Control', 'no-store')

@@ -1,0 +1,38 @@
+version: "3.8"
+
+services:
+  app:
+    build: .
+    ports:
+      - "3847:3847"
+    environment:
+      - FEDEX_TOOL_API_HOST=0.0.0.0
+      - FEDEX_TOOL_API_PORT=3847
+      - NODE_ENV=production
+      - WAHA_BASE_URL=http://waha:3000
+      - WAHA_API_KEY=
+    depends_on:
+      waha:
+        condition: service_healthy
+    restart: unless-stopped
+
+  waha:
+    image: devlikeapro/waha
+    ports:
+      - "3000:3000"
+    environment:
+      - WHATSAPP_HOOK_EVENTS=message,message.any
+      - WHATSAPP_DEFAULT_ENGINE=NOWEB
+      - WAHA_PRINT_QR=true
+    volumes:
+      - waha_data:/app/.sessions
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:3000/api/health"]
+      interval: 15s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
+    restart: unless-stopped
+
+volumes:
+  waha_data:

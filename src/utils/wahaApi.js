@@ -1,12 +1,10 @@
 /**
  * WAHA (WhatsApp HTTP API) client.
- * Connects to a self-hosted WAHA instance for sending/receiving WhatsApp group messages.
+ * Connects to a co-hosted WAHA container for sending/receiving WhatsApp group messages.
+ * The WAHA instance runs alongside the app via docker-compose (service: waha).
  * @see https://github.com/devlikeapro/waha
  */
 
-const WAHA_URL_KEY = 'wahaBaseUrl'
-const WAHA_API_KEY_KEY = 'wahaApiKey'
-const WAHA_SESSION_KEY = 'wahaSessionName'
 const WAHA_GROUP_ID_KEY = 'wahaGroupId'
 const WAHA_TTS_ENABLED_KEY = 'wahaTtsEnabled'
 const WAHA_POLL_INTERVAL_KEY = 'wahaPollIntervalMs'
@@ -14,34 +12,23 @@ const WAHA_POLL_INTERVAL_KEY = 'wahaPollIntervalMs'
 const DEFAULT_SESSION = 'default'
 const DEFAULT_POLL_INTERVAL = 10_000
 
+/**
+ * WAHA base URL — proxied through the app server at /api/waha,
+ * or directly at the WAHA container URL for local dev.
+ */
 export function getWahaBaseUrl() {
-  if (typeof window === 'undefined' || !window.localStorage) return ''
-  return (window.localStorage.getItem(WAHA_URL_KEY) ?? '').trim()
-}
-
-export function setWahaBaseUrl(url) {
-  if (typeof window === 'undefined' || !window.localStorage) return
-  window.localStorage.setItem(WAHA_URL_KEY, String(url ?? '').trim())
+  if (typeof window === 'undefined') return ''
+  const base = (import.meta.env.VITE_WAHA_URL || '').trim()
+  if (base) return base
+  return `${window.location.origin}/api/waha`
 }
 
 export function getWahaApiKey() {
-  if (typeof window === 'undefined' || !window.localStorage) return ''
-  return (window.localStorage.getItem(WAHA_API_KEY_KEY) ?? '').trim()
-}
-
-export function setWahaApiKey(key) {
-  if (typeof window === 'undefined' || !window.localStorage) return
-  window.localStorage.setItem(WAHA_API_KEY_KEY, String(key ?? '').trim())
+  return ''
 }
 
 export function getWahaSessionName() {
-  if (typeof window === 'undefined' || !window.localStorage) return DEFAULT_SESSION
-  return (window.localStorage.getItem(WAHA_SESSION_KEY) ?? '').trim() || DEFAULT_SESSION
-}
-
-export function setWahaSessionName(name) {
-  if (typeof window === 'undefined' || !window.localStorage) return
-  window.localStorage.setItem(WAHA_SESSION_KEY, String(name ?? '').trim())
+  return DEFAULT_SESSION
 }
 
 export function getWahaGroupId() {

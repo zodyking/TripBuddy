@@ -66,9 +66,6 @@ import {
 import AutomationList from '../components/automation/AutomationList.vue'
 import AutomationEditor from '../components/automation/AutomationEditor.vue'
 import {
-  getWahaBaseUrl, setWahaBaseUrl,
-  getWahaApiKey, setWahaApiKey,
-  getWahaSessionName, setWahaSessionName,
   getWahaGroupId, setWahaGroupId,
   isWahaTtsEnabled, setWahaTtsEnabled,
   getSessionStatus, listGroups, sendGroupMessage,
@@ -651,9 +648,6 @@ async function resetApiQuotaToday() {
 }
 
 /** WhatsApp (WAHA) settings */
-const wahaUrlDraft = ref(getWahaBaseUrl())
-const wahaApiKeyDraft = ref(getWahaApiKey())
-const wahaSessionDraft = ref(getWahaSessionName())
 const wahaGroupIdDraft = ref(getWahaGroupId())
 const wahaTtsDraft = ref(isWahaTtsEnabled())
 const wahaConnMsg = ref('')
@@ -663,15 +657,7 @@ const wahaGroupsList = ref([])
 const wahaSendText = ref('')
 const wahaSendMsg = ref('')
 
-function saveWahaConnection() {
-  setWahaBaseUrl(wahaUrlDraft.value)
-  setWahaApiKey(wahaApiKeyDraft.value)
-  setWahaSessionName(wahaSessionDraft.value)
-  wahaConnMsg.value = 'Connection saved.'
-}
-
 async function testWahaConnection() {
-  saveWahaConnection()
   wahaConnMsg.value = 'Testing…'
   try {
     const r = await getSessionStatus()
@@ -679,7 +665,7 @@ async function testWahaConnection() {
       const status = r.body?.status || r.body?.state || 'connected'
       wahaConnMsg.value = `Connected — session status: ${status}`
     } else {
-      wahaConnMsg.value = `Failed (${r.status}). Check URL and credentials.`
+      wahaConnMsg.value = `Failed (${r.status}). WAHA may not be running.`
     }
   } catch (e) {
     wahaConnMsg.value = e instanceof Error ? e.message : String(e)
@@ -1439,6 +1425,7 @@ onUnmounted(() => {
       </button>
       <button
         type="button"
+        class="tab-btn tap"
         role="tab"
         :aria-selected="settingsTab === 'whatsapp'"
         :class="{ active: settingsTab === 'whatsapp' }"
@@ -2301,42 +2288,13 @@ onUnmounted(() => {
     <main v-show="settingsTab === 'whatsapp'" class="stack whatsapp-panel">
       <SettingsSection title="WhatsApp Messenger" section-id="settings-whatsapp">
         <p class="cred-hint">
-          Connect to a self-hosted
-          <a href="https://github.com/devlikeapro/waha" target="_blank" rel="noopener noreferrer" class="ext-link">WAHA</a>
-          instance to send/receive messages from a WhatsApp group. Incoming messages are read aloud via TTS.
+          Send and receive WhatsApp group messages. Incoming messages are read aloud via TTS.
+          WAHA runs automatically alongside the app.
         </p>
 
-        <h4 class="api-sub-heading" style="margin-top:0;padding-top:0;border-top:none">Connection</h4>
-        <label class="lbl" for="waha-url">WAHA server URL</label>
-        <input
-          id="waha-url"
-          v-model="wahaUrlDraft"
-          class="inp tap"
-          type="url"
-          autocomplete="off"
-          placeholder="http://your-server:3000"
-        />
-        <label class="lbl" for="waha-api-key">API key (optional)</label>
-        <input
-          id="waha-api-key"
-          v-model="wahaApiKeyDraft"
-          class="inp tap"
-          type="password"
-          autocomplete="off"
-          placeholder="Bearer token"
-        />
-        <label class="lbl" for="waha-session">Session name</label>
-        <input
-          id="waha-session"
-          v-model="wahaSessionDraft"
-          class="inp tap"
-          type="text"
-          autocomplete="off"
-          placeholder="default"
-        />
+        <h4 class="api-sub-heading" style="margin-top:0;padding-top:0;border-top:none">Status</h4>
         <div class="btn-row">
-          <button type="button" class="btn primary tap" @click="saveWahaConnection">Save connection</button>
-          <button type="button" class="btn tap" @click="testWahaConnection">Test</button>
+          <button type="button" class="btn tap" @click="testWahaConnection">Check connection</button>
         </div>
         <p v-if="wahaConnMsg" class="cred-msg">{{ wahaConnMsg }}</p>
 
@@ -2458,7 +2416,7 @@ onUnmounted(() => {
    ═══════════════════════════════════════════════════════════════════════════ */
 .settings-tabs {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   align-items: center;
   gap: var(--space-1, 0.25rem);
   padding: var(--space-1, 0.25rem);
@@ -2468,10 +2426,18 @@ onUnmounted(() => {
   -webkit-backdrop-filter: blur(var(--blur-md, 12px));
   border: 1px solid var(--color-glass-border, rgba(255, 255, 255, 0.06));
   border-radius: var(--radius-xl, 1rem);
+  overflow-x: auto;
+  overflow-y: hidden;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.settings-tabs::-webkit-scrollbar {
+  display: none;
 }
 
 .tab-btn {
-  flex: 1;
+  flex: 0 0 auto;
   cursor: pointer;
   border-radius: var(--radius-lg, 0.75rem);
   border: none;
@@ -2481,6 +2447,7 @@ onUnmounted(() => {
   font-size: var(--text-sm, 0.8125rem);
   font-weight: var(--weight-semibold, 600);
   min-height: var(--touch-target, 2.75rem);
+  white-space: nowrap;
   transition: var(--transition-all);
   position: relative;
 }
