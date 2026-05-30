@@ -201,6 +201,7 @@ import {
   purgeNoisyInAppItems,
 } from './in-app-notifications-store.mjs'
 import { isSkippableInAppNotification } from './in-app-notification-noise.mjs'
+import { publishInAppForAccount } from './notification-publish.mjs'
 import {
   addOrTouchDolly,
   readDollyRegistry,
@@ -396,7 +397,7 @@ app.post('/api/auth/login', async (req, reply) => {
   try {
     await publishInAppForAccount(accountKey, {
       type: 'info',
-      message: 'Signed in — alerts for dispatch changes and crossing-time refreshes appear here.',
+      message: 'Signed in — trip and dispatch alerts appear here.',
       source: 'session',
     })
   } catch {
@@ -861,6 +862,31 @@ app.get('/api/notifications', async (req) => {
   const list = Array.isArray(d.items) ? d.items : []
   const unreadCount = list.filter((x) => x && !x.read).length
   return { ok: true, items: list, unreadCount }
+})
+
+app.post('/api/notifications', async (req, reply) => {
+  const ak = /** @type {any} */(req).credentialAccountKey
+  if (!ak) {
+    return reply.code(401).send({ error: 'Not signed in' })
+  }
+  const b = req.body ?? {}
+  const message = typeof b.message === 'string' ? b.message.trim() : ''
+  if (!message) {
+    return reply.code(400).send({ error: 'message is required' })
+  }
+  const source = typeof b.source === 'string' && b.source.trim() ? b.source.trim() : 'linehaul'
+  const type = typeof b.type === 'string' && b.type.trim() ? b.type.trim() : 'info'
+  const extra =
+    b.extra && typeof b.extra === 'object' && !Array.isArray(b.extra) ? b.extra : undefined
+  const r = await publishInAppForAccount(ak, { type, message, source, extra })
+  if (!r?.item) {
+    const list = (r?.inbox?.items || [])
+    const unreadCount = list.filter((x) => x && !x.read).length
+    return { ok: true, skipped: r?.skipped || 'deduped', items: list, unreadCount }
+  }
+  const list = (r.inbox?.items || [])
+  const unreadCount = list.filter((x) => x && !x.read).length
+  return { ok: true, item: r.item, items: list, unreadCount }
 })
 
 app.post('/api/notifications/read', async (req, reply) => {

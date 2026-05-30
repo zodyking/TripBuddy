@@ -2,7 +2,6 @@ import { readKeyJson, writeKeyJson } from './kv-store.mjs'
 import { getDataAccountKey, userScopeKey, keyForUser } from './scope-kv.mjs'
 import { emitLog } from './log-bus.mjs'
 import { publishInAppForAccount } from './notification-publish.mjs'
-import { inferTravelDirectionFromTripBody } from './bridge-travel-context.mjs'
 
 /**
  * @returns {string}
@@ -1240,31 +1239,6 @@ export async function writeAssignment(body) {
   }
 
   await writeKeyJson(key, next)
-
-  if ('persistedLinehaulTripSnapshot' in body) {
-    const ak = getDataAccountKey()
-    const nextSnap = next.persistedLinehaulTripSnapshot
-    const prevSnap = prev.persistedLinehaulTripSnapshot
-    if (
-      ak &&
-      nextSnap &&
-      typeof nextSnap === 'object' &&
-      !Array.isArray(nextSnap) &&
-      (!prevSnap ||
-        typeof prevSnap !== 'object' ||
-        JSON.stringify(prevSnap) !== JSON.stringify(nextSnap))
-    ) {
-      const dir = inferTravelDirectionFromTripBody(nextSnap)
-      if (dir === 'ToNY' || dir === 'ToNJ') {
-        void publishInAppForAccount(ak, {
-          type: 'info',
-          message: `Trip leg updated — bridge alerts will follow ${dir === 'ToNY' ? 'NY-bound' : 'NJ-bound'} crossings`,
-          source: 'dispatch',
-          extra: { watchDir: dir },
-        })
-      }
-    }
-  }
 
   if (instructionsChanged) {
     const ak = getDataAccountKey()

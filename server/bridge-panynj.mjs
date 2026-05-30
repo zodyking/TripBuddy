@@ -113,8 +113,12 @@ export async function refreshPanynjCrossingData() {
   lastFetchAt = Date.now()
   lastFetchError = null
   const st = await appendPanynjSnapshotFromLive(live)
-  maybeNotifyBridgeCrossingDigest(live)
-  await maybeNotifyBridgeTierChanges(live)
+  // In-app bridge traffic notifications disabled until improved tier alerts ship.
+  // Data poll + tier logic remain for the Traffic tab and future notifications.
+  if (process.env.BRIDGE_IN_APP_NOTIFICATIONS === '1') {
+    maybeNotifyBridgeCrossingDigest(live)
+    await maybeNotifyBridgeTierChanges(live)
+  }
   if (ak) await recordApiCompletedCall(ak, 'panynj').catch(() => {})
   return st
 }

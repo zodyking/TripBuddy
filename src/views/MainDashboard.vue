@@ -108,6 +108,14 @@ import {
   announceGeofenceArrival,
   announceArrivalSuccess,
 } from '../utils/tripVoiceAnnouncement.js'
+import {
+  maybeNotifyNewTripInApp,
+  maybeNotifyPrePlanTripInApp,
+  syncTripPhaseInAppStable,
+  seedTripInAppFromSnapshot,
+  maybeNotifyDriverTractorMismatchInApp,
+  clearTripInAppTracking,
+} from '../utils/inAppTripNotifications.js'
 import { applyHelpersLocationPrefsFromCredentials } from '../utils/helpersLocationPrefs.js'
 import {
   announceTractorChange,
@@ -1597,11 +1605,22 @@ watch(
       linehaulTripsNoActive.value,
       prePlanTripSnapshot.value,
     )
+    seedTripInAppFromSnapshot(
+      linehaulTripsBody.value,
+      linehaulTripsNoActive.value,
+      prePlanTripSnapshot.value,
+      tripPhase.value,
+    )
     maybeAnnounceNewTrip(
       linehaulTripsBody.value,
       linehaulTripsNoActive.value,
     )
     maybeAnnouncePrePlanTrip(prePlanTripSnapshot.value)
+    maybeNotifyNewTripInApp(
+      linehaulTripsBody.value,
+      linehaulTripsNoActive.value,
+    )
+    maybeNotifyPrePlanTripInApp(prePlanTripSnapshot.value)
     syncTripVoiceUnlockHint()
   },
 )
@@ -1619,12 +1638,22 @@ watch(tripPhase, (newPhase, oldPhase) => {
   tripPhaseVoiceTimer = setTimeout(() => {
     tripPhaseVoiceTimer = null
     syncTripPhaseVoiceStable(newPhase)
+    syncTripPhaseInAppStable(newPhase)
   }, 850)
 
   if (newPhase === 'none' && oldPhase !== 'none') {
     clearTrailerStatusTracking()
     clearTrailerGpsTracking()
   }
+})
+
+watch(linehaulLocationMatch, (match) => {
+  const t = linehaulTractorBody.value
+  const d = linehaulDriverBody.value
+  maybeNotifyDriverTractorMismatchInApp(match, {
+    tractorLocation: t?.locationId,
+    driverLocation: d?.driverLocation,
+  })
 })
 
 watch(
@@ -2190,6 +2219,7 @@ onUnmounted(() => {
   clearTrailerStatusTracking()
   clearTrailerGpsTracking()
   clearTripPhaseTracking()
+  clearTripInAppTracking()
   unregisterAssignment()
   unregisterSession()
   unregisterRecover()
