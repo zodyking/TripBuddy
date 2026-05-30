@@ -24,7 +24,12 @@ import {
   getWhatsAppThreadCache,
   syncWhatsAppThread,
   fetchWhatsAppMessageMedia,
+  postTranslateSenderNames,
+  getSenderNameTranslationCache,
 } from '../api.js'
+import {
+  needsEnglishSenderNameTranslation,
+} from '../utils/senderNameLocale.js'
 import {
   getCachedThread,
   setCachedThread,
@@ -36,6 +41,10 @@ import {
   setCachedLidMap,
   getCachedParticipantNames,
   setCachedParticipantNames,
+  getCachedParticipantRawNames,
+  setCachedParticipantRawNames,
+  getCachedSenderTextEn,
+  setCachedSenderTextEn,
 } from '../stores/wahaChatStore.js'
 
 /**
@@ -56,8 +65,12 @@ export function useWahaMessenger(opts = {}) {
   const contactMap = ref(new Map())
   /** @type {import('vue').Ref<Map<string, string>>} lid @lid -> pn @c.us */
   const lidMap = ref(new Map())
-  /** @type {import('vue').Ref<Map<string, string>>} participant JID -> display name */
+  /** @type {import('vue').Ref<Map<string, string>>} participant JID -> display name (English when translated) */
   const participantNameMap = ref(new Map())
+  /** @type {import('vue').Ref<Map<string, string>>} participant JID -> original resolved name */
+  const participantRawNameMap = ref(new Map())
+  /** @type {import('vue').Ref<Record<string, string>>} original text -> English */
+  const senderTextEn = ref({})
   /** @type {import('vue').Ref<unknown[]>} */
   const rawThreadMessages = ref([])
 
@@ -66,6 +79,9 @@ export function useWahaMessenger(opts = {}) {
   let lastSeenId = ''
   let syncGen = 0
   let mediaGen = 0
+  let translateGen = 0
+  /** @type {Set<string>} */
+  const translateQueued = new Set()
 
   const configured = computed(() => isWahaConfigured())
   const displayMessages = computed(() =>
@@ -122,17 +138,98 @@ export function useWahaMessenger(opts = {}) {
     }
   }
 
+  function displayNameForParticipant(jid, rawName) {
+    const raw = String(rawName ?? '').trim()
+    if (!raw) return ''
+    if (!needsEnglishSenderNameTranslation(raw)) return raw
+    const en = senderTextEn.value[raw]
+    return en || raw
+  }
+
+  function applyDisplayNamesFromRaw() {
+    const display = new Map()
+    for (const [jid, raw] of participantRawNameMap.value) {
+      display.set(jid, displayNameForParticipant(jid, raw))
+    }
+    participantNameMap.value = display
+  }
+
   function persistParticipantNames(chatId) {
     if (!chatId) return
     setCachedParticipantNames(chatId, Object.fromEntries(participantNameMap.value))
+    setCachedParticipantRawNames(chatId, Object.fromEntries(participantRawNameMap.value))
+    setCachedSenderTextEn(senderTextEn.value)
   }
 
   function hydrateParticipantNames(chatId) {
-    const rec = getCachedParticipantNames(chatId)
-    if (rec && typeof rec === 'object' && Object.keys(rec).length) {
-      participantNameMap.value = new Map(Object.entries(rec))
+    const displayRec = getCachedParticipantNames(chatId)
+    const rawRec = getCachedParticipantRawNames(chatId)
+    senderTextEn.value = { ...getCachedSenderTextEn() }
+    if (rawRec && typeof rawRec === 'object' && Object.keys(rawRec).length) {
+      participantRawNameMap.value = new Map(Object.entries(rawRec))
+      applyDisplayNamesFromRaw()
+    } else if (displayRec && typeof displayRec === 'object' && Object.keys(displayRec).length) {
+      participantNameMap.value = new Map(Object.entries(displayRec))
+      participantRawNameMap.value = new Map(Object.entries(displayRec))
     } else {
       participantNameMap.value = new Map()
+      participantRawNameMap.value = new Map()
+    }
+  }
+
+  async function hydrateSenderTextEnFromServer() {
+    try {
+      const r = await getSenderNameTranslationCache()
+      if (r?.ok && r.textEn && typeof r.textEn === 'object') {
+        senderTextEn.value = { ...senderTextEn.value, ...r.textEn }
+        applyDisplayNamesFromRaw()
+      }
+    } catch {
+      /* optional */
+    }
+  }
+
+  async function ensureEnglishParticipantNames(chatId) {
+    if (!chatId) return
+    const gen = ++translateGen
+    const items = []
+    for (const [jid, raw] of participantRawNameMap.value) {
+      const name = String(raw ?? '').trim()
+      if (!name || !needsEnglishSenderNameTranslation(name)) continue
+      if (senderTextEn.value[name]) continue
+      const queueKey = `${jid}\0${name}`
+      if (translateQueued.has(queueKey)) continue
+      translateQueued.add(queueKey)
+      items.push({ id: jid, text: name })
+    }
+    if (!items.length) {
+      applyDisplayNamesFromRaw()
+      persistParticipantNames(chatId)
+      return
+    }
+    try {
+      const r = await postTranslateSenderNames({ items })
+      if (gen !== translateGen) return
+      if (r?.ok) {
+        if (r.textEn && typeof r.textEn === 'object') {
+          senderTextEn.value = { ...senderTextEn.value, ...r.textEn }
+        }
+        if (r.names && typeof r.names === 'object') {
+          for (const [jid, en] of Object.entries(r.names)) {
+            const raw = participantRawNameMap.value.get(jid)
+            if (raw && en) senderTextEn.value[raw] = String(en)
+          }
+        }
+        applyDisplayNamesFromRaw()
+        persistParticipantNames(chatId)
+        reapplySenderNames()
+      }
+    } catch {
+      /* show raw names */
+    } finally {
+      for (const item of items) {
+        translateQueued.delete(`${item.id}\0${item.text}`)
+      }
     }
   }
 
@@ -144,10 +241,12 @@ export function useWahaMessenger(opts = {}) {
     }
     const learned = buildParticipantNameMap(raw, opts)
     if (!learned.size) return
-    const merged = new Map(participantNameMap.value)
-    for (const [k, v] of learned) merged.set(k, v)
-    participantNameMap.value = merged
+    const mergedRaw = new Map(participantRawNameMap.value)
+    for (const [k, v] of learned) mergedRaw.set(k, v)
+    participantRawNameMap.value = mergedRaw
+    applyDisplayNamesFromRaw()
     persistParticipantNames(chatId)
+    void ensureEnglishParticipantNames(chatId)
   }
 
   function normalizeList(raw, chatId) {
@@ -478,6 +577,7 @@ export function useWahaMessenger(opts = {}) {
     mediaGen++
     rawThreadMessages.value = []
     participantNameMap.value = new Map()
+    participantRawNameMap.value = new Map()
     hydrateParticipantNames(chat.id)
     const had = hydrateThreadFromClientCache(chat.id, { scroll: true })
     if (!had) loading.value = true
@@ -499,6 +599,7 @@ export function useWahaMessenger(opts = {}) {
     hydrateContactsFromCache()
     hydrateLidsFromCache()
     if (activeChatId.value) hydrateParticipantNames(activeChatId.value)
+    void hydrateSenderTextEnFromServer()
     void loadContacts()
     void loadLids()
     const memChats = getCachedChats()

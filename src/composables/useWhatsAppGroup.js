@@ -15,6 +15,11 @@ import {
   buildParticipantNameMap,
   normalizeWahaMessage,
 } from '../utils/wahaApi.js'
+import {
+  buildEnglishParticipantDisplayMap,
+  englishDisplayName,
+} from '../utils/senderNameTranslateClient.js'
+import { getCachedSenderTextEn } from '../stores/wahaChatStore.js'
 import { enqueueAnnouncement } from '../utils/alertAudioQueue.js'
 import { pushLiveLog } from '../stores/liveLogStore.js'
 
@@ -108,11 +113,13 @@ export function useWhatsAppGroup() {
           if (msg.fromMe) continue
           newMsgs.push(msg)
         }
-        participantNameMap = buildParticipantNameMap(incoming, {
+        const rawParticipantMap = buildParticipantNameMap(incoming, {
           contactMap,
           lidMap,
           activeChatId: chatId,
         })
+        participantNameMap = await buildEnglishParticipantDisplayMap(rawParticipantMap)
+        const textEn = getCachedSenderTextEn()
         for (const raw of newMsgs.reverse()) {
           const norm = normalizeWahaMessage(raw, {
             contactMap,
@@ -120,6 +127,9 @@ export function useWhatsAppGroup() {
             participantMap: participantNameMap,
             activeChatId: chatId,
           })
+          if (norm.senderName) {
+            norm.senderName = englishDisplayName(norm.senderName, textEn)
+          }
           const speech = buildNewMessageSpeech(norm)
           if (!speech) continue
           pushLiveLog({ type: 'info', message: `[WhatsApp] TTS: ${speech}`, ts: Date.now() })

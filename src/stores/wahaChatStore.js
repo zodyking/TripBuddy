@@ -9,6 +9,8 @@ const CHATS_KEY = 'waha-chats-v1'
 const CONTACTS_KEY = 'waha-contacts-v1'
 const LIDS_KEY = 'waha-lids-v1'
 const PARTICIPANTS_PREFIX = 'waha-participants-v1:'
+const PARTICIPANTS_RAW_PREFIX = 'waha-participants-raw-v1:'
+const SENDER_TEXT_EN_KEY = 'waha-sender-text-en-v1'
 
 /** @type {Map<string, { rawMessages: unknown[], updatedAt: number }>} */
 const threadMemory = new Map()
@@ -157,4 +159,34 @@ export function setCachedParticipantNames(chatId, map) {
   const id = String(chatId || '').trim()
   if (!id) return
   writeJson(`${PARTICIPANTS_PREFIX}${id}`, map && typeof map === 'object' ? map : {})
+}
+
+/**
+ * @param {string} chatId
+ * @returns {Record<string, string>}
+ */
+export function getCachedParticipantRawNames(chatId) {
+  const id = String(chatId || '').trim()
+  if (!id) return {}
+  return readJson(`${PARTICIPANTS_RAW_PREFIX}${id}`, {})
+}
+
+/**
+ * @param {string} chatId
+ * @param {Record<string, string>} map
+ */
+export function setCachedParticipantRawNames(chatId, map) {
+  const id = String(chatId || '').trim()
+  if (!id) return
+  writeJson(`${PARTICIPANTS_RAW_PREFIX}${id}`, map && typeof map === 'object' ? map : {})
+}
+
+/** @returns {Record<string, string>} original display text -> English */
+export function getCachedSenderTextEn() {
+  return readJson(SENDER_TEXT_EN_KEY, {})
+}
+
+/** @param {Record<string, string>} map */
+export function setCachedSenderTextEn(map) {
+  writeJson(SENDER_TEXT_EN_KEY, map && typeof map === 'object' ? map : {})
 }

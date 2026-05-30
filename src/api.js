@@ -509,6 +509,25 @@ export async function putOpenrouterApiKey(body) {
 }
 
 /**
+ * Translate non-English sender display names to English (cached server-side by original text).
+ * @param {{ items: Array<{ id: string, text: string }> }} body
+ */
+export async function postTranslateSenderNames(body) {
+  const r = await apiFetch('/api/translate/sender-names', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body ?? {}),
+  })
+  return handleJson(r)
+}
+
+/** Load cached original-text → English sender name map from server. */
+export async function getSenderNameTranslationCache() {
+  const r = await apiFetch('/api/translate/sender-names/cache', { credentials: 'include' })
+  return handleJson(r)
+}
+
+/**
  * Generate spoken daily briefing from today's WhatsApp messages (OpenRouter).
  * @param {{ chatId: string, chatLabel?: string, timeZone?: string }} body
  */

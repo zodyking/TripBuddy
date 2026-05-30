@@ -72,6 +72,9 @@ export async function ensureUserProfileTable() {
       ALTER TABLE ${TABLE} ADD COLUMN IF NOT EXISTS openrouter_model TEXT
     `)
     await client.query(`
+      ALTER TABLE ${TABLE} ADD COLUMN IF NOT EXISTS sender_name_translations JSONB
+    `)
+    await client.query(`
       ALTER TABLE ${TABLE} ADD COLUMN IF NOT EXISTS api_quota_state JSONB
     `)
     await client.query(`
@@ -303,6 +306,60 @@ export async function setOpenrouterModelForAccount(accountKey, modelId) {
        openrouter_model = EXCLUDED.openrouter_model,
        updated_at = now()`,
     [ak, v],
+  )
+}
+
+/**
+ * Learned English display strings for non-English sender names (keyed by original text).
+ * @param {string} accountKey
+ * @returns {Promise<Record<string, string>>}
+ */
+export async function getSenderNameTranslationsForAccount(accountKey) {
+  const ak = String(accountKey || '').trim()
+  if (!ak) return {}
+  const p = await getPostgresPool()
+  if (!p) return {}
+  await ensureUserProfileTable()
+  const { rows } = await p.query(
+    `SELECT sender_name_translations FROM ${TABLE} WHERE account_key = $1`,
+    [ak],
+  )
+  const raw = rows[0]?.sender_name_translations
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {}
+  /** @type {Record<string, string>} */
+  const out = {}
+  for (const [k, v] of Object.entries(raw)) {
+    const key = String(k ?? '').trim()
+    const val = String(v ?? '').trim()
+    if (key && val) out[key] = val
+  }
+  return out
+}
+
+/**
+ * @param {string} accountKey
+ * @param {Record<string, string>} additions original text -> English
+ */
+export async function mergeSenderNameTranslationsForAccount(accountKey, additions) {
+  const ak = String(accountKey || '').trim()
+  if (!ak || !additions || typeof additions !== 'object') return
+  const p = await getPostgresPool()
+  if (!p) return
+  await ensureUserProfileTable()
+  const current = await getSenderNameTranslationsForAccount(ak)
+  const merged = { ...current }
+  for (const [k, v] of Object.entries(additions)) {
+    const key = String(k ?? '').trim()
+    const val = String(v ?? '').trim()
+    if (key && val) merged[key] = val
+  }
+  await p.query(
+    `INSERT INTO ${TABLE} (account_key, sender_name_translations, updated_at)
+     VALUES ($1, $2::jsonb, now())
+     ON CONFLICT (account_key) DO UPDATE SET
+       sender_name_translations = EXCLUDED.sender_name_translations,
+       updated_at = now()`,
+    [ak, JSON.stringify(merged)],
   )
 }
 

@@ -5,6 +5,12 @@ import {
   fetchWahaLids,
   buildLidPhoneMap,
 } from './wahaChatCache.mjs'
+import { translateSenderNamesToEnglish } from './google-translate.mjs'
+import { needsEnglishSenderNameTranslation } from '../src/utils/senderNameLocale.js'
+import {
+  getSenderNameTranslationsForAccount,
+  mergeSenderNameTranslationsForAccount,
+} from './user-profile-pg.mjs'
 import {
   openRouterComplete,
   buildBriefingPrompt,
@@ -194,6 +200,44 @@ export async function collectTodayMessages(chatId, timeZone, opts = {}) {
 /**
  * @param {Array<{ sender: string, text: string, ts: number }>} messages
  */
+/**
+ * @param {Array<{ sender: string, text: string, ts: number }>} messages
+ * @param {string} [accountKey]
+ */
+export async function applyEnglishSenderLabels(messages, accountKey) {
+  if (!Array.isArray(messages) || !messages.length) return
+  const ak = String(accountKey || '').trim()
+  const stored = ak ? await getSenderNameTranslationsForAccount(ak) : {}
+  const items = []
+  const seen = new Set()
+  for (const m of messages) {
+    const raw = String(m.sender || '').trim()
+    if (!raw || !needsEnglishSenderNameTranslation(raw)) continue
+    if (stored[raw]) {
+      m.sender = stored[raw]
+      continue
+    }
+    if (seen.has(raw)) continue
+    seen.add(raw)
+    items.push({ id: raw, text: raw })
+  }
+  if (!items.length) return
+  const translated = await translateSenderNamesToEnglish(items)
+  const additions = {}
+  for (const item of items) {
+    const en = translated[item.id] || item.text
+    additions[item.text] = en
+  }
+  if (ak && Object.keys(additions).length) {
+    await mergeSenderNameTranslationsForAccount(ak, additions)
+  }
+  const allEn = { ...stored, ...additions }
+  for (const m of messages) {
+    const raw = String(m.sender || '').trim()
+    if (allEn[raw]) m.sender = allEn[raw]
+  }
+}
+
 export function formatTranscript(messages) {
   return messages
     .map((m) => {
@@ -215,6 +259,7 @@ export function formatTranscript(messages) {
  *   timeZone: string,
  *   openRouterApiKey: string,
  *   openRouterModel?: string,
+ *   accountKey?: string,
  * }} opts
  */
 export async function generateDailyBriefing(opts) {
@@ -227,6 +272,7 @@ export async function generateDailyBriefing(opts) {
     return { ok: true, empty: true, messageCount: 0, briefing: '' }
   }
 
+  await applyEnglishSenderLabels(messages, opts.accountKey)
   const transcript = formatTranscript(messages)
   const prompt = buildBriefingPrompt(transcript, chatLabel)
   const ai = await openRouterComplete(opts.openRouterApiKey, prompt, {

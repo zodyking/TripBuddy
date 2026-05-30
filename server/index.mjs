@@ -21,6 +21,8 @@ import {
   setOpenrouterApiKeyForAccount,
   getOpenrouterModelForAccount,
   setOpenrouterModelForAccount,
+  getSenderNameTranslationsForAccount,
+  mergeSenderNameTranslationsForAccount,
   getGwbUpperCamYoutubeUrlForAccount,
   setGwbUpperCamYoutubeUrlForAccount,
   getHelpersAutoArrivePrefsForAccount,
@@ -111,6 +113,8 @@ import {
 } from './wahaChatCache.mjs'
 import { generateDailyBriefing } from './waha-daily-briefing.mjs'
 import { sanitizeOpenrouterModel, OPENROUTER_DEFAULT_MODEL } from './openrouter-briefing.mjs'
+import { translateSenderNamesToEnglish } from './google-translate.mjs'
+import { needsEnglishSenderNameTranslation } from '../src/utils/senderNameLocale.js'
 import { readAssignment, writeAssignment } from './assignment-store.mjs'
 import {
   getCredentialsMeta,
@@ -1082,6 +1086,74 @@ app.put('/api/settings/openrouter-api-key', async (req, reply) => {
   }
 })
 
+app.post('/api/translate/sender-names', async (req, reply) => {
+  reply.header('Cache-Control', 'no-store')
+  try {
+    const ak = req.credentialAccountKey
+    if (typeof ak !== 'string' || !ak.trim()) {
+      return reply.code(401).send({ ok: false, error: 'Sign in required.' })
+    }
+    const body = req.body ?? {}
+    const items = Array.isArray(body.items) ? body.items : []
+    const filtered = items
+      .map((item) => ({
+        id: String(item?.id ?? '').trim(),
+        text: String(item?.text ?? '').trim(),
+      }))
+      .filter((item) => item.id && item.text && needsEnglishSenderNameTranslation(item.text))
+      .slice(0, 40)
+
+    if (!filtered.length) {
+      return { ok: true, names: {}, textEn: {} }
+    }
+
+    const stored = await getSenderNameTranslationsForAccount(ak.trim())
+    /** @type {Record<string, string>} */
+    const names = {}
+    /** @type {Record<string, string>} */
+    const textEn = { ...stored }
+    const toFetch = []
+
+    for (const item of filtered) {
+      const cached = stored[item.text]
+      if (cached) {
+        names[item.id] = cached
+        continue
+      }
+      toFetch.push(item)
+    }
+
+    if (toFetch.length) {
+      const translated = await translateSenderNamesToEnglish(toFetch)
+      const additions = {}
+      for (const item of toFetch) {
+        const en = translated[item.id] || item.text
+        names[item.id] = en
+        additions[item.text] = en
+      }
+      if (Object.keys(additions).length) {
+        await mergeSenderNameTranslationsForAccount(ak.trim(), additions)
+        Object.assign(textEn, additions)
+      }
+    }
+
+    return { ok: true, names, textEn }
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e)
+    return reply.code(502).send({ ok: false, error: msg })
+  }
+})
+
+app.get('/api/translate/sender-names/cache', async (req, reply) => {
+  reply.header('Cache-Control', 'no-store')
+  const ak = req.credentialAccountKey
+  if (typeof ak !== 'string' || !ak.trim()) {
+    return reply.code(401).send({ ok: false, error: 'Sign in required.' })
+  }
+  const textEn = await getSenderNameTranslationsForAccount(ak.trim())
+  return { ok: true, textEn }
+})
+
 app.post('/api/whatsapp/daily-briefing', async (req, reply) => {
   reply.header('Cache-Control', 'no-store')
   try {
@@ -1114,6 +1186,7 @@ app.post('/api/whatsapp/daily-briefing', async (req, reply) => {
       timeZone,
       openRouterApiKey,
       openRouterModel,
+      accountKey: akTrim,
     })
     if (!result.ok) {
       return reply.code(502).send(result)
