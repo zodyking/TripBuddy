@@ -98,10 +98,10 @@ function profileFromSeries(series) {
     highMinMinutesIfSlow: Math.round(p90t * 10) / 10,
     highMaxSpeedIfSlow: Math.max(8, Math.round(p25s * 0.65)),
     standstillMinMinutes: Math.round(Math.max(p95t * 1.2, p50t * 2.2) * 10) / 10,
-    standstillMinMinutesIfSlow: Math.round(p90t * 10) / 10,
-    standstillMaxSpeedIfSlow: Math.max(8, Math.round(p25s * 0.55)),
-    standstillMaxSpeedMph: Math.max(6, Math.round(p10s * 0.75)),
-    standstillSpeedRequiresMinMinutes: Math.round(p75t * 10) / 10,
+    standstillMinMinutesIfSlow: Math.round(p90t * 1.1 * 10) / 10,
+    standstillMaxSpeedIfSlow: STANDSTILL_MAX_SPEED_MPH,
+    standstillMaxSpeedMph: STANDSTILL_MAX_SPEED_MPH,
+    standstillSpeedRequiresMinMinutes: Math.round(p90t * 10) / 10,
   }
 }
 
@@ -118,6 +118,31 @@ function profileFromSeries(series) {
  */
 
 /**
+ * Gridlock / standstill = barely moving. Never assign above this speed (mph).
+ * 26 mph is flowing traffic, not standstill.
+ */
+export const STANDSTILL_MAX_SPEED_MPH = 10
+
+/**
+ * @param {number} minutes
+ * @param {number | null} speed
+ * @param {BridgeTrafficProfile} profile
+ * @returns {boolean}
+ */
+export function isStandstillTraffic(minutes, speed, profile) {
+  if (speed == null || !Number.isFinite(speed)) {
+    return false
+  }
+  if (speed > STANDSTILL_MAX_SPEED_MPH) {
+    return false
+  }
+  if (speed <= 5) {
+    return minutes >= profile.highMinMinutesIfSlow
+  }
+  return minutes >= profile.standstillMinMinutesIfSlow
+}
+
+/**
  * @param {number} minutes
  * @param {number | null} speed
  * @param {BridgeTrafficProfile} profile
@@ -125,19 +150,8 @@ function profileFromSeries(series) {
  */
 export function levelFromProfile(minutes, speed, profile) {
   const sp = speed
-  const crawlMin = profile.standstillSpeedRequiresMinMinutes ?? 0
 
-  if (sp != null && sp <= profile.standstillMaxSpeedMph && minutes >= crawlMin) {
-    return 'standstill'
-  }
-  if (
-    sp != null &&
-    minutes >= profile.standstillMinMinutesIfSlow &&
-    sp <= profile.standstillMaxSpeedIfSlow
-  ) {
-    return 'standstill'
-  }
-  if (minutes >= profile.standstillMinMinutes) {
+  if (isStandstillTraffic(minutes, sp, profile)) {
     return 'standstill'
   }
 
@@ -230,9 +244,13 @@ export function classifyBridgeTraffic(input) {
  */
 function classifyWithGlobalFallback(minutes, speed) {
   let level = /** @type {BridgeTrafficLevel} */ ('low')
-  if (speed != null && speed <= 8 && minutes >= 10) level = 'standstill'
-  else if (minutes >= 25) level = 'standstill'
-  else if (minutes >= 12) level = 'high'
+  if (
+    speed != null &&
+    speed <= STANDSTILL_MAX_SPEED_MPH &&
+    minutes >= 15
+  ) {
+    level = 'standstill'
+  } else if (minutes >= 12) level = 'high'
   else if (minutes >= 5) level = 'medium'
   else if (minutes > 3) level = 'medium'
   return {

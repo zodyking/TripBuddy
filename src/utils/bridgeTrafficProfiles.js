@@ -3,7 +3,7 @@
  * Calibrated from Postgres history export (May 2026, ~500 samples per PANYNJ route).
  *
  * Classification order: standstill → high → medium → low.
- * Speed is required for standstill on slow corridors (e.g. GWB to NY) so normal 7 mph creep is not gridlock.
+ * Standstill is only assigned in code when speed ≤ 10 mph (see bridgeTrafficCondition.js).
  */
 
 /** @typedef {'to_ny' | 'to_nj'} DirectionSlug */
@@ -188,8 +188,8 @@ export const BRIDGE_TRAFFIC_PROFILES = Object.freeze({
     highMaxSpeedIfSlow: 28,
     standstillMinMinutes: 18,
     standstillMinMinutesIfSlow: 14,
-    standstillMaxSpeedIfSlow: 26,
-    standstillMaxSpeedMph: 18,
+    standstillMaxSpeedIfSlow: 10,
+    standstillMaxSpeedMph: 10,
     standstillSpeedRequiresMinMinutes: 12,
   },
   verrazzano_narrows_bridge__to_ny: {
@@ -203,8 +203,8 @@ export const BRIDGE_TRAFFIC_PROFILES = Object.freeze({
     highMaxSpeedIfSlow: 26,
     standstillMinMinutes: 40,
     standstillMinMinutesIfSlow: 35,
-    standstillMaxSpeedIfSlow: 24,
-    standstillMaxSpeedMph: 18,
+    standstillMaxSpeedIfSlow: 10,
+    standstillMaxSpeedMph: 10,
     standstillSpeedRequiresMinMinutes: 28,
   },
   holland_tunnel__to_nj: {

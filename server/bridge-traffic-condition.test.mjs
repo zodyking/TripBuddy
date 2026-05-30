@@ -2,7 +2,9 @@ import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import {
   classifyBridgeTraffic,
+  isStandstillTraffic,
   levelFromProfile,
+  STANDSTILL_MAX_SPEED_MPH,
 } from '../src/utils/bridgeTrafficCondition.js'
 import { BRIDGE_TRAFFIC_PROFILES } from '../src/utils/bridgeTrafficProfiles.js'
 
@@ -104,10 +106,40 @@ describe('classifyBridgeTraffic (calibrated profiles)', () => {
   })
 })
 
-describe('levelFromProfile standstill rules', () => {
-  it('requires time threshold for very low speed on GWB NY', () => {
+describe('standstill speed gate', () => {
+  it('never standstill above 10 mph on any bridge', () => {
+    for (const p of Object.values(BRIDGE_TRAFFIC_PROFILES)) {
+      assert.equal(isStandstillTraffic(99, 26, p), false)
+      assert.equal(isStandstillTraffic(50, 26, p), false)
+      assert.equal(isStandstillTraffic(99, STANDSTILL_MAX_SPEED_MPH + 1, p), false)
+    }
+  })
+
+  it('Verrazzano 14 min @ 26 mph is not standstill', () => {
+    const r = classifyBridgeTraffic({
+      routeId: 'verrazzano',
+      travelDirection: 'ToNJ',
+      routeTravelTime: 14,
+      routeSpeed: 26,
+    })
+    assert.notEqual(r.level, 'standstill')
+  })
+
+  it('GWB upper NJ 42 min @ 26 mph is not standstill', () => {
+    const r = classifyBridgeTraffic({
+      routeId: 12,
+      travelDirection: 'ToNJ',
+      facilityModifier: 'Upper',
+      routeTravelTime: 42,
+      routeSpeed: 26,
+    })
+    assert.notEqual(r.level, 'standstill')
+  })
+
+  it('gridlock requires crawl speed and long time', () => {
     const p = BRIDGE_TRAFFIC_PROFILES.george_washington_bridge__upper__to_ny
-    assert.equal(levelFromProfile(22, 7, p), 'medium')
+    assert.equal(isStandstillTraffic(45, 8, p), true)
     assert.equal(levelFromProfile(45, 8, p), 'standstill')
+    assert.equal(levelFromProfile(22, 7, p), 'medium')
   })
 })
