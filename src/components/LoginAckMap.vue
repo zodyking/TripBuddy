@@ -138,6 +138,8 @@ function initMap() {
         '&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a> &copy; <a href="https://carto.com/attributions">CARTO</a>',
       subdomains: 'abcd',
       maxZoom: 20,
+      keepBuffer: 6,
+      updateWhenZooming: false,
     },
   ).addTo(map)
   layer = L.layerGroup().addTo(map)

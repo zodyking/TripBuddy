@@ -933,6 +933,8 @@ function initMap() {
       subdomains: 'abcd',
       maxZoom: 20,
       detectRetina: false,
+      keepBuffer: 6,
+      updateWhenZooming: false,
     },
   )
 
@@ -943,6 +945,8 @@ function initMap() {
       subdomains: 'abcd',
       maxZoom: 20,
       detectRetina: false,
+      keepBuffer: 6,
+      updateWhenZooming: false,
     },
   )
 
@@ -951,6 +955,8 @@ function initMap() {
     {
       attribution: 'Tiles &copy; Esri &mdash; Source: Esri, Maxar, Earthstar Geographics',
       maxZoom: 19,
+      keepBuffer: 6,
+      updateWhenZooming: false,
     },
   )
 

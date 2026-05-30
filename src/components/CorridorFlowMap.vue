@@ -604,6 +604,8 @@ function initMap() {
       attribution: '&copy; OSM &copy; CARTO',
       subdomains: 'abcd',
       maxZoom: 20,
+      keepBuffer: 6,
+      updateWhenZooming: false,
     },
   )
   setTrafficLayerFromKey()
