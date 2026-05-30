@@ -35,6 +35,7 @@ export async function readThreadCache(chatId) {
       updatedAt: Number(data.updatedAt) || 0,
       messages: Array.isArray(data.messages) ? data.messages : [],
       contacts: Array.isArray(data.contacts) ? data.contacts : [],
+      lids: Array.isArray(data.lids) ? data.lids : [],
     }
     memoryCache.set(id, { updatedAt: payload.updatedAt, messages: payload.messages })
     return payload
@@ -45,7 +46,7 @@ export async function readThreadCache(chatId) {
 
 /**
  * @param {string} chatId
- * @param {{ updatedAt?: number, messages: unknown[], contacts?: unknown[] }} payload
+ * @param {{ updatedAt?: number, messages: unknown[], contacts?: unknown[], lids?: unknown[] }} payload
  */
 export async function writeThreadCache(chatId, payload) {
   const id = String(chatId || '').trim()
@@ -53,12 +54,13 @@ export async function writeThreadCache(chatId, payload) {
   const updatedAt = Number(payload.updatedAt) || Date.now()
   const messages = Array.isArray(payload.messages) ? payload.messages : []
   const contacts = Array.isArray(payload.contacts) ? payload.contacts : []
+  const lids = Array.isArray(payload.lids) ? payload.lids : []
   memoryCache.set(id, { updatedAt, messages })
   try {
     await ensureCacheDir()
     await fs.writeFile(
       path.join(CACHE_DIR, safeFileName(id)),
-      JSON.stringify({ chatId: id, updatedAt, messages, contacts }),
+      JSON.stringify({ chatId: id, updatedAt, messages, contacts, lids }),
       'utf8',
     )
   } catch {
@@ -106,7 +108,7 @@ export async function fetchWahaMessageMedia(chatId, messageId) {
 
 /**
  * @param {string} chatId
- * @param {{ limit?: number, downloadMedia?: boolean, contacts?: unknown[] }} [opts]
+ * @param {{ limit?: number, downloadMedia?: boolean, contacts?: unknown[], lids?: unknown[] }} [opts]
  */
 export async function syncThreadCache(chatId, opts = {}) {
   const r = await fetchWahaChatMessages(chatId, {
@@ -122,6 +124,7 @@ export async function syncThreadCache(chatId, opts = {}) {
     updatedAt,
     messages,
     contacts: opts.contacts,
+    lids: opts.lids,
   })
   return { ok: true, status: r.status, messages, updatedAt }
 }
@@ -131,4 +134,27 @@ export async function fetchWahaContacts(opts = {}) {
   const limit = Math.min(1000, Math.max(1, Number(opts.limit) || 500))
   const q = `?session=${encodeURIComponent(WAHA_SESSION)}&limit=${limit}&offset=0`
   return wahaFetch('/api/contacts/all', q)
+}
+
+/** @param {{ limit?: number, offset?: number }} [opts] */
+export async function fetchWahaLids(opts = {}) {
+  const limit = Math.min(1000, Math.max(1, Number(opts.limit) || 500))
+  const offset = Math.max(0, Number(opts.offset) || 0)
+  const q = `?limit=${limit}&offset=${offset}`
+  return wahaFetch(`/api/${encodeURIComponent(WAHA_SESSION)}/lids`, q)
+}
+
+/**
+ * @param {Array<{ lid?: string, pn?: string | null }>} entries
+ * @returns {Map<string, string>}
+ */
+export function buildLidPhoneMap(entries) {
+  const map = new Map()
+  if (!Array.isArray(entries)) return map
+  for (const row of entries) {
+    const lid = String(row?.lid ?? '').trim()
+    const pn = String(row?.pn ?? '').trim()
+    if (lid && pn) map.set(lid, pn)
+  }
+  return map
 }

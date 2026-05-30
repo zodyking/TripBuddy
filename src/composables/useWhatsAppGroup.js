@@ -9,7 +9,9 @@ import {
   getWahaPollInterval,
   getWahaChatId,
   listContacts,
+  listLids,
   buildContactNameMap,
+  buildLidPhoneMap,
   normalizeWahaMessage,
 } from '../utils/wahaApi.js'
 import { enqueueAnnouncement } from '../utils/alertAudioQueue.js'
@@ -17,6 +19,8 @@ import { pushLiveLog } from '../stores/liveLogStore.js'
 
 /** @type {Map<string, string>} */
 let contactMap = new Map()
+/** @type {Map<string, string>} */
+let lidMap = new Map()
 let contactsLoaded = false
 
 function getMsgId(msg) {
@@ -55,9 +59,15 @@ function buildNewMessageSpeech(norm) {
 async function ensureContacts() {
   if (contactsLoaded) return
   try {
-    const r = await listContacts({ limit: 500 })
-    if (r.ok && Array.isArray(r.body)) {
-      contactMap = buildContactNameMap(r.body)
+    const [cr, lr] = await Promise.all([
+      listContacts({ limit: 500 }),
+      listLids({ limit: 500 }),
+    ])
+    if (cr.ok && Array.isArray(cr.body)) {
+      contactMap = buildContactNameMap(cr.body)
+    }
+    if (lr.ok && Array.isArray(lr.body)) {
+      lidMap = buildLidPhoneMap(lr.body)
     }
   } catch {
     /* optional */
@@ -96,7 +106,7 @@ export function useWhatsAppGroup() {
           newMsgs.push(msg)
         }
         for (const raw of newMsgs.reverse()) {
-          const norm = normalizeWahaMessage(raw, { contactMap, activeChatId: chatId })
+          const norm = normalizeWahaMessage(raw, { contactMap, lidMap, activeChatId: chatId })
           const speech = buildNewMessageSpeech(norm)
           if (!speech) continue
           pushLiveLog({ type: 'info', message: `[WhatsApp] TTS: ${speech}`, ts: Date.now() })
@@ -119,6 +129,7 @@ export function useWhatsAppGroup() {
     polling.value = true
     lastSeenId = ''
     contactsLoaded = false
+    lidMap = new Map()
     pollOnce().then(() => {
       if (!pollTimer) {
         pollTimer = setInterval(pollOnce, getWahaPollInterval())
