@@ -15,8 +15,10 @@ import {
   isTrailerGpsTtsEnabled,
   tripVoiceShowUnlockHint,
 } from '../utils/tripVoiceAnnouncement.js'
+import { useCompassOrientation } from '../composables/useCompassOrientation.js'
 
 const router = useRouter()
+const { smoothHeading: compassHeading, startTracking: startCompass } = useCompassOrientation()
 
 /** @type {import('vue').Ref<Record<string, unknown> | null>} */
 const pageData = ref(null)
@@ -65,19 +67,20 @@ function tryStartTripProximityWatch() {
   if (typeof navigator === 'undefined' || !navigator.geolocation?.watchPosition) return
   stopTripProximityWatch()
   const heavyOrder = String(sessionMeta.value?.heavyTrailerOrder ?? '').trim()
+  void Promise.resolve(startCompass()).catch(() => {})
   tripProximityWatchId = navigator.geolocation.watchPosition(
     (pos) => {
       const tr = proximityTrailers.value
       if (!Array.isArray(tr)) return
+      const gpsHeading = pos.coords.heading
+      const hasGpsHeading = typeof gpsHeading === 'number' && Number.isFinite(gpsHeading) && gpsHeading >= 0
+      const compass = compassHeading.value
+      const hasCompass = typeof compass === 'number' && Number.isFinite(compass)
       maybeAnnounceNearTrailer(pos.coords.latitude, pos.coords.longitude, tr, {
         mapOpen: true,
         heavyTrailerOrder: heavyOrder,
-        userHeadingDeg:
-          typeof pos.coords.heading === 'number' && Number.isFinite(pos.coords.heading) && pos.coords.heading >= 0
-            ? pos.coords.heading
-            : null,
-        speedMps:
-          typeof pos.coords.speed === 'number' && Number.isFinite(pos.coords.speed) ? pos.coords.speed : null,
+        userHeadingDeg: hasGpsHeading ? gpsHeading : hasCompass ? compass : null,
+        speedMps: null,
       })
     },
     () => {},

@@ -679,7 +679,6 @@ export function maybeAnnounceTrailerRelocated(trailers) {
  *   mapOpen?: boolean,
  *   heavyTrailerOrder?: string,
  *   userHeadingDeg?: number | null,
- *   speedMps?: number | null,
  * }} [opts]
  */
 export function maybeAnnounceNearTrailer(userLat, userLng, trailers, opts) {
@@ -695,10 +694,8 @@ export function maybeAnnounceNearTrailer(userLat, userLng, trailers, opts) {
   const innerR = getNearTrailerRadiusMeters()
   const outerR = innerR * APPROACHING_TRAILER_RADIUS_MULT
   const cog = opts?.userHeadingDeg
-  const spd = opts?.speedMps
   const cogOk =
     typeof cog === 'number' && Number.isFinite(cog) && cog >= 0 && cog <= 360
-  const speedOk = spd == null || !Number.isFinite(spd) || spd >= 0.45
   const heavyOrder = String(opts?.heavyTrailerOrder ?? '').trim()
   const multiTrailer = trailers.filter(
     (x) => x && typeof x === 'object' && x.latitude != null && x.longitude != null,
@@ -729,7 +726,7 @@ export function maybeAnnounceNearTrailer(userLat, userLng, trailers, opts) {
       let text = roleLabel
         ? `Near your ${roleLabel} trailer ${idSpeech}.`
         : `Near trailer ${idSpeech}.`
-      if (cogOk && speedOk) {
+      if (cogOk) {
         const brg = initialBearingDeg(userLat, userLng, lat, lng)
         const side = sideRelativeToUserCourse(brg, /** @type {number} */ (cog))
         text = roleLabel
@@ -748,7 +745,7 @@ export function maybeAnnounceNearTrailer(userLat, userLng, trailers, opts) {
       let text = roleLabel
         ? `Approaching your ${roleLabel} trailer ${idSpeech}.`
         : `Approaching trailer ${idSpeech}.`
-      if (cogOk && speedOk) {
+      if (cogOk) {
         const brg = initialBearingDeg(userLat, userLng, lat, lng)
         const side = sideRelativeToUserCourse(brg, /** @type {number} */ (cog))
         text = roleLabel
