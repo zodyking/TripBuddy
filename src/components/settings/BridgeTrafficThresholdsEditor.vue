@@ -2,10 +2,15 @@
 import { ref, computed, watch, onMounted } from 'vue'
 import {
   BRIDGE_PROFILE_CATALOG,
-  BRIDGE_THRESHOLD_FIELD_DEFS,
+  BRIDGE_TIER_FIELD_DEFS,
+  BRIDGE_STANDSTILL_FIELD_DEFS,
   BRIDGE_TRAFFIC_PROFILES,
   mergeBridgeTrafficProfile,
 } from '../../utils/bridgeTrafficProfiles.js'
+import {
+  STANDSTILL_ABSOLUTE_MINUTES,
+  STANDSTILL_CRAWL_MAX_SPEED_MPH,
+} from '../../utils/bridgeTrafficCondition.js'
 import {
   bridgeProfileOverridesDraft,
   bridgeProfilesLoading,
@@ -18,17 +23,14 @@ import {
 /** @type {import('vue').Ref<'ToNY' | 'ToNJ'>} */
 const direction = ref('ToNY')
 
-/** profileKey → partial edits (only keys user touched) */
 /** @type {import('vue').Ref<Record<string, Record<string, number>>>} */
 const edits = ref({})
-
 const dirty = ref(false)
 
 const crossingsForDirection = computed(() =>
   BRIDGE_PROFILE_CATALOG.filter((c) => c.directionSlug === direction.value),
 )
 
-/** Group by bridge name for cleaner layout */
 const bridgeGroups = computed(() => {
   /** @type {Map<string, typeof BRIDGE_PROFILE_CATALOG>} */
   const map = new Map()
@@ -47,6 +49,11 @@ const bridgeGroups = computed(() => {
     }),
   }))
 })
+
+const allFieldKeys = [
+  ...BRIDGE_TIER_FIELD_DEFS.map((f) => f.key),
+  ...BRIDGE_STANDSTILL_FIELD_DEFS.map((f) => f.key),
+]
 
 /**
  * @param {string} profileKey
@@ -157,6 +164,13 @@ async function save() {
   }
 }
 
+/**
+ * @param {string} profileKey
+ */
+function profileHasCustom(profileKey) {
+  return allFieldKeys.some((k) => isFieldCustomized(profileKey, k))
+}
+
 watch(direction, () => {
   edits.value = {}
   dirty.value = false
@@ -169,17 +183,14 @@ onMounted(() => {
 
 <template>
   <div class="bth">
-    <div class="bth-head">
-      <div>
-        <h3 class="bth-title">Crossing delay thresholds</h3>
-        <p class="bth-lead">
-          Set when each bridge shows
-          <span class="tier-chip tier-chip--green">green</span>,
-          <span class="tier-chip tier-chip--orange">orange</span>, or
-          <span class="tier-chip tier-chip--red">red</span>
-          on the Traffic tab. Values apply per direction.
-        </p>
-      </div>
+    <header class="bth-head">
+      <p class="bth-lead">
+        Tune when crossings show
+        <span class="tier-pill tier-pill--green">green</span>
+        <span class="tier-pill tier-pill--orange">orange</span>
+        <span class="tier-pill tier-pill--red">red</span>
+        on Traffic. Gridlock uses <strong>time and speed together</strong>, not a single minute cap.
+      </p>
       <div class="bth-dir" role="tablist" aria-label="Travel direction">
         <button
           type="button"
@@ -202,12 +213,15 @@ onMounted(() => {
           To NJ
         </button>
       </div>
+    </header>
+
+    <p v-if="bridgeProfilesSaveError" class="bth-flash bth-flash--err">{{ bridgeProfilesSaveError }}</p>
+    <p v-else-if="bridgeProfilesSaveMsg" class="bth-flash">{{ bridgeProfilesSaveMsg }}</p>
+
+    <div v-if="bridgeProfilesLoading && !bridgeGroups.length" class="bth-skeleton" aria-busy="true">
+      <span class="bth-skeleton-bar" />
+      <span class="bth-skeleton-text">Loading thresholds…</span>
     </div>
-
-    <p v-if="bridgeProfilesSaveError" class="cred-msg cred-msg--error">{{ bridgeProfilesSaveError }}</p>
-    <p v-else-if="bridgeProfilesSaveMsg" class="cred-msg">{{ bridgeProfilesSaveMsg }}</p>
-
-    <div v-if="bridgeProfilesLoading && !bridgeGroups.length" class="bth-loading">Loading thresholds…</div>
 
     <div v-else class="bth-list">
       <article v-for="group in bridgeGroups" :key="group.bridge" class="bth-card">
@@ -215,53 +229,83 @@ onMounted(() => {
           <h4 class="bth-card-title">{{ group.bridge }}</h4>
         </header>
 
-        <div
+        <section
           v-for="row in group.rows"
           :key="row.key"
-          class="bth-row"
+          class="bth-lane"
+          :class="{ 'bth-lane--custom': profileHasCustom(row.key) }"
         >
-          <p v-if="row.deck" class="bth-deck">{{ row.deck }} deck · {{ row.direction }}</p>
-
-          <div class="bth-grid">
-            <label
-              v-for="field in BRIDGE_THRESHOLD_FIELD_DEFS"
-              :key="`${row.key}-${field.key}`"
-              class="bth-field"
-              :class="`bth-field--${field.tier}`"
-              :title="field.hint"
-            >
-              <span class="bth-field-label">{{ field.label }}</span>
-              <span class="bth-field-input-wrap">
-                <input
-                  type="number"
-                  class="bth-field-input inp tap"
-                  step="0.5"
-                  min="0"
-                  :value="displayValue(row.key, field.key)"
-                  :aria-label="`${group.bridge} ${row.deck || ''} ${field.label}`"
-                  @input="onFieldInput(row.key, field.key, ($event.target).value)"
-                />
-                <span class="bth-field-unit">{{ field.unit }}</span>
-              </span>
-              <span
-                v-if="isFieldCustomized(row.key, field.key)"
-                class="bth-custom"
-              >custom</span>
-            </label>
+          <div class="bth-lane-top">
+            <span v-if="row.deck" class="bth-deck-pill">{{ row.deck }}</span>
+            <span v-else class="bth-deck-pill bth-deck-pill--muted">{{ row.direction }}</span>
+            <button type="button" class="bth-reset tap" @click="resetProfile(row.key)">
+              Reset
+            </button>
           </div>
 
-          <button
-            type="button"
-            class="bth-reset-link tap"
-            @click="resetProfile(row.key)"
-          >
-            Reset {{ row.deck ? `${row.deck} ` : '' }}to defaults
-          </button>
-        </div>
+          <div class="bth-tier-row" role="group" :aria-label="`${group.bridge} delay tiers`">
+            <template v-for="(field, idx) in BRIDGE_TIER_FIELD_DEFS" :key="field.key">
+              <span v-if="idx > 0" class="bth-sep" aria-hidden="true">·</span>
+              <label
+                class="bth-chip"
+                :class="[`bth-chip--${field.tier}`, { 'bth-chip--custom': isFieldCustomized(row.key, field.key) }]"
+                :title="field.hint"
+              >
+                <span class="bth-chip-tier">{{ field.label }}</span>
+                <span class="bth-chip-inputs">
+                  <span v-if="field.short" class="bth-chip-prefix">{{ field.short }}</span>
+                  <input
+                    type="number"
+                    class="bth-inp tap"
+                    step="0.5"
+                    min="0"
+                    :value="displayValue(row.key, field.key)"
+                    :aria-label="`${group.bridge} ${field.label}`"
+                    @input="onFieldInput(row.key, field.key, ($event.target).value)"
+                  />
+                  <span class="bth-chip-unit">{{ field.unit }}</span>
+                </span>
+              </label>
+            </template>
+          </div>
+
+          <details class="bth-gridlock">
+            <summary class="bth-gridlock-summary tap">
+              Gridlock detection
+              <span class="bth-gridlock-hint">speed + time rules</span>
+            </summary>
+            <p class="bth-gridlock-note">
+              Also flags gridlock at ≥{{ STANDSTILL_ABSOLUTE_MINUTES }} min or ≤{{ STANDSTILL_CRAWL_MAX_SPEED_MPH }} mph with enough crawl time (global rules).
+            </p>
+            <div class="bth-gridlock-row">
+              <label
+                v-for="field in BRIDGE_STANDSTILL_FIELD_DEFS"
+                :key="field.key"
+                class="bth-chip bth-chip--gridlock"
+                :class="{ 'bth-chip--custom': isFieldCustomized(row.key, field.key) }"
+                :title="field.hint"
+              >
+                <span class="bth-chip-tier">{{ field.label }}</span>
+                <span class="bth-chip-inputs">
+                  <input
+                    type="number"
+                    class="bth-inp tap"
+                    step="0.5"
+                    min="0"
+                    :value="displayValue(row.key, field.key)"
+                    :aria-label="`${group.bridge} gridlock ${field.label}`"
+                    @input="onFieldInput(row.key, field.key, ($event.target).value)"
+                  />
+                  <span class="bth-chip-unit">{{ field.unit }}</span>
+                </span>
+              </label>
+            </div>
+          </details>
+        </section>
       </article>
     </div>
 
-    <div class="bth-actions">
+    <footer class="bth-foot">
       <button
         type="button"
         class="btn primary tap"
@@ -276,9 +320,9 @@ onMounted(() => {
         :disabled="bridgeProfilesLoading"
         @click="resetAllVisible"
       >
-        Reset {{ direction === 'ToNY' ? 'To NY' : 'To NJ' }} to defaults
+        Reset {{ direction === 'ToNY' ? 'To NY' : 'To NJ' }}
       </button>
-    </div>
+    </footer>
   </div>
 </template>
 
@@ -286,58 +330,55 @@ onMounted(() => {
 .bth {
   display: flex;
   flex-direction: column;
-  gap: 1rem;
+  gap: 0.85rem;
 }
 
 .bth-head {
   display: flex;
-  flex-wrap: wrap;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 0.75rem 1.25rem;
-}
-
-.bth-title {
-  margin: 0 0 0.35rem;
-  font-size: 0.95rem;
-  font-weight: 700;
-  color: var(--color-text-primary, #f4f4f8);
+  flex-direction: column;
+  gap: 0.65rem;
 }
 
 .bth-lead {
   margin: 0;
-  max-width: 36rem;
   font-size: 0.78rem;
-  line-height: 1.45;
+  line-height: 1.5;
   color: var(--color-text-secondary, #b8b8c6);
 }
 
-.tier-chip {
+.bth-lead strong {
+  color: var(--color-text-primary, #f0f0f6);
+  font-weight: 600;
+}
+
+.tier-pill {
   display: inline-block;
-  padding: 0.05rem 0.35rem;
+  margin: 0 0.1rem;
+  padding: 0.05rem 0.4rem;
   border-radius: 0.25rem;
-  font-size: 0.7rem;
+  font-size: 0.68rem;
   font-weight: 700;
 }
-.tier-chip--green {
-  background: rgba(34, 197, 94, 0.2);
+.tier-pill--green {
+  background: rgba(34, 197, 94, 0.18);
   color: #4ade80;
 }
-.tier-chip--orange {
-  background: rgba(249, 115, 22, 0.2);
+.tier-pill--orange {
+  background: rgba(249, 115, 22, 0.18);
   color: #fb923c;
 }
-.tier-chip--red {
-  background: rgba(239, 68, 68, 0.2);
+.tier-pill--red {
+  background: rgba(239, 68, 68, 0.18);
   color: #f87171;
 }
 
 .bth-dir {
   display: inline-flex;
-  padding: 0.2rem;
-  border-radius: 0.55rem;
-  background: rgba(255, 255, 255, 0.06);
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  align-self: flex-start;
+  padding: 0.15rem;
+  border-radius: var(--radius-md, 0.5rem);
+  background: var(--color-bg-elevated, #0f0f14);
+  border: 1px solid var(--color-border, rgba(255, 255, 255, 0.08));
 }
 
 .bth-dir-btn {
@@ -347,8 +388,8 @@ onMounted(() => {
   font: inherit;
   font-size: 0.78rem;
   font-weight: 600;
-  padding: 0.4rem 0.85rem;
-  border-radius: 0.4rem;
+  padding: 0.4rem 0.9rem;
+  border-radius: calc(var(--radius-md, 0.5rem) - 2px);
   cursor: pointer;
 }
 .bth-dir-btn.is-active {
@@ -356,112 +397,103 @@ onMounted(() => {
   color: #fff;
 }
 
-.bth-loading {
-  font-size: 0.8rem;
+.bth-flash {
+  margin: 0;
+  font-size: 0.78rem;
+  color: var(--color-text-secondary, #b8b8c6);
+}
+.bth-flash--err {
+  color: #f87171;
+}
+
+.bth-skeleton {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 0.5rem 0;
+}
+.bth-skeleton-bar {
+  height: 4px;
+  border-radius: 999px;
+  background: linear-gradient(
+    90deg,
+    rgba(123, 77, 181, 0.15) 0%,
+    rgba(123, 77, 181, 0.55) 50%,
+    rgba(123, 77, 181, 0.15) 100%
+  );
+  background-size: 200% 100%;
+  animation: bth-shimmer 1.2s ease-in-out infinite;
+}
+.bth-skeleton-text {
+  font-size: 0.75rem;
   color: var(--color-text-tertiary, #8b8b98);
-  padding: 1rem 0;
+}
+
+@keyframes bth-shimmer {
+  0% {
+    background-position: 100% 0;
+  }
+  100% {
+    background-position: -100% 0;
+  }
 }
 
 .bth-list {
   display: flex;
   flex-direction: column;
-  gap: 0.75rem;
+  gap: 0.65rem;
 }
 
 .bth-card {
-  border-radius: 0.65rem;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  background: rgba(255, 255, 255, 0.03);
+  border-radius: var(--radius-lg, 0.75rem);
+  border: 1px solid var(--color-border, rgba(255, 255, 255, 0.08));
+  background: var(--color-bg-elevated, #0f0f14);
   overflow: hidden;
 }
 
 .bth-card-head {
-  padding: 0.55rem 0.75rem;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-  background: rgba(0, 0, 0, 0.15);
+  padding: 0.5rem 0.75rem;
+  border-bottom: 1px solid var(--color-border, rgba(255, 255, 255, 0.06));
 }
 
 .bth-card-title {
   margin: 0;
-  font-size: 0.82rem;
+  font-size: 0.84rem;
   font-weight: 700;
-  letter-spacing: 0.02em;
+  color: var(--color-text-primary, #f4f4f8);
 }
 
-.bth-row {
-  padding: 0.65rem 0.75rem 0.75rem;
-  border-top: 1px solid rgba(255, 255, 255, 0.06);
+.bth-lane {
+  padding: 0.55rem 0.75rem 0.65rem;
+  border-top: 1px solid var(--color-border, rgba(255, 255, 255, 0.05));
 }
-.bth-row:first-of-type {
-  border-top: none;
-}
-
-.bth-deck {
-  margin: 0 0 0.5rem;
-  font-size: 0.68rem;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  color: var(--color-text-tertiary, #8b8b98);
+.bth-lane--custom {
+  background: rgba(123, 77, 181, 0.06);
 }
 
-.bth-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(9.5rem, 1fr));
-  gap: 0.5rem 0.65rem;
-}
-
-.bth-field {
+.bth-lane-top {
   display: flex;
-  flex-direction: column;
-  gap: 0.2rem;
-  position: relative;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-bottom: 0.45rem;
 }
 
-.bth-field-label {
+.bth-deck-pill {
   font-size: 0.65rem;
   font-weight: 700;
   text-transform: uppercase;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.05em;
+  color: var(--color-text-secondary, #c8c8d4);
 }
-.bth-field--green .bth-field-label { color: #4ade80; }
-.bth-field--orange .bth-field-label { color: #fb923c; }
-.bth-field--red .bth-field-label { color: #f87171; }
-.bth-field--standstill .bth-field-label { color: #c084fc; }
-
-.bth-field-input-wrap {
-  display: flex;
-  align-items: center;
-  gap: 0.25rem;
+.bth-deck-pill--muted {
+  font-weight: 600;
+  text-transform: none;
+  letter-spacing: 0;
+  font-size: 0.72rem;
 }
 
-.bth-field-input {
-  width: 100%;
-  min-width: 0;
-  padding: 0.35rem 0.45rem;
-  font-size: 0.85rem;
-}
-
-.bth-field-unit {
-  flex-shrink: 0;
-  font-size: 0.68rem;
-  color: var(--color-text-tertiary, #8b8b98);
-}
-
-.bth-custom {
-  position: absolute;
-  top: 0;
-  right: 0;
-  font-size: 0.55rem;
-  font-weight: 700;
-  text-transform: uppercase;
-  color: var(--color-accent-purple, #a78bfa);
-  letter-spacing: 0.04em;
-}
-
-.bth-reset-link {
-  margin-top: 0.45rem;
-  padding: 0;
+.bth-reset {
   border: none;
   background: none;
   font: inherit;
@@ -469,21 +501,149 @@ onMounted(() => {
   color: var(--color-text-tertiary, #8b8b98);
   text-decoration: underline;
   cursor: pointer;
+  padding: 0.2rem;
 }
-.bth-reset-link:hover {
+.bth-reset:hover {
   color: var(--color-text-secondary, #c8c8d4);
 }
 
-.bth-actions {
+.bth-tier-row,
+.bth-gridlock-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem 0.25rem;
+}
+
+.bth-sep {
+  color: var(--color-text-tertiary, #6e6e7e);
+  font-size: 0.85rem;
+  user-select: none;
+}
+
+.bth-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.2rem 0.35rem;
+  border-radius: 0.4rem;
+  border: 1px solid transparent;
+  cursor: default;
+}
+.bth-chip--custom {
+  border-color: rgba(167, 139, 250, 0.35);
+  background: rgba(123, 77, 181, 0.08);
+}
+
+.bth-chip-tier {
+  font-size: 0.62rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  white-space: nowrap;
+}
+.bth-chip--green .bth-chip-tier {
+  color: #4ade80;
+}
+.bth-chip--orange .bth-chip-tier {
+  color: #fb923c;
+}
+.bth-chip--red .bth-chip-tier {
+  color: #f87171;
+}
+.bth-chip--gridlock .bth-chip-tier {
+  color: #c4b5fd;
+}
+
+.bth-chip-inputs {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.15rem;
+}
+
+.bth-chip-prefix {
+  font-size: 0.72rem;
+  color: var(--color-text-tertiary, #8b8b98);
+}
+
+.bth-inp {
+  width: 3.1rem;
+  min-height: 1.85rem;
+  padding: 0.2rem 0.35rem;
+  border-radius: 0.35rem;
+  border: 1px solid var(--color-border, rgba(255, 255, 255, 0.1));
+  background: var(--color-bg-base, #08080c);
+  color: var(--color-text-primary, #f4f4f8);
+  font-size: 0.82rem;
+  font-variant-numeric: tabular-nums;
+}
+.bth-inp:focus {
+  outline: none;
+  border-color: var(--color-accent-purple, #7b4db5);
+  box-shadow: 0 0 0 2px rgba(123, 77, 181, 0.2);
+}
+
+.bth-chip-unit {
+  font-size: 0.62rem;
+  color: var(--color-text-tertiary, #8b8b98);
+}
+
+.bth-gridlock {
+  margin-top: 0.45rem;
+}
+
+.bth-gridlock-summary {
+  list-style: none;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--color-text-secondary, #c8c8d4);
+  cursor: pointer;
+}
+.bth-gridlock-summary::-webkit-details-marker {
+  display: none;
+}
+.bth-gridlock-summary::before {
+  content: '▸';
+  font-size: 0.65rem;
+  color: var(--color-text-tertiary, #8b8b98);
+}
+.bth-gridlock[open] .bth-gridlock-summary::before {
+  content: '▾';
+}
+
+.bth-gridlock-hint {
+  font-size: 0.62rem;
+  font-weight: 500;
+  color: var(--color-text-tertiary, #8b8b98);
+}
+
+.bth-gridlock-note {
+  margin: 0.35rem 0 0.45rem;
+  font-size: 0.68rem;
+  line-height: 1.4;
+  color: var(--color-text-tertiary, #8b8b98);
+}
+
+.bth-foot {
   display: flex;
   flex-wrap: wrap;
   gap: 0.5rem;
-  padding-top: 0.25rem;
+  padding-top: 0.15rem;
 }
 
-@media (max-width: 480px) {
-  .bth-grid {
-    grid-template-columns: 1fr 1fr;
+@media (max-width: 420px) {
+  .bth-tier-row {
+    gap: 0.25rem;
+  }
+  .bth-sep {
+    display: none;
+  }
+  .bth-chip {
+    flex: 1 1 calc(50% - 0.25rem);
+    min-width: 8.5rem;
   }
 }
 </style>

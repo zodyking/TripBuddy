@@ -17,6 +17,8 @@ const {
   displayMessages,
   loading,
   syncing,
+  syncProgress,
+  syncStatusLabel,
   sending,
   error,
   syncWarning,
@@ -30,6 +32,18 @@ const {
 const hasActiveChat = computed(() => !!activeChatId.value)
 const threadBusy = computed(() => loading.value || syncing.value)
 const showThreadLoader = computed(() => threadBusy.value)
+
+const loaderLabel = computed(() => {
+  if (syncStatusLabel.value) return syncStatusLabel.value
+  if (syncing.value) return 'Syncing with WhatsApp…'
+  return 'Loading messages…'
+})
+
+const loaderPercent = computed(() => {
+  if (syncProgress.value > 0) return syncProgress.value
+  if (threadBusy.value) return 12
+  return 0
+})
 
 /** Tap translated sender label to toggle original spelling */
 const peekOriginalSenderId = ref(/** @type {string | null} */ (null))
@@ -138,7 +152,19 @@ function openMedia(url) {
   <!-- Hydrating account WhatsApp prefs from server -->
   <div v-if="!wahaPrefsHydrated" class="chat-empty">
     <div class="chat-thread-loader" role="status" aria-live="polite">
-      <span class="chat-thread-spinner" aria-hidden="true" />
+      <div
+        class="chat-sync-progress"
+        role="progressbar"
+        :aria-valuenow="loaderPercent"
+        aria-valuemin="0"
+        aria-valuemax="100"
+      >
+        <div
+          class="chat-sync-progress-fill"
+          :class="{ 'is-active': !wahaPrefsHydrated }"
+          :style="{ width: `${loaderPercent || 18}%` }"
+        />
+      </div>
       <p class="chat-thread-loader-label">Loading chat…</p>
     </div>
   </div>
@@ -254,8 +280,22 @@ function openMedia(url) {
           aria-live="polite"
           aria-label="Loading messages"
         >
-          <span class="chat-thread-spinner" aria-hidden="true" />
-          <p v-if="!displayMessages.length" class="chat-thread-loader-label">Loading messages…</p>
+          <div
+            class="chat-sync-progress"
+            role="progressbar"
+            :aria-valuenow="loaderPercent"
+            aria-valuemin="0"
+            aria-valuemax="100"
+            :aria-label="loaderLabel"
+          >
+            <div
+              class="chat-sync-progress-fill"
+              :class="{ 'is-active': threadBusy && loaderPercent < 100 }"
+              :style="{ width: `${loaderPercent}%` }"
+            />
+          </div>
+          <p class="chat-thread-loader-label">{{ loaderLabel }}</p>
+          <p v-if="loaderPercent > 0" class="chat-sync-percent">{{ Math.round(loaderPercent) }}%</p>
         </div>
         <div
           v-else-if="error && !displayMessages.length"
@@ -623,19 +663,50 @@ function openMedia(url) {
   -webkit-backdrop-filter: blur(2px);
 }
 
-.chat-thread-spinner {
-  width: 2rem;
-  height: 2rem;
-  border: 2px solid var(--color-border, rgba(255, 255, 255, 0.08));
-  border-top-color: var(--color-accent-purple, #7b4db5);
-  border-radius: 50%;
-  animation: chat-spin 0.8s linear infinite;
+.chat-sync-progress {
+  width: min(16rem, 72vw);
+  height: 0.35rem;
+  border-radius: 999px;
+  background: var(--color-border, rgba(255, 255, 255, 0.1));
+  overflow: hidden;
+}
+
+.chat-sync-progress-fill {
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(
+    90deg,
+    var(--color-accent-purple, #7b4db5) 0%,
+    #a78bfa 100%
+  );
+  transition: width 0.35s ease;
+}
+.chat-sync-progress-fill.is-active {
+  animation: chat-sync-pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes chat-sync-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.72;
+  }
 }
 
 .chat-thread-loader-label {
   margin: 0;
   font-size: var(--text-sm, 0.8125rem);
   color: var(--color-text-secondary, #a8a8b8);
+  text-align: center;
+}
+
+.chat-sync-percent {
+  margin: 0;
+  font-size: 0.68rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--color-text-tertiary, #8b8b98);
 }
 
 .chat-thread-status {

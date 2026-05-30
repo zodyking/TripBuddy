@@ -400,44 +400,83 @@ export function trafficProfileForKey(key) {
   return base ?? null
 }
 
-/** UI-editable fields (advanced fields keep calibrated defaults). */
-export const BRIDGE_THRESHOLD_FIELD_DEFS = Object.freeze([
+/** Tier color bands (inline row in settings). */
+export const BRIDGE_TIER_FIELD_DEFS = Object.freeze([
   {
     key: 'lowMaxMinutes',
-    label: 'Green max',
+    short: '≤',
+    label: 'Green',
     unit: 'min',
     tier: 'green',
-    hint: 'Crossing time at or below → light traffic',
+    hint: 'At or below → light traffic',
   },
   {
     key: 'lowMinSpeedMph',
-    label: 'Green min speed',
+    short: '@',
+    label: 'min',
     unit: 'mph',
     tier: 'green',
     hint: 'Speed at or above → light traffic',
   },
   {
     key: 'mediumMaxMinutes',
-    label: 'Orange max',
+    short: '≤',
+    label: 'Orange',
     unit: 'min',
     tier: 'orange',
-    hint: 'Above green, up to here → moderate',
+    hint: 'Above green → moderate',
   },
   {
     key: 'highMaxMinutes',
-    label: 'Red max',
+    short: '≤',
+    label: 'Red',
     unit: 'min',
     tier: 'red',
-    hint: 'Above orange, up to here → heavy',
-  },
-  {
-    key: 'standstillMinMinutes',
-    label: 'Standstill',
-    unit: 'min',
-    tier: 'standstill',
-    hint: 'Crossing time alone → gridlock tier',
+    hint: 'Above orange → heavy',
   },
 ])
+
+/** Gridlock uses time + speed together (see isStandstillTraffic). */
+export const BRIDGE_STANDSTILL_FIELD_DEFS = Object.freeze([
+  {
+    key: 'standstillMinMinutes',
+    label: 'Time alone',
+    unit: 'min',
+    hint: 'Crossing time at or above → gridlock even if speed unknown',
+  },
+  {
+    key: 'standstillMinMinutesIfSlow',
+    label: 'Crawl time',
+    unit: 'min',
+    hint: 'With crawl speed below, minutes needed for gridlock',
+  },
+  {
+    key: 'standstillMaxSpeedIfSlow',
+    label: 'Crawl mph',
+    unit: 'mph',
+    hint: 'Speed at or below with crawl time → gridlock',
+  },
+  {
+    key: 'standstillMaxSpeedMph',
+    label: 'Slow mph',
+    unit: 'mph',
+    hint: 'Very slow speed with enough minutes → gridlock',
+  },
+])
+
+/** @deprecated Use BRIDGE_TIER_FIELD_DEFS */
+export const BRIDGE_THRESHOLD_FIELD_DEFS = BRIDGE_TIER_FIELD_DEFS
+
+/** @type {Readonly<Record<string, string>>} */
+const BRIDGE_SLUG_LABELS = Object.freeze({
+  bayonne_bridge: 'Bayonne Bridge',
+  goethals_bridge: 'Goethals Bridge',
+  outerbridge_crossing: 'Outerbridge Crossing',
+  george_washington_bridge: 'George Washington Bridge',
+  verrazzano_narrows_bridge: 'Verrazzano-Narrows Bridge',
+  holland_tunnel: 'Holland Tunnel',
+  lincoln_tunnel: 'Lincoln Tunnel',
+})
 
 /**
  * @param {string} profileKey
@@ -454,10 +493,12 @@ function labelFromProfileKey(profileKey) {
     deck = body[deckIdx] === 'upper' ? 'Upper' : 'Lower'
     body.splice(deckIdx, 1)
   }
-  const bridge = body
-    .join(' ')
-    .replace(/\b\w/g, (c) => c.toUpperCase())
-    .replace(/George Washington Bridge/i, 'GWB')
+  const slug = body.join('__')
+  const bridge =
+    BRIDGE_SLUG_LABELS[slug] ||
+    slug
+      .replace(/_/g, ' ')
+      .replace(/\b\w/g, (c) => c.toUpperCase())
   return { bridge, deck, direction: dir }
 }
 

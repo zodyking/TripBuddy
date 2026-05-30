@@ -2614,7 +2614,11 @@ onUnmounted(() => {
     </main>
 
     <main v-show="settingsTab === 'traffic'" class="stack traffic-panel">
-      <SettingsSection title="Crossing thresholds" section-id="settings-bridge-thresholds">
+      <SettingsSection
+        title="Crossing thresholds"
+        section-id="settings-bridge-thresholds"
+        :open="true"
+      >
         <BridgeTrafficThresholdsEditor />
       </SettingsSection>
 

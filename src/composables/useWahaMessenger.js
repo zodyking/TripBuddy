@@ -57,6 +57,10 @@ export function useWahaMessenger(opts = {}) {
   const messages = ref(/** @type {ReturnType<typeof normalizeWahaMessage>[]} */ ([]))
   const loading = ref(false)
   const syncing = ref(false)
+  /** 0–100 for determinate loader in Chat */
+  const syncProgress = ref(0)
+  /** Human-readable sync step for Chat loader */
+  const syncStatusLabel = ref('')
   const sending = ref(false)
   const error = ref('')
   /** Non-blocking hint when live sync fails but cached messages are shown */
@@ -463,12 +467,19 @@ export function useWahaMessenger(opts = {}) {
    * @param {string} chatId
    * @param {{ full?: boolean, scroll?: boolean }} [opts]
    */
+  function setSyncStep(label, percent) {
+    syncStatusLabel.value = label
+    syncProgress.value = Math.min(100, Math.max(0, percent))
+  }
+
   async function syncThread(chatId, opts = {}) {
     const gen = ++syncGen
     syncing.value = true
     error.value = ''
     syncWarning.value = ''
+    setSyncStep('Preparing…', 8)
     try {
+      setSyncStep('Loading saved messages…', 22)
       const serverCache = await getWhatsAppThreadCache(chatId)
       if (gen !== syncGen) return
       if (Array.isArray(serverCache.contacts) && serverCache.contacts.length) {
@@ -484,11 +495,13 @@ export function useWahaMessenger(opts = {}) {
         }
       }
 
+      setSyncStep('Syncing with WhatsApp…', 48)
       const synced = await syncWhatsAppThread(chatId, {
         limit: 60,
         downloadMedia: false,
       })
       if (gen !== syncGen) return
+      setSyncStep('Updating thread…', 78)
       if (synced.ok && Array.isArray(synced.messages)) {
         if (Array.isArray(synced.contacts) && synced.contacts.length) {
           applyContactsList(synced.contacts)
@@ -498,10 +511,12 @@ export function useWahaMessenger(opts = {}) {
         }
         applyRawThread(chatId, synced.messages, synced.updatedAt)
         if (opts.scroll) await scrollToBottom()
+        setSyncStep('Loading attachments…', 92)
         void hydrateMediaLazy(chatId)
         error.value = ''
         syncWarning.value =
           typeof synced.warning === 'string' ? synced.warning.trim() : ''
+        setSyncStep('Ready', 100)
       } else if (messages.value.length) {
         syncWarning.value = synced.error || 'Live sync unavailable — showing cached messages'
         error.value = ''
@@ -519,8 +534,26 @@ export function useWahaMessenger(opts = {}) {
         }
       }
     } finally {
-      if (gen === syncGen) syncing.value = false
-      loading.value = false
+      if (gen === syncGen) {
+        syncing.value = false
+        loading.value = false
+        if (!error.value) {
+          const clearLater = () => {
+            if (gen === syncGen && !syncing.value && !loading.value) {
+              syncProgress.value = 0
+              syncStatusLabel.value = ''
+            }
+          }
+          if (typeof window !== 'undefined') {
+            window.setTimeout(clearLater, 400)
+          } else {
+            clearLater()
+          }
+        } else {
+          syncProgress.value = 0
+          syncStatusLabel.value = ''
+        }
+      }
     }
   }
 
@@ -532,6 +565,7 @@ export function useWahaMessenger(opts = {}) {
     }
     const hadCache = hydrateThreadFromClientCache(chatId)
     if (!hadCache) loading.value = true
+    setSyncStep(hadCache ? 'Refreshing…' : 'Loading messages…', hadCache ? 15 : 5)
     await syncThread(chatId, { scroll: true })
   }
 
@@ -685,6 +719,8 @@ export function useWahaMessenger(opts = {}) {
     displayMessages,
     loading,
     syncing,
+    syncProgress,
+    syncStatusLabel,
     sending,
     error,
     syncWarning,
