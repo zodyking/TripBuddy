@@ -14,6 +14,7 @@ const WAHA_CHAT_ID_KEY = 'wahaChatId'
 /** @deprecated legacy key — migrated on read */
 const WAHA_CHAT_ID_LEGACY_KEY = 'wahaGroupId'
 const WAHA_TTS_ENABLED_KEY = 'wahaTtsEnabled'
+const WAHA_DAILY_BRIEFING_KEY = 'wahaDailyBriefingEnabled'
 const WAHA_POLL_INTERVAL_KEY = 'wahaPollIntervalMs'
 
 const DEFAULT_SESSION = 'default'
@@ -125,6 +126,20 @@ export function isWahaTtsEnabled() {
 export function setWahaTtsEnabled(enabled) {
   if (typeof window === 'undefined' || !window.localStorage) return
   window.localStorage.setItem(WAHA_TTS_ENABLED_KEY, enabled ? 'true' : 'false')
+}
+
+/** Spoken summary of today’s monitored chat once per login (OpenRouter). */
+export function isWahaDailyBriefingEnabled() {
+  if (typeof window === 'undefined' || !window.localStorage) return false
+  const raw = window.localStorage.getItem(WAHA_DAILY_BRIEFING_KEY)
+  if (raw === null) return isWahaTtsEnabled()
+  return raw !== 'false'
+}
+
+/** @param {boolean} enabled */
+export function setWahaDailyBriefingEnabled(enabled) {
+  if (typeof window === 'undefined' || !window.localStorage) return
+  window.localStorage.setItem(WAHA_DAILY_BRIEFING_KEY, enabled ? 'true' : 'false')
 }
 
 export function getWahaPollInterval() {

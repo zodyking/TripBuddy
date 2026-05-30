@@ -76,7 +76,10 @@ import {
   isWahaProxyMode,
   getWahaChatId, setWahaChatId,
   wahaChatKindLabel,
-  isWahaTtsEnabled, setWahaTtsEnabled,
+  isWahaTtsEnabled,
+  setWahaTtsEnabled,
+  isWahaDailyBriefingEnabled,
+  setWahaDailyBriefingEnabled,
   wahaAuthErrorHint,
   getSessionStatus, ensureSession, getQr, listChats, sendChatMessage,
 } from '../utils/wahaApi.js'
@@ -723,7 +726,8 @@ const wahaUrlDraft = ref(getWahaUrlForSettings())
 const wahaApiKeyDraft = ref(getWahaApiKeyForSettings())
 const wahaUsesServerProxy = computed(() => isWahaProxyMode())
 const wahaChatIdDraft = ref(getWahaChatId())
-const wahaTtsDraft = ref(isWahaTtsEnabled())
+const wahaChatSpeechOn = ref(isWahaTtsEnabled())
+const wahaDailyBriefingOn = ref(isWahaDailyBriefingEnabled())
 const wahaConnMsg = ref('')
 const wahaChatMsg = ref('')
 const wahaChatsLoading = ref(false)
@@ -802,9 +806,19 @@ function selectWahaChat(chat) {
   saveWahaChat()
 }
 
-function saveWahaTts() {
-  setWahaTtsEnabled(wahaTtsDraft.value)
-  wahaChatMsg.value = 'TTS preference saved.'
+function syncWahaSpeechPrefsFromStorage() {
+  wahaChatSpeechOn.value = isWahaTtsEnabled()
+  wahaDailyBriefingOn.value = isWahaDailyBriefingEnabled()
+}
+
+function onWahaChatSpeechToggle(enabled) {
+  wahaChatSpeechOn.value = enabled
+  setWahaTtsEnabled(enabled)
+}
+
+function onWahaDailyBriefingToggle(enabled) {
+  wahaDailyBriefingOn.value = enabled
+  setWahaDailyBriefingEnabled(enabled)
 }
 
 async function sendWahaMessage() {
@@ -1441,6 +1455,7 @@ onMounted(async () => {
   hereApiDraft.value = hereApiKeyOverride.value
   ny511ApiDraft.value = ny511ApiKeyOverride.value
   openrouterApiDraft.value = openrouterApiKeyOverride.value
+  syncWahaSpeechPrefsFromStorage()
   applySettingsRouteFragment()
 })
 
@@ -1479,6 +1494,7 @@ watch(settingsTab, (tab) => {
   if (tab === 'helpers') {
     helpersProximityMsg.value = ''
     syncHelpersPrefsFromStorage()
+    syncWahaSpeechPrefsFromStorage()
   }
 })
 
@@ -1972,7 +1988,7 @@ onUnmounted(() => {
     </main>
 
     <main v-show="settingsTab === 'helpers'" class="stack helpers-panel">
-      <SettingsSection title="Location (live)">
+      <SettingsSection title="Location">
         <p class="helpers-lead">{{ helpersPermissionLabel }}</p>
         <p class="helpers-coords">{{ helpersCoordsLine }}</p>
         <p v-if="appGeoError" class="helpers-err">{{ appGeoError }}</p>
@@ -1982,27 +1998,17 @@ onUnmounted(() => {
           :disabled="helpersLocationBusy"
           @click="onHelpersRequestLocationTap"
         >
-          {{ helpersLocationBusy ? 'Requesting…' : 'Request location fix' }}
+          {{ helpersLocationBusy ? 'Requesting…' : 'Refresh location' }}
         </button>
         <p class="helpers-hint">
-          While signed in, the app keeps a GPS watch in the background for Dispatch and this screen.
-          High accuracy uses more battery. On iOS you may need a tap here once to unlock fixes.
+          Background GPS for Dispatch and maps. Tap once on iOS if location stalls.
         </p>
       </SettingsSection>
 
-      <SettingsSection title="Auto arrive and check-in near destination">
-        <p class="helpers-lead">
-          When your driver status is <strong>ENRT</strong> and the <strong>Leg progress remaining NM</strong>
-          (shown on Home) drops to or below this threshold, the app announces
-          <em>Auto arrive and check in running</em> and runs your Home <strong>Arrive</strong> quick action,
-          then your <strong>Check-in</strong> quick action (same pairing as the late-night prompt).
-        </p>
+      <SettingsSection title="Auto Arrive + Check-in">
         <p class="helpers-hint">
-          The threshold is <strong>nautical miles</strong> (NM) to FedEx’s lat/long for that destination ID
-          (often the terminal, not necessarily the exact street gate). You must stay
-          <strong>inside</strong> the circle continuously for <strong>about 40 seconds</strong> with
-          reasonably good GPS accuracy before it runs—this blocks one-off bad samples that used to fire
-          early. 2 NM ≈ 2.3 statute miles.
+          When ENRT and leg remaining NM is at or below the trigger, runs Home Arrive then Check-in.
+          Stay inside the zone ~40s with good GPS (blocks bad fixes).
         </p>
         <p v-if="helpersProximityMsg" class="cred-msg cred-msg--error">{{ helpersProximityMsg }}</p>
         <div class="audio-row">
@@ -2015,10 +2021,10 @@ onUnmounted(() => {
             />
             <span class="toggle-slider"></span>
           </label>
-          <span class="audio-row-label">Enable proximity auto Arrive and Check-in</span>
+          <span class="audio-row-label">Enabled</span>
         </div>
         <div class="helpers-field">
-          <label class="lbl" for="helpers-radius-nm">Trigger distance (nautical miles)</label>
+          <label class="lbl" for="helpers-radius-nm">Trigger (NM)</label>
           <input
             id="helpers-radius-nm"
             v-model.number="helpersRadiusNm"
@@ -2032,8 +2038,36 @@ onUnmounted(() => {
             @blur="onHelpersRadiusBlur"
           />
           <p class="helpers-hint">
-            Range {{ HELPERS_RADIUS_NM_MIN }}–{{ HELPERS_RADIUS_NM_MAX }} NM (1 NM = 1852 m). Default is 2 NM if unset.
+            {{ HELPERS_RADIUS_NM_MIN }}–{{ HELPERS_RADIUS_NM_MAX }} NM · default 2 NM
           </p>
+        </div>
+      </SettingsSection>
+
+      <SettingsSection title="WhatsApp speech">
+        <p class="helpers-hint">
+          Monitored chat is set under WhatsApp. Daily briefing needs an OpenRouter key in General → API.
+        </p>
+        <div class="audio-row">
+          <label class="toggle-switch">
+            <input
+              type="checkbox"
+              :checked="wahaChatSpeechOn"
+              @change="onWahaChatSpeechToggle($event.target.checked)"
+            />
+            <span class="toggle-slider"></span>
+          </label>
+          <span class="audio-row-label">Read new messages aloud</span>
+        </div>
+        <div class="audio-row">
+          <label class="toggle-switch">
+            <input
+              type="checkbox"
+              :checked="wahaDailyBriefingOn"
+              @change="onWahaDailyBriefingToggle($event.target.checked)"
+            />
+            <span class="toggle-slider"></span>
+          </label>
+          <span class="audio-row-label">Daily briefing on login</span>
         </div>
       </SettingsSection>
     </main>
@@ -2547,15 +2581,6 @@ onUnmounted(() => {
               <span class="waha-chat-id">{{ c.id }}</span>
             </span>
           </button>
-        </div>
-
-        <h4 class="api-sub-heading">Messaging</h4>
-        <label class="waha-toggle-row">
-          <input type="checkbox" v-model="wahaTtsDraft" class="tap" />
-          <span>Read incoming chat messages aloud (TTS)</span>
-        </label>
-        <div class="btn-row">
-          <button type="button" class="btn tap" @click="saveWahaTts">Save TTS preference</button>
         </div>
 
         <div class="waha-send-row">

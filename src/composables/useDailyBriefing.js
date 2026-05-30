@@ -3,8 +3,11 @@
  */
 import { ref } from 'vue'
 import { postWhatsAppDailyBriefing } from '../api.js'
-import { getWahaChatId, isWahaConfigured, isWahaTtsEnabled } from '../utils/wahaApi.js'
-import { isTripAlertEnabled } from '../utils/tripVoiceAnnouncement.js'
+import {
+  getWahaChatId,
+  isWahaConfigured,
+  isWahaDailyBriefingEnabled,
+} from '../utils/wahaApi.js'
 import { getOpenrouterKeyEffective } from '../stores/trafficTileKey.js'
 import { enqueueAnnouncement } from '../utils/alertAudioQueue.js'
 
@@ -54,7 +57,7 @@ export function useDailyBriefing() {
    */
   async function maybeOfferDailyBriefing(opts = {}) {
     if (wasOfferedThisSession()) return
-    if (!isTripAlertEnabled() && !isWahaTtsEnabled()) return
+    if (!isWahaDailyBriefingEnabled()) return
     if (!isWahaConfigured()) return
     if (!getOpenrouterKeyEffective().trim()) return
 
