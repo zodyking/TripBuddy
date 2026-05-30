@@ -2650,9 +2650,9 @@ onUnmounted(() => {
       <SettingsSection title="Bridge traffic history">
         <p class="cred-hint">
           Download the full crossing-time and speed series stored in Postgres (up to
-          <strong>500 samples per route</strong>, not the 24-hour chart cap). PANYNJ bridges poll every
-          5 minutes; Verrazzano when HERE/TomTom is refreshed. JSON is grouped
-          <strong>per bridge → ToNY / ToNJ</strong> with ISO timestamps.
+          <strong>500 observations per route</strong>, not the 24-hour chart cap). Each series is one
+          row in <code>crossingDatasets</code> with <code>displayName</code>,
+          <code>bridgeName</code>, <code>travelDirectionLabel</code>, and <code>observations</code>.
         </p>
         <p v-if="trafficExportError" class="cred-msg cred-msg--error">{{ trafficExportError }}</p>
         <p v-else-if="trafficExportMsg" class="cred-msg">{{ trafficExportMsg }}</p>
