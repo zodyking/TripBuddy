@@ -34,7 +34,7 @@ On the **TripBuddy** container, set:
 | `WAHA_BASE_URL` | `http://<waha-service-name>:3000` | Internal URL reachable from TripBuddy (Docker/Dokploy network) |
 | `WAHA_API_KEY` | same plain key as WAHA | Injected as `X-Api-Key` on `/api/waha/*` proxy requests |
 
-In the app → **Settings → WhatsApp**: leave **WAHA URL** empty (uses `/api/waha` proxy). Tap **Check connection**, scan QR if needed, pick a group.
+In the app → **Settings → WhatsApp**: leave **WAHA URL** empty (uses `/api/waha` proxy). Tap **Check connection**, scan QR if needed, **List chats**, and select the chat to monitor.
 
 Verify after deploy: `GET /api/health` includes `waha.apiKeyConfigured: true` and `waha.baseUrlConfigured: true`.
 

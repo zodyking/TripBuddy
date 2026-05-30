@@ -69,10 +69,11 @@ import {
   getWahaUrlForSettings, setWahaBaseUrl,
   getWahaApiKeyForSettings, setWahaApiKey,
   isWahaProxyMode,
-  getWahaGroupId, setWahaGroupId,
+  getWahaChatId, setWahaChatId,
+  wahaChatKindLabel,
   isWahaTtsEnabled, setWahaTtsEnabled,
   wahaAuthErrorHint,
-  getSessionStatus, ensureSession, getQr, listGroups, sendGroupMessage,
+  getSessionStatus, ensureSession, getQr, listChats, sendChatMessage,
 } from '../utils/wahaApi.js'
 import {
   getTripAlertMode,
@@ -655,12 +656,12 @@ async function resetApiQuotaToday() {
 const wahaUrlDraft = ref(getWahaUrlForSettings())
 const wahaApiKeyDraft = ref(getWahaApiKeyForSettings())
 const wahaUsesServerProxy = computed(() => isWahaProxyMode())
-const wahaGroupIdDraft = ref(getWahaGroupId())
+const wahaChatIdDraft = ref(getWahaChatId())
 const wahaTtsDraft = ref(isWahaTtsEnabled())
 const wahaConnMsg = ref('')
-const wahaGroupMsg = ref('')
-const wahaGroupsLoading = ref(false)
-const wahaGroupsList = ref([])
+const wahaChatMsg = ref('')
+const wahaChatsLoading = ref(false)
+const wahaChatsList = ref([])
 const wahaSendText = ref('')
 const wahaSendMsg = ref('')
 
@@ -702,39 +703,42 @@ async function testWahaConnection() {
   }
 }
 
-function saveWahaGroup() {
-  setWahaGroupId(wahaGroupIdDraft.value)
-  wahaGroupMsg.value = 'Group saved.'
+function saveWahaChat() {
+  setWahaChatId(wahaChatIdDraft.value)
+  wahaChatMsg.value = 'Chat saved — TripBuddy will monitor and send to this chat.'
 }
 
-async function loadWahaGroups() {
+async function loadWahaChats() {
   setWahaBaseUrl(wahaUrlDraft.value)
   setWahaApiKey(wahaApiKeyDraft.value)
-  wahaGroupsLoading.value = true
-  wahaGroupMsg.value = ''
+  wahaChatsLoading.value = true
+  wahaChatMsg.value = ''
   try {
-    const r = await listGroups()
+    const r = await listChats({ limit: 100 })
     if (r.ok && Array.isArray(r.body)) {
-      wahaGroupsList.value = r.body.map((g) => ({
-        id: g.id || g.chatId || g.groupId || '',
-        name: g.subject || g.name || '',
-      })).filter((g) => g.id)
-      wahaGroupMsg.value = `${wahaGroupsList.value.length} group(s) found.`
+      wahaChatsList.value = r.body
+      wahaChatMsg.value = `${wahaChatsList.value.length} chat(s) found. Tap one to select it.`
     } else {
       const authHint = wahaAuthErrorHint(r.status)
-      wahaGroupMsg.value = authHint
+      wahaChatMsg.value = authHint
         || `Failed (${r.status}). Session may not be linked — tap "Check connection" first.`
     }
   } catch (e) {
-    wahaGroupMsg.value = e instanceof Error ? e.message : String(e)
+    wahaChatMsg.value = e instanceof Error ? e.message : String(e)
   } finally {
-    wahaGroupsLoading.value = false
+    wahaChatsLoading.value = false
   }
+}
+
+function selectWahaChat(chat) {
+  if (!chat?.id) return
+  wahaChatIdDraft.value = chat.id
+  saveWahaChat()
 }
 
 function saveWahaTts() {
   setWahaTtsEnabled(wahaTtsDraft.value)
-  wahaGroupMsg.value = 'TTS preference saved.'
+  wahaChatMsg.value = 'TTS preference saved.'
 }
 
 async function sendWahaMessage() {
@@ -744,7 +748,7 @@ async function sendWahaMessage() {
   setWahaApiKey(wahaApiKeyDraft.value)
   wahaSendMsg.value = 'Sending…'
   try {
-    const r = await sendGroupMessage(text)
+    const r = await sendChatMessage(text)
     if (r.ok) {
       wahaSendMsg.value = 'Sent.'
       wahaSendText.value = ''
@@ -2324,10 +2328,11 @@ onUnmounted(() => {
     <main v-show="settingsTab === 'whatsapp'" class="stack whatsapp-panel">
       <SettingsSection title="WhatsApp Messenger" section-id="settings-whatsapp">
         <p class="cred-hint">
-          Send and receive WhatsApp group messages via
+          Send and receive WhatsApp messages via
           <a href="https://github.com/devlikeapro/waha" target="_blank" rel="noopener noreferrer" class="ext-link">WAHA</a>.
-          Incoming messages are read aloud via TTS. Deploy WAHA as a separate Dokploy service
-          (<code>devlikeapro/waha</code> image) with <code>WAHA_API_KEY</code> set.
+          Pick a chat to monitor and send to; incoming messages can be read aloud via TTS.
+          Deploy WAHA as a separate Dokploy service (<code>devlikeapro/waha</code> image) with
+          <code>WAHA_API_KEY</code> set.
         </p>
 
         <h4 class="api-sub-heading" style="margin-top:0;padding-top:0;border-top:none">Connection</h4>
@@ -2371,44 +2376,47 @@ onUnmounted(() => {
           <img :src="wahaQrUrl" alt="WhatsApp QR code" class="waha-qr-img" />
         </div>
 
-        <h4 class="api-sub-heading">Group</h4>
-        <label class="lbl" for="waha-group-id">Group chat ID</label>
+        <h4 class="api-sub-heading">Chat</h4>
+        <label class="lbl" for="waha-chat-id">Chat ID</label>
         <input
-          id="waha-group-id"
-          v-model="wahaGroupIdDraft"
+          id="waha-chat-id"
+          v-model="wahaChatIdDraft"
           class="inp tap"
           type="text"
           autocomplete="off"
-          placeholder="120363xxxxxxxxx@g.us"
+          placeholder="120363…@g.us or 1555…@c.us"
         />
         <p class="cred-hint">
-          Format: <code>120363…@g.us</code> — use "List groups" below to find yours.
+          Groups use <code>@g.us</code>, direct chats use <code>@c.us</code>. Use "List chats" below to pick one.
         </p>
         <div class="btn-row">
-          <button type="button" class="btn primary tap" @click="saveWahaGroup">Save group</button>
-          <button type="button" class="btn tap" :disabled="wahaGroupsLoading" @click="loadWahaGroups">
-            {{ wahaGroupsLoading ? 'Loading…' : 'List groups' }}
+          <button type="button" class="btn primary tap" @click="saveWahaChat">Save chat</button>
+          <button type="button" class="btn tap" :disabled="wahaChatsLoading" @click="loadWahaChats">
+            {{ wahaChatsLoading ? 'Loading…' : 'List chats' }}
           </button>
         </div>
-        <p v-if="wahaGroupMsg" class="cred-msg">{{ wahaGroupMsg }}</p>
-        <div v-if="wahaGroupsList.length" class="waha-groups-list">
+        <p v-if="wahaChatMsg" class="cred-msg">{{ wahaChatMsg }}</p>
+        <div v-if="wahaChatsList.length" class="waha-chats-list">
           <button
-            v-for="g in wahaGroupsList"
-            :key="g.id"
+            v-for="c in wahaChatsList"
+            :key="c.id"
             type="button"
-            class="waha-group-item tap"
-            :class="{ 'is-active': g.id === wahaGroupIdDraft }"
-            @click="wahaGroupIdDraft = g.id"
+            class="waha-chat-item tap"
+            :class="{ 'is-active': c.id === wahaChatIdDraft }"
+            @click="selectWahaChat(c)"
           >
-            <span class="waha-group-name">{{ g.name || g.id }}</span>
-            <span class="waha-group-id">{{ g.id }}</span>
+            <span class="waha-chat-name">{{ c.name || c.id }}</span>
+            <span class="waha-chat-meta">
+              <span class="waha-chat-kind">{{ wahaChatKindLabel(c.kind) }}</span>
+              <span class="waha-chat-id">{{ c.id }}</span>
+            </span>
           </button>
         </div>
 
         <h4 class="api-sub-heading">Messaging</h4>
         <label class="waha-toggle-row">
           <input type="checkbox" v-model="wahaTtsDraft" class="tap" />
-          <span>Read incoming group messages aloud (TTS)</span>
+          <span>Read incoming chat messages aloud (TTS)</span>
         </label>
         <div class="btn-row">
           <button type="button" class="btn tap" @click="saveWahaTts">Save TTS preference</button>
@@ -2419,7 +2427,7 @@ onUnmounted(() => {
             v-model="wahaSendText"
             class="inp tap waha-send-input"
             type="text"
-            placeholder="Type a message to the group…"
+            placeholder="Type a message to the chat…"
             @keydown.enter.prevent="sendWahaMessage"
           />
           <button type="button" class="btn primary tap" :disabled="!wahaSendText.trim()" @click="sendWahaMessage">
@@ -3508,7 +3516,7 @@ code {
   max-width: 40rem;
   margin-inline: auto;
 }
-.waha-groups-list {
+.waha-chats-list {
   display: flex;
   flex-direction: column;
   gap: 0.25rem;
@@ -3516,7 +3524,7 @@ code {
   max-height: 12rem;
   overflow-y: auto;
 }
-.waha-group-item {
+.waha-chat-item {
   display: flex;
   flex-direction: column;
   gap: 0.1rem;
@@ -3529,22 +3537,36 @@ code {
   font: inherit;
   color: inherit;
 }
-.waha-group-item:hover {
+.waha-chat-item:hover {
   background: rgba(255,255,255,0.07);
 }
-.waha-group-item.is-active {
+.waha-chat-item.is-active {
   border-color: rgba(34,197,94,0.5);
   background: rgba(34,197,94,0.08);
 }
-.waha-group-name {
+.waha-chat-name {
   font-size: 0.78rem;
   font-weight: 700;
   color: var(--color-text-primary, #f4f4f8);
 }
-.waha-group-id {
+.waha-chat-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.25rem 0.5rem;
+}
+.waha-chat-kind {
+  font-size: 0.58rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: rgba(34,197,94,0.9);
+}
+.waha-chat-id {
   font-size: 0.62rem;
   color: var(--color-text-tertiary, #8b8b98);
   font-family: monospace;
+  word-break: break-all;
 }
 .waha-toggle-row {
   display: flex;

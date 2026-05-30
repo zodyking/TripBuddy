@@ -1,6 +1,6 @@
 /**
  * WAHA (WhatsApp HTTP API) client.
- * Connects to a WAHA instance for sending/receiving WhatsApp group messages.
+ * Connects to a WAHA instance for sending/receiving WhatsApp chat messages.
  * Deploy WAHA as a separate service (Dokploy service or docker-compose).
  *
  * Recommended (API key on server only): set TripBuddy env `WAHA_BASE_URL` + `WAHA_API_KEY`,
@@ -10,12 +10,15 @@
 
 const WAHA_URL_KEY = 'wahaBaseUrl'
 const WAHA_API_KEY_KEY = 'wahaApiKey'
-const WAHA_GROUP_ID_KEY = 'wahaGroupId'
+const WAHA_CHAT_ID_KEY = 'wahaChatId'
+/** @deprecated legacy key — migrated on read */
+const WAHA_CHAT_ID_LEGACY_KEY = 'wahaGroupId'
 const WAHA_TTS_ENABLED_KEY = 'wahaTtsEnabled'
 const WAHA_POLL_INTERVAL_KEY = 'wahaPollIntervalMs'
 
 const DEFAULT_SESSION = 'default'
 const DEFAULT_POLL_INTERVAL = 10_000
+const DEFAULT_CHATS_LIMIT = 100
 
 function defaultWahaProxyUrl() {
   if (typeof window === 'undefined') return ''
@@ -79,14 +82,39 @@ export function getWahaSessionName() {
   return DEFAULT_SESSION
 }
 
-export function getWahaGroupId() {
+export function getWahaChatId() {
   if (typeof window === 'undefined' || !window.localStorage) return ''
-  return (window.localStorage.getItem(WAHA_GROUP_ID_KEY) ?? '').trim()
+  const current = (window.localStorage.getItem(WAHA_CHAT_ID_KEY) ?? '').trim()
+  if (current) return current
+  const legacy = (window.localStorage.getItem(WAHA_CHAT_ID_LEGACY_KEY) ?? '').trim()
+  if (legacy) {
+    window.localStorage.setItem(WAHA_CHAT_ID_KEY, legacy)
+    window.localStorage.removeItem(WAHA_CHAT_ID_LEGACY_KEY)
+    return legacy
+  }
+  return ''
 }
 
-export function setWahaGroupId(id) {
+export function setWahaChatId(id) {
   if (typeof window === 'undefined' || !window.localStorage) return
-  window.localStorage.setItem(WAHA_GROUP_ID_KEY, String(id ?? '').trim())
+  const trimmed = String(id ?? '').trim()
+  if (!trimmed) {
+    window.localStorage.removeItem(WAHA_CHAT_ID_KEY)
+    window.localStorage.removeItem(WAHA_CHAT_ID_LEGACY_KEY)
+  } else {
+    window.localStorage.setItem(WAHA_CHAT_ID_KEY, trimmed)
+    window.localStorage.removeItem(WAHA_CHAT_ID_LEGACY_KEY)
+  }
+}
+
+/** @deprecated use getWahaChatId */
+export function getWahaGroupId() {
+  return getWahaChatId()
+}
+
+/** @deprecated use setWahaChatId */
+export function setWahaGroupId(id) {
+  setWahaChatId(id)
 }
 
 export function isWahaTtsEnabled() {
@@ -112,7 +140,7 @@ export function setWahaPollInterval(ms) {
 }
 
 export function isWahaConfigured() {
-  return !!(getWahaBaseUrl() && getWahaGroupId())
+  return !!(getWahaBaseUrl() && getWahaChatId())
 }
 
 function wahaHeaders() {
@@ -135,6 +163,53 @@ export function wahaAuthErrorHint(status) {
     return 'Unauthorized — set WAHA_API_KEY on the TripBuddy server (same plain key as WAHA) and WAHA_BASE_URL to your WAHA service URL.'
   }
   return 'Unauthorized — enter your WAHA API key below (X-Api-Key), or clear the URL to use the server proxy.'
+}
+
+export function normalizeWahaChatId(raw) {
+  if (raw == null) return ''
+  if (typeof raw === 'string') return raw.trim()
+  if (typeof raw === 'object') {
+    return String(raw._serialized || raw.id || raw.user || '').trim()
+  }
+  return String(raw).trim()
+}
+
+export function getWahaChatKind(chatId) {
+  const id = normalizeWahaChatId(chatId)
+  if (id.endsWith('@g.us')) return 'group'
+  if (id.endsWith('@c.us')) return 'direct'
+  if (id.endsWith('@broadcast')) return 'broadcast'
+  return 'chat'
+}
+
+export function wahaChatKindLabel(kind) {
+  if (kind === 'group') return 'Group'
+  if (kind === 'direct') return 'Direct'
+  if (kind === 'broadcast') return 'Broadcast'
+  return 'Chat'
+}
+
+/**
+ * @param {Record<string, unknown>} entry
+ * @returns {{ id: string, name: string, kind: string }}
+ */
+export function normalizeWahaChat(entry) {
+  const id = normalizeWahaChatId(
+    entry?.id ?? entry?.chatId ?? entry?._chat?.id ?? entry?._chat?.chatId,
+  )
+  const name = String(
+    entry?.name
+    || entry?.subject
+    || entry?._chat?.name
+    || entry?._chat?.subject
+    || entry?.lastMessage?._data?.notifyName
+    || '',
+  ).trim()
+  return {
+    id,
+    name: name || id,
+    kind: getWahaChatKind(id),
+  }
 }
 
 /**
@@ -180,26 +255,56 @@ export async function getQr() {
 }
 
 /**
- * List groups for the session.
+ * List chats (groups and direct) for the session.
+ * Uses overview endpoint when available; falls back to full chats list.
+ * @param {{ limit?: number, offset?: number }} [opts]
  */
-export async function listGroups() {
+export async function listChats(opts = {}) {
+  const limit = opts.limit ?? DEFAULT_CHATS_LIMIT
+  const offset = opts.offset ?? 0
   const session = getWahaSessionName()
-  const r = await fetch(wahaUrl(`/api/${encodeURIComponent(session)}/groups`), {
-    headers: wahaHeaders(),
+  const qs = new URLSearchParams({
+    limit: String(limit),
+    offset: String(offset),
   })
+
+  let r = await fetch(
+    wahaUrl(`/api/${encodeURIComponent(session)}/chats/overview?${qs}`),
+    { headers: wahaHeaders() },
+  )
+
+  if (r.status === 404 || r.status === 501) {
+    qs.set('sortBy', 'messageTimestamp')
+    qs.set('sortOrder', 'desc')
+    r = await fetch(
+      wahaUrl(`/api/${encodeURIComponent(session)}/chats?${qs}`),
+      { headers: wahaHeaders() },
+    )
+  }
+
   if (!r.ok) return { ok: false, status: r.status, body: null }
   const body = await r.json().catch(() => null)
-  return { ok: r.ok, status: r.status, body: Array.isArray(body) ? body : [] }
+  const list = Array.isArray(body) ? body : []
+  return {
+    ok: true,
+    status: r.status,
+    body: list.map(normalizeWahaChat).filter((c) => c.id),
+  }
+}
+
+/** @deprecated use listChats */
+export async function listGroups() {
+  return listChats()
 }
 
 /**
- * Send text message to configured group.
+ * Send text message to configured chat.
  * @param {string} text
  */
-export async function sendGroupMessage(text) {
+export async function sendChatMessage(text) {
   const session = getWahaSessionName()
-  const chatId = getWahaGroupId()
-  if (!chatId) throw new Error('No WhatsApp group configured')
+  const chatId = getWahaChatId()
+  if (!chatId) throw new Error('No WhatsApp chat configured')
   const r = await fetch(wahaUrl('/api/sendText'), {
     method: 'POST',
     headers: wahaHeaders(),
@@ -208,13 +313,16 @@ export async function sendGroupMessage(text) {
   return { ok: r.ok, status: r.status, body: await r.json().catch(() => null) }
 }
 
+/** @deprecated use sendChatMessage */
+export const sendGroupMessage = sendChatMessage
+
 /**
- * Fetch recent messages from the configured group.
+ * Fetch recent messages from the configured chat.
  * @param {number} [limit]
  */
-export async function fetchGroupMessages(limit = 20) {
+export async function fetchChatMessages(limit = 20) {
   const session = getWahaSessionName()
-  const chatId = getWahaGroupId()
+  const chatId = getWahaChatId()
   if (!chatId) return { ok: false, status: 0, body: null }
   const r = await fetch(
     wahaUrl(`/api/${encodeURIComponent(session)}/chats/${encodeURIComponent(chatId)}/messages?limit=${limit}&downloadMedia=false`),
@@ -224,3 +332,6 @@ export async function fetchGroupMessages(limit = 20) {
   const body = await r.json().catch(() => null)
   return { ok: true, status: r.status, body: Array.isArray(body) ? body : [] }
 }
+
+/** @deprecated use fetchChatMessages */
+export const fetchGroupMessages = fetchChatMessages

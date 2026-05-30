@@ -1,13 +1,13 @@
 /**
- * Composable for WhatsApp group message polling and TTS reading.
+ * Composable for WhatsApp chat message polling and TTS reading.
  */
 import { ref, onBeforeUnmount } from 'vue'
 import {
-  fetchGroupMessages,
+  fetchChatMessages,
   isWahaConfigured,
   isWahaTtsEnabled,
   getWahaPollInterval,
-  getWahaGroupId,
+  getWahaChatId,
 } from '../utils/wahaApi.js'
 import { enqueueAnnouncement } from '../utils/alertAudioQueue.js'
 import { pushLiveLog } from '../stores/liveLogStore.js'
@@ -31,7 +31,7 @@ export function useWhatsAppGroup() {
   async function pollOnce() {
     if (!isWahaConfigured()) return
     try {
-      const r = await fetchGroupMessages(30)
+      const r = await fetchChatMessages(30)
       if (!r.ok || !Array.isArray(r.body)) {
         error.value = `Poll failed: ${r.status}`
         return
