@@ -9,7 +9,10 @@ import {
   bridgeShortLabelForRouteId,
   bridgeShortLabelFromDisplayName,
 } from '../utils/mapMarkers.js'
-import { bridgeDelayTier } from '../utils/bridgeDelayTier.js'
+import {
+  bridgeDelayTierForRow,
+  classifyBridgeTraffic,
+} from '../utils/bridgeDelayTier.js'
 import { useMapVehicleId } from '../composables/useMapVehicleId.js'
 import { sanitizeNy511ImpactFootnote } from '../utils/ny511ImpactFootnote.js'
 import { extractYoutubeVideoIdFromInput } from '../utils/youtubeVideoId.js'
@@ -349,13 +352,68 @@ function finiteTravelMinutes(row) {
 }
 
 /**
+ * @param {unknown} row
+ */
+function trafficInputForRow(row) {
+  if (row == null || typeof row !== 'object') return null
+  const o = /** @type {Record<string, unknown>} */ (row)
+  return {
+    routeId: o.routeId,
+    travelDirection: o.travelDirection ?? direction.value,
+    routeTravelTime: o.routeTravelTime,
+    routeSpeed: o.routeSpeed,
+    routeTravelTimeHist: o.routeTravelTimeHist,
+    routeSpeedHist: o.routeSpeedHist,
+    series: seriesForRow(row),
+  }
+}
+
+/**
  * Delay severity for card accent + trend chrome (empty string if closed).
  * @param {unknown} row
  */
 function delayTierForRow(row) {
   if (isClosedRow(row)) return ''
-  const fm = finiteTravelMinutes(row)
-  return fm != null ? bridgeDelayTier(fm) : 'orange'
+  const input = trafficInputForRow(row)
+  if (!input || finitePositive(input.routeTravelTime) == null) return 'orange'
+  return classifyBridgeTraffic(input).tier
+}
+
+/**
+ * @param {unknown} v
+ */
+function finitePositive(v) {
+  const n = typeof v === 'number' ? v : Number(v)
+  if (!Number.isFinite(n) || n <= 0) return null
+  return n
+}
+
+/**
+ * @param {unknown} row
+ */
+function trafficLevelForRow(row) {
+  if (isClosedRow(row)) return ''
+  const input = trafficInputForRow(row)
+  if (!input || finitePositive(input.routeTravelTime) == null) return 'medium'
+  return classifyBridgeTraffic(input).level
+}
+
+const TRAFFIC_LEVEL_LABEL = {
+  low: 'Light traffic',
+  medium: 'Moderate traffic',
+  high: 'Heavy traffic',
+  standstill: 'Standstill / gridlock',
+}
+
+/**
+ * @param {unknown} row
+ */
+function trafficStatusTitle(row) {
+  const level = trafficLevelForRow(row)
+  const trend = trendInfo(row).full
+  const lab = level && TRAFFIC_LEVEL_LABEL[/** @type {keyof typeof TRAFFIC_LEVEL_LABEL} */ (level)]
+  if (!lab) return trend
+  return `${lab} · ${trend}`
 }
 
 /**
@@ -372,8 +430,11 @@ function delayTierClass(row) {
  */
 function bridgeChartStrokeColor(row) {
   if (isClosedRow(row)) return '#94a3b8'
-  const fm = finiteTravelMinutes(row)
-  const t = fm != null ? bridgeDelayTier(fm) : 'orange'
+  const input = trafficInputForRow(row)
+  const t =
+    input && finitePositive(input.routeTravelTime) != null
+      ? classifyBridgeTraffic(input).tier
+      : 'orange'
   if (t === 'green') return '#4ade80'
   if (t === 'red') return '#f87171'
   return '#fb923c'
@@ -695,7 +756,7 @@ const mapPins = computed(() => {
       lng: pos[1],
       title: displayTitleShort(row),
       shortLabel: mapPinShortLabel(row),
-      delayTier: fm != null ? bridgeDelayTier(fm) : /** @type {'orange'} */ ('orange'),
+      delayTier: delayTierForRow(row) || /** @type {'orange'} */ ('orange'),
       minutes: isClosedRow(row) ? '—' : (() => {
         const m = travelMinutes(row)
         return Number.isFinite(m) ? String(Math.round(m)) : '—'
@@ -1175,7 +1236,9 @@ onUnmounted(() => {
                 'is-hi': isHighlighted(row),
                 'bridge-tile--d-green': delayTierForRow(row) === 'green',
                 'bridge-tile--d-orange': delayTierForRow(row) === 'orange',
-                'bridge-tile--d-red': delayTierForRow(row) === 'red',
+                'bridge-tile--d-red':
+                  delayTierForRow(row) === 'red' && trafficLevelForRow(row) !== 'standstill',
+                'bridge-tile--d-standstill': trafficLevelForRow(row) === 'standstill',
               }"
               @click="onListTileClick(row)"
             >
@@ -1200,7 +1263,7 @@ onUnmounted(() => {
                     <div
                       class="bridge-trend ico"
                       :class="[trendInfo(row).cls, delayTierClass(row)]"
-                      :title="trendInfo(row).full"
+                      :title="trafficStatusTitle(row)"
                     >{{ trendInfo(row).short }}</div>
                   </div>
                   <div class="bridge-card-metrics">
@@ -1777,6 +1840,15 @@ onUnmounted(() => {
 .bridge-tile--d-red::before {
   background: linear-gradient(180deg, #f87171, #dc2626);
   box-shadow: 0 0 14px rgba(248, 113, 113, 0.28);
+}
+
+.bridge-tile--d-standstill::before {
+  background: linear-gradient(180deg, #fb7185, #9f1239);
+  box-shadow: 0 0 16px rgba(251, 113, 133, 0.42);
+}
+
+.bridge-tile--d-standstill {
+  border-color: rgba(251, 113, 133, 0.35);
 }
 
 .bridge-tile:active {
