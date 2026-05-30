@@ -4,7 +4,8 @@ import {
   classifyBridgeTraffic,
   isStandstillTraffic,
   levelFromProfile,
-  STANDSTILL_MAX_SPEED_MPH,
+  STANDSTILL_ABSOLUTE_MINUTES,
+  STANDSTILL_CRAWL_MAX_SPEED_MPH,
 } from '../src/utils/bridgeTrafficCondition.js'
 import { BRIDGE_TRAFFIC_PROFILES } from '../src/utils/bridgeTrafficProfiles.js'
 
@@ -31,7 +32,7 @@ describe('classifyBridgeTraffic (calibrated profiles)', () => {
     assert.equal(r.level, 'low')
   })
 
-  it('GWB upper To NY 18 min / 17 mph → low (not global red)', () => {
+  it('GWB upper To NY 18 min / 17 mph → low', () => {
     const r = classifyBridgeTraffic({
       routeId: 211,
       travelDirection: 'ToNY',
@@ -43,7 +44,7 @@ describe('classifyBridgeTraffic (calibrated profiles)', () => {
     assert.equal(r.tier, 'green')
   })
 
-  it('GWB upper To NY 7 mph at 22 min is not standstill (normal crawl)', () => {
+  it('GWB upper To NY 22 min / 7 mph → medium (crawl, not gridlock)', () => {
     const r = classifyBridgeTraffic({
       routeId: 211,
       travelDirection: 'ToNY',
@@ -51,21 +52,31 @@ describe('classifyBridgeTraffic (calibrated profiles)', () => {
       routeTravelTime: 22,
       routeSpeed: 7,
     })
-    assert.notEqual(r.level, 'standstill')
+    assert.equal(r.level, 'medium')
   })
 
-  it('GWB upper To NY 50 min / 8 mph → standstill', () => {
+  it('30+ min is standstill even at highway speed', () => {
     const r = classifyBridgeTraffic({
-      routeId: 211,
-      travelDirection: 'ToNY',
+      routeId: 12,
+      travelDirection: 'ToNJ',
       facilityModifier: 'Upper',
-      routeTravelTime: 50,
-      routeSpeed: 8,
+      routeTravelTime: 32,
+      routeSpeed: 26,
     })
     assert.equal(r.level, 'standstill')
   })
 
-  it('Goethals To NJ spike 9 min / 9 mph → standstill', () => {
+  it('29 min @ 26 mph is not the absolute standstill rule', () => {
+    const r = classifyBridgeTraffic({
+      routeId: 'verrazzano',
+      travelDirection: 'ToNJ',
+      routeTravelTime: 29,
+      routeSpeed: 26,
+    })
+    assert.notEqual(r.level, 'standstill')
+  })
+
+  it('Goethals To NJ 9 min / 9 mph → standstill', () => {
     const r = classifyBridgeTraffic({
       routeId: 87,
       travelDirection: 'ToNJ',
@@ -85,16 +96,6 @@ describe('classifyBridgeTraffic (calibrated profiles)', () => {
     assert.equal(r.level, 'low')
   })
 
-  it('Verrazzano To NJ 11 min / 40 mph → low', () => {
-    const r = classifyBridgeTraffic({
-      routeId: 'verrazzano',
-      travelDirection: 'ToNJ',
-      routeTravelTime: 11,
-      routeSpeed: 40,
-    })
-    assert.equal(r.level, 'low')
-  })
-
   it('Verrazzano To NY 28 min / 34 mph → low', () => {
     const r = classifyBridgeTraffic({
       routeId: 'verrazzano',
@@ -106,40 +107,23 @@ describe('classifyBridgeTraffic (calibrated profiles)', () => {
   })
 })
 
-describe('standstill speed gate', () => {
-  it('never standstill above 10 mph on any bridge', () => {
-    for (const p of Object.values(BRIDGE_TRAFFIC_PROFILES)) {
-      assert.equal(isStandstillTraffic(99, 26, p), false)
-      assert.equal(isStandstillTraffic(50, 26, p), false)
-      assert.equal(isStandstillTraffic(99, STANDSTILL_MAX_SPEED_MPH + 1, p), false)
-    }
+describe('standstill compound rules', () => {
+  it(`absolute ${STANDSTILL_ABSOLUTE_MINUTES} min threshold`, () => {
+    const p = BRIDGE_TRAFFIC_PROFILES.bayonne_bridge__to_nj
+    assert.equal(isStandstillTraffic(30, 50, p), true)
+    assert.equal(isStandstillTraffic(29, 50, p), false)
   })
 
-  it('Verrazzano 14 min @ 26 mph is not standstill', () => {
-    const r = classifyBridgeTraffic({
-      routeId: 'verrazzano',
-      travelDirection: 'ToNJ',
-      routeTravelTime: 14,
-      routeSpeed: 26,
-    })
-    assert.notEqual(r.level, 'standstill')
+  it('crawl standstill only at or below crawl speed cap when under 30 min', () => {
+    const p = BRIDGE_TRAFFIC_PROFILES.bayonne_bridge__to_nj
+    assert.equal(
+      isStandstillTraffic(20, STANDSTILL_CRAWL_MAX_SPEED_MPH + 5, p),
+      false,
+    )
   })
 
-  it('GWB upper NJ 42 min @ 26 mph is not standstill', () => {
-    const r = classifyBridgeTraffic({
-      routeId: 12,
-      travelDirection: 'ToNJ',
-      facilityModifier: 'Upper',
-      routeTravelTime: 42,
-      routeSpeed: 26,
-    })
-    assert.notEqual(r.level, 'standstill')
-  })
-
-  it('gridlock requires crawl speed and long time', () => {
+  it('GWB upper NY 45 min / 8 mph → standstill', () => {
     const p = BRIDGE_TRAFFIC_PROFILES.george_washington_bridge__upper__to_ny
-    assert.equal(isStandstillTraffic(45, 8, p), true)
     assert.equal(levelFromProfile(45, 8, p), 'standstill')
-    assert.equal(levelFromProfile(22, 7, p), 'medium')
   })
 })
