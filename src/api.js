@@ -366,6 +366,18 @@ export async function getInAppNotifications() {
 }
 
 /**
+ * @param {{ type?: string, message: string, source?: string, extra?: object }} body
+ */
+export async function postInAppNotification(body) {
+  const r = await apiFetch('/api/notifications', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+  return handleJson(r)
+}
+
+/**
  * @param {{ id?: string, all?: boolean }} body
  */
 export async function postInAppMarkRead(body) {

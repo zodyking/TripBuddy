@@ -14,5 +14,10 @@ export function isSkippableInAppNotification(message, source) {
   if (m.includes('crossing times were refreshed')) return true
   if (m.includes('bridge') && m.includes('tunnel') && m.includes('refreshed')) return true
   if (s === 'bridges' && m.includes('refreshed')) return true
+  if (s === 'bridges' || s === 'bridges-tier') return true
+  if (m.includes('bridge alerts will follow')) return true
+  if (/\bbridge\b/.test(m) && /\btraffic\b/.test(m) && (m.includes('→') || m.includes('->'))) {
+    return true
+  }
   return false
 }
