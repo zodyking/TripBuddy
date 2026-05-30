@@ -69,6 +69,9 @@ export async function ensureUserProfileTable() {
       ALTER TABLE ${TABLE} ADD COLUMN IF NOT EXISTS openrouter_api_key_enc JSONB
     `)
     await client.query(`
+      ALTER TABLE ${TABLE} ADD COLUMN IF NOT EXISTS openrouter_model TEXT
+    `)
+    await client.query(`
       ALTER TABLE ${TABLE} ADD COLUMN IF NOT EXISTS api_quota_state JSONB
     `)
     await client.query(`
@@ -262,6 +265,44 @@ export async function setOpenrouterApiKeyForAccount(accountKey, rawKey) {
        openrouter_api_key_enc = EXCLUDED.openrouter_api_key_enc,
        updated_at = now()`,
     [ak, enc ? JSON.stringify(enc) : null],
+  )
+}
+
+/**
+ * @param {string} accountKey
+ * @returns {Promise<string>}
+ */
+export async function getOpenrouterModelForAccount(accountKey) {
+  const ak = String(accountKey || '').trim()
+  if (!ak) return ''
+  const p = await getPostgresPool()
+  if (!p) return ''
+  await ensureUserProfileTable()
+  const { rows } = await p.query(
+    `SELECT openrouter_model FROM ${TABLE} WHERE account_key = $1`,
+    [ak],
+  )
+  return String(rows[0]?.openrouter_model ?? '').trim()
+}
+
+/**
+ * @param {string} accountKey
+ * @param {string} modelId
+ */
+export async function setOpenrouterModelForAccount(accountKey, modelId) {
+  const ak = String(accountKey || '').trim()
+  if (!ak) throw new Error('account_key required')
+  const p = await getPostgresPool()
+  if (!p) throw new Error('Database not available')
+  await ensureUserProfileTable()
+  const v = String(modelId ?? '').trim() || null
+  await p.query(
+    `INSERT INTO ${TABLE} (account_key, openrouter_model, updated_at)
+     VALUES ($1, $2, now())
+     ON CONFLICT (account_key) DO UPDATE SET
+       openrouter_model = EXCLUDED.openrouter_model,
+       updated_at = now()`,
+    [ak, v],
   )
 }
 

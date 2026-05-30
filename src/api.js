@@ -497,7 +497,7 @@ export async function putNy511ApiKey(body) {
 
 /**
  * Persist OpenRouter API key for daily WhatsApp briefing (encrypted server-side).
- * @param {{ openrouterApiKey?: string }} body
+ * @param {{ openrouterApiKey?: string, openrouterModel?: string }} body
  */
 export async function putOpenrouterApiKey(body) {
   const r = await apiFetch('/api/settings/openrouter-api-key', {

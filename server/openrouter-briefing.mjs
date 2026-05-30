@@ -1,9 +1,16 @@
 /**
  * OpenRouter chat completion for WhatsApp daily briefing summaries.
  */
+import {
+  OPENROUTER_DEFAULT_MODEL,
+  OPENROUTER_BRIEFING_SYSTEM_PROMPT,
+  sanitizeOpenrouterModel,
+} from '../src/constants/openrouterModels.js'
+
 const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions'
-const DEFAULT_MODEL = 'openai/gpt-4o-mini'
 const MAX_OUTPUT_TOKENS = 900
+
+export { OPENROUTER_DEFAULT_MODEL, sanitizeOpenrouterModel }
 
 /**
  * @param {string} apiKey
@@ -27,7 +34,7 @@ export async function openRouterComplete(apiKey, messages, opts = {}) {
       'X-Title': 'TripBuddy Daily Briefing',
     },
     body: JSON.stringify({
-      model: opts.model || DEFAULT_MODEL,
+      model: sanitizeOpenrouterModel(opts.model || OPENROUTER_DEFAULT_MODEL),
       max_tokens: opts.maxTokens ?? MAX_OUTPUT_TOKENS,
       temperature: 0.4,
       messages,
@@ -68,13 +75,7 @@ export function buildBriefingPrompt(transcript, chatLabel) {
   return [
     {
       role: 'system',
-      content: `You summarize group chat messages for a FedEx linehaul driver briefing.
-Write in clear spoken English for text-to-speech.
-Be concise: at most 500 words (roughly 3 minutes when read aloud).
-Use short paragraphs or brief bullet-style phrases (no markdown symbols).
-Prioritize safety alerts, schedule changes, traffic, weather, and actionable items.
-Skip greetings-only noise and duplicate forwards.
-If nothing important happened, say so in one short sentence.`,
+      content: OPENROUTER_BRIEFING_SYSTEM_PROMPT,
     },
     {
       role: 'user',

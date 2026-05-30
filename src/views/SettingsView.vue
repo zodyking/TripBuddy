@@ -67,7 +67,15 @@ import {
   setNy511ApiKey,
   openrouterApiKeyOverride,
   setOpenrouterApiKey,
+  setOpenrouterModel,
+  openrouterModelEffective,
 } from '../stores/trafficTileKey.js'
+import {
+  OPENROUTER_DEFAULT_MODEL,
+  OPENROUTER_MODEL_OPTIONS,
+  OPENROUTER_BRIEFING_SYSTEM_PROMPT,
+  sanitizeOpenrouterModel,
+} from '../constants/openrouterModels.js'
 import AutomationList from '../components/automation/AutomationList.vue'
 import AutomationEditor from '../components/automation/AutomationEditor.vue'
 import {
@@ -596,19 +604,32 @@ async function saveNy511ApiKey() {
   }
 }
 
-/** OpenRouter API key (WhatsApp daily briefing). Register: openrouter.ai */
+/** OpenRouter API key + model (WhatsApp daily briefing). Register: openrouter.ai */
 const openrouterApiDraft = ref('')
+const openrouterModelDraft = ref(OPENROUTER_DEFAULT_MODEL)
 const openrouterApiMsg = ref('')
 const openrouterApiBusy = ref(false)
+const openrouterModelOptions = OPENROUTER_MODEL_OPTIONS
+const openrouterBriefingSystemPrompt = OPENROUTER_BRIEFING_SYSTEM_PROMPT
 
 async function saveOpenrouterApiKey() {
   if (!(await requireApi())) return
   openrouterApiBusy.value = true
   openrouterApiMsg.value = ''
   try {
-    await putOpenrouterApiKey({ openrouterApiKey: openrouterApiDraft.value })
+    const model = sanitizeOpenrouterModel(openrouterModelDraft.value)
+    openrouterModelDraft.value = model
+    const res = await putOpenrouterApiKey({
+      openrouterApiKey: openrouterApiDraft.value,
+      openrouterModel: model,
+    })
     setOpenrouterApiKey(openrouterApiDraft.value)
-    openrouterApiMsg.value = 'OpenRouter key saved to your account (encrypted on the server).'
+    setOpenrouterModel(model)
+    if (typeof res?.openrouterModel === 'string' && res.openrouterModel.trim()) {
+      openrouterModelDraft.value = res.openrouterModel.trim()
+      setOpenrouterModel(res.openrouterModel.trim())
+    }
+    openrouterApiMsg.value = 'OpenRouter settings saved to your account.'
   } catch (e) {
     openrouterApiMsg.value = e instanceof Error ? e.message : String(e)
   } finally {
@@ -966,6 +987,14 @@ async function loadCredentials() {
         : ''
     if (ork) setOpenrouterApiKey(ork)
     openrouterApiDraft.value = openrouterApiKeyOverride.value
+    const orm =
+      typeof credMeta.value.openrouterModel === 'string'
+        ? credMeta.value.openrouterModel.trim()
+        : ''
+    if (orm) {
+      setOpenrouterModel(orm)
+      openrouterModelDraft.value = sanitizeOpenrouterModel(orm)
+    }
     gwbUpperCamYoutubeDraft.value =
       typeof credMeta.value.gwbUpperCamYoutubeUrl === 'string'
         ? credMeta.value.gwbUpperCamYoutubeUrl
@@ -1455,6 +1484,9 @@ onMounted(async () => {
   hereApiDraft.value = hereApiKeyOverride.value
   ny511ApiDraft.value = ny511ApiKeyOverride.value
   openrouterApiDraft.value = openrouterApiKeyOverride.value
+  openrouterModelDraft.value = sanitizeOpenrouterModel(
+    openrouterModelEffective.value || OPENROUTER_DEFAULT_MODEL,
+  )
   syncWahaSpeechPrefsFromStorage()
   applySettingsRouteFragment()
 })
@@ -1846,10 +1878,40 @@ onUnmounted(() => {
             {{ openrouterApiBusy ? 'Saving…' : 'Save' }}
           </button>
         </div>
+        <div class="api-key-row">
+          <label class="lbl api-key-lbl" for="openrouter-model">Model</label>
+          <select
+            id="openrouter-model"
+            v-model="openrouterModelDraft"
+            class="inp tap api-key-inp api-model-select"
+            :disabled="openrouterApiBusy"
+          >
+            <option v-for="opt in openrouterModelOptions" :key="opt.value" :value="opt.value">
+              {{ opt.label }}
+            </option>
+          </select>
+          <button type="button" class="btn primary tap api-key-save" :disabled="openrouterApiBusy" @click="saveOpenrouterApiKey">
+            {{ openrouterApiBusy ? 'Saving…' : 'Save' }}
+          </button>
+        </div>
         <p class="api-key-foot">
           <span class="cred-hint">Status: {{ openrouterApiKeyOverride ? 'saved' : 'empty' }}</span>
+          <span v-if="openrouterModelDraft" class="cred-hint">Model: {{ openrouterModelDraft }}</span>
           <span v-if="openrouterApiMsg" class="cred-msg">{{ openrouterApiMsg }}</span>
         </p>
+        <details class="openrouter-prompt-details">
+          <summary class="openrouter-prompt-summary">Briefing prompt (what we send to OpenRouter)</summary>
+          <p class="cred-hint openrouter-prompt-note">
+            System message plus a user message with today’s chat transcript
+            (<code>[time] Sender: text</code> per line).
+          </p>
+          <pre class="openrouter-prompt-pre">{{ openrouterBriefingSystemPrompt }}</pre>
+          <p class="cred-hint openrouter-prompt-user">
+            User message template:
+            <code>Chat: {chat name}</code> then
+            <code>Today's messages:</code> and the transcript.
+          </p>
+        </details>
 
         <!-- GWB Camera -->
         <h4 class="api-sub-heading">GWB Upper Camera</h4>
@@ -2669,6 +2731,41 @@ onUnmounted(() => {
 }
 .api-key-foot .cred-msg {
   margin: 0;
+}
+.api-model-select {
+  min-height: var(--touch-target, 2.75rem);
+}
+.openrouter-prompt-details {
+  margin: 0.5rem 0 0.75rem;
+  font-size: 0.78rem;
+  color: var(--color-text-secondary, #c4c4d4);
+}
+.openrouter-prompt-summary {
+  cursor: pointer;
+  font-weight: 600;
+  color: var(--color-text-primary, #f4f4f8);
+}
+.openrouter-prompt-note {
+  margin: 0.5rem 0 0.35rem;
+}
+.openrouter-prompt-pre {
+  margin: 0.35rem 0;
+  padding: 0.55rem 0.65rem;
+  border-radius: 0.45rem;
+  background: rgba(0, 0, 0, 0.35);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: 0.72rem;
+  line-height: 1.4;
+  color: #b8b8c8;
+}
+.openrouter-prompt-user {
+  margin: 0.35rem 0 0;
+}
+.openrouter-prompt-user code,
+.openrouter-prompt-note code {
+  font-size: 0.7rem;
 }
 @media (max-width: 420px) {
   .api-key-lbl {

@@ -23,7 +23,9 @@ const ny511Override = ref('')
 
 // OpenRouter key (WhatsApp daily briefing summaries)
 const LS_OPENROUTER = 'fedextool_openrouter_api_key'
+const LS_OPENROUTER_MODEL = 'fedextool_openrouter_model'
 const openrouterOverride = ref('')
+const openrouterModelOverride = ref('')
 
 if (typeof window !== 'undefined') {
   try {
@@ -38,6 +40,8 @@ if (typeof window !== 'undefined') {
 
     const openrouterVal = localStorage.getItem(LS_OPENROUTER)
     if (openrouterVal) openrouterOverride.value = openrouterVal.trim()
+    const openrouterModelVal = localStorage.getItem(LS_OPENROUTER_MODEL)
+    if (openrouterModelVal) openrouterModelOverride.value = openrouterModelVal.trim()
   } catch {
     /* private mode */
   }
@@ -202,6 +206,7 @@ export function getNy511KeyEffective() {
 export const ny511KeyEffective = computed(() => ny511Override.value)
 
 export const openrouterApiKeyOverride = openrouterOverride
+export const openrouterModelOverrideRef = openrouterModelOverride
 
 /**
  * @param {string} key
@@ -224,6 +229,27 @@ export function setOpenrouterApiKey(key) {
   openrouterOverride.value = v
 }
 
+/**
+ * @param {string} model
+ */
+export function setOpenrouterModel(model) {
+  const v = String(model ?? '').trim()
+  if (typeof window === 'undefined') {
+    openrouterModelOverride.value = v
+    return
+  }
+  try {
+    if (v) {
+      localStorage.setItem(LS_OPENROUTER_MODEL, v)
+    } else {
+      localStorage.removeItem(LS_OPENROUTER_MODEL)
+    }
+  } catch {
+    /* ignore */
+  }
+  openrouterModelOverride.value = v
+}
+
 export async function hydrateOpenrouterApiKeyFromServer() {
   if (typeof window === 'undefined') return
   try {
@@ -235,6 +261,9 @@ export async function hydrateOpenrouterApiKeyFromServer() {
     if (typeof data.openrouterApiKey === 'string') {
       setOpenrouterApiKey(data.openrouterApiKey)
     }
+    if (typeof data.openrouterModel === 'string' && data.openrouterModel.trim()) {
+      setOpenrouterModel(data.openrouterModel.trim())
+    }
   } catch {
     /* ignore */
   }
@@ -245,6 +274,7 @@ export function getOpenrouterKeyEffective() {
 }
 
 export const openrouterKeyEffective = computed(() => openrouterOverride.value)
+export const openrouterModelEffective = computed(() => openrouterModelOverride.value)
 
 /**
  * Hydrate all traffic API keys from server.

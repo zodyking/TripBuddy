@@ -19,6 +19,8 @@ import {
   setNy511ApiKeyForAccount,
   getOpenrouterApiKeyForAccount,
   setOpenrouterApiKeyForAccount,
+  getOpenrouterModelForAccount,
+  setOpenrouterModelForAccount,
   getGwbUpperCamYoutubeUrlForAccount,
   setGwbUpperCamYoutubeUrlForAccount,
   getHelpersAutoArrivePrefsForAccount,
@@ -108,6 +110,7 @@ import {
   fetchWahaLids,
 } from './wahaChatCache.mjs'
 import { generateDailyBriefing } from './waha-daily-briefing.mjs'
+import { sanitizeOpenrouterModel, OPENROUTER_DEFAULT_MODEL } from './openrouter-briefing.mjs'
 import { readAssignment, writeAssignment } from './assignment-store.mjs'
 import {
   getCredentialsMeta,
@@ -915,6 +918,7 @@ app.get('/api/settings/credentials', async (req) => {
   let hereApiKey = undefined
   let ny511ApiKey = undefined
   let openrouterApiKey = undefined
+  let openrouterModel = undefined
   if (includeTomtom && typeof ak === 'string' && ak.trim()) {
     tomtomApiKey = (await getTomtomApiKeyForAccount(ak)) || ''
   }
@@ -925,7 +929,10 @@ app.get('/api/settings/credentials', async (req) => {
     ny511ApiKey = (await getNy511ApiKeyForAccount(ak)) || ''
   }
   if (includeOpenrouter && typeof ak === 'string' && ak.trim()) {
-    openrouterApiKey = (await getOpenrouterApiKeyForAccount(ak)) || ''
+    const akTrim = ak.trim()
+    openrouterApiKey = (await getOpenrouterApiKeyForAccount(akTrim)) || ''
+    const storedModel = await getOpenrouterModelForAccount(akTrim)
+    openrouterModel = sanitizeOpenrouterModel(storedModel || OPENROUTER_DEFAULT_MODEL)
   }
   let gwbUpperCamYoutubeUrl = ''
   /** @type {{ enabled: boolean, radiusNm: number } | null} */
@@ -941,7 +948,7 @@ app.get('/api/settings/credentials', async (req) => {
     ...(includeTomtom ? { tomtomApiKey } : {}),
     ...(includeHere ? { hereApiKey } : {}),
     ...(includeNy511 ? { ny511ApiKey } : {}),
-    ...(includeOpenrouter ? { openrouterApiKey } : {}),
+    ...(includeOpenrouter ? { openrouterApiKey, openrouterModel } : {}),
     gwbUpperCamYoutubeUrl,
     ...(helpersAutoArrivePrefs
       ? {
@@ -1056,7 +1063,19 @@ app.put('/api/settings/openrouter-api-key', async (req, reply) => {
       return reply.code(400).send({ error: 'Invalid OpenRouter API key format.' })
     }
     await setOpenrouterApiKeyForAccount(ak, sanitized)
-    return { ok: true, hasOpenrouterApiKey: Boolean(sanitized) }
+    const modelRaw =
+      typeof body.openrouterModel === 'string'
+        ? body.openrouterModel
+        : typeof body.model === 'string'
+          ? body.model
+          : ''
+    if (modelRaw.trim()) {
+      await setOpenrouterModelForAccount(ak, sanitizeOpenrouterModel(modelRaw))
+    }
+    const openrouterModel = sanitizeOpenrouterModel(
+      (await getOpenrouterModelForAccount(ak)) || OPENROUTER_DEFAULT_MODEL,
+    )
+    return { ok: true, hasOpenrouterApiKey: Boolean(sanitized), openrouterModel }
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e)
     return reply.code(400).send({ error: msg })
@@ -1075,13 +1094,18 @@ app.post('/api/whatsapp/daily-briefing', async (req, reply) => {
     if (!chatId) {
       return reply.code(400).send({ ok: false, error: 'chatId required' })
     }
-    const openRouterApiKey = await getOpenrouterApiKeyForAccount(ak.trim())
+    const akTrim = ak.trim()
+    const openRouterApiKey = await getOpenrouterApiKeyForAccount(akTrim)
     if (!openRouterApiKey) {
       return reply.code(400).send({
         ok: false,
         error: 'OpenRouter API key not configured. Add it in Settings → API.',
       })
     }
+    const storedModel = await getOpenrouterModelForAccount(akTrim)
+    const openRouterModel = sanitizeOpenrouterModel(
+      String(body.model ?? body.openrouterModel ?? storedModel ?? OPENROUTER_DEFAULT_MODEL),
+    )
     const timeZone = String(body.timeZone ?? 'UTC').trim() || 'UTC'
     const chatLabel = String(body.chatLabel ?? chatId).trim()
     const result = await generateDailyBriefing({
@@ -1089,6 +1113,7 @@ app.post('/api/whatsapp/daily-briefing', async (req, reply) => {
       chatLabel,
       timeZone,
       openRouterApiKey,
+      openRouterModel,
     })
     if (!result.ok) {
       return reply.code(502).send(result)

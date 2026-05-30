@@ -214,6 +214,7 @@ export function formatTranscript(messages) {
  *   chatLabel?: string,
  *   timeZone: string,
  *   openRouterApiKey: string,
+ *   openRouterModel?: string,
  * }} opts
  */
 export async function generateDailyBriefing(opts) {
@@ -228,7 +229,9 @@ export async function generateDailyBriefing(opts) {
 
   const transcript = formatTranscript(messages)
   const prompt = buildBriefingPrompt(transcript, chatLabel)
-  const ai = await openRouterComplete(opts.openRouterApiKey, prompt)
+  const ai = await openRouterComplete(opts.openRouterApiKey, prompt, {
+    model: opts.openRouterModel,
+  })
   if (!ai.ok) {
     return { ok: false, error: ai.error || 'Briefing generation failed.', messageCount: messages.length }
   }
