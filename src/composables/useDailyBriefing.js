@@ -79,9 +79,6 @@ export function useDailyBriefing() {
   }
 
   function offerBriefingNow() {
-    if (wasOfferedThisSession()) return
-    if (!isWahaConfigured()) return
-    if (!getWahaChatId()) return
     modalOpen.value = true
   }
 
