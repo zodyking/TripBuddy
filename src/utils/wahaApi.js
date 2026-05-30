@@ -1,3 +1,5 @@
+import { englishDisplayName } from './senderNameLocale.js'
+
 /**
  * WAHA (WhatsApp HTTP API) client.
  * Connects to a WAHA instance for sending/receiving WhatsApp chat messages.
@@ -527,6 +529,38 @@ export function buildParticipantNameMap(messages, opts = {}) {
 }
 
 /**
+ * Scan entire thread for participant JIDs and display names (for translation cache).
+ * @param {unknown[]} messages
+ * @param {{ contactMap?: Map<string, string>, lidMap?: Map<string, string>, activeChatId?: string }} [opts]
+ */
+export function collectParticipantRawNamesFromMessages(messages, opts = {}) {
+  const { contactMap, lidMap, activeChatId = '' } = opts
+  /** @type {Map<string, string>} */
+  const byJid = new Map()
+  /** @type {Set<string>} */
+  const orphanTexts = new Set()
+  if (!Array.isArray(messages)) return { byJid, orphanTexts }
+
+  for (const msg of messages) {
+    if (!msg || typeof msg !== 'object' || msg.fromMe) continue
+    const participant = extractParticipantJid(msg)
+    const inline = extractInlineSenderName(msg, activeChatId)
+    let name = inline
+    if (!name && participant) {
+      name = resolveJidToDisplayName(participant, contactMap, lidMap)
+    }
+    if (!name) continue
+    if (participant) {
+      const prev = byJid.get(participant)
+      if (!prev || (inline && inline !== prev)) byJid.set(participant, name)
+    } else {
+      orphanTexts.add(name)
+    }
+  }
+  return { byJid, orphanTexts }
+}
+
+/**
  * @param {Record<string, unknown>} msg
  * @param {Map<string, string>} [contactMap]
  * @param {string} [activeChatId]
@@ -535,13 +569,13 @@ export function buildParticipantNameMap(messages, opts = {}) {
  */
 export function resolveWahaSenderName(msg, contactMap, activeChatId = '', lidMap, participantMap) {
   if (msg?.fromMe) return ''
-  const inline = extractInlineSenderName(msg, activeChatId)
-  if (inline) return inline
   const data = msg?._data && typeof msg._data === 'object' ? msg._data : {}
   const participant = extractParticipantJid(msg)
   if (participant && participantMap?.get(participant)) {
     return participantMap.get(participant) || ''
   }
+  const inline = extractInlineSenderName(msg, activeChatId)
+  if (inline) return inline
   const fromParticipant = resolveJidToDisplayName(participant, contactMap, lidMap)
   if (fromParticipant) return fromParticipant
   const from = normalizeParticipantJid(normalizeWahaChatId(msg?.from || data?.from))
@@ -555,7 +589,7 @@ export function resolveWahaSenderName(msg, contactMap, activeChatId = '', lidMap
 
 /**
  * @param {Record<string, unknown>} msg
- * @param {{ contactMap?: Map<string, string>, lidMap?: Map<string, string>, participantMap?: Map<string, string>, activeChatId?: string }} [opts]
+ * @param {{ contactMap?: Map<string, string>, lidMap?: Map<string, string>, participantMap?: Map<string, string>, senderTextEn?: Record<string, string>, activeChatId?: string }} [opts]
  * @returns {{
  *   id: string,
  *   text: string,
@@ -568,7 +602,7 @@ export function resolveWahaSenderName(msg, contactMap, activeChatId = '', lidMap
  * }}
  */
 export function normalizeWahaMessage(msg, opts = {}) {
-  const { contactMap, lidMap, participantMap, activeChatId = '' } = opts
+  const { contactMap, lidMap, participantMap, senderTextEn, activeChatId = '' } = opts
   const raw = isRawWahaMessage(msg) ? msg : null
   const src = raw || msg
   const id = getWahaMessageId(src)
@@ -579,7 +613,10 @@ export function normalizeWahaMessage(msg, opts = {}) {
   else if (ts < 1e12) ts *= 1000
   const media = normalizeWahaMedia(src)
   const hasMedia = Boolean(src?.hasMedia || media?.url)
-  const senderName = resolveWahaSenderName(src, contactMap, activeChatId, lidMap, participantMap)
+  let senderName = resolveWahaSenderName(src, contactMap, activeChatId, lidMap, participantMap)
+  if (senderName && senderTextEn && typeof senderTextEn === 'object') {
+    senderName = englishDisplayName(senderName, senderTextEn)
+  }
   const isGroupChat = activeChatId.endsWith('@g.us')
   return {
     id,

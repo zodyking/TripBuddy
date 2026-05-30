@@ -1101,7 +1101,7 @@ app.post('/api/translate/sender-names', async (req, reply) => {
         text: String(item?.text ?? '').trim(),
       }))
       .filter((item) => item.id && item.text && needsEnglishSenderNameTranslation(item.text))
-      .slice(0, 40)
+      .slice(0, 60)
 
     if (!filtered.length) {
       return { ok: true, names: {}, textEn: {} }

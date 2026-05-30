@@ -15,10 +15,8 @@ import {
   buildParticipantNameMap,
   normalizeWahaMessage,
 } from '../utils/wahaApi.js'
-import {
-  buildEnglishParticipantDisplayMap,
-  englishDisplayName,
-} from '../utils/senderNameTranslateClient.js'
+import { buildEnglishParticipantDisplayMap } from '../utils/senderNameTranslateClient.js'
+import { englishDisplayName } from '../utils/senderNameLocale.js'
 import { getCachedSenderTextEn } from '../stores/wahaChatStore.js'
 import { enqueueAnnouncement } from '../utils/alertAudioQueue.js'
 import { pushLiveLog } from '../stores/liveLogStore.js'

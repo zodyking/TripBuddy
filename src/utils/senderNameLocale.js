@@ -47,3 +47,14 @@ export function needsEnglishSenderNameTranslation(name) {
 export function isLikelyEnglishDisplayName(name) {
   return !needsEnglishSenderNameTranslation(name)
 }
+
+/**
+ * @param {string} raw
+ * @param {Record<string, string>} [textEn] original → English
+ */
+export function englishDisplayName(raw, textEn = {}) {
+  const name = String(raw ?? '').trim()
+  if (!name) return ''
+  if (!needsEnglishSenderNameTranslation(name)) return name
+  return textEn[name] || name
+}

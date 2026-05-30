@@ -1,20 +1,9 @@
 /**
  * Client helper: resolve English display names for sender strings (cached).
  */
-import { needsEnglishSenderNameTranslation } from './senderNameLocale.js'
+import { needsEnglishSenderNameTranslation, englishDisplayName } from './senderNameLocale.js'
 import { getCachedSenderTextEn, setCachedSenderTextEn } from '../stores/wahaChatStore.js'
 import { postTranslateSenderNames, getSenderNameTranslationCache } from '../api.js'
-
-/**
- * @param {string} raw
- * @param {Record<string, string>} textEn
- */
-export function englishDisplayName(raw, textEn) {
-  const name = String(raw ?? '').trim()
-  if (!name) return ''
-  if (!needsEnglishSenderNameTranslation(name)) return name
-  return textEn[name] || name
-}
 
 /**
  * @param {Map<string, string>} rawByJid participant JID -> raw name
