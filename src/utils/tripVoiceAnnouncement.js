@@ -530,10 +530,10 @@ const nearTrailerCooldown = new Map()
 const approachingTrailerCooldown = new Map()
 
 /** Outer ring for “approaching” speech = this × configured near radius. */
-const APPROACHING_TRAILER_RADIUS_MULT = 3
+const APPROACHING_TRAILER_RADIUS_MULT = 2.2
 
 const RELOC_MIN_MOVE_M = 12
-const NEAR_COOLDOWN_MS = 110_000
+const NEAR_COOLDOWN_MS = 25_000
 
 function haversineM(lat1, lng1, lat2, lng2) {
   const R = 6371000
@@ -562,14 +562,16 @@ function initialBearingDeg(lat1, lng1, lat2, lng2) {
 }
 
 /**
- * Left / right / ahead relative to user course-over-ground (both 0–360, north=0).
+ * Left / right / ahead / behind relative to user heading (both 0–360, north=0).
  */
 function sideRelativeToUserCourse(bearingToTargetDeg, userHeadingDeg) {
   let diff = bearingToTargetDeg - userHeadingDeg
   diff = ((diff % 360) + 360) % 360
   if (diff > 180) diff -= 360
-  if (diff > 52) return 'on your right'
-  if (diff < -52) return 'on your left'
+  if (diff > 135) return 'behind you'
+  if (diff < -135) return 'behind you'
+  if (diff > 45) return 'on your right'
+  if (diff < -45) return 'on your left'
   return 'ahead'
 }
 
@@ -715,7 +717,12 @@ export function maybeAnnounceNearTrailer(userLat, userLng, trailers, opts) {
       const last = nearTrailerCooldown.get(order) ?? 0
       if (now - last < NEAR_COOLDOWN_MS) continue
       nearTrailerCooldown.set(order, now)
-      const text = `You are near trailer ${idSpeech}.`
+      let text = `Near trailer ${idSpeech}.`
+      if (cogOk && speedOk) {
+        const brg = initialBearingDeg(userLat, userLng, lat, lng)
+        const side = sideRelativeToUserCourse(brg, /** @type {number} */ (cog))
+        text = `Trailer ${idSpeech}, ${side}.`
+      }
       pushLiveLog({ type: 'info', message: `[TripVoice] ${text}`, ts: Date.now() })
       enqueueAnnouncement(text, { bell: mode === 'both', category: `nearTrailer:${order}` })
       continue
@@ -725,12 +732,11 @@ export function maybeAnnounceNearTrailer(userLat, userLng, trailers, opts) {
       const lastA = approachingTrailerCooldown.get(order) ?? 0
       if (now - lastA < NEAR_COOLDOWN_MS) continue
       approachingTrailerCooldown.set(order, now)
-      let text = `Approaching trailer ${idSpeech}.`
+      let text = `Trailer ${idSpeech} nearby.`
       if (cogOk && speedOk) {
         const brg = initialBearingDeg(userLat, userLng, lat, lng)
         const side = sideRelativeToUserCourse(brg, /** @type {number} */ (cog))
-        if (side === 'on your right') text = `Approaching trailer ${idSpeech} on your right.`
-        else if (side === 'on your left') text = `Approaching trailer ${idSpeech} on your left.`
+        text = `Trailer ${idSpeech}, ${side}.`
       }
       pushLiveLog({ type: 'info', message: `[TripVoice] ${text}`, ts: Date.now() })
       enqueueAnnouncement(text, { bell: mode === 'both', category: `approachTrailer:${order}` })

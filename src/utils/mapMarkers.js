@@ -8,12 +8,8 @@ import L from 'leaflet'
  * Replace files under `src/assets/map-markers/` to update art.
  */
 import truckMarkerUrl from '../assets/map-markers/truck.png?url'
-import trailer20MarkerUrl from '../assets/map-markers/20ft.png?url'
-import trailer53MarkerUrl from '../assets/map-markers/53ft.png?url'
 
 const userLocationTruckImg = truckMarkerUrl
-const trailer20ftTopImg = trailer20MarkerUrl
-const trailer53ftTopImg = trailer53MarkerUrl
 
 /** Display width for bundled truck PNG (~bridge marker width). */
 const USER_MARKER_IMG_W = 52
@@ -22,12 +18,6 @@ const USER_MARKER_IMG_H = 56
 const RASTER_CHIP_H = 13
 const RASTER_CHIP_GAP = 2
 
-/** 20′ trailer column (~same width cap as bridges). */
-const TRAILER_20_IMG_W = 52
-const TRAILER_20_IMG_H = Math.round(TRAILER_20_IMG_W * (118 / 72))
-/** 53′ trailer — taller column, same width cap. */
-const TRAILER_53_IMG_W = 52
-const TRAILER_53_IMG_H = Math.round(TRAILER_53_IMG_W * (248 / 76))
 
 /** Real-world trailer dimensions in meters (length × width). */
 const TRAILER_20FT_LENGTH_M = 6.1
@@ -227,13 +217,11 @@ export function userLocationTruckIcon(vehicleId = '') {
 }
 
 /**
- * Trailer top PNG + optional number chip below image (`src/assets/map-markers/20ft.png` / `53ft.png`).
- * @param {string} rasterHref
- * @param {number} vw
- * @param {number} imgH drawable height for the PNG column (chip stacks below)
+ * Beacon circle marker for trailers — CSS-drawn pulsing circle with optional number chip.
  * @param {string} trailerNumber
+ * @param {{ pulseHeavy?: boolean, size?: string }} [opts]
  */
-function trailerTopDivIcon(rasterHref, vw, imgH, trailerNumber = '', pulseClass = '') {
+function trailerBeaconDivIcon(trailerNumber = '', opts = {}) {
   const chipH = RASTER_CHIP_H
   const gap = RASTER_CHIP_GAP
   const raw = String(trailerNumber ?? '')
@@ -248,73 +236,62 @@ function trailerTopDivIcon(rasterHref, vw, imgH, trailerNumber = '', pulseClass 
           labelRaw,
         )}</div>`
       : ''
-  const boxH = labelRaw !== '' ? imgH + chipH + gap : imgH
-  const pulse =
-    pulseClass && String(pulseClass).trim()
-      ? ` ${escapeHtmlAttr(String(pulseClass).trim())}`
-      : ''
-  const html = `<div class="map-marker-raster-root map-marker-raster-root--trailer${pulse}" style="width:${vw}px;height:${boxH}px"><img class="map-marker-raster-img" src="${escapeHtmlAttr(
-    rasterHref,
-  )}" alt="" role="presentation" decoding="async" width="${vw}" height="${imgH}"/>${chipHtml}</div>`
+  const circleSize = 28
+  const boxH = labelRaw !== '' ? circleSize + chipH + gap : circleSize
+  const pulse = opts.pulseHeavy
+    ? 'map-marker-trailer-pulse-heavy'
+    : 'map-marker-trailer-pulse-light'
+  const colorClass = opts.pulseHeavy
+    ? 'map-beacon-circle--heavy'
+    : 'map-beacon-circle--light'
+  const html = `<div class="map-beacon-root ${pulse}" style="width:${circleSize}px;height:${boxH}px"><div class="map-beacon-circle ${colorClass}"></div>${chipHtml}</div>`
   return L.divIcon({
     html,
-    className: 'map-marker-raster-div-icon map-marker-raster-div-icon--trailer',
-    iconSize: [vw, boxH],
-    iconAnchor: [Math.round(vw / 2), Math.round(imgH / 2)],
-    popupAnchor: [0, -Math.round(imgH / 2)],
+    className: 'map-marker-beacon-div-icon',
+    iconSize: [circleSize, boxH],
+    iconAnchor: [Math.round(circleSize / 2), Math.round(circleSize / 2)],
+    popupAnchor: [0, -Math.round(circleSize / 2)],
   })
 }
 
 /**
- * 20′ trailer top PNG + optional number chip (`src/assets/map-markers/20ft.png`).
+ * 20′ trailer beacon circle + optional number chip.
  * @param {string} [trailerNumber]
  * @param {{ pulseHeavy?: boolean }} [opts]
  */
 export function trailer20ftTopIcon(trailerNumber = '', opts = {}) {
-  const pulseClass = opts.pulseHeavy
-    ? 'map-marker-trailer-pulse-heavy'
-    : 'map-marker-trailer-pulse-light'
-  return trailerTopDivIcon(trailer20ftTopImg, TRAILER_20_IMG_W, TRAILER_20_IMG_H, trailerNumber, pulseClass)
+  return trailerBeaconDivIcon(trailerNumber, { pulseHeavy: !!opts.pulseHeavy, size: '20ft' })
 }
 
 /**
- * 53′ trailer top PNG + optional number chip (`src/assets/map-markers/53ft.png`).
+ * 53′ trailer beacon circle + optional number chip.
  * @param {string} [trailerNumber]
  * @param {{ pulseHeavy?: boolean }} [opts]
  */
 export function trailer53ftTopIcon(trailerNumber = '', opts = {}) {
-  const pulseClass = opts.pulseHeavy
-    ? 'map-marker-trailer-pulse-heavy'
-    : 'map-marker-trailer-pulse-light'
-  return trailerTopDivIcon(trailer53ftTopImg, TRAILER_53_IMG_W, TRAILER_53_IMG_H, trailerNumber, pulseClass)
+  return trailerBeaconDivIcon(trailerNumber, { pulseHeavy: !!opts.pulseHeavy, size: '53ft' })
 }
 
 /**
- * Geo-scaled 20′ trailer icon — size matches real-world dimensions at given lat/zoom.
+ * Geo-scaled 20′ trailer beacon — always a circle beacon (size-independent).
  * @param {string} [trailerNumber]
- * @param {number} lat - marker latitude
- * @param {number} zoom - current map zoom level
+ * @param {number} _lat
+ * @param {number} _zoom
  * @param {{ pulseHeavy?: boolean, minWidth?: number, maxWidth?: number }} [opts]
  */
-export function trailer20ftTopIconGeoScaled(trailerNumber = '', lat, zoom, opts = {}) {
-  const { pulseHeavy, minWidth, maxWidth } = opts
-  const { width, height } = getTrailer20ftGeoSize(lat, zoom, { minWidth, maxWidth })
-  const pulseClass = pulseHeavy ? 'map-marker-trailer-pulse-heavy' : 'map-marker-trailer-pulse-light'
-  return trailerTopDivIcon(trailer20ftTopImg, width, height, trailerNumber, pulseClass)
+export function trailer20ftTopIconGeoScaled(trailerNumber = '', _lat, _zoom, opts = {}) {
+  return trailerBeaconDivIcon(trailerNumber, { pulseHeavy: !!opts?.pulseHeavy, size: '20ft' })
 }
 
 /**
- * Geo-scaled 53′ trailer icon — size matches real-world dimensions at given lat/zoom.
+ * Geo-scaled 53′ trailer beacon — always a circle beacon (size-independent).
  * @param {string} [trailerNumber]
- * @param {number} lat - marker latitude
- * @param {number} zoom - current map zoom level
+ * @param {number} _lat
+ * @param {number} _zoom
  * @param {{ pulseHeavy?: boolean, minWidth?: number, maxWidth?: number }} [opts]
  */
-export function trailer53ftTopIconGeoScaled(trailerNumber = '', lat, zoom, opts = {}) {
-  const { pulseHeavy, minWidth, maxWidth } = opts
-  const { width, height } = getTrailer53ftGeoSize(lat, zoom, { minWidth, maxWidth })
-  const pulseClass = pulseHeavy ? 'map-marker-trailer-pulse-heavy' : 'map-marker-trailer-pulse-light'
-  return trailerTopDivIcon(trailer53ftTopImg, width, height, trailerNumber, pulseClass)
+export function trailer53ftTopIconGeoScaled(trailerNumber = '', _lat, _zoom, opts = {}) {
+  return trailerBeaconDivIcon(trailerNumber, { pulseHeavy: !!opts?.pulseHeavy, size: '53ft' })
 }
 
 /**
@@ -589,42 +566,8 @@ export function bridgesCrossingIcon(p) {
   })
 }
 
-/** Semi-trailer pin — fallback when trailer size is unknown / not 20′ or 53′ */
-function trailerSemiSvg() {
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="56" height="56" viewBox="0 0 56 56">
-  <defs>
-    <linearGradient id="trlPinG" x1="28" y1="4" x2="28" y2="52">
-      <stop offset="0%" stop-color="#fb923c"/>
-      <stop offset="45%" stop-color="#ea580c"/>
-      <stop offset="100%" stop-color="#9a3412"/>
-    </linearGradient>
-    <linearGradient id="trlCabG" x1="0" y1="0" x2="1" y2="0">
-      <stop offset="0%" stop-color="#fdba74"/>
-      <stop offset="100%" stop-color="#ea580c"/>
-    </linearGradient>
-  </defs>
-  <ellipse cx="28" cy="53" rx="13" ry="3" fill="#000" opacity="0.22"/>
-  <path d="M28 4c-1.2 0-2.3.4-3.2 1.1L11.5 15.8c-1.9 1.6-3 4-3 6.5v11c0 10 12 23 17.8 27 .9.7 2.1.7 3 0 5.8-4 17.8-17 17.8-27v-11c0-2.5-1.1-4.9-3-6.5L31.2 5.1c-.9-.7-2-1.1-3.2-1.1z" fill="url(#trlPinG)" stroke="#fff7ed" stroke-width="1.15"/>
-  <rect x="13" y="17" width="28" height="13" rx="1.2" fill="#fff7ed" stroke="#c2410c" stroke-width="1"/>
-  <rect x="15" y="19" width="24" height="3.5" rx="0.6" fill="#ea580c" opacity="0.45"/>
-  <path d="M13 24 L9 28v8h7v-11l4-4z" fill="url(#trlCabG)" stroke="#9a3412" stroke-width="0.9"/>
-  <rect x="8.5" y="28.5" width="4" height="3.5" rx="0.5" fill="#0f172a" opacity="0.9"/>
-  <circle cx="17.5" cy="34.5" r="4" fill="#1e293b" stroke="#f8fafc" stroke-width="1.3"/>
-  <circle cx="17.5" cy="34.5" r="1.8" fill="#475569"/>
-  <circle cx="38.5" cy="34.5" r="4" fill="#1e293b" stroke="#f8fafc" stroke-width="1.3"/>
-  <circle cx="38.5" cy="34.5" r="1.8" fill="#475569"/>
-  <line x1="15" y1="23.5" x2="39" y2="23.5" stroke="#c2410c" stroke-width="1" opacity="0.65"/>
-</svg>`
-}
-
 export function trailerFallbackPinIcon() {
-  return L.icon({
-    iconUrl: svgDataUrl(trailerSemiSvg()),
-    iconSize: [56, 56],
-    iconAnchor: [28, 56],
-    popupAnchor: [0, -50],
-    className: 'map-marker-img-icon map-marker-img-icon--trailer',
-  })
+  return trailerBeaconDivIcon('', { pulseHeavy: false })
 }
 
 /** Modal / preview — polished purple location pin */

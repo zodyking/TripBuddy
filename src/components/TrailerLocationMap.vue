@@ -95,8 +95,6 @@ const {
 } = useCompassOrientation()
 
 const {
-  calibrationModalOpen,
-  openCompassCalibration,
   onCompassPointerDown,
   onCompassPointerUp,
   wrapCompassToggle,
@@ -455,8 +453,6 @@ let mapResizeObserver = null
 /** @type {ReturnType<typeof setTimeout> | null} */
 let layoutRetryTimer = null
 
-/** User manually zoomed/panned — stop auto-centering until recenter button tapped. */
-const userCameraLocked = ref(false)
 /** True when inline calibration panel is visible. */
 const calibrationPanelOpen = ref(false)
 
@@ -492,32 +488,17 @@ function syncNavigationGestures() {
   })
 }
 
-/** @type {boolean} */
-let isInternalZoom = false
 
 function bindTruckBearingSync() {
   if (!map || unbindTruckBearingSync) return
   const fn = () => {
     applyUserMarkerRotation()
   }
-  const onZoomStart = () => {
-    if (!isInternalZoom && trailerGeoFollowActive.value) {
-      userCameraLocked.value = true
-    }
-  }
   map.on('rotate', fn)
   map.on('zoomend', fn)
-  map.on('zoomstart', onZoomStart)
-  map.on('dragstart', () => {
-    if (trailerGeoFollowActive.value) {
-      userCameraLocked.value = true
-    }
-  })
   unbindTruckBearingSync = () => {
     map?.off('rotate', fn)
     map?.off('zoomend', fn)
-    map?.off('zoomstart', onZoomStart)
-    map?.off('dragstart')
     unbindTruckBearingSync = null
   }
 }
@@ -604,14 +585,9 @@ function scheduleFitBounds() {
     } else {
       b = b.pad(0.14)
     }
-    isInternalZoom = true
     map.fitBounds(b, {
       padding: [56, 56],
-      maxZoom: 19,
       animate: motion,
-    })
-    requestAnimationFrame(() => {
-      isInternalZoom = false
     })
     if (compassModeActive.value) {
       applyMapCompassRotation()
@@ -622,10 +598,9 @@ function scheduleFitBounds() {
 
 /**
  * Center map on user without changing zoom (follow behavior).
- * Skipped if user has manually adjusted camera.
  */
 function centerOnUser() {
-  if (!map || !userFix.value || userCameraLocked.value) return
+  if (!map || !userFix.value) return
   const motion = !prefersReducedMotion()
   centerMapOnLatLng(map, L.latLng(userFix.value.lat, userFix.value.lng), { animate: motion })
   if (compassModeActive.value) {
@@ -635,11 +610,9 @@ function centerOnUser() {
 }
 
 /**
- * Recenter button handler: clear user lock, fit all pins + user, then resume follow.
+ * Recenter button handler: fit all pins + user.
  */
 function onRecenterClick() {
-  userCameraLocked.value = false
-  didFitWithUser = false
   scheduleFitBounds()
 }
 
@@ -906,20 +879,8 @@ function applyTrailerMarkersToMap() {
   }
 }
 
-/** @type {string} */
-let lastTrailerPinKeys = ''
-
 function syncTrailerMarkers() {
   applyTrailerMarkersToMap()
-  const pins = effectiveTrailers.value
-  const newKeys = pins.map((p) => `${p.order}:${p.lat}:${p.lng}`).join('|')
-  const pinsChanged = newKeys !== lastTrailerPinKeys
-  lastTrailerPinKeys = newKeys
-  if (!didFitWithUser) {
-    scheduleFitBounds()
-  } else if (pinsChanged && !userCameraLocked.value) {
-    scheduleFitBounds()
-  }
 }
 
 /**
@@ -1020,24 +981,17 @@ function initMap() {
     requestAnimationFrame(() => {
       requestAnimationFrame(() => {
         relayoutMapSurface()
-        if (effectiveTrailers.value.length) {
-          scheduleFitBounds()
-        }
+        scheduleFitBounds()
       })
     })
     layoutRetryTimer = setTimeout(() => {
       layoutRetryTimer = null
       relayoutMapSurface()
-      if (effectiveTrailers.value.length) {
-        scheduleFitBounds()
-      }
     }, 420)
   })
 
   nextTick(() => {
     relayoutMapSurface()
-    setTimeout(() => relayoutMapSurface(), 120)
-    setTimeout(() => relayoutMapSurface(), 360)
   })
   bindTruckBearingSync()
   syncNavigationGestures()
@@ -1062,14 +1016,12 @@ function destroyMap() {
   trailerMarkers.clear()
   userMarker = null
   userFix.value = null
-  userCameraLocked.value = false
   calibrationPanelOpen.value = false
   overlayLayer = null
   userLayer = null
   darkLayer = null
   streetLayer = null
   satelliteLayer = null
-  lastTrailerPinKeys = ''
   if (map) {
     map.remove()
     map = null
@@ -1105,12 +1057,6 @@ watch(
   ],
   () => {
     syncTrailerMarkers()
-    nextTick(() => {
-      relayoutMapSurface()
-      if (effectiveTrailers.value.length) {
-        scheduleFitBounds()
-      }
-    })
   },
   { deep: true },
 )
@@ -1142,9 +1088,6 @@ watch(compassModeActive, (active) => {
   }
   nextTick(() => {
     relayoutMapSurface()
-    if (active === false && effectiveTrailers.value.length && !userCameraLocked.value) {
-      scheduleFitBounds()
-    }
   })
 })
 
@@ -1253,7 +1196,7 @@ watch(
         <span class="sr-only">Open heading offset and calibration</span>
       </button>
       <button
-        v-if="userCameraLocked && trailerGeoFollowActive"
+        v-if="trailerGeoFollowActive"
         type="button"
         class="map-control-btn map-control-btn--recenter tap"
         title="Recenter map on truck and trailers"
@@ -1266,54 +1209,38 @@ watch(
         </svg>
       </button>
       </div>
-    <!-- Inline calibration panel (overlays live map) -->
+    <!-- Compact inline calibration strip -->
     <div
       v-if="calibrationPanelOpen"
-      class="calibration-panel"
+      class="calibration-strip"
       role="dialog"
       aria-modal="false"
       aria-label="Compass calibration"
     >
-      <div class="calibration-panel__header">
-        <h3 class="calibration-panel__title">Compass calibration</h3>
-        <button
-          type="button"
-          class="calibration-panel__close tap"
-          aria-label="Close"
-          @click="onCalibrationPanelClose"
-        >×</button>
-      </div>
-      <p class="calibration-panel__hint">
-        Adjust until the truck icon points where you are actually facing.
-      </p>
-      <div class="calibration-panel__live">
-        <span class="calibration-panel__label">Heading</span>
-        <span class="calibration-panel__heading">{{ headingDisplay }}</span>
-      </div>
-      <div class="calibration-panel__offset">
-        <div class="calibration-panel__offset-head">
-          <span class="calibration-panel__label">Offset</span>
-          <span class="calibration-panel__offset-val">{{ offsetSigned }}°</span>
-        </div>
+      <div class="calibration-strip__row">
+        <span class="calibration-strip__heading">{{ headingDisplay }}</span>
+        <span class="calibration-strip__sep">·</span>
+        <span class="calibration-strip__offset">{{ offsetSigned }}°</span>
         <input
-          class="calibration-panel__slider tap"
+          class="calibration-strip__slider tap"
           type="range"
           min="-180"
           max="180"
           step="1"
           :value="offsetSigned"
-          aria-label="Heading offset in degrees"
+          aria-label="Heading offset"
           @input="onOffsetSliderInput"
         />
-        <div class="calibration-panel__nudge-row">
-          <button type="button" class="calibration-panel__nudge tap" @click="nudgeOffset(-5)">−5°</button>
-          <button type="button" class="calibration-panel__nudge tap" @click="nudgeOffset(-1)">−1°</button>
-          <button type="button" class="calibration-panel__nudge tap" @click="nudgeOffset(1)">+1°</button>
-          <button type="button" class="calibration-panel__nudge tap" @click="nudgeOffset(5)">+5°</button>
-        </div>
-        <button type="button" class="calibration-panel__reset tap" @click="resetOffset">Reset to 0°</button>
+        <button type="button" class="calibration-strip__nudge tap" @click="nudgeOffset(-5)">−5</button>
+        <button type="button" class="calibration-strip__nudge tap" @click="nudgeOffset(5)">+5</button>
+        <button type="button" class="calibration-strip__reset tap" @click="resetOffset">0</button>
+        <button
+          type="button"
+          class="calibration-strip__close tap"
+          aria-label="Close calibration"
+          @click="onCalibrationPanelClose"
+        >×</button>
       </div>
-      <button type="button" class="calibration-panel__done tap" @click="onCalibrationPanelClose">Done</button>
     </div>
     <p
       v-if="copyToast"
@@ -1874,44 +1801,104 @@ watch(
   height: 1.1rem;
 }
 
-/* Inline calibration panel */
-.calibration-panel {
+/* Compact calibration strip */
+.calibration-strip {
   position: absolute;
   z-index: 1001;
-  bottom: 0;
-  left: 0;
-  right: 0;
-  padding: 0.75rem 1rem 1rem;
-  padding-bottom: max(1rem, env(safe-area-inset-bottom, 0px));
-  background: rgba(10, 10, 15, 0.94);
-  backdrop-filter: blur(12px);
-  border-top: 1px solid rgba(255, 255, 255, 0.12);
-  border-radius: 1rem 1rem 0 0;
-  box-shadow: 0 -4px 24px rgba(0, 0, 0, 0.4);
+  top: 0.4rem;
+  left: 0.4rem;
+  right: 4rem;
+  padding: 0.3rem 0.45rem;
+  background: rgba(10, 10, 15, 0.92);
+  backdrop-filter: blur(10px);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 0.5rem;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.4);
 }
 
-.calibration-panel__header {
+.calibration-strip__row {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  margin-bottom: 0.5rem;
+  gap: 0.3rem;
+  flex-wrap: nowrap;
+  min-width: 0;
 }
 
-.calibration-panel__title {
-  margin: 0;
-  font-size: 1rem;
+.calibration-strip__heading {
+  font-size: 0.72rem;
   font-weight: 700;
-  color: #f0f0f5;
+  font-variant-numeric: tabular-nums;
+  color: #a8e6ff;
+  flex-shrink: 0;
 }
 
-.calibration-panel__close {
-  width: 2rem;
-  height: 2rem;
+.calibration-strip__sep {
+  color: rgba(200, 200, 215, 0.5);
+  font-size: 0.65rem;
+  flex-shrink: 0;
+}
+
+.calibration-strip__offset {
+  font-size: 0.68rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: rgba(200, 210, 255, 0.9);
+  flex-shrink: 0;
+  min-width: 2rem;
+  text-align: center;
+}
+
+.calibration-strip__slider {
+  flex: 1;
+  min-width: 3rem;
+  height: 0.3rem;
+  accent-color: #7b4db5;
+  cursor: pointer;
+}
+
+.calibration-strip__nudge {
+  flex-shrink: 0;
+  padding: 0.2rem 0.35rem;
+  border-radius: 0.25rem;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  background: rgba(255, 255, 255, 0.06);
+  color: rgba(220, 220, 230, 0.9);
+  font-size: 0.6rem;
+  font-weight: 600;
+  cursor: pointer;
+  line-height: 1;
+}
+
+.calibration-strip__nudge:hover {
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.calibration-strip__reset {
+  flex-shrink: 0;
+  padding: 0.2rem 0.35rem;
+  border-radius: 0.25rem;
+  border: 1px dashed rgba(255, 255, 255, 0.2);
+  background: transparent;
+  color: rgba(200, 200, 215, 0.85);
+  font-size: 0.6rem;
+  font-weight: 600;
+  cursor: pointer;
+  line-height: 1;
+}
+
+.calibration-strip__reset:hover {
+  border-color: rgba(255, 255, 255, 0.35);
+}
+
+.calibration-strip__close {
+  flex-shrink: 0;
+  width: 1.4rem;
+  height: 1.4rem;
   border: none;
   border-radius: 50%;
   background: rgba(255, 255, 255, 0.1);
   color: #e8e8ee;
-  font-size: 1.25rem;
+  font-size: 0.85rem;
   line-height: 1;
   cursor: pointer;
   display: flex;
@@ -1919,119 +1906,7 @@ watch(
   justify-content: center;
 }
 
-.calibration-panel__close:hover {
+.calibration-strip__close:hover {
   background: rgba(255, 255, 255, 0.18);
-}
-
-.calibration-panel__hint {
-  margin: 0 0 0.65rem;
-  font-size: 0.75rem;
-  line-height: 1.4;
-  color: rgba(200, 200, 215, 0.9);
-}
-
-.calibration-panel__live {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  margin-bottom: 0.6rem;
-}
-
-.calibration-panel__label {
-  font-size: 0.7rem;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  color: rgba(180, 180, 195, 0.85);
-}
-
-.calibration-panel__heading {
-  font-size: 1.2rem;
-  font-weight: 700;
-  font-variant-numeric: tabular-nums;
-  color: #a8e6ff;
-}
-
-.calibration-panel__offset {
-  margin-bottom: 0.75rem;
-}
-
-.calibration-panel__offset-head {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 0.3rem;
-}
-
-.calibration-panel__offset-val {
-  font-size: 0.9rem;
-  font-variant-numeric: tabular-nums;
-  color: rgba(200, 210, 255, 0.95);
-}
-
-.calibration-panel__slider {
-  width: 100%;
-  height: 0.4rem;
-  margin: 0.2rem 0 0.5rem;
-  accent-color: #7b4db5;
-  cursor: pointer;
-}
-
-.calibration-panel__nudge-row {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.3rem;
-  margin-bottom: 0.45rem;
-}
-
-.calibration-panel__nudge {
-  flex: 1;
-  min-width: 3rem;
-  padding: 0.4rem 0.3rem;
-  border-radius: 0.4rem;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  background: rgba(255, 255, 255, 0.06);
-  color: inherit;
-  font-size: 0.75rem;
-  cursor: pointer;
-}
-
-.calibration-panel__nudge:hover {
-  background: rgba(255, 255, 255, 0.1);
-}
-
-.calibration-panel__reset {
-  width: 100%;
-  padding: 0.28rem;
-  border-radius: 0.4rem;
-  border: 1px dashed rgba(255, 255, 255, 0.2);
-  background: transparent;
-  color: rgba(200, 200, 215, 0.95);
-  font-size: 0.75rem;
-  cursor: pointer;
-}
-
-.calibration-panel__reset:hover {
-  border-color: rgba(255, 255, 255, 0.35);
-}
-
-.calibration-panel__done {
-  width: 100%;
-  padding: 0.55rem 1rem;
-  border: none;
-  border-radius: 0.5rem;
-  background: linear-gradient(180deg, #8b5fd4 0%, #6b3fa8 100%);
-  color: #fff;
-  font-weight: 600;
-  font-size: 0.88rem;
-  cursor: pointer;
-}
-
-.calibration-panel__done:hover {
-  filter: brightness(1.08);
-}
-
-/* Adjust hints position when calibration panel is open */
-.trailer-loc-root.has-trailer-ledger .calibration-panel {
-  bottom: 0;
 }
 </style>

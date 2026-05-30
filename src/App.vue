@@ -556,55 +556,79 @@ body {
   border-color: rgba(196, 181, 253, 0.45);
 }
 
-/* Trailer map markers: quick beacon-style outer glow (heavy = red, other = green) */
-@keyframes trailer-marker-heavy-glow {
-  0%,
-  28%,
-  100% {
-    filter:
-      drop-shadow(0 0 3px rgba(239, 68, 68, 0.35))
-      drop-shadow(0 0 7px rgba(239, 68, 68, 0.18));
+/* Trailer beacon circle markers */
+.map-marker-beacon-div-icon {
+  background: transparent !important;
+  border: none !important;
+}
+
+.map-beacon-root {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+}
+
+.map-beacon-circle {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  border: 3px solid currentColor;
+  box-sizing: border-box;
+}
+
+.map-beacon-circle--heavy {
+  color: #ef4444;
+  background: rgba(239, 68, 68, 0.25);
+  box-shadow: 0 0 0 4px rgba(239, 68, 68, 0.15);
+}
+
+.map-beacon-circle--light {
+  color: #22c55e;
+  background: rgba(34, 197, 94, 0.2);
+  box-shadow: 0 0 0 4px rgba(34, 197, 94, 0.12);
+}
+
+@keyframes beacon-pulse-heavy {
+  0%, 100% {
+    box-shadow: 0 0 0 4px rgba(239, 68, 68, 0.15), 0 0 6px rgba(239, 68, 68, 0.3);
+    transform: scale(1);
   }
-  9% {
-    filter:
-      drop-shadow(0 0 11px rgba(239, 68, 68, 1))
-      drop-shadow(0 0 22px rgba(239, 68, 68, 0.72))
-      drop-shadow(0 0 34px rgba(239, 68, 68, 0.35));
+  50% {
+    box-shadow: 0 0 0 8px rgba(239, 68, 68, 0.08), 0 0 18px rgba(239, 68, 68, 0.5);
+    transform: scale(1.12);
   }
 }
 
-@keyframes trailer-marker-light-glow {
-  0%,
-  28%,
-  100% {
-    filter:
-      drop-shadow(0 0 3px rgba(34, 197, 94, 0.32))
-      drop-shadow(0 0 7px rgba(34, 197, 94, 0.16));
+@keyframes beacon-pulse-light {
+  0%, 100% {
+    box-shadow: 0 0 0 4px rgba(34, 197, 94, 0.12), 0 0 6px rgba(34, 197, 94, 0.25);
+    transform: scale(1);
   }
-  9% {
-    filter:
-      drop-shadow(0 0 10px rgba(52, 211, 153, 0.98))
-      drop-shadow(0 0 20px rgba(34, 197, 94, 0.62))
-      drop-shadow(0 0 30px rgba(34, 197, 94, 0.28));
+  50% {
+    box-shadow: 0 0 0 8px rgba(34, 197, 94, 0.06), 0 0 16px rgba(34, 197, 94, 0.45);
+    transform: scale(1.1);
   }
 }
 
-.map-marker-trailer-pulse-heavy {
-  animation: trailer-marker-heavy-glow 0.88s cubic-bezier(0.33, 0, 0.2, 1) infinite;
+.map-marker-trailer-pulse-heavy .map-beacon-circle {
+  animation: beacon-pulse-heavy 1.4s ease-in-out infinite;
 }
 
-.map-marker-trailer-pulse-light {
-  animation: trailer-marker-light-glow 0.96s cubic-bezier(0.33, 0, 0.2, 1) infinite;
+.map-marker-trailer-pulse-light .map-beacon-circle {
+  animation: beacon-pulse-light 1.6s ease-in-out infinite;
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .map-marker-trailer-pulse-heavy {
+  .map-marker-trailer-pulse-heavy .map-beacon-circle,
+  .map-marker-trailer-pulse-light .map-beacon-circle {
     animation: none;
-    filter: drop-shadow(0 0 8px rgba(239, 68, 68, 0.9)) drop-shadow(0 0 16px rgba(239, 68, 68, 0.55));
   }
-  .map-marker-trailer-pulse-light {
-    animation: none;
-    filter: drop-shadow(0 0 7px rgba(34, 197, 94, 0.85)) drop-shadow(0 0 14px rgba(34, 197, 94, 0.5));
+  .map-marker-trailer-pulse-heavy .map-beacon-circle {
+    box-shadow: 0 0 0 5px rgba(239, 68, 68, 0.2), 0 0 12px rgba(239, 68, 68, 0.4);
+  }
+  .map-marker-trailer-pulse-light .map-beacon-circle {
+    box-shadow: 0 0 0 5px rgba(34, 197, 94, 0.18), 0 0 10px rgba(34, 197, 94, 0.35);
   }
 }
 

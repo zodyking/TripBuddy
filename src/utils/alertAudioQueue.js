@@ -145,7 +145,7 @@ function speakText(text) {
 
   try {
     const u = new SpeechSynthesisUtterance(text)
-    u.rate = 1.05
+    u.rate = 1.15
     u.pitch = 1
     u.volume = 1
     currentUtterance = u
@@ -235,7 +235,7 @@ function speakDirectTts(text) {
   try {
     window.speechSynthesis.cancel()
     const u = new SpeechSynthesisUtterance(text)
-    u.rate = 1.05
+    u.rate = 1.15
     u.pitch = 1
     u.volume = 1
     u.onstart = () => pushLiveLog({ type: 'info', message: `[Direct] TTS started: ${text}`, ts: Date.now() })
