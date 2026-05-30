@@ -97,7 +97,12 @@ const headerTitle = computed(() => {
   return 'Linehaul'
 })
 
+function onOfferBriefingEvent() {
+  dailyBriefingOpen.value = true
+}
+
 onMounted(() => {
+  window.addEventListener('tripbuddy:offer-briefing', onOfferBriefingEvent)
   startAppGeolocationWatch()
   connectLiveLogStream()
   void fetchInAppInbox()
@@ -121,6 +126,7 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
+  window.removeEventListener('tripbuddy:offer-briefing', onOfferBriefingEvent)
   stopAppGeolocationWatch()
   if (docClickClose) {
     document.removeEventListener('click', docClickClose)
