@@ -424,15 +424,16 @@ app.get('/api/health', async () => ({
  */
 const WAHA_INTERNAL_URL = process.env.WAHA_BASE_URL || 'http://waha:3000'
 
-app.all('/api/waha/*', async (req, reply) => {
-  const subPath = req.url.replace(/^\/api\/waha/, '')
+async function wahaProxyHandler(req, reply) {
+  const subPath = req.url.replace(/^\/api\/waha/, '') || '/'
   const target = `${WAHA_INTERNAL_URL}${subPath}`
   try {
-    const headers = { 'Content-Type': 'application/json' }
+    const headers = {}
     const wahaKey = process.env.WAHA_API_KEY
     if (wahaKey) headers['Authorization'] = `Bearer ${wahaKey}`
     const opts = { method: req.method, headers }
-    if (req.method !== 'GET' && req.method !== 'HEAD') {
+    if (req.method !== 'GET' && req.method !== 'HEAD' && req.body != null) {
+      headers['Content-Type'] = 'application/json'
       opts.body = JSON.stringify(req.body)
     }
     const r = await fetch(target, opts)
@@ -441,9 +442,15 @@ app.all('/api/waha/*', async (req, reply) => {
     const body = await r.text()
     return reply.send(body)
   } catch (e) {
-    return reply.status(502).send({ error: 'WAHA proxy error', message: e.message || String(e) })
+    return reply.status(502).send(JSON.stringify({ error: 'WAHA proxy error', message: e.message || String(e) }))
   }
-})
+}
+
+app.get('/api/waha/*', wahaProxyHandler)
+app.post('/api/waha/*', wahaProxyHandler)
+app.put('/api/waha/*', wahaProxyHandler)
+app.delete('/api/waha/*', wahaProxyHandler)
+app.patch('/api/waha/*', wahaProxyHandler)
 
 /** Public: which Vite bundle the running container serves (compare after deploy / vs browser Sources). */
 app.get('/api/build-info', async (req, reply) => {

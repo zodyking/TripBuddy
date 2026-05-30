@@ -21,6 +21,13 @@ export function useWhatsAppGroup() {
   /** Track last seen message ID to only speak new ones */
   let lastSeenId = ''
 
+  function getMsgId(msg) {
+    if (!msg) return ''
+    if (typeof msg.id === 'string') return msg.id
+    if (msg.id && typeof msg.id === 'object') return msg.id._serialized || msg.id.id || ''
+    return ''
+  }
+
   async function pollOnce() {
     if (!isWahaConfigured()) return
     try {
@@ -35,22 +42,23 @@ export function useWhatsAppGroup() {
       if (lastSeenId && isWahaTtsEnabled()) {
         const newMsgs = []
         for (const msg of incoming) {
-          if (msg.id === lastSeenId) break
+          const msgId = getMsgId(msg)
+          if (msgId === lastSeenId) break
           if (msg.fromMe) continue
           newMsgs.push(msg)
         }
         for (const msg of newMsgs.reverse()) {
-          const sender = msg.senderName || msg.from || 'Someone'
+          const sender = msg._data?.notifyName || msg.senderName || msg.from || 'Someone'
           const text = msg.body || msg.text || ''
           if (!text) continue
           const speech = `${sender} says: ${text}`
           pushLiveLog({ type: 'info', message: `[WhatsApp] TTS: ${speech}`, ts: Date.now() })
-          enqueueAnnouncement(speech, { category: `whatsapp:${msg.id}` })
+          enqueueAnnouncement(speech, { category: `whatsapp:${getMsgId(msg)}` })
         }
       }
 
       if (incoming.length > 0) {
-        lastSeenId = incoming[0].id || ''
+        lastSeenId = getMsgId(incoming[0])
       }
       messages.value = incoming.slice(0, 50)
     } catch (e) {

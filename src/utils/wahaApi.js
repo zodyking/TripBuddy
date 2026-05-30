@@ -80,38 +80,45 @@ function wahaUrl(path) {
 }
 
 /**
- * Start a WAHA session.
+ * Create + start the default WAHA session (idempotent — WAHA ignores if already running).
  */
-export async function startSession() {
+export async function ensureSession() {
   const session = getWahaSessionName()
-  const r = await fetch(wahaUrl('/api/sessions/start'), {
+  const r = await fetch(wahaUrl('/api/sessions/'), {
     method: 'POST',
     headers: wahaHeaders(),
-    body: JSON.stringify({ name: session }),
+    body: JSON.stringify({ name: session, start: true }),
   })
   return { ok: r.ok, status: r.status, body: await r.json().catch(() => null) }
 }
 
 /**
- * Get session status.
+ * Get session status (list all sessions, find ours).
  */
 export async function getSessionStatus() {
   const session = getWahaSessionName()
-  const r = await fetch(wahaUrl(`/api/sessions/${encodeURIComponent(session)}`), {
+  const r = await fetch(wahaUrl('/api/sessions?all=true'), {
     headers: wahaHeaders(),
   })
-  return { ok: r.ok, status: r.status, body: await r.json().catch(() => null) }
+  if (!r.ok) return { ok: false, status: r.status, body: null }
+  const list = await r.json().catch(() => [])
+  if (!Array.isArray(list)) return { ok: false, status: r.status, body: null }
+  const found = list.find((s) => s.name === session)
+  if (!found) return { ok: true, status: 200, body: { name: session, status: 'NOT_FOUND' } }
+  return { ok: true, status: 200, body: found }
 }
 
 /**
- * Get QR code for linking.
+ * Get QR code for linking (scan with phone).
  */
 export async function getQr() {
   const session = getWahaSessionName()
   const r = await fetch(wahaUrl(`/api/${encodeURIComponent(session)}/auth/qr`), {
     headers: wahaHeaders(),
   })
-  return { ok: r.ok, status: r.status, body: await r.json().catch(() => null) }
+  if (!r.ok) return { ok: false, status: r.status, body: null }
+  const body = await r.json().catch(() => null)
+  return { ok: true, status: r.status, body }
 }
 
 /**
@@ -122,7 +129,9 @@ export async function listGroups() {
   const r = await fetch(wahaUrl(`/api/${encodeURIComponent(session)}/groups`), {
     headers: wahaHeaders(),
   })
-  return { ok: r.ok, status: r.status, body: await r.json().catch(() => null) }
+  if (!r.ok) return { ok: false, status: r.status, body: null }
+  const body = await r.json().catch(() => null)
+  return { ok: r.ok, status: r.status, body: Array.isArray(body) ? body : [] }
 }
 
 /**
@@ -150,8 +159,10 @@ export async function fetchGroupMessages(limit = 20) {
   const chatId = getWahaGroupId()
   if (!chatId) return { ok: false, status: 0, body: null }
   const r = await fetch(
-    wahaUrl(`/api/${encodeURIComponent(session)}/chats/${encodeURIComponent(chatId)}/messages?limit=${limit}`),
+    wahaUrl(`/api/${encodeURIComponent(session)}/chats/${encodeURIComponent(chatId)}/messages?limit=${limit}&downloadMedia=false`),
     { headers: wahaHeaders() },
   )
-  return { ok: r.ok, status: r.status, body: await r.json().catch(() => null) }
+  if (!r.ok) return { ok: false, status: r.status, body: null }
+  const body = await r.json().catch(() => null)
+  return { ok: true, status: r.status, body: Array.isArray(body) ? body : [] }
 }

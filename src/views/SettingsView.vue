@@ -68,7 +68,7 @@ import AutomationEditor from '../components/automation/AutomationEditor.vue'
 import {
   getWahaGroupId, setWahaGroupId,
   isWahaTtsEnabled, setWahaTtsEnabled,
-  getSessionStatus, listGroups, sendGroupMessage,
+  getSessionStatus, ensureSession, getQr, listGroups, sendGroupMessage,
 } from '../utils/wahaApi.js'
 import {
   getTripAlertMode,
@@ -657,15 +657,34 @@ const wahaGroupsList = ref([])
 const wahaSendText = ref('')
 const wahaSendMsg = ref('')
 
+const wahaQrUrl = ref('')
+
 async function testWahaConnection() {
-  wahaConnMsg.value = 'Testing…'
+  wahaConnMsg.value = 'Checking…'
+  wahaQrUrl.value = ''
   try {
+    await ensureSession()
     const r = await getSessionStatus()
-    if (r.ok) {
-      const status = r.body?.status || r.body?.state || 'connected'
-      wahaConnMsg.value = `Connected — session status: ${status}`
+    if (!r.ok) {
+      wahaConnMsg.value = `Cannot reach WAHA (${r.status}). Is the container running?`
+      return
+    }
+    const status = String(r.body?.status || 'UNKNOWN').toUpperCase()
+    if (status === 'WORKING') {
+      const me = r.body?.me?.pushName || r.body?.me?.id || ''
+      wahaConnMsg.value = `Connected${me ? ` as ${me}` : ''}.`
+    } else if (status === 'SCAN_QR_CODE' || status === 'QR') {
+      wahaConnMsg.value = 'Scan the QR code below with your WhatsApp app.'
+      const qr = await getQr()
+      if (qr.ok && qr.body?.value) {
+        wahaQrUrl.value = qr.body.value
+      }
+    } else if (status === 'NOT_FOUND') {
+      wahaConnMsg.value = 'Session not found — starting it now…'
+      await ensureSession()
+      wahaConnMsg.value = 'Session created. Tap "Check connection" again to get QR.'
     } else {
-      wahaConnMsg.value = `Failed (${r.status}). WAHA may not be running.`
+      wahaConnMsg.value = `Session status: ${status}`
     }
   } catch (e) {
     wahaConnMsg.value = e instanceof Error ? e.message : String(e)
@@ -684,12 +703,12 @@ async function loadWahaGroups() {
     const r = await listGroups()
     if (r.ok && Array.isArray(r.body)) {
       wahaGroupsList.value = r.body.map((g) => ({
-        id: g.id || g.chatId || '',
-        name: g.name || g.subject || '',
-      }))
+        id: g.id || g.chatId || g.groupId || '',
+        name: g.subject || g.name || '',
+      })).filter((g) => g.id)
       wahaGroupMsg.value = `${wahaGroupsList.value.length} group(s) found.`
     } else {
-      wahaGroupMsg.value = `Failed (${r.status}). Session may not be active.`
+      wahaGroupMsg.value = `Failed (${r.status}). Session may not be linked — tap "Check connection" first.`
     }
   } catch (e) {
     wahaGroupMsg.value = e instanceof Error ? e.message : String(e)
@@ -2297,6 +2316,9 @@ onUnmounted(() => {
           <button type="button" class="btn tap" @click="testWahaConnection">Check connection</button>
         </div>
         <p v-if="wahaConnMsg" class="cred-msg">{{ wahaConnMsg }}</p>
+        <div v-if="wahaQrUrl" class="waha-qr-wrap">
+          <img :src="wahaQrUrl" alt="WhatsApp QR code" class="waha-qr-img" />
+        </div>
 
         <h4 class="api-sub-heading">Group</h4>
         <label class="lbl" for="waha-group-id">Group chat ID</label>
@@ -3486,6 +3508,18 @@ code {
   width: 1.1rem;
   height: 1.1rem;
   accent-color: var(--color-accent-purple, #7b4db5);
+}
+.waha-qr-wrap {
+  margin: 0.75rem 0;
+  text-align: center;
+}
+.waha-qr-img {
+  max-width: 240px;
+  width: 100%;
+  height: auto;
+  border-radius: 0.5rem;
+  background: #fff;
+  padding: 0.5rem;
 }
 .waha-send-row {
   display: flex;
