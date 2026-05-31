@@ -677,6 +677,26 @@ export async function putWahaPrefs(body) {
   return handleJson(r)
 }
 
+/** Persist BlueBubbles / iMessage prefs for the signed-in user. */
+export async function putBlueBubblesPrefs(body) {
+  const r = await apiFetch('/api/settings/bluebubbles-prefs', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body ?? {}),
+  })
+  return handleJson(r)
+}
+
+/** Register TripBuddy webhook URL on the BlueBubbles server. */
+export async function registerBlueBubblesWebhook() {
+  const r = await apiFetch('/api/settings/bluebubbles-register-webhook', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({}),
+  })
+  return handleJson(r)
+}
+
 /** Per-account API usage counters and limits (server / PostgreSQL). */
 export async function getApiQuotaSettings() {
   const r = await apiFetch('/api/settings/api-quota')
@@ -1367,6 +1387,36 @@ export async function syncWhatsAppThread(chatId, opts = {}) {
       limit: opts.limit ?? 60,
       downloadMedia: opts.downloadMedia === true,
     }),
+  })
+  return handleJson(r)
+}
+
+/** Cached iMessage thread (server disk) — fast open. */
+export async function getIMessageThreadCache(chatGuid) {
+  const id = encodeURIComponent(String(chatGuid || '').trim())
+  const r = await apiFetch(`/api/imessage/thread?chatGuid=${id}`)
+  return handleJson(r)
+}
+
+/** Sync iMessage thread from BlueBubbles into server cache. */
+export async function syncIMessageThread(chatGuid, opts = {}) {
+  const r = await apiFetch('/api/imessage/thread/sync', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      chatGuid: String(chatGuid || '').trim(),
+      limit: opts.limit ?? 60,
+    }),
+  })
+  return handleJson(r)
+}
+
+/** Trigger server-side OpenRouter auto-reply for one incoming iMessage. */
+export async function postIMessageAutoReply(body) {
+  const r = await apiFetch('/api/imessage/auto-reply', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body ?? {}),
   })
   return handleJson(r)
 }

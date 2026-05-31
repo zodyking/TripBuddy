@@ -62,7 +62,7 @@ export function buildChatSpeechItem(msg) {
  */
 export function isChatMessageSpeechCategory(category) {
   const c = String(category || '')
-  return c.startsWith('whatsapp:') || c.startsWith('chatmsg:')
+  return c.startsWith('whatsapp:') || c.startsWith('imessage:') || c.startsWith('chatmsg:')
 }
 
 /**

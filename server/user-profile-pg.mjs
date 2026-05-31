@@ -110,12 +110,34 @@ export async function ensureUserProfileTable() {
     await client.query(`
       ALTER TABLE ${TABLE} ADD COLUMN IF NOT EXISTS waha_api_key_enc JSONB
     `)
+    await client.query(`
+      ALTER TABLE ${TABLE} ADD COLUMN IF NOT EXISTS bluebubbles_url TEXT
+    `)
+    await client.query(`
+      ALTER TABLE ${TABLE} ADD COLUMN IF NOT EXISTS bluebubbles_password_enc JSONB
+    `)
+    await client.query(`
+      ALTER TABLE ${TABLE} ADD COLUMN IF NOT EXISTS bluebubbles_chat_guid TEXT
+    `)
+    await client.query(`
+      ALTER TABLE ${TABLE} ADD COLUMN IF NOT EXISTS bluebubbles_tts_enabled BOOLEAN
+    `)
+    await client.query(`
+      ALTER TABLE ${TABLE} ADD COLUMN IF NOT EXISTS bluebubbles_auto_reply_enabled BOOLEAN
+    `)
+    await client.query(`
+      ALTER TABLE ${TABLE} ADD COLUMN IF NOT EXISTS bluebubbles_webhook_token TEXT
+    `)
+    await client.query(`
+      ALTER TABLE ${TABLE} ADD COLUMN IF NOT EXISTS bluebubbles_contact_rules JSONB
+    `)
   } finally {
     client.release()
   }
 }
 
 const WAHA_CHAT_ID_MAX = 256
+const BB_CHAT_GUID_MAX = 512
 
 /**
  * @param {string} accountKey
@@ -747,4 +769,212 @@ export async function setGwbUpperCamYoutubeUrlForAccount(accountKey, rawUrl) {
        updated_at = now()`,
     [ak, v || null],
   )
+}
+
+function generateWebhookToken() {
+  return crypto.randomBytes(24).toString('hex')
+}
+
+/**
+ * @param {string} accountKey
+ */
+export async function getBlueBubblesPrefsForAccount(accountKey) {
+  const ak = String(accountKey || '').trim()
+  if (!ak) {
+    return {
+      serverUrl: '',
+      password: '',
+      chatGuid: '',
+      ttsEnabled: null,
+      autoReplyEnabled: false,
+      webhookToken: '',
+      contactRules: [],
+    }
+  }
+  const p = await getPostgresPool()
+  if (!p) {
+    return {
+      serverUrl: '',
+      password: '',
+      chatGuid: '',
+      ttsEnabled: null,
+      autoReplyEnabled: false,
+      webhookToken: '',
+      contactRules: [],
+    }
+  }
+  await ensureUserProfileTable()
+  const { rows } = await p.query(
+    `SELECT bluebubbles_url, bluebubbles_password_enc, bluebubbles_chat_guid,
+            bluebubbles_tts_enabled, bluebubbles_auto_reply_enabled,
+            bluebubbles_webhook_token, bluebubbles_contact_rules
+     FROM ${TABLE} WHERE account_key = $1`,
+    [ak],
+  )
+  const row = rows[0]
+  const chatGuid =
+    typeof row?.bluebubbles_chat_guid === 'string'
+      ? row.bluebubbles_chat_guid.trim().slice(0, BB_CHAT_GUID_MAX)
+      : ''
+  const ttsEnabled =
+    row?.bluebubbles_tts_enabled === true
+      ? true
+      : row?.bluebubbles_tts_enabled === false
+        ? false
+        : null
+  const autoReplyEnabled = row?.bluebubbles_auto_reply_enabled === true
+  const serverUrl = typeof row?.bluebubbles_url === 'string' ? row.bluebubbles_url.trim() : ''
+  let password = ''
+  if (row?.bluebubbles_password_enc && typeof row.bluebubbles_password_enc === 'object') {
+    try {
+      password = decryptString(row.bluebubbles_password_enc).trim()
+    } catch {
+      /* ignore */
+    }
+  }
+  let webhookToken =
+    typeof row?.bluebubbles_webhook_token === 'string' ? row.bluebubbles_webhook_token.trim() : ''
+  const contactRules = Array.isArray(row?.bluebubbles_contact_rules)
+    ? row.bluebubbles_contact_rules
+    : []
+  return {
+    serverUrl,
+    password,
+    chatGuid,
+    ttsEnabled,
+    autoReplyEnabled,
+    webhookToken,
+    contactRules,
+  }
+}
+
+/**
+ * @param {string} accountKey
+ * @returns {Promise<string | null>} account key if token matches
+ */
+export async function resolveBlueBubblesWebhookAccount(webhookToken) {
+  const token = String(webhookToken || '').trim()
+  if (!token) return null
+  const p = await getPostgresPool()
+  if (!p) return null
+  await ensureUserProfileTable()
+  const { rows } = await p.query(
+    `SELECT account_key FROM ${TABLE} WHERE bluebubbles_webhook_token = $1 LIMIT 1`,
+    [token],
+  )
+  return typeof rows[0]?.account_key === 'string' ? rows[0].account_key.trim() : null
+}
+
+/**
+ * @param {string} accountKey
+ * @param {{
+ *   serverUrl?: string,
+ *   password?: string,
+ *   chatGuid?: string,
+ *   ttsEnabled?: boolean | null,
+ *   autoReplyEnabled?: boolean,
+ *   contactRules?: unknown[],
+ *   ensureWebhookToken?: boolean,
+ * }} prefs
+ */
+export async function setBlueBubblesPrefsForAccount(accountKey, prefs) {
+  const ak = String(accountKey || '').trim()
+  if (!ak) throw new Error('account_key required')
+  const p = await getPostgresPool()
+  if (!p) throw new Error('Database not available')
+  await ensureUserProfileTable()
+
+  const hasUrl = prefs && Object.prototype.hasOwnProperty.call(prefs, 'serverUrl')
+  const hasPassword = prefs && Object.prototype.hasOwnProperty.call(prefs, 'password')
+  const hasChatGuid = prefs && Object.prototype.hasOwnProperty.call(prefs, 'chatGuid')
+  const hasTts = prefs && Object.prototype.hasOwnProperty.call(prefs, 'ttsEnabled')
+  const hasAutoReply = prefs && Object.prototype.hasOwnProperty.call(prefs, 'autoReplyEnabled')
+  const hasRules = prefs && Object.prototype.hasOwnProperty.call(prefs, 'contactRules')
+
+  if (hasUrl) {
+    const url = String(prefs.serverUrl ?? '').trim().slice(0, 500)
+    await p.query(
+      `INSERT INTO ${TABLE} (account_key, bluebubbles_url, updated_at)
+       VALUES ($1, $2, now())
+       ON CONFLICT (account_key) DO UPDATE SET
+         bluebubbles_url = EXCLUDED.bluebubbles_url,
+         updated_at = now()`,
+      [ak, url || null],
+    )
+  }
+
+  if (hasPassword) {
+    const plain = String(prefs.password ?? '').trim()
+    const enc = plain ? encryptString(plain) : null
+    await p.query(
+      `INSERT INTO ${TABLE} (account_key, bluebubbles_password_enc, updated_at)
+       VALUES ($1, $2::jsonb, now())
+       ON CONFLICT (account_key) DO UPDATE SET
+         bluebubbles_password_enc = EXCLUDED.bluebubbles_password_enc,
+         updated_at = now()`,
+      [ak, enc ? JSON.stringify(enc) : null],
+    )
+  }
+
+  if (hasChatGuid) {
+    const guid = String(prefs.chatGuid ?? '').trim().slice(0, BB_CHAT_GUID_MAX)
+    await p.query(
+      `INSERT INTO ${TABLE} (account_key, bluebubbles_chat_guid, updated_at)
+       VALUES ($1, $2, now())
+       ON CONFLICT (account_key) DO UPDATE SET
+         bluebubbles_chat_guid = EXCLUDED.bluebubbles_chat_guid,
+         updated_at = now()`,
+      [ak, guid || null],
+    )
+  }
+
+  if (hasTts) {
+    const ttsVal = prefs.ttsEnabled === true ? true : prefs.ttsEnabled === false ? false : null
+    await p.query(
+      `INSERT INTO ${TABLE} (account_key, bluebubbles_tts_enabled, updated_at)
+       VALUES ($1, $2, now())
+       ON CONFLICT (account_key) DO UPDATE SET
+         bluebubbles_tts_enabled = EXCLUDED.bluebubbles_tts_enabled,
+         updated_at = now()`,
+      [ak, ttsVal],
+    )
+  }
+
+  if (hasAutoReply) {
+    await p.query(
+      `INSERT INTO ${TABLE} (account_key, bluebubbles_auto_reply_enabled, updated_at)
+       VALUES ($1, $2, now())
+       ON CONFLICT (account_key) DO UPDATE SET
+         bluebubbles_auto_reply_enabled = EXCLUDED.bluebubbles_auto_reply_enabled,
+         updated_at = now()`,
+      [ak, prefs.autoReplyEnabled === true],
+    )
+  }
+
+  if (hasRules) {
+    const rules = Array.isArray(prefs.contactRules) ? prefs.contactRules : []
+    await p.query(
+      `INSERT INTO ${TABLE} (account_key, bluebubbles_contact_rules, updated_at)
+       VALUES ($1, $2::jsonb, now())
+       ON CONFLICT (account_key) DO UPDATE SET
+         bluebubbles_contact_rules = EXCLUDED.bluebubbles_contact_rules,
+         updated_at = now()`,
+      [ak, JSON.stringify(rules)],
+    )
+  }
+
+  if (prefs?.ensureWebhookToken) {
+    const existing = await getBlueBubblesPrefsForAccount(ak)
+    if (!existing.webhookToken) {
+      const token = generateWebhookToken()
+      await p.query(
+        `INSERT INTO ${TABLE} (account_key, bluebubbles_webhook_token, updated_at)
+         VALUES ($1, $2, now())
+         ON CONFLICT (account_key) DO UPDATE SET
+           bluebubbles_webhook_token = COALESCE(${TABLE}.bluebubbles_webhook_token, EXCLUDED.bluebubbles_webhook_token),
+           updated_at = now()`,
+        [ak, token],
+      )
+    }
+  }
 }

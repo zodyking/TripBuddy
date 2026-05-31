@@ -30,6 +30,9 @@ import {
   setHelpersAutoArrivePrefsForAccount,
   getWahaPrefsForAccount,
   setWahaPrefsForAccount,
+  getBlueBubblesPrefsForAccount,
+  setBlueBubblesPrefsForAccount,
+  resolveBlueBubblesWebhookAccount,
 } from './user-profile-pg.mjs'
 import { sanitizeTomtomApiKey } from './tomtom-key.mjs'
 import { sanitizeHereApiKey } from './here-traffic-api.mjs'
@@ -149,6 +152,25 @@ import {
   filterOpenrouterModels,
 } from './openrouter-models.mjs'
 import { ensureWahaChatHistoryTable } from './waha-chat-history-pg.mjs'
+import { ensureBlueBubblesChatHistoryTable } from './bluebubbles-chat-history-pg.mjs'
+import {
+  readBbThreadCache,
+  syncBbThreadCache,
+  fetchBbChats,
+  applyBlueBubblesPrefsForAccount,
+  clearAccountBlueBubblesPrefs,
+} from './bluebubblesChatCache.mjs'
+import {
+  pingBlueBubbles,
+  applyBlueBubblesPrefsForAccount as applyBbClientPrefs,
+  clearAccountBlueBubblesPrefs as clearBbClientPrefs,
+  registerBlueBubblesWebhook,
+  listBlueBubblesWebhooks,
+} from './bluebubbles-client.mjs'
+import {
+  parseBlueBubblesWebhookMessage,
+  handleBlueBubblesAutoReply,
+} from './bluebubbles-auto-reply.mjs'
 import { translateSenderNamesToEnglish } from './google-translate.mjs'
 import { needsEnglishSenderNameTranslation } from '../src/utils/senderNameLocale.js'
 import { readAssignment, writeAssignment } from './assignment-store.mjs'
@@ -298,6 +320,7 @@ app.addHook('preHandler', async (req) => {
   if (!isAuthEnabled()) return
   if (path.startsWith('/api/auth/')) return
   if (path === '/api/health' || path === '/api/build-info') return
+  if (path.startsWith('/api/bluebubbles/webhook/')) return
   const sid = req.cookies?.[COOKIE_NAME]
   if (isValidSession(sid)) {
     const ak = getSessionAccountKey(sid)
@@ -315,6 +338,7 @@ app.addHook('preHandler', async (req, reply) => {
   if (path === '/api/login/access-log' && req.method === 'POST') return
   if (path === '/api/visit' && req.method === 'POST') return
   if (path === '/api/public/geo-fence-check') return
+  if (path.startsWith('/api/bluebubbles/webhook/')) return
   const sid = req.cookies?.[COOKIE_NAME]
   if (isValidSession(sid)) return
   return reply.code(401).send({ error: 'Unauthorized', code: 'AUTH_REQUIRED' })
@@ -487,6 +511,11 @@ app.get('/api/health', async () => {
       apiKeyConfigured: !!process.env.WAHA_API_KEY,
       internalUrl: getWahaInternalUrl(),
     },
+    bluebubbles: {
+      proxy: true,
+      baseUrlConfigured: !!process.env.BLUEBUBBLES_BASE_URL,
+      passwordConfigured: !!process.env.BLUEBUBBLES_PASSWORD,
+    },
   }
 })
 
@@ -530,6 +559,238 @@ app.post('/api/waha/*', wahaProxyHandler)
 app.put('/api/waha/*', wahaProxyHandler)
 app.delete('/api/waha/*', wahaProxyHandler)
 app.patch('/api/waha/*', wahaProxyHandler)
+
+/** Internal BlueBubbles URL for `/api/bluebubbles` proxy. */
+function getBlueBubblesInternalUrl() {
+  return String(process.env.BLUEBUBBLES_BASE_URL || '').trim().replace(/\/+$/, '')
+}
+
+async function blueBubblesProxyHandler(req, reply) {
+  const subPath = req.url.replace(/^\/api\/bluebubbles/, '') || '/'
+  const ak = String(req.credentialAccountKey || '').trim()
+  if (ak) {
+    try {
+      applyBbClientPrefs(await getBlueBubblesPrefsForAccount(ak))
+    } catch { /* ignore */ }
+  }
+  const base = getBlueBubblesInternalUrl()
+  const prefs = ak ? await getBlueBubblesPrefsForAccount(ak).catch(() => null) : null
+  const serverUrl = prefs?.serverUrl || base
+  if (!serverUrl) {
+    clearBbClientPrefs()
+    return reply.code(502).send({ error: 'BlueBubbles server URL not configured.' })
+  }
+  const password = prefs?.password || process.env.BLUEBUBBLES_PASSWORD || ''
+  if (!password) {
+    clearBbClientPrefs()
+    return reply.code(502).send({ error: 'BlueBubbles password not configured.' })
+  }
+  try {
+    const u = new URL(`${serverUrl}${subPath}`)
+    u.searchParams.set('password', password)
+    const headers = { Accept: 'application/json' }
+    const opts = { method: req.method, headers }
+    if (req.method !== 'GET' && req.method !== 'HEAD' && req.body != null) {
+      headers['Content-Type'] = 'application/json'
+      opts.body = JSON.stringify(req.body)
+    }
+    const r = await fetch(u.toString(), opts)
+    const ct = r.headers.get('content-type') || 'application/octet-stream'
+    reply.status(r.status).header('Content-Type', ct)
+    if (ct.includes('application/json') || ct.includes('text/json')) {
+      return reply.send(await r.text())
+    }
+    return reply.send(Buffer.from(await r.arrayBuffer()))
+  } catch (e) {
+    return reply.code(502).send({ error: 'BlueBubbles proxy error', message: e.message || String(e) })
+  } finally {
+    clearBbClientPrefs()
+  }
+}
+
+/** Public webhook — BlueBubbles POSTs new messages here (token in path). Must register before wildcard proxy. */
+app.post('/api/bluebubbles/webhook/:token', async (req, reply) => {
+  reply.header('Cache-Control', 'no-store')
+  const token = String(req.params?.token ?? '').trim()
+  if (!token) return reply.code(400).send({ ok: false, error: 'token required' })
+  const accountKey = await resolveBlueBubblesWebhookAccount(token)
+  if (!accountKey) return reply.code(404).send({ ok: false, error: 'Unknown webhook token' })
+
+  const msg = parseBlueBubblesWebhookMessage(req.body)
+  if (msg) {
+    try {
+      const prefs = await getBlueBubblesPrefsForAccount(accountKey)
+      await upsertBlueBubblesMessagesFromWebhook(accountKey, msg, prefs)
+      applyBbClientPrefs(prefs)
+      await handleBlueBubblesAutoReply(accountKey, msg)
+    } catch (e) {
+      emitLog('imessage', `Webhook handler error: ${e instanceof Error ? e.message : String(e)}`)
+    } finally {
+      clearBbClientPrefs()
+    }
+  }
+  return { ok: true }
+})
+
+async function upsertBlueBubblesMessagesFromWebhook(accountKey, msg, prefs) {
+  const { upsertBlueBubblesMessages, upsertBlueBubblesChatMeta } = await import('./bluebubbles-chat-history-pg.mjs')
+  const raw = {
+    guid: msg.messageId,
+    text: msg.text,
+    isFromMe: false,
+    dateCreated: msg.ts,
+    handle: { address: msg.handle },
+    chats: [{ guid: msg.chatGuid, displayName: msg.senderLabel }],
+  }
+  await upsertBlueBubblesMessages(accountKey, msg.chatGuid, [raw])
+  await upsertBlueBubblesChatMeta(accountKey, msg.chatGuid, {
+    displayName: msg.senderLabel,
+    participants: msg.handle ? [{ address: msg.handle }] : [],
+  })
+  const cache = await readBbThreadCache(msg.chatGuid, accountKey)
+  const existing = Array.isArray(cache?.messages) ? cache.messages : []
+  const ids = new Set(existing.map((m) => String(m?.guid || m?.id || '')))
+  if (!ids.has(msg.messageId)) {
+    await import('./bluebubblesChatCache.mjs').then(({ writeBbThreadCache }) =>
+      writeBbThreadCache(msg.chatGuid, {
+        updatedAt: Date.now(),
+        messages: [...existing, raw],
+        displayName: msg.senderLabel,
+        accountKey,
+      }),
+    )
+  }
+  void prefs
+}
+
+app.get('/api/bluebubbles/*', blueBubblesProxyHandler)
+app.post('/api/bluebubbles/*', blueBubblesProxyHandler)
+app.put('/api/bluebubbles/*', blueBubblesProxyHandler)
+app.delete('/api/bluebubbles/*', blueBubblesProxyHandler)
+app.patch('/api/bluebubbles/*', blueBubblesProxyHandler)
+
+app.get('/api/imessage/thread', async (req, reply) => {
+  reply.header('Cache-Control', 'no-store')
+  const chatGuid = String(req.query?.chatGuid ?? '').trim()
+  if (!chatGuid) return reply.code(400).send({ ok: false, error: 'chatGuid required' })
+  const accountKey = String(req.credentialAccountKey || getDataAccountKey() || '').trim()
+  const cache = await readBbThreadCache(chatGuid, accountKey)
+  return {
+    ok: true,
+    cached: Boolean(cache?.messages?.length),
+    chatGuid,
+    messages: cache?.messages ?? [],
+    updatedAt: cache?.updatedAt ?? 0,
+    displayName: cache?.displayName ?? '',
+    participants: cache?.participants ?? [],
+  }
+})
+
+app.post('/api/imessage/thread/sync', async (req, reply) => {
+  reply.header('Cache-Control', 'no-store')
+  const chatGuid = String(req.body?.chatGuid ?? '').trim()
+  if (!chatGuid) return reply.code(400).send({ ok: false, error: 'chatGuid required' })
+  const limit = Number(req.body?.limit) || 60
+  const ak = String(req.credentialAccountKey || getDataAccountKey() || '').trim()
+  if (ak) {
+    try {
+      applyBlueBubblesPrefsForAccount(await getBlueBubblesPrefsForAccount(ak))
+    } catch { /* ignore */ }
+  }
+  try {
+    const r = await syncBbThreadCache(chatGuid, {
+      limit,
+      accountKey: ak,
+      displayName: String(req.body?.displayName ?? ''),
+      participants: Array.isArray(req.body?.participants) ? req.body.participants : [],
+    })
+    if (!r.ok) {
+      const stale = await readBbThreadCache(chatGuid, ak)
+      if (stale?.messages?.length) {
+        return {
+          ok: true,
+          stale: true,
+          warning: 'Using cached messages; live BlueBubbles sync unavailable.',
+          chatGuid,
+          messages: stale.messages,
+          updatedAt: stale.updatedAt ?? 0,
+          status: r.status,
+        }
+      }
+      return reply.code(r.status || 502).send({
+        ok: false,
+        error: r.error || 'BlueBubbles sync failed',
+        status: r.status,
+        messages: [],
+        updatedAt: 0,
+      })
+    }
+    return {
+      ok: true,
+      chatGuid,
+      messages: r.messages,
+      updatedAt: r.updatedAt,
+    }
+  } finally {
+    clearAccountBlueBubblesPrefs()
+  }
+})
+
+app.get('/api/imessage/chats', async (req, reply) => {
+  reply.header('Cache-Control', 'no-store')
+  const ak = String(req.credentialAccountKey || getDataAccountKey() || '').trim()
+  if (ak) {
+    try {
+      applyBlueBubblesPrefsForAccount(await getBlueBubblesPrefsForAccount(ak))
+    } catch { /* ignore */ }
+  }
+  try {
+    const r = await fetchBbChats({ limit: Number(req.query?.limit) || 50 })
+    if (!r.ok) {
+      return reply.code(r.status || 502).send({ ok: false, error: r.error || 'Failed to list chats' })
+    }
+    const list = Array.isArray(r.body) ? r.body : []
+    return { ok: true, chats: list }
+  } finally {
+    clearAccountBlueBubblesPrefs()
+  }
+})
+
+app.post('/api/imessage/ping', async (req, reply) => {
+  const ak = String(req.credentialAccountKey || getDataAccountKey() || '').trim()
+  if (ak) {
+    try {
+      applyBbClientPrefs(await getBlueBubblesPrefsForAccount(ak))
+    } catch { /* ignore */ }
+  }
+  try {
+    const r = await pingBlueBubbles()
+    if (!r.ok) {
+      return reply.code(r.status || 502).send({ ok: false, error: r.error || 'Ping failed' })
+    }
+    return { ok: true, data: r.body }
+  } finally {
+    clearBbClientPrefs()
+  }
+})
+
+app.post('/api/imessage/auto-reply', async (req, reply) => {
+  const ak = String(req.credentialAccountKey || getDataAccountKey() || '').trim()
+  if (!ak) return reply.code(401).send({ ok: false, error: 'Unauthorized' })
+  const body = req.body ?? {}
+  const msg = {
+    messageId: String(body.messageId ?? '').trim(),
+    text: String(body.text ?? '').trim(),
+    handle: String(body.handle ?? '').trim(),
+    chatGuid: String(body.chatGuid ?? '').trim(),
+    senderLabel: String(body.senderLabel ?? '').trim(),
+  }
+  if (!msg.messageId || !msg.chatGuid) {
+    return reply.code(400).send({ ok: false, error: 'messageId and chatGuid required' })
+  }
+  const result = await handleBlueBubblesAutoReply(ak, msg)
+  return { ok: true, ...result }
+})
 
 app.get('/api/whatsapp/thread', async (req, reply) => {
   reply.header('Cache-Control', 'no-store')
@@ -1022,11 +1283,14 @@ app.get('/api/settings/credentials', async (req) => {
   let helpersAutoArrivePrefs = null
   /** @type {{ chatId: string, ttsEnabled: boolean | null, dailyBriefingEnabled: boolean | null } | null} */
   let wahaPrefs = null
+  /** @type {Awaited<ReturnType<typeof getBlueBubblesPrefsForAccount>> | null} */
+  let blueBubblesPrefs = null
   if (typeof ak === 'string' && ak.trim()) {
     const akTrim = ak.trim()
     gwbUpperCamYoutubeUrl = (await getGwbUpperCamYoutubeUrlForAccount(akTrim)) || ''
     helpersAutoArrivePrefs = await getHelpersAutoArrivePrefsForAccount(akTrim)
     wahaPrefs = await getWahaPrefsForAccount(akTrim)
+    blueBubblesPrefs = await getBlueBubblesPrefsForAccount(akTrim)
   }
   return {
     ...meta,
@@ -1052,6 +1316,17 @@ app.get('/api/settings/credentials', async (req) => {
           wahaAutoRespondWhoAtEnabled: wahaPrefs.autoRespondWhoAtEnabled,
           wahaUrl: wahaPrefs.wahaUrl || '',
           wahaApiKey: wahaPrefs.wahaApiKey || '',
+        }
+      : {}),
+    ...(blueBubblesPrefs
+      ? {
+          blueBubblesUrl: blueBubblesPrefs.serverUrl || '',
+          blueBubblesPassword: blueBubblesPrefs.password ? '••••' : '',
+          blueBubblesChatGuid: blueBubblesPrefs.chatGuid || '',
+          blueBubblesTtsEnabled: blueBubblesPrefs.ttsEnabled,
+          blueBubblesAutoReplyEnabled: blueBubblesPrefs.autoReplyEnabled,
+          blueBubblesWebhookToken: blueBubblesPrefs.webhookToken || '',
+          blueBubblesContactRules: blueBubblesPrefs.contactRules || [],
         }
       : {}),
     secretHint: process.env.FEDEX_TOOL_SECRET ? null : TOOL_SECRET_HINT,
@@ -1403,6 +1678,107 @@ app.put('/api/settings/waha-prefs', async (req, reply) => {
       wahaAutoRespondWhoAtEnabled: stored.autoRespondWhoAtEnabled,
       wahaUrl: stored.wahaUrl || '',
       wahaApiKey: stored.wahaApiKey ? '••••' : '',
+    }
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e)
+    return reply.code(400).send({ error: msg })
+  }
+})
+
+const BB_CHAT_GUID_MAX = 512
+
+app.put('/api/settings/bluebubbles-prefs', async (req, reply) => {
+  try {
+    const ak = req.credentialAccountKey
+    if (typeof ak !== 'string' || !ak.trim()) {
+      return reply.code(400).send({ error: 'No account in session.' })
+    }
+    const body = req.body ?? {}
+    /** @type {Record<string, unknown>} */
+    const prefs = { ensureWebhookToken: true }
+    if (Object.prototype.hasOwnProperty.call(body, 'serverUrl')) {
+      prefs.serverUrl = String(body.serverUrl ?? '').trim().slice(0, 500)
+    }
+    if (Object.prototype.hasOwnProperty.call(body, 'password')) {
+      prefs.password = String(body.password ?? '').trim().slice(0, 500)
+    }
+    if (Object.prototype.hasOwnProperty.call(body, 'chatGuid')) {
+      prefs.chatGuid = String(body.chatGuid ?? '').trim().slice(0, BB_CHAT_GUID_MAX)
+    }
+    if (Object.prototype.hasOwnProperty.call(body, 'ttsEnabled')) {
+      prefs.ttsEnabled = body.ttsEnabled === true
+    }
+    if (Object.prototype.hasOwnProperty.call(body, 'autoReplyEnabled')) {
+      prefs.autoReplyEnabled = body.autoReplyEnabled === true
+    }
+    if (Object.prototype.hasOwnProperty.call(body, 'contactRules')) {
+      prefs.contactRules = Array.isArray(body.contactRules) ? body.contactRules : []
+    }
+    const fieldCount = Object.keys(prefs).filter((k) => k !== 'ensureWebhookToken').length
+    if (!fieldCount) {
+      return reply.code(400).send({ error: 'Provide at least one BlueBubbles preference field.' })
+    }
+    await setBlueBubblesPrefsForAccount(ak.trim(), prefs)
+    const stored = await getBlueBubblesPrefsForAccount(ak.trim())
+    const appUrl =
+      (process.env.APP_PUBLIC_URL || process.env.VITE_APP_URL || '').trim().replace(/\/+$/, '') ||
+      `${req.protocol}://${req.headers.host || 'localhost'}`
+    const webhookUrl = stored.webhookToken
+      ? `${appUrl}/api/bluebubbles/webhook/${stored.webhookToken}`
+      : ''
+    return {
+      ok: true,
+      blueBubblesUrl: stored.serverUrl || '',
+      blueBubblesPassword: stored.password ? '••••' : '',
+      blueBubblesChatGuid: stored.chatGuid || '',
+      blueBubblesTtsEnabled: stored.ttsEnabled,
+      blueBubblesAutoReplyEnabled: stored.autoReplyEnabled,
+      blueBubblesWebhookToken: stored.webhookToken || '',
+      blueBubblesWebhookUrl: webhookUrl,
+      blueBubblesContactRules: stored.contactRules || [],
+    }
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e)
+    return reply.code(400).send({ error: msg })
+  }
+})
+
+app.post('/api/settings/bluebubbles-register-webhook', async (req, reply) => {
+  try {
+    const ak = req.credentialAccountKey
+    if (typeof ak !== 'string' || !ak.trim()) {
+      return reply.code(400).send({ error: 'No account in session.' })
+    }
+    await setBlueBubblesPrefsForAccount(ak.trim(), { ensureWebhookToken: true })
+    const stored = await getBlueBubblesPrefsForAccount(ak.trim())
+    if (!stored.webhookToken) {
+      return reply.code(500).send({ error: 'Could not generate webhook token.' })
+    }
+    const appUrl =
+      (process.env.APP_PUBLIC_URL || process.env.VITE_APP_URL || '').trim().replace(/\/+$/, '') ||
+      `${req.protocol}://${req.headers.host || 'localhost'}`
+    const webhookUrl = `${appUrl}/api/bluebubbles/webhook/${stored.webhookToken}`
+    applyBbClientPrefs(stored)
+    try {
+      const existing = await listBlueBubblesWebhooks()
+      const list = Array.isArray(existing.body) ? existing.body : []
+      const already = list.some((w) => w && typeof w === 'object' && w.url === webhookUrl)
+      if (!already) {
+        const reg = await registerBlueBubblesWebhook({
+          url: webhookUrl,
+          events: ['new-message', 'updated-message', 'typing-indicator'],
+        })
+        if (!reg.ok) {
+          return reply.code(reg.status || 502).send({
+            ok: false,
+            error: reg.error || 'Failed to register webhook on BlueBubbles server.',
+            webhookUrl,
+          })
+        }
+      }
+      return { ok: true, webhookUrl, registered: !already }
+    } finally {
+      clearBbClientPrefs()
     }
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e)
@@ -2432,6 +2808,7 @@ try {
   await requirePostgresOrThrow({ attempts: 12, delayMs: 2500 })
   await ensureUserProfileTable()
   await ensureWahaChatHistoryTable()
+  await ensureBlueBubblesChatHistoryTable()
 } catch (e) {
   console.error('[postgres]', (e && e.message) || e)
   process.exit(1)

@@ -13,6 +13,24 @@ import { resolveWahaMediaUrl } from '../utils/wahaApi.js'
 import { isLinkOnlyMessage, primaryUrlFromText } from '../utils/chatMessageLinks.js'
 import ChatMessageText from '../components/ChatMessageText.vue'
 import ChatLinkPreview from '../components/ChatLinkPreview.vue'
+import IMessageChatPanel from '../components/IMessageChatPanel.vue'
+
+/** @type {import('vue').Ref<'whatsapp' | 'imessage'>} */
+const chatTab = ref(
+  typeof window !== 'undefined' && window.localStorage.getItem('fedextool-chat-tab') === 'imessage'
+    ? 'imessage'
+    : 'whatsapp',
+)
+
+watch(chatTab, (tab) => {
+  if (typeof window !== 'undefined') {
+    try {
+      window.localStorage.setItem('fedextool-chat-tab', tab)
+    } catch {
+      /* ignore */
+    }
+  }
+})
 
 const {
   generateBriefingFromChat,
@@ -411,7 +429,31 @@ async function onSendPoll() {
 </script>
 
 <template>
-  <div class="chat-page">
+  <div class="chat-shell">
+    <nav class="chat-platform-tabs" aria-label="Chat platform">
+      <button
+        type="button"
+        class="chat-platform-tab tap"
+        :class="{ active: chatTab === 'whatsapp' }"
+        :aria-selected="chatTab === 'whatsapp'"
+        @click="chatTab = 'whatsapp'"
+      >
+        WhatsApp
+      </button>
+      <button
+        type="button"
+        class="chat-platform-tab tap"
+        :class="{ active: chatTab === 'imessage' }"
+        :aria-selected="chatTab === 'imessage'"
+        @click="chatTab = 'imessage'"
+      >
+        iMessage
+      </button>
+    </nav>
+
+    <IMessageChatPanel v-if="chatTab === 'imessage'" />
+
+    <div v-else class="chat-page">
   <p v-if="chatPickToast" class="chat-pick-toast" role="status" aria-live="polite">{{ chatPickToast }}</p>
   <!-- Hydrating account WhatsApp prefs from server -->
   <div v-if="!wahaPrefsHydrated" class="chat-empty">
@@ -861,7 +903,7 @@ async function onSendPoll() {
   </template>
   </div>
 
-  <Teleport to="body">
+  <Teleport v-if="chatTab === 'whatsapp'" to="body">
     <div
       v-if="mediaViewer"
       class="chat-media-viewer"
@@ -902,9 +944,39 @@ async function onSendPoll() {
       </div>
     </div>
   </Teleport>
+  </div>
 </template>
 
 <style scoped>
+.chat-shell {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 0;
+  min-height: 0;
+  height: 100%;
+  width: 100%;
+}
+.chat-platform-tabs {
+  display: flex;
+  gap: 0.25rem;
+  padding: 0.35rem 0.5rem 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  flex-shrink: 0;
+}
+.chat-platform-tab {
+  flex: 1;
+  border: none;
+  border-radius: 0.5rem 0.5rem 0 0;
+  padding: 0.55rem 0.75rem;
+  background: transparent;
+  color: var(--color-text-secondary, #a8a8b8);
+  font-weight: 600;
+  font-size: 0.78rem;
+}
+.chat-platform-tab.active {
+  background: rgba(123, 77, 181, 0.18);
+  color: var(--color-text-primary, #f4f4f8);
+}
 .chat-page {
   flex: 1 1 0;
   min-height: 0;
