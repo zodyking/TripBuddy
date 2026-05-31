@@ -218,18 +218,46 @@ function flushPendingTripAlert() {
   enqueueAnnouncement(text, { bell, category: `newTrip:${fp}` })
 }
 
+/** Whether the user has already unlocked speech from a tap (iOS / Android). */
+export function tripVoiceIsGestureUnlocked() {
+  if (typeof window === 'undefined') return true
+  evaluateGestureGate()
+  return gestureUnlocked
+}
+
+/**
+ * Minimal in-gesture speak() for iOS — no audible phrase or speech-alert overlay.
+ */
+function primeSpeechSynthesisFromGesture() {
+  if (typeof window === 'undefined' || !window.speechSynthesis) return
+  try {
+    window.speechSynthesis.cancel()
+    const u = new SpeechSynthesisUtterance('\u200b')
+    u.volume = 0.01
+    u.rate = 2
+    window.speechSynthesis.speak(u)
+  } catch {
+    /* ignore */
+  }
+}
+
 /**
  * Call from a click / pointer handler so the first announcement can play on iOS / Android.
- * This MUST call speechSynthesis.speak() directly to prime the browser.
+ * @param {{ silent?: boolean }} [opts] — silent: unlock without "Text to speech alerts active."
  */
-export function unlockTripVoiceFromUserGesture() {
+export function unlockTripVoiceFromUserGesture(opts = {}) {
   if (typeof window === 'undefined') return
+  const wasUnlocked = gestureUnlocked
   gestureUnlocked = true
 
-  const mode = getTripAlertMode()
-  const bell = mode === 'both'
-  /** Must stay synchronous: iOS only unlocks speech in the same gesture tick. */
-  speakDirect('Text to speech alerts active.', { bell })
+  if (opts.silent) {
+    if (!wasUnlocked) primeSpeechSynthesisFromGesture()
+  } else {
+    const mode = getTripAlertMode()
+    const bell = mode === 'both'
+    /** Must stay synchronous: iOS only unlocks speech in the same gesture tick. */
+    speakDirect('Text to speech alerts active.', { bell })
+  }
   flushPendingTripAlert()
 }
 

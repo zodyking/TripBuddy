@@ -9,6 +9,8 @@ import { saveWahaPrefsToServer } from './wahaPrefs.js'
 export function enableSpeechAlertsForBriefing() {
   if (getTripAlertMode() === 'off') setTripAlertMode('tts')
   setWahaTtsEnabled(true)
-  unlockTripVoiceFromUserGesture()
+  if (!tripVoiceIsGestureUnlocked()) {
+    unlockTripVoiceFromUserGesture({ silent: true })
+  }
   void saveWahaPrefsToServer({ ttsEnabled: true }).catch(() => {})
 }
