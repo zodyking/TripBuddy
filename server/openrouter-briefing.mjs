@@ -10,7 +10,8 @@ import {
 const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions'
 const OPENROUTER_TITLE = 'TripBuddy Daily Briefing'
 const MAX_OUTPUT_TOKENS = 900
-const REQUEST_TIMEOUT_MS = 45_000
+const REQUEST_TIMEOUT_MS = 55_000
+const OPENROUTER_MAX_ATTEMPTS = 3
 
 export { OPENROUTER_DEFAULT_MODEL, sanitizeOpenrouterModel }
 
@@ -49,12 +50,37 @@ function responseContentText(content) {
     .trim()
 }
 
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+/**
+ * @param {string} err
+ */
+function isRetryableOpenRouterError(err) {
+  const s = String(err || '').toLowerCase()
+  return (
+    s.includes('timed out') ||
+    s.includes('timeout') ||
+    s.includes('429') ||
+    s.includes('rate limit') ||
+    s.includes('502') ||
+    s.includes('503') ||
+    s.includes('504') ||
+    s.includes('network') ||
+    s.includes('fetch failed') ||
+    s.includes('econnreset') ||
+    s.includes('socket') ||
+    s.includes('temporarily')
+  )
+}
+
 /**
  * @param {string} apiKey
  * @param {Array<{ role: string, content: string }>} messages
  * @param {{ model?: string, maxTokens?: number }} [opts]
  */
-export async function openRouterComplete(apiKey, messages, opts = {}) {
+async function openRouterCompleteOnce(apiKey, messages, opts = {}) {
   const key = String(apiKey || '').trim()
   if (!key) return { ok: false, error: 'OpenRouter API key not configured.' }
 
@@ -120,6 +146,24 @@ export async function openRouterComplete(apiKey, messages, opts = {}) {
   }
 
   return { ok: true, text: content }
+}
+
+/**
+ * @param {string} apiKey
+ * @param {Array<{ role: string, content: string }>} messages
+ * @param {{ model?: string, maxTokens?: number, maxAttempts?: number }} [opts]
+ */
+export async function openRouterComplete(apiKey, messages, opts = {}) {
+  const attempts = Math.max(1, Math.min(5, Number(opts.maxAttempts) || OPENROUTER_MAX_ATTEMPTS))
+  let lastError = 'Briefing generation failed.'
+  for (let attempt = 0; attempt < attempts; attempt++) {
+    if (attempt > 0) await sleep(900 * attempt)
+    const result = await openRouterCompleteOnce(apiKey, messages, opts)
+    if (result.ok) return result
+    lastError = result.error || lastError
+    if (!isRetryableOpenRouterError(lastError)) break
+  }
+  return { ok: false, error: lastError }
 }
 
 /**

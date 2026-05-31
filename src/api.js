@@ -579,23 +579,58 @@ export async function getSenderNameTranslationCache() {
 
 /**
  * Generate spoken daily briefing from today's WhatsApp messages (OpenRouter).
- * @param {{ chatId: string, chatLabel?: string, timeZone?: string }} body
+ * Never throws — returns `{ ok: false, error }` on HTTP/network failures (with retries upstream).
+ * @param {{ chatId: string, chatLabel?: string, timeZone?: string, skipThreadSync?: boolean }} body
  */
 export async function postWhatsAppDailyBriefing(body) {
-  const r = await apiFetch('/api/whatsapp/daily-briefing', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      chatId: String(body.chatId || '').trim(),
-      chatLabel: body.chatLabel,
-      timeZone:
-        body.timeZone ||
-        (typeof Intl !== 'undefined'
-          ? Intl.DateTimeFormat().resolvedOptions().timeZone
-          : 'UTC'),
-    }),
-  })
-  return handleJson(r)
+  try {
+    const r = await apiFetch('/api/whatsapp/daily-briefing', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        chatId: String(body.chatId || '').trim(),
+        chatLabel: body.chatLabel,
+        skipThreadSync: body.skipThreadSync === true,
+        timeZone:
+          body.timeZone ||
+          (typeof Intl !== 'undefined'
+            ? Intl.DateTimeFormat().resolvedOptions().timeZone
+            : 'UTC'),
+      }),
+    })
+    const text = await r.text()
+    let data = {}
+    try {
+      data = text ? JSON.parse(text) : {}
+    } catch {
+      data = { raw: text }
+    }
+    if (!r.ok) {
+      if (
+        r.status === 401 &&
+        data.code === 'AUTH_REQUIRED' &&
+        typeof window !== 'undefined'
+      ) {
+        const base = import.meta.env.BASE_URL || '/'
+        const loginPath = `${base.replace(/\/$/, '')}/login`
+        if (!window.location.pathname.endsWith('/login')) {
+          window.location.assign(
+            `${loginPath}?redirect=${encodeURIComponent(
+              window.location.pathname + window.location.search,
+            )}`,
+          )
+        }
+      }
+      const errStr = typeof data.error === 'string' ? data.error.trim() : ''
+      const msgStr = typeof data.message === 'string' ? data.message.trim() : ''
+      const msg = errStr || msgStr || r.statusText || 'Request failed'
+      return { ok: false, error: msg, status: r.status, ...data }
+    }
+    return data
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e)
+    return { ok: false, error: msg || 'Request failed' }
+  }
 }
 
 /**

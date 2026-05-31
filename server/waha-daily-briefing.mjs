@@ -21,6 +21,10 @@ import { wahaMessageTimestampMs } from '../src/utils/wahaMessageTime.js'
 
 export const BRIEFING_LOOKBACK_DAYS = 2
 export const BRIEFING_LOOKBACK_MS = BRIEFING_LOOKBACK_DAYS * 24 * 60 * 60 * 1000
+const MAX_BRIEFING_MESSAGES = 180
+const MAX_TRANSCRIPT_CHARS = 14_000
+const CACHE_FRESH_MS = 2 * 60 * 1000
+const MIN_CACHED_FOR_SKIP_SYNC = 8
 
 /**
  * @param {unknown} msg
@@ -234,11 +238,23 @@ export async function collectTodayMessages(chatId, timeZone, opts = {}) {
   let contacts = []
   if (Array.isArray(cachedBeforeSync?.contacts)) contacts = cachedBeforeSync.contacts
 
-  const sync = await syncThreadCache(id, {
-    limit: opts.limit ?? 300,
-    downloadMedia: false,
-    accountKey,
-  })
+  const briefingWindow = briefingWindowForNow(safeNow, timeZone)
+  const cachedInWindow = rawMessages
+    .map((m) => ({ ts: wahaMessageTimestampMs(m), text: messageBody(m) }))
+    .filter((m) => m.text && m.ts > 0 && m.ts >= briefingWindow.startMs && m.ts <= briefingWindow.endMs)
+  const cacheUpdatedAt = Number(cachedBeforeSync?.updatedAt) || 0
+  const cacheFresh = cacheUpdatedAt > 0 && Date.now() - cacheUpdatedAt < CACHE_FRESH_MS
+  const skipLiveSync =
+    opts.skipLiveSync === true ||
+    (cacheFresh && cachedInWindow.length >= MIN_CACHED_FOR_SKIP_SYNC)
+
+  const sync = skipLiveSync
+    ? { ok: false, status: 0, messages: [], updatedAt: 0 }
+    : await syncThreadCache(id, {
+      limit: opts.limit ?? 200,
+      downloadMedia: false,
+      accountKey,
+    })
   if (sync.ok && Array.isArray(sync.messages)) {
     rawMessages = mergeRawMessages(rawMessages, sync.messages)
     if (accountKey) {
@@ -275,7 +291,6 @@ export async function collectTodayMessages(chatId, timeZone, opts = {}) {
 
   const contactMap = buildContactMap(contacts)
   const lidMap = buildLidPhoneMap(lidEntries)
-  const briefingWindow = briefingWindowForNow(safeNow, timeZone)
 
   const briefingMsgs = rawMessages
     .map((m) => ({
@@ -289,6 +304,23 @@ export async function collectTodayMessages(chatId, timeZone, opts = {}) {
     .sort((a, b) => a.ts - b.ts)
 
   return { messages: briefingMsgs, contacts, window: briefingWindow }
+}
+
+/**
+ * @param {Array<{ sender: string, text: string, ts: number }>} messages
+ */
+export function limitMessagesForBriefing(messages) {
+  if (!Array.isArray(messages) || messages.length <= MAX_BRIEFING_MESSAGES) return messages
+  return messages.slice(-MAX_BRIEFING_MESSAGES)
+}
+
+/**
+ * @param {string} transcript
+ */
+export function trimTranscriptForBriefing(transcript) {
+  const text = String(transcript || '')
+  if (text.length <= MAX_TRANSCRIPT_CHARS) return text
+  return `…${text.slice(-MAX_TRANSCRIPT_CHARS)}`
 }
 
 /**
@@ -370,13 +402,18 @@ export async function generateDailyBriefing(opts) {
   const { messages } = await collectTodayMessages(chatId, timeZone, {
     now,
     accountKey: opts.accountKey,
+    skipLiveSync: opts.skipLiveSync === true,
   })
   if (!messages.length) {
     return { ok: true, empty: true, messageCount: 0, briefing: '' }
   }
 
-  await applyEnglishSenderLabels(messages, opts.accountKey)
-  const transcript = formatTranscript(messages, timeZone, { includeDate: true })
+  const totalCount = messages.length
+  const forBriefing = limitMessagesForBriefing(messages)
+  await applyEnglishSenderLabels(forBriefing, opts.accountKey)
+  const transcript = trimTranscriptForBriefing(
+    formatTranscript(forBriefing, timeZone, { includeDate: true }),
+  )
   const prompt = buildBriefingPrompt(transcript, chatLabel, {
     dateLabel: window.endDay,
     windowLabel: window.label,
@@ -386,14 +423,14 @@ export async function generateDailyBriefing(opts) {
     model: opts.openRouterModel,
   })
   if (!ai.ok) {
-    return { ok: false, error: ai.error || 'Briefing generation failed.', messageCount: messages.length }
+    return { ok: false, error: ai.error || 'Briefing generation failed.', messageCount: totalCount }
   }
 
   const briefing = trimBriefingForSpeech(ai.text, 500)
   return {
     ok: true,
     empty: false,
-    messageCount: messages.length,
+    messageCount: totalCount,
     briefing,
   }
 }

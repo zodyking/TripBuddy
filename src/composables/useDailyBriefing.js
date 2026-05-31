@@ -1,8 +1,8 @@
 /**
- * Once per browser session: offer a spoken daily WhatsApp briefing (OpenRouter).
+ * Daily WhatsApp briefing (OpenRouter + TTS). Module-level singleton shared by AppShell + Chat.
  */
 import { ref } from 'vue'
-import { postWhatsAppDailyBriefing, syncWhatsAppThread } from '../api.js'
+import { postWhatsAppDailyBriefing } from '../api.js'
 import {
   getWahaChatId,
   isWahaConfigured,
@@ -14,178 +14,242 @@ import {
 } from '../utils/dailyBriefingPlayback.js'
 
 const SESSION_KEY = 'tripbuddy_daily_briefing_offered_v1'
-const BRIEFING_SYNC_LIMIT = 300
+const BRIEFING_MAX_ATTEMPTS = 3
 
-async function prepareBriefingMessages(chatId) {
+const modalOpen = ref(false)
+const loading = ref(false)
+const briefingText = ref('')
+const messageCount = ref(0)
+const error = ref('')
+const narratorActive = ref(false)
+const narratorWordIndex = ref(-1)
+
+let fetchInFlight = false
+/** @type {ReturnType<typeof setTimeout> | null} */
+let chatPageBriefingTimer = null
+
+function markOffered() {
   try {
-    await syncWhatsAppThread(chatId, { limit: BRIEFING_SYNC_LIMIT })
+    sessionStorage.setItem(SESSION_KEY, '1')
   } catch {
-    /* briefing endpoint also syncs server-side */
+    /* ignore */
   }
 }
 
-export function useDailyBriefing() {
-  const modalOpen = ref(false)
-  const loading = ref(false)
-  const briefingText = ref('')
-  const messageCount = ref(0)
-  const error = ref('')
-  const narratorActive = ref(false)
-  const narratorWordIndex = ref(-1)
+function wasOfferedThisSession() {
+  try {
+    return sessionStorage.getItem(SESSION_KEY) === '1'
+  } catch {
+    return false
+  }
+}
 
-  function markOffered() {
-    try {
-      sessionStorage.setItem(SESSION_KEY, '1')
-    } catch {
-      /* ignore */
+/**
+ * @param {string} msg
+ */
+function isRetryableBriefingError(msg) {
+  const s = String(msg || '').toLowerCase()
+  return (
+    s.includes('request failed') ||
+    s.includes('timed out') ||
+    s.includes('timeout') ||
+    s.includes('network') ||
+    s.includes('fetch') ||
+    s.includes('502') ||
+    s.includes('503') ||
+    s.includes('504') ||
+    s.includes('429') ||
+    s.includes('rate limit') ||
+    s.includes('openrouter') ||
+    s.includes('econnreset') ||
+    s.includes('socket')
+  )
+}
+
+/**
+ * @param {{ chatId: string, chatLabel?: string, skipThreadSync?: boolean }} payload
+ */
+async function fetchBriefingWithRetry(payload) {
+  let lastError = 'Briefing failed.'
+  for (let attempt = 0; attempt < BRIEFING_MAX_ATTEMPTS; attempt++) {
+    if (attempt > 0) {
+      await new Promise((r) => setTimeout(r, 1200 * attempt))
     }
+    const result = await postWhatsAppDailyBriefing(payload)
+    if (result.ok || result.empty) return result
+    lastError = typeof result.error === 'string' ? result.error : lastError
+    if (!isRetryableBriefingError(lastError)) break
+  }
+  return { ok: false, error: lastError }
+}
+
+function dismiss() {
+  modalOpen.value = false
+  markOffered()
+}
+
+function stopNarrator() {
+  cancelDailyBriefingPlayback()
+  narratorActive.value = false
+  narratorWordIndex.value = -1
+}
+
+function playBriefing() {
+  const text = briefingText.value.trim()
+  if (!text) {
+    dismiss()
+    return
+  }
+  markOffered()
+  modalOpen.value = false
+  narratorActive.value = true
+  narratorWordIndex.value = -1
+
+  speakDailyBriefing(text, {
+    onWordIndex: (i) => {
+      narratorWordIndex.value = i
+    },
+    onEnd: () => {
+      narratorActive.value = false
+      narratorWordIndex.value = -1
+    },
+    onError: () => {
+      narratorActive.value = false
+      narratorWordIndex.value = -1
+    },
+  })
+}
+
+/**
+ * @param {{ chatLabel?: string, force?: boolean, openOnError?: boolean, skipSessionGate?: boolean, skipThreadSync?: boolean, showModal?: boolean }} [opts]
+ */
+async function maybeOfferDailyBriefing(opts = {}) {
+  if (!opts.force && !opts.skipSessionGate && wasOfferedThisSession()) return
+  if (!isWahaDailyBriefingEnabled()) return
+  if (!isWahaConfigured()) return
+
+  const chatId = getWahaChatId()
+  if (!chatId) return
+
+  if (briefingText.value.trim() && !opts.force) {
+    if (opts.showModal !== false) modalOpen.value = true
+    return
   }
 
-  function wasOfferedThisSession() {
-    try {
-      return sessionStorage.getItem(SESSION_KEY) === '1'
-    } catch {
-      return false
-    }
+  if (fetchInFlight) return
+  fetchInFlight = true
+
+  if (opts.force || opts.openOnError) modalOpen.value = true
+  loading.value = true
+  error.value = ''
+  if (opts.force) {
+    briefingText.value = ''
+    messageCount.value = 0
   }
 
-  function dismiss() {
-    modalOpen.value = false
-    markOffered()
-  }
-
-  function stopNarrator() {
-    cancelDailyBriefingPlayback()
-    narratorActive.value = false
-    narratorWordIndex.value = -1
-  }
-
-  function playBriefing() {
-    const text = briefingText.value.trim()
-    if (!text) {
-      dismiss()
+  try {
+    const result = await fetchBriefingWithRetry({
+      chatId,
+      chatLabel: opts.chatLabel || 'WhatsApp chat',
+      skipThreadSync: opts.skipThreadSync === true,
+    })
+    if (!result.ok) {
+      error.value = typeof result.error === 'string' ? result.error : 'Briefing failed.'
+      if (opts.openOnError) modalOpen.value = true
       return
     }
-    markOffered()
+    if (result.empty || !result.briefing) {
+      if (opts.force || opts.openOnError) {
+        error.value = 'No messages in the last 2 days to summarize.'
+        modalOpen.value = true
+      } else {
+        markOffered()
+      }
+      return
+    }
+    briefingText.value = result.briefing
+    messageCount.value = Number(result.messageCount) || 0
+    if (opts.showModal !== false) modalOpen.value = true
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : 'Briefing failed.'
+    if (opts.openOnError) modalOpen.value = true
+  } finally {
+    loading.value = false
+    fetchInFlight = false
+  }
+}
+
+async function offerBriefingNow(opts = {}) {
+  await maybeOfferDailyBriefing({ ...opts, force: true, openOnError: true })
+}
+
+async function acceptBriefing(opts = {}) {
+  if (briefingText.value.trim()) {
+    playBriefing()
+    return
+  }
+
+  markOffered()
+  loading.value = true
+  error.value = ''
+  briefingText.value = ''
+
+  const chatId = getWahaChatId()
+  if (!chatId) {
+    loading.value = false
+    error.value = 'No chat configured.'
+    return
+  }
+
+  try {
+    const result = await fetchBriefingWithRetry({
+      chatId,
+      chatLabel: opts.chatLabel || 'WhatsApp chat',
+    })
+    loading.value = false
+    if (!result.ok) {
+      error.value = typeof result.error === 'string' ? result.error : 'Briefing failed.'
+      return
+    }
+    if (result.empty || !result.briefing) {
+      error.value = 'No messages in the last 2 days to summarize.'
+      return
+    }
+    briefingText.value = result.briefing
+    messageCount.value = Number(result.messageCount) || 0
     modalOpen.value = false
     narratorActive.value = true
     narratorWordIndex.value = -1
-
-    speakDailyBriefing(text, {
-      onWordIndex: (i) => {
-        narratorWordIndex.value = i
-      },
-      onEnd: () => {
-        narratorActive.value = false
-        narratorWordIndex.value = -1
-      },
-      onError: () => {
-        narratorActive.value = false
-        narratorWordIndex.value = -1
-      },
+    speakDailyBriefing(result.briefing, {
+      onWordIndex: (i) => { narratorWordIndex.value = i },
+      onEnd: () => { narratorActive.value = false; narratorWordIndex.value = -1 },
+      onError: () => { narratorActive.value = false; narratorWordIndex.value = -1 },
     })
+  } catch (e) {
+    loading.value = false
+    error.value = e instanceof Error ? e.message : 'Briefing failed.'
   }
+}
 
-  async function offerBriefingNow(opts = {}) {
-    await maybeOfferDailyBriefing({ ...opts, force: true, openOnError: true })
-  }
+/**
+ * Load briefing when the user opens the Chat tab (after messenger sync has time to finish).
+ * @param {{ chatLabel?: string }} [opts]
+ */
+function loadBriefingOnChatPage(opts = {}) {
+  if (!isWahaDailyBriefingEnabled() || !isWahaConfigured()) return
+  if (chatPageBriefingTimer) clearTimeout(chatPageBriefingTimer)
+  chatPageBriefingTimer = setTimeout(() => {
+    chatPageBriefingTimer = null
+    void maybeOfferDailyBriefing({
+      skipSessionGate: true,
+      openOnError: true,
+      skipThreadSync: true,
+      chatLabel: opts.chatLabel || 'WhatsApp chat',
+    })
+  }, 1800)
+}
 
-  async function acceptBriefing(opts = {}) {
-    if (briefingText.value.trim()) {
-      playBriefing()
-      return
-    }
-
-    markOffered()
-    loading.value = true
-    error.value = ''
-    briefingText.value = ''
-
-    const chatId = getWahaChatId()
-    if (!chatId) {
-      loading.value = false
-      error.value = 'No chat configured.'
-      return
-    }
-
-    try {
-      await prepareBriefingMessages(chatId)
-      const result = await postWhatsAppDailyBriefing({
-        chatId,
-        chatLabel: opts.chatLabel || 'WhatsApp chat',
-      })
-      loading.value = false
-      if (!result.ok) {
-        error.value = typeof result.error === 'string' ? result.error : 'Briefing failed.'
-        return
-      }
-      if (result.empty || !result.briefing) {
-        error.value = 'No messages in the last 2 days to summarize.'
-        return
-      }
-      briefingText.value = result.briefing
-      messageCount.value = Number(result.messageCount) || 0
-      modalOpen.value = false
-      narratorActive.value = true
-      narratorWordIndex.value = -1
-      speakDailyBriefing(result.briefing, {
-        onWordIndex: (i) => { narratorWordIndex.value = i },
-        onEnd: () => { narratorActive.value = false; narratorWordIndex.value = -1 },
-        onError: () => { narratorActive.value = false; narratorWordIndex.value = -1 },
-      })
-    } catch (e) {
-      loading.value = false
-      error.value = e instanceof Error ? e.message : 'Briefing failed.'
-    }
-  }
-
-  /**
-   * @param {{ chatLabel?: string, force?: boolean, openOnError?: boolean }} [opts]
-   */
-  async function maybeOfferDailyBriefing(opts = {}) {
-    if (!opts.force && wasOfferedThisSession()) return
-    if (!isWahaDailyBriefingEnabled()) return
-    if (!isWahaConfigured()) return
-
-    const chatId = getWahaChatId()
-    if (!chatId) return
-
-    if (opts.force) modalOpen.value = true
-    loading.value = true
-    error.value = ''
-    briefingText.value = ''
-    messageCount.value = 0
-
-    try {
-      await prepareBriefingMessages(chatId)
-      const result = await postWhatsAppDailyBriefing({
-        chatId,
-        chatLabel: opts.chatLabel || 'WhatsApp chat',
-      })
-      if (!result.ok) {
-        error.value = typeof result.error === 'string' ? result.error : 'Briefing failed.'
-        if (opts.openOnError) modalOpen.value = true
-        return
-      }
-      if (result.empty || !result.briefing) {
-        if (opts.force || opts.openOnError) {
-          error.value = 'No messages in the last 2 days to summarize.'
-          modalOpen.value = true
-        } else {
-          markOffered()
-        }
-        return
-      }
-      briefingText.value = result.briefing
-      messageCount.value = Number(result.messageCount) || 0
-      modalOpen.value = true
-    } catch (e) {
-      error.value = e instanceof Error ? e.message : 'Briefing failed.'
-    } finally {
-      loading.value = false
-    }
-  }
-
+export function useDailyBriefing() {
   return {
     modalOpen,
     loading,
@@ -200,5 +264,6 @@ export function useDailyBriefing() {
     playBriefing,
     dismiss,
     stopNarrator,
+    loadBriefingOnChatPage,
   }
 }

@@ -1323,9 +1323,10 @@ app.post('/api/whatsapp/daily-briefing', async (req, reply) => {
       openRouterApiKey,
       openRouterModel,
       accountKey: akTrim,
+      skipLiveSync: body.skipThreadSync === true,
     })
     if (!result.ok) {
-      return reply.code(502).send(result)
+      return { ok: false, error: result.error || 'Briefing generation failed.', messageCount: result.messageCount ?? 0 }
     }
     return result
     } finally {
@@ -1333,7 +1334,7 @@ app.post('/api/whatsapp/daily-briefing', async (req, reply) => {
     }
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e)
-    return reply.code(500).send({ ok: false, error: msg })
+    return { ok: false, error: msg }
   }
 })
 

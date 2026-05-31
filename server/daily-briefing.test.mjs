@@ -10,6 +10,8 @@ import {
   cleanChatText,
   formatTranscript,
   isInBriefingWindow,
+  limitMessagesForBriefing,
+  trimTranscriptForBriefing,
 } from './waha-daily-briefing.mjs'
 import {
   normalizeWahaHistoryMessage,
@@ -144,6 +146,25 @@ test('openRouterComplete posts the documented OpenRouter chat completion payload
 
 test('cleanChatText strips control and zero-width characters', () => {
   assert.equal(cleanChatText(' A\u0000\u200B  B\nC '), 'A B C')
+})
+
+test('limitMessagesForBriefing keeps the most recent messages', () => {
+  const messages = Array.from({ length: 200 }, (_, i) => ({
+    ts: i,
+    sender: 'A',
+    text: `m${i}`,
+  }))
+  const limited = limitMessagesForBriefing(messages)
+  assert.equal(limited.length, 180)
+  assert.equal(limited[0].text, 'm20')
+  assert.equal(limited.at(-1).text, 'm199')
+})
+
+test('trimTranscriptForBriefing caps very long transcripts', () => {
+  const long = 'x'.repeat(20_000)
+  const trimmed = trimTranscriptForBriefing(long)
+  assert.equal(trimmed.length, 14_001)
+  assert.equal(trimmed.startsWith('…'), true)
 })
 
 test('wahaMessageTimestampMs reads messageTimestamp from WAHA payloads', () => {

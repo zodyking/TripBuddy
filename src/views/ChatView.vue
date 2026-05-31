@@ -2,7 +2,10 @@
 import { ref, computed, watch } from 'vue'
 import { RouterLink } from 'vue-router'
 import { useWahaMessenger } from '../composables/useWahaMessenger.js'
+import { useDailyBriefing } from '../composables/useDailyBriefing.js'
 import { wahaPrefsHydrated } from '../utils/wahaPrefs.js'
+
+const { loadBriefingOnChatPage } = useDailyBriefing()
 
 const scrollEl = ref(/** @type {HTMLElement | null} */ (null))
 const draft = ref('')
@@ -142,6 +145,15 @@ watch(showChatList, (open) => {
 watch(activeChatId, () => {
   peekOriginalSenderId.value = null
 })
+
+watch(
+  [wahaPrefsHydrated, configured, chatTitle],
+  () => {
+    if (!wahaPrefsHydrated.value || !configured.value) return
+    loadBriefingOnChatPage({ chatLabel: chatTitle.value || 'WhatsApp chat' })
+  },
+  { immediate: true },
+)
 
 function openMedia(url) {
   if (url) window.open(url, '_blank', 'noopener,noreferrer')
