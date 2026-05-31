@@ -2,7 +2,7 @@
  * Once per browser session: offer a spoken daily WhatsApp briefing (OpenRouter).
  */
 import { ref } from 'vue'
-import { postWhatsAppDailyBriefing } from '../api.js'
+import { postWhatsAppDailyBriefing, syncWhatsAppThread } from '../api.js'
 import {
   getWahaChatId,
   isWahaConfigured,
@@ -14,6 +14,15 @@ import {
 } from '../utils/dailyBriefingPlayback.js'
 
 const SESSION_KEY = 'tripbuddy_daily_briefing_offered_v1'
+const BRIEFING_SYNC_LIMIT = 300
+
+async function prepareBriefingMessages(chatId) {
+  try {
+    await syncWhatsAppThread(chatId, { limit: BRIEFING_SYNC_LIMIT })
+  } catch {
+    /* briefing endpoint also syncs server-side */
+  }
+}
 
 export function useDailyBriefing() {
   const modalOpen = ref(false)
@@ -100,6 +109,7 @@ export function useDailyBriefing() {
     }
 
     try {
+      await prepareBriefingMessages(chatId)
       const result = await postWhatsAppDailyBriefing({
         chatId,
         chatLabel: opts.chatLabel || 'WhatsApp chat',
@@ -110,7 +120,7 @@ export function useDailyBriefing() {
         return
       }
       if (result.empty || !result.briefing) {
-        error.value = 'No messages to summarize today.'
+        error.value = 'No messages in the last 2 days to summarize.'
         return
       }
       briefingText.value = result.briefing
@@ -147,6 +157,7 @@ export function useDailyBriefing() {
     messageCount.value = 0
 
     try {
+      await prepareBriefingMessages(chatId)
       const result = await postWhatsAppDailyBriefing({
         chatId,
         chatLabel: opts.chatLabel || 'WhatsApp chat',
@@ -158,7 +169,7 @@ export function useDailyBriefing() {
       }
       if (result.empty || !result.briefing) {
         if (opts.force || opts.openOnError) {
-          error.value = 'No messages to summarize today.'
+          error.value = 'No messages in the last 2 days to summarize.'
           modalOpen.value = true
         } else {
           markOffered()

@@ -33,10 +33,16 @@ const emit = defineEmits(['play', 'dismiss'])
         </div>
         <p class="daily-briefing-eyebrow">WhatsApp daily briefing</p>
         <h2 id="daily-briefing-title" class="daily-briefing-title">
-          {{ busy ? 'Building your briefing…' : 'Your chat briefing is ready' }}
+          {{
+            busy
+              ? 'Building your briefing…'
+              : error
+                ? 'Could not build briefing'
+                : 'Your chat briefing is ready'
+          }}
         </h2>
         <p v-if="busy" class="daily-briefing-lead daily-briefing-loading">
-          Pulling stored chat history, syncing the latest messages, and summarizing today's activity.
+          Syncing WhatsApp messages from the last 2 days and generating your summary.
         </p>
         <p v-else-if="error" class="daily-briefing-lead daily-briefing-error">
           {{ error }}
@@ -50,7 +56,7 @@ const emit = defineEmits(['play', 'dismiss'])
             <span class="daily-briefing-status-label">messages</span>
           </div>
           <div class="daily-briefing-status-card">
-            <span class="daily-briefing-status-value">{{ busy ? 'Syncing' : error ? 'Needs attention' : 'Ready' }}</span>
+            <span class="daily-briefing-status-value">{{ busy ? 'Syncing' : error ? 'Unavailable' : 'Ready' }}</span>
             <span class="daily-briefing-status-label">status</span>
           </div>
           <div class="daily-briefing-status-card">

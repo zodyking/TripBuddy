@@ -17,6 +17,7 @@ import {
   wahaHistoryMessageId,
   wahaHistoryTimestampMs,
 } from './waha-chat-history-pg.mjs'
+import { wahaMessageTimestampMs } from '../src/utils/wahaMessageTime.js'
 
 test('formatTranscript produces clean timezone-aware chat text', () => {
   const transcript = formatTranscript(
@@ -143,6 +144,14 @@ test('openRouterComplete posts the documented OpenRouter chat completion payload
 
 test('cleanChatText strips control and zero-width characters', () => {
   assert.equal(cleanChatText(' A\u0000\u200B  B\nC '), 'A B C')
+})
+
+test('wahaMessageTimestampMs reads messageTimestamp from WAHA payloads', () => {
+  assert.equal(wahaMessageTimestampMs({ messageTimestamp: 1_780_000_000 }), 1_780_000_000_000)
+  assert.equal(
+    wahaMessageTimestampMs({ _data: { messageTimestamp: 1_780_000_001 } }),
+    1_780_000_001_000,
+  )
 })
 
 test('WAHA history normalization extracts stable ids and millisecond timestamps', () => {

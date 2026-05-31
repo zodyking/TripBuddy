@@ -1,5 +1,6 @@
 import crypto from 'node:crypto'
 import { getPostgresPool } from './kv-pg.mjs'
+import { wahaMessageTimestampMs } from '../src/utils/wahaMessageTime.js'
 
 const MESSAGE_TABLE = 'fedextool_waha_chat_message'
 const META_TABLE = 'fedextool_waha_chat_meta'
@@ -30,19 +31,7 @@ export function wahaHistoryMessageId(msg) {
 }
 
 export function wahaHistoryTimestampMs(msg) {
-  const data = msg?._data && typeof msg._data === 'object' ? msg._data : {}
-  const candidates = [
-    msg?.timestamp,
-    msg?.ts,
-    msg?.t,
-    data?.timestamp,
-    data?.ts,
-    data?.t,
-  ]
-  let ts = candidates.map((v) => Number(v)).find((v) => Number.isFinite(v) && v > 0)
-  if (!Number.isFinite(ts)) return 0
-  if (ts < 1e12) ts *= 1000
-  return Math.floor(ts)
+  return wahaMessageTimestampMs(msg)
 }
 
 export function wahaHistoryFromMe(msg) {

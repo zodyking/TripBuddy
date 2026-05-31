@@ -138,7 +138,8 @@ import {
   fetchWahaMessageMedia,
   fetchWahaContacts,
   fetchWahaLids,
-  setAccountWahaUrl,
+  applyWahaPrefsForAccount,
+  clearAccountWahaPrefs,
 } from './wahaChatCache.mjs'
 import { generateDailyBriefing } from './waha-daily-briefing.mjs'
 import { sanitizeOpenrouterModel, OPENROUTER_DEFAULT_MODEL } from './openrouter-briefing.mjs'
@@ -552,65 +553,68 @@ app.post('/api/whatsapp/thread/sync', async (req, reply) => {
   const limit = Number(req.body?.limit) || 60
   const downloadMedia = req.body?.downloadMedia === true
   const ak = String(req.credentialAccountKey || getDataAccountKey() || '').trim()
-  if (typeof ak === 'string' && ak.trim()) {
+  if (ak) {
     try {
-      const prefs = await getWahaPrefsForAccount(ak.trim())
-      if (prefs.wahaUrl) setAccountWahaUrl(prefs.wahaUrl)
+      applyWahaPrefsForAccount(await getWahaPrefsForAccount(ak))
     } catch { /* ignore */ }
   }
-  let contacts = []
-  let lids = []
   try {
-    const cr = await fetchWahaContacts({ limit: 500 })
-    if (cr.ok && Array.isArray(cr.body)) contacts = cr.body
-  } catch {
-    /* optional */
-  }
-  try {
-    const lr = await fetchWahaLids({ limit: 500 })
-    if (lr.ok && Array.isArray(lr.body)) lids = lr.body
-  } catch {
-    /* optional */
-  }
-  const r = await syncThreadCache(chatId, {
-    limit,
-    downloadMedia,
-    contacts,
-    lids,
-    accountKey: ak,
-  })
-  if (!r.ok) {
-    const stale = await readThreadCache(chatId, ak)
-    if (stale?.messages?.length) {
-      return {
-        ok: true,
-        stale: true,
-        warning: 'Using cached messages; live WAHA sync unavailable.',
-        chatId,
-        messages: stale.messages,
-        updatedAt: stale.updatedAt ?? 0,
-        contacts: stale.contacts?.length ? stale.contacts : contacts,
-        lids: stale.lids?.length ? stale.lids : lids,
-        status: r.status,
-      }
+    let contacts = []
+    let lids = []
+    try {
+      const cr = await fetchWahaContacts({ limit: 500 })
+      if (cr.ok && Array.isArray(cr.body)) contacts = cr.body
+    } catch {
+      /* optional */
     }
-    return reply.code(r.status || 502).send({
-      ok: false,
-      error: 'WAHA sync failed',
-      status: r.status,
-      messages: [],
-      updatedAt: 0,
+    try {
+      const lr = await fetchWahaLids({ limit: 500 })
+      if (lr.ok && Array.isArray(lr.body)) lids = lr.body
+    } catch {
+      /* optional */
+    }
+    const r = await syncThreadCache(chatId, {
+      limit,
+      downloadMedia,
       contacts,
       lids,
+      accountKey: ak,
     })
-  }
-  return {
-    ok: true,
-    chatId,
-    messages: r.messages,
-    updatedAt: r.updatedAt,
-    contacts,
-    lids,
+    if (!r.ok) {
+      const stale = await readThreadCache(chatId, ak)
+      if (stale?.messages?.length) {
+        return {
+          ok: true,
+          stale: true,
+          warning: 'Using cached messages; live WAHA sync unavailable.',
+          chatId,
+          messages: stale.messages,
+          updatedAt: stale.updatedAt ?? 0,
+          contacts: stale.contacts?.length ? stale.contacts : contacts,
+          lids: stale.lids?.length ? stale.lids : lids,
+          status: r.status,
+        }
+      }
+      return reply.code(r.status || 502).send({
+        ok: false,
+        error: 'WAHA sync failed',
+        status: r.status,
+        messages: [],
+        updatedAt: 0,
+        contacts,
+        lids,
+      })
+    }
+    return {
+      ok: true,
+      chatId,
+      messages: r.messages,
+      updatedAt: r.updatedAt,
+      contacts,
+      lids,
+    }
+  } finally {
+    clearAccountWahaPrefs()
   }
 })
 
@@ -1297,8 +1301,8 @@ app.post('/api/whatsapp/daily-briefing', async (req, reply) => {
       return reply.code(400).send({ ok: false, error: 'chatId required' })
     }
     const akTrim = ak.trim()
-    const wahaPrefs = await getWahaPrefsForAccount(akTrim)
-    if (wahaPrefs.wahaUrl) setAccountWahaUrl(wahaPrefs.wahaUrl)
+    applyWahaPrefsForAccount(await getWahaPrefsForAccount(akTrim))
+    try {
     const openRouterApiKey = await getOpenrouterApiKeyForAccount(akTrim)
     if (!openRouterApiKey) {
       return reply.code(400).send({
@@ -1324,6 +1328,9 @@ app.post('/api/whatsapp/daily-briefing', async (req, reply) => {
       return reply.code(502).send(result)
     }
     return result
+    } finally {
+      clearAccountWahaPrefs()
+    }
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e)
     return reply.code(500).send({ ok: false, error: msg })

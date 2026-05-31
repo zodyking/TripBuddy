@@ -17,6 +17,7 @@ import {
   trimBriefingForSpeech,
 } from './openrouter-briefing.mjs'
 import { readWahaThreadHistoryAroundDate } from './waha-chat-history-pg.mjs'
+import { wahaMessageTimestampMs } from '../src/utils/wahaMessageTime.js'
 
 export const BRIEFING_LOOKBACK_DAYS = 2
 export const BRIEFING_LOOKBACK_MS = BRIEFING_LOOKBACK_DAYS * 24 * 60 * 60 * 1000
@@ -45,25 +46,6 @@ function isFromMe(msg) {
   const data = msg?._data && typeof msg._data === 'object' ? msg._data : {}
   const key = messageKeyObject(msg)
   return Boolean(msg?.fromMe ?? data?.fromMe ?? key?.fromMe)
-}
-
-/**
- * @param {unknown} msg
- */
-function messageTimestampMs(msg) {
-  const data = msg?._data && typeof msg._data === 'object' ? msg._data : {}
-  const candidates = [
-    msg?.timestamp,
-    msg?.ts,
-    msg?.t,
-    data?.timestamp,
-    data?.ts,
-    data?.t,
-  ]
-  let ts = candidates.map((v) => Number(v)).find((v) => Number.isFinite(v) && v > 0)
-  if (!Number.isFinite(ts)) return 0
-  if (ts < 1e12) ts *= 1000
-  return ts
 }
 
 /**
@@ -211,7 +193,7 @@ function rawMessageDedupeKey(msg) {
   if (id) return `id:${id}`
   return [
     'fallback',
-    messageTimestampMs(msg),
+    wahaMessageTimestampMs(msg),
     isFromMe(msg) ? 'me' : 'them',
     messageBody(msg).slice(0, 120),
   ].join(':')
@@ -253,7 +235,7 @@ export async function collectTodayMessages(chatId, timeZone, opts = {}) {
   if (Array.isArray(cachedBeforeSync?.contacts)) contacts = cachedBeforeSync.contacts
 
   const sync = await syncThreadCache(id, {
-    limit: opts.limit ?? 100,
+    limit: opts.limit ?? 300,
     downloadMedia: false,
     accountKey,
   })
@@ -298,7 +280,7 @@ export async function collectTodayMessages(chatId, timeZone, opts = {}) {
   const briefingMsgs = rawMessages
     .map((m) => ({
       id: getMessageId(m),
-      ts: messageTimestampMs(m),
+      ts: wahaMessageTimestampMs(m),
       sender: resolveSenderName(m, contactMap, id, lidMap),
       text: messageBody(m),
     }))

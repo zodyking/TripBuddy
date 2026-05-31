@@ -10,16 +10,43 @@ import {
 const WAHA_SESSION = process.env.WAHA_SESSION_NAME || 'default'
 const CACHE_DIR = path.join(LOCAL_DIR, 'waha-chat-cache')
 
-/** Resolve WAHA URL: env var > user account pref > fallback */
+/** Per-request WAHA URL/API key from signed-in user prefs (cleared after each handler). */
 let _accountWahaUrl = ''
+let _accountWahaApiKey = ''
+
 export function setAccountWahaUrl(url) {
   _accountWahaUrl = String(url || '').trim().replace(/\/+$/, '')
 }
+
+export function setAccountWahaApiKey(key) {
+  _accountWahaApiKey = String(key || '').trim()
+}
+
+/**
+ * Apply stored WAHA prefs for the current request (URL + API key).
+ * @param {{ wahaUrl?: string, wahaApiKey?: string } | null | undefined} prefs
+ */
+export function applyWahaPrefsForAccount(prefs) {
+  const p = prefs && typeof prefs === 'object' ? prefs : {}
+  if (p.wahaUrl) setAccountWahaUrl(p.wahaUrl)
+  if (p.wahaApiKey) setAccountWahaApiKey(p.wahaApiKey)
+}
+
+export function clearAccountWahaPrefs() {
+  setAccountWahaUrl('')
+  setAccountWahaApiKey('')
+}
+
 function getWahaUrl() {
+  if (_accountWahaUrl) return _accountWahaUrl
   const env = (process.env.WAHA_BASE_URL || '').trim().replace(/\/+$/, '')
   if (env) return env
-  if (_accountWahaUrl) return _accountWahaUrl
   return 'http://waha:3000'
+}
+
+function getWahaApiKey() {
+  if (_accountWahaApiKey) return _accountWahaApiKey
+  return String(process.env.WAHA_API_KEY || '').trim()
 }
 
 /** @type {Map<string, { updatedAt: number, messages: unknown[] }>} */
@@ -116,7 +143,7 @@ export async function writeThreadCache(chatId, payload) {
 
 async function wahaFetch(urlPath, query = '') {
   const headers = { Accept: 'application/json' }
-  const key = process.env.WAHA_API_KEY
+  const key = getWahaApiKey()
   if (key) headers['X-Api-Key'] = key
   const url = `${getWahaUrl()}${urlPath}${query}`
   const r = await fetch(url, { headers })
@@ -136,7 +163,7 @@ async function wahaFetch(urlPath, query = '') {
  */
 export async function fetchWahaChatMessages(chatId, opts = {}) {
   const id = encodeURIComponent(String(chatId || '').trim())
-  const limit = Math.min(100, Math.max(1, Number(opts.limit) || 50))
+  const limit = Math.min(500, Math.max(1, Number(opts.limit) || 50))
   const downloadMedia = opts.downloadMedia === true
   const q = `?limit=${limit}&downloadMedia=${downloadMedia}`
   return wahaFetch(`/api/${encodeURIComponent(WAHA_SESSION)}/chats/${id}/messages`, q)

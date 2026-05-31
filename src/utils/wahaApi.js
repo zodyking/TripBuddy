@@ -2,6 +2,7 @@ import {
   englishDisplayName,
   needsEnglishSenderNameTranslation,
 } from './senderNameLocale.js'
+import { wahaMessageTimestampMs } from './wahaMessageTime.js'
 
 /**
  * WAHA (WhatsApp HTTP API) client.
@@ -664,9 +665,8 @@ export function normalizeWahaMessage(msg, opts = {}) {
   const id = getWahaMessageId(src)
   const text = String(src?.body ?? src?.text ?? src?.caption ?? '').trim()
   const fromMe = Boolean(src?.fromMe)
-  let ts = Number(src?.timestamp ?? src?.ts)
-  if (!Number.isFinite(ts)) ts = Date.now()
-  else if (ts < 1e12) ts *= 1000
+  let ts = wahaMessageTimestampMs(src)
+  if (!ts) ts = Date.now()
   const media = normalizeWahaMedia(src)
   const hasMedia = Boolean(src?.hasMedia || media?.url)
   let senderName = resolveWahaSenderName(src, contactMap, activeChatId, lidMap, participantMap)
