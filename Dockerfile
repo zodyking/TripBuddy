@@ -8,7 +8,7 @@ RUN npm install
 # Dokploy → Build → Build Args (recommended):
 #   GIT_COMMIT = commit SHA from your deploy (or ${{COMMIT_SHA}} if your template supports it)
 # Also enable "Disable build cache" / clean build when UI still looks stale.
-# UI rebuild trigger: panynj-fresh-live-series-keys
+# UI rebuild trigger: docker-copy-src-bridges
 ARG GIT_COMMIT=unknown
 ARG BUILD_TIMESTAMP=
 
@@ -47,6 +47,7 @@ COPY --from=ui /app/dist ./dist
 # Server imports from `../src/*` at runtime (not bundled into dist).
 COPY --from=ui /app/src/utils ./src/utils
 COPY --from=ui /app/src/constants ./src/constants
+COPY --from=ui /app/src/bridges ./src/bridges
 
 # Environment defaults for containers
 ENV FEDEX_TOOL_API_HOST=0.0.0.0
