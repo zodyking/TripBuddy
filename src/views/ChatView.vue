@@ -27,6 +27,7 @@ const {
   refreshMessages,
   sendText,
   selectChat,
+  fetchMessageMedia,
 } = useWahaMessenger({ scrollEl, poll: true })
 
 const hasActiveChat = computed(() => !!activeChatId.value)
@@ -144,6 +145,18 @@ watch(activeChatId, () => {
 
 function openMedia(url) {
   if (url) window.open(url, '_blank', 'noopener,noreferrer')
+}
+
+/** @param {{ id: string, media?: { url?: string } | null }} msg */
+function onMediaLoadError(msg) {
+  if (!msg?.id || msg.media?.url) return
+  void fetchMessageMedia(msg.id)
+}
+
+/** @param {{ id: string, media?: { url?: string } | null }} msg */
+function retryMedia(msg) {
+  if (!msg?.id) return
+  void fetchMessageMedia(msg.id)
 }
 </script>
 
@@ -349,11 +362,13 @@ function openMedia(url) {
               </button>
               <div v-if="item.msg.media?.url" class="chat-bubble-media">
                 <img
-                  v-if="item.msg.media.kind === 'image'"
+                  v-if="item.msg.media.kind === 'image' || item.msg.media.kind === 'sticker'"
                   :src="item.msg.media.url"
                   class="chat-media-img tap"
+                  :class="{ 'chat-media-img--sticker': item.msg.media.kind === 'sticker' }"
                   alt=""
                   loading="lazy"
+                  @error="onMediaLoadError(item.msg)"
                   @click="openMedia(item.msg.media.url)"
                 />
                 <video
@@ -363,6 +378,7 @@ function openMedia(url) {
                   controls
                   playsinline
                   preload="metadata"
+                  @error="onMediaLoadError(item.msg)"
                 />
                 <audio
                   v-else-if="item.msg.media.kind === 'audio'"
@@ -370,6 +386,7 @@ function openMedia(url) {
                   :src="item.msg.media.url"
                   controls
                   preload="metadata"
+                  @error="onMediaLoadError(item.msg)"
                 />
                 <a
                   v-else
@@ -378,13 +395,23 @@ function openMedia(url) {
                   target="_blank"
                   rel="noopener noreferrer"
                 >
-                  {{ item.msg.media.filename || 'Download file' }}
+                  <span class="chat-media-file-icon" aria-hidden="true">📎</span>
+                  {{ item.msg.media.filename || 'Open attachment' }}
+                  <span v-if="item.msg.media.mimetype" class="chat-media-file-type">{{
+                    item.msg.media.mimetype
+                  }}</span>
                 </a>
                 <p v-if="item.msg.media.error" class="chat-media-err">{{ item.msg.media.error }}</p>
               </div>
-              <p v-else-if="item.msg.hasMedia && !item.msg.media?.url" class="chat-bubble-text chat-bubble-text--muted">
-                Loading media…
-              </p>
+              <div
+                v-else-if="item.msg.hasMedia && !item.msg.media?.url"
+                class="chat-bubble-media chat-bubble-media--pending"
+              >
+                <p class="chat-bubble-text chat-bubble-text--muted">Loading attachment…</p>
+                <button type="button" class="chat-media-retry tap" @click="retryMedia(item.msg)">
+                  Retry
+                </button>
+              </div>
               <p v-if="item.msg.text" class="chat-bubble-text">{{ item.msg.text }}</p>
               <time class="chat-bubble-time" :datetime="new Date(item.msg.ts).toISOString()">{{ fmtTime(item.msg.ts) }}</time>
             </div>
@@ -859,6 +886,44 @@ function openMedia(url) {
   border-radius: var(--radius-md, 0.5rem);
   object-fit: cover;
   cursor: pointer;
+}
+
+.chat-media-img--sticker {
+  max-width: 8rem;
+  max-height: 8rem;
+  object-fit: contain;
+}
+
+.chat-bubble-media--pending {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  padding: 0.35rem 0;
+}
+
+.chat-media-retry {
+  align-self: flex-start;
+  border: none;
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--color-text-secondary, #c8c8d4);
+  font: inherit;
+  font-size: 0.72rem;
+  padding: 0.25rem 0.55rem;
+  border-radius: 0.35rem;
+  cursor: pointer;
+}
+
+.chat-media-file {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.8rem;
+}
+
+.chat-media-file-type {
+  font-size: 0.65rem;
+  opacity: 0.75;
 }
 
 .chat-media-video {

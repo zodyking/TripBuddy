@@ -494,7 +494,7 @@ async function wahaProxyHandler(req, reply) {
   const subPath = req.url.replace(/^\/api\/waha/, '') || '/'
   const target = `${getWahaInternalUrl()}${subPath}`
   try {
-    const headers = { Accept: 'application/json' }
+    const headers = { Accept: '*/*' }
     const wahaKey = process.env.WAHA_API_KEY
     if (wahaKey) headers['X-Api-Key'] = wahaKey
     const opts = { method: req.method, headers }
@@ -503,12 +503,20 @@ async function wahaProxyHandler(req, reply) {
       opts.body = JSON.stringify(req.body)
     }
     const r = await fetch(target, opts)
-    const ct = r.headers.get('content-type') || 'application/json'
+    const ct = r.headers.get('content-type') || 'application/octet-stream'
     reply.status(r.status).header('Content-Type', ct)
-    const body = await r.text()
-    return reply.send(body)
+    const isFileDownload = /\/files\//.test(subPath)
+    const isJson =
+      !isFileDownload &&
+      (ct.includes('application/json') || ct.includes('text/json'))
+    if (isJson) {
+      const body = await r.text()
+      return reply.send(body)
+    }
+    const buf = Buffer.from(await r.arrayBuffer())
+    return reply.send(buf)
   } catch (e) {
-    return reply.status(502).send(JSON.stringify({ error: 'WAHA proxy error', message: e.message || String(e) }))
+    return reply.code(502).send({ error: 'WAHA proxy error', message: e.message || String(e) })
   }
 }
 

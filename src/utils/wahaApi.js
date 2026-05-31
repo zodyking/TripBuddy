@@ -441,37 +441,90 @@ function resolveJidToDisplayName(jid, contactMap, lidMap) {
  * Rewrite WAHA file URLs so the browser can load them (proxy or direct base).
  * @param {string} mediaUrl
  */
+/**
+ * Rewrite WAHA file URLs to a URL the browser can load (TripBuddy /api/waha proxy).
+ * @param {string} mediaUrl
+ */
 export function resolveWahaMediaUrl(mediaUrl) {
   const raw = String(mediaUrl ?? '').trim()
   if (!raw) return ''
-  const base = getWahaBaseUrl().replace(/\/+$/, '')
-  if (raw.startsWith('/')) return `${base}${raw}`
-  try {
-    const parsed = new URL(raw)
-    if (parsed.pathname.startsWith('/api/')) {
-      return `${base}${parsed.pathname}${parsed.search}`
+  if (raw.startsWith('data:') || raw.startsWith('blob:')) return raw
+
+  const proxyBase = getWahaBaseUrl().replace(/\/+$/, '')
+  let pathname = ''
+  let search = ''
+  if (raw.startsWith('/')) {
+    const q = raw.indexOf('?')
+    pathname = q >= 0 ? raw.slice(0, q) : raw
+    search = q >= 0 ? raw.slice(q) : ''
+  } else {
+    try {
+      const parsed = new URL(raw)
+      pathname = parsed.pathname
+      search = parsed.search
+    } catch {
+      return raw
     }
-    return raw
-  } catch {
-    return raw
   }
+
+  const isWahaFile =
+    pathname.includes('/files/') ||
+    pathname.startsWith('/api/files/') ||
+    /^\/api\/[^/]+\/files\//.test(pathname)
+
+  if (isWahaFile || (pathname.startsWith('/api/') && isWahaProxyMode())) {
+    const stored = getWahaUrlForSettings().replace(/\/+$/, '')
+    const base = stored || proxyBase
+    return `${base}${pathname}${search}`
+  }
+
+  return raw
 }
 
 /**
  * @param {Record<string, unknown>} msg
  * @returns {{ url: string, mimetype: string, filename: string, kind: string, error: string | null } | null}
  */
+/**
+ * @param {string} mimetype
+ * @param {string} filename
+ * @param {Record<string, unknown>} msg
+ */
+function mediaKindFromMeta(mimetype, filename, msg) {
+  const type = String(msg?.type ?? msg?._data?.type ?? '').toLowerCase()
+  if (type === 'sticker' || mimetype === 'image/webp') return 'sticker'
+  if (mimetype.startsWith('image/')) return 'image'
+  if (mimetype.startsWith('video/')) return 'video'
+  if (mimetype.startsWith('audio/') || mimetype === 'audio/ogg' || mimetype.includes('opus')) {
+    return 'audio'
+  }
+  const fn = filename.toLowerCase()
+  if (/\.(jpe?g|png|gif|webp|bmp|heic|avif)$/i.test(fn)) return 'image'
+  if (/\.(mp4|mov|webm|mkv|3gp)$/i.test(fn)) return 'video'
+  if (/\.(mp3|ogg|wav|m4a|aac|opus)$/i.test(fn)) return 'audio'
+  if (/\.(pdf|doc|docx|xls|xlsx|ppt|pptx|txt|csv|zip)$/i.test(fn)) return 'document'
+  if (mimetype.startsWith('application/') || mimetype.startsWith('text/')) return 'document'
+  return 'file'
+}
+
 export function normalizeWahaMedia(msg) {
   if (!msg?.hasMedia && !msg?.media) return null
   const m = msg?.media && typeof msg.media === 'object' ? msg.media : {}
-  const url = resolveWahaMediaUrl(m.url || m.URL || '')
+  let url = resolveWahaMediaUrl(m.url || m.URL || '')
   const mimetype = String(m.mimetype || m.mimeType || '').toLowerCase()
   const filename = String(m.filename || m.fileName || '').trim()
+
+  if (!url) {
+    const b64 = m.data || m.base64
+    if (b64 && mimetype) {
+      const payload = String(b64).replace(/^data:[^;]+;base64,/, '')
+      url = `data:${mimetype};base64,${payload}`
+    }
+  }
+
   if (!url && !msg?.hasMedia) return null
-  let kind = 'file'
-  if (mimetype.startsWith('image/')) kind = 'image'
-  else if (mimetype.startsWith('video/')) kind = 'video'
-  else if (mimetype.startsWith('audio/') || mimetype === 'audio/ogg') kind = 'audio'
+
+  const kind = mediaKindFromMeta(mimetype, filename, msg)
   return {
     url,
     mimetype,

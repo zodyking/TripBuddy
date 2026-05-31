@@ -436,7 +436,7 @@ export function useWahaMessenger(opts = {}) {
     const pending = messages.value.filter(
       (m) => m.hasMedia && !m.media?.url && m.id,
     )
-    for (const m of pending.slice(0, 12)) {
+    for (const m of pending.slice(0, 24)) {
       if (gen !== mediaGen) return
       try {
         const r = await fetchWhatsAppMessageMedia(chatId, m.id)
@@ -554,6 +554,28 @@ export function useWahaMessenger(opts = {}) {
           syncStatusLabel.value = ''
         }
       }
+    }
+  }
+
+  /**
+   * @param {string} messageId
+   */
+  async function fetchMessageMedia(messageId) {
+    const chatId = activeChatId.value
+    if (!chatId || !messageId) return
+    const gen = mediaGen
+    try {
+      const r = await fetchWhatsAppMessageMedia(chatId, messageId)
+      if (gen !== mediaGen || !r.ok || !r.message) return
+      const updated = normalizeWahaMessage(r.message, normalizeOpts(chatId))
+      const idx = messages.value.findIndex((x) => x.id === messageId)
+      if (idx >= 0) {
+        const next = [...messages.value]
+        next[idx] = { ...next[idx], ...updated, media: updated.media || next[idx].media }
+        messages.value = next
+      }
+    } catch {
+      /* skip */
     }
   }
 
@@ -680,6 +702,17 @@ export function useWahaMessenger(opts = {}) {
     () => reapplySenderNames(),
   )
 
+  watch(
+    displayMessages,
+    (list) => {
+      const chatId = activeChatId.value
+      if (!chatId || !Array.isArray(list)) return
+      const needs = list.some((m) => m.hasMedia && !m.media?.url && m.id)
+      if (needs) void hydrateMediaLazy(chatId)
+    },
+    { deep: true },
+  )
+
   onMounted(() => {
     void (async () => {
       await ensureWahaPrefsHydrated()
@@ -727,6 +760,7 @@ export function useWahaMessenger(opts = {}) {
     wahaChatKindLabel,
     loadChats,
     refreshMessages,
+    fetchMessageMedia,
     sendText,
     selectChat,
     loadContacts,

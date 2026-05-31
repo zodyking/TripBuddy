@@ -25,6 +25,7 @@ import {
 } from '../stores/linehaulBearerCaptureOverlay.js'
 import DailyBriefingModal from './DailyBriefingModal.vue'
 import DailyBriefingNarrator from './DailyBriefingNarrator.vue'
+import SpeechAlertModal from './SpeechAlertModal.vue'
 import { useDailyBriefing } from '../composables/useDailyBriefing.js'
 import { hydrateOpenrouterApiKeyFromServer } from '../stores/trafficTileKey.js'
 import { hydrateWahaPrefsFromServer } from '../utils/wahaPrefs.js'
@@ -99,7 +100,7 @@ const headerTitle = computed(() => {
 })
 
 function onOfferBriefingEvent() {
-  dailyBriefingOpen.value = true
+  offerBriefingNow({ force: true })
 }
 
 onMounted(() => {
@@ -342,6 +343,7 @@ onUnmounted(() => {
       :word-index="dailyBriefingNarratorWordIndex"
       @close="stopDailyBriefingNarrator"
     />
+    <SpeechAlertModal />
   </div>
 </template>
 

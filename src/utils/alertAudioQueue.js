@@ -5,6 +5,12 @@
  */
 
 import { pushLiveLog } from '../stores/liveLogStore.js'
+import {
+  showSpeechAlertModal,
+  hideSpeechAlertModal,
+} from '../stores/speechAlertModalStore.js'
+import { isTripAlertEnabled } from './tripVoiceAnnouncement.js'
+import { isWahaTtsEnabled } from './wahaApi.js'
 
 const PREFS_KEY = 'fedexAlertPrefs'
 
@@ -66,6 +72,11 @@ let currentAudio = null
 let currentUtterance = null
 
 const DEDUP_WINDOW_MS = 2000
+
+function shouldShowSpeechAlertModal() {
+  if (typeof window === 'undefined') return false
+  return isTripAlertEnabled() || isWahaTtsEnabled()
+}
 
 /**
  * Process next item in queue. Waits for current speech to finish via onend.
@@ -152,10 +163,12 @@ function speakText(text) {
 
     u.onstart = () => {
       pushLiveLog({ type: 'info', message: `[Queue] TTS started: ${text}`, ts: Date.now() })
+      if (shouldShowSpeechAlertModal()) showSpeechAlertModal(text)
     }
 
     u.onend = () => {
       pushLiveLog({ type: 'info', message: `[Queue] TTS ended: ${text}`, ts: Date.now() })
+      hideSpeechAlertModal()
       currentUtterance = null
       isSpeaking = false
       processNextSpeech()
@@ -163,6 +176,7 @@ function speakText(text) {
 
     u.onerror = (e) => {
       pushLiveLog({ type: 'error', message: `[Queue] TTS error: ${text} - ${e.error || 'unknown'}`, ts: Date.now() })
+      hideSpeechAlertModal()
       currentUtterance = null
       isSpeaking = false
       processNextSpeech()
@@ -330,6 +344,7 @@ export function announceApiReconnect() {
 }
 
 export function cancelAllAlerts() {
+  hideSpeechAlertModal()
   speechQueue = []
   isSpeaking = false
   if (typeof window !== 'undefined') {

@@ -78,7 +78,13 @@ export function useDailyBriefing() {
     })
   }
 
-  function offerBriefingNow() {
+  /**
+   * @param {{ force?: boolean }} [opts] — force=true skips session gate (e.g. after enabling speech).
+   */
+  function offerBriefingNow(opts = {}) {
+    if (!opts.force && wasOfferedThisSession()) return
+    if (!isWahaConfigured()) return
+    if (!getWahaChatId()) return
     modalOpen.value = true
   }
 
