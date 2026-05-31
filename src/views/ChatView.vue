@@ -5,6 +5,8 @@ import { useWahaMessenger } from '../composables/useWahaMessenger.js'
 import { useDailyBriefing } from '../composables/useDailyBriefing.js'
 import { wahaPrefsHydrated, hydrateWahaPrefsFromServer } from '../utils/wahaPrefs.js'
 import { hydrateOpenrouterApiKeyFromServer } from '../stores/trafficTileKey.js'
+import { formatChatDisplayName, chatAvatarInitial } from '../utils/chatDisplayName.js'
+import { createDoubleTapHandlers } from '../utils/doubleTap.js'
 
 const {
   generateBriefingFromChat,
@@ -36,7 +38,10 @@ const {
   sendText,
   selectChat,
   fetchMessageMedia,
+  formatChatLabel,
 } = useWahaMessenger({ scrollEl, poll: true })
+
+const chatPickToast = ref('')
 
 const hasActiveChat = computed(() => !!activeChatId.value)
 const threadBusy = computed(() => loading.value || syncing.value)
@@ -46,7 +51,8 @@ const briefingAvailable = computed(
 const briefingBusy = computed(() => briefingLoading.value)
 
 function onGenerateBriefingTap() {
-  void generateBriefingFromChat({ chatLabel: chatTitle.value || 'WhatsApp chat' })
+  const label = formatChatLabel(chatTitle.value) || chatTitle.value || 'WhatsApp chat'
+  void generateBriefingFromChat({ chatLabel: label })
 }
 const showThreadLoader = computed(() => threadBusy.value)
 
@@ -132,9 +138,51 @@ async function openChatList() {
   await loadChats()
 }
 
+const chatsForList = computed(() =>
+  chats.value.map((c) => {
+    const names = formatChatDisplayName(c.name || c.id)
+    return { ...c, ...names }
+  }),
+)
+
 function pickChat(chat) {
   selectChat(chat)
   showChatList.value = false
+}
+
+/** @type {import('vue').Ref<{ id: string, name: string } | null>} */
+const pendingChatTap = ref(null)
+
+function setMonitoredChat(chat) {
+  const names = formatChatDisplayName(chat.name || chat.id)
+  selectChat(chat, { displayTitle: names.displayTitle })
+  showChatList.value = false
+  chatPickToast.value = `Using ${names.displayTitle}`
+  setTimeout(() => {
+    chatPickToast.value = ''
+  }, 2800)
+}
+
+const chatListTap = createDoubleTapHandlers({
+  onSingle() {
+    const c = pendingChatTap.value
+    if (c) pickChat(c)
+  },
+  onDouble() {
+    const c = pendingChatTap.value
+    if (c) setMonitoredChat(c)
+  },
+})
+
+function onChatListTap(chat) {
+  pendingChatTap.value = chat
+  chatListTap.onTap(chat.id)
+}
+
+function onChatListDblClick(chat) {
+  chatListTap.cancelPending()
+  pendingChatTap.value = chat
+  setMonitoredChat(chat)
 }
 
 async function onSend() {
@@ -188,6 +236,7 @@ function retryMedia(msg) {
 
 <template>
   <div class="chat-page">
+  <p v-if="chatPickToast" class="chat-pick-toast" role="status" aria-live="polite">{{ chatPickToast }}</p>
   <!-- Hydrating account WhatsApp prefs from server -->
   <div v-if="!wahaPrefsHydrated" class="chat-empty">
     <div class="chat-thread-loader" role="status" aria-live="polite">
@@ -248,20 +297,25 @@ function retryMedia(msg) {
         </svg>
       </button>
     </header>
+    <p class="chat-list-hint">Double-tap a chat to use it for alerts and briefings.</p>
     <div class="chat-list-scroll">
       <p v-if="chatsLoading" class="chat-list-status">Loading chats…</p>
       <p v-else-if="!chats.length" class="chat-list-status">No chats found. Check WAHA connection in Settings.</p>
       <button
-        v-for="c in chats"
+        v-for="c in chatsForList"
         :key="c.id"
         type="button"
         class="chat-list-item tap"
         :class="{ 'is-active': c.id === activeChatId }"
-        @click="pickChat(c)"
+        @click="onChatListTap(c)"
+        @dblclick.prevent="onChatListDblClick(c)"
       >
-        <span class="chat-list-avatar" aria-hidden="true">{{ (c.name || '?').charAt(0).toUpperCase() }}</span>
+        <span class="chat-list-avatar" aria-hidden="true">{{ chatAvatarInitial(c.name) }}</span>
         <span class="chat-list-body">
-          <span class="chat-list-name">{{ c.name || c.id }}</span>
+          <span class="chat-list-name">
+            <span class="chat-list-first">{{ c.firstName || c.displayTitle }}</span>
+            <span v-if="c.lastName" class="chat-list-last">{{ c.lastName }}</span>
+          </span>
           <span class="chat-list-meta">
             <span class="chat-list-kind">{{ wahaChatKindLabel(c.kind) }}</span>
             <span class="chat-list-id">{{ c.id }}</span>
@@ -647,6 +701,33 @@ function retryMedia(msg) {
   flex-direction: column;
 }
 
+.chat-pick-toast {
+  position: fixed;
+  left: 50%;
+  bottom: calc(var(--app-nav-height, 4.5rem) + 0.75rem);
+  z-index: var(--z-toast, 60);
+  transform: translateX(-50%);
+  margin: 0;
+  padding: 0.55rem 1rem;
+  border-radius: var(--radius-full, 9999px);
+  background: rgba(22, 22, 29, 0.92);
+  border: 1px solid rgba(168, 85, 247, 0.45);
+  color: var(--color-text-primary, #f4f4f5);
+  font-size: 0.875rem;
+  font-weight: var(--weight-semibold, 600);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+  pointer-events: none;
+}
+
+.chat-list-hint {
+  flex-shrink: 0;
+  margin: 0;
+  padding: 0.35rem 0.75rem 0.25rem;
+  font-size: 0.75rem;
+  color: var(--color-text-secondary, #a8a8b8);
+  text-align: center;
+}
+
 .chat-list-scroll {
   flex: 1;
   min-height: 0;
@@ -703,9 +784,24 @@ function retryMedia(msg) {
 }
 
 .chat-list-name {
+  display: flex;
+  align-items: baseline;
+  gap: 0.35rem;
+  min-width: 0;
   font-size: var(--text-sm, 0.8125rem);
-  font-weight: var(--weight-semibold, 600);
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.chat-list-first {
+  font-weight: var(--weight-bold, 700);
+  flex-shrink: 0;
+}
+
+.chat-list-last {
+  font-weight: var(--weight-medium, 500);
+  color: var(--color-text-secondary, #a8a8b8);
   overflow: hidden;
   text-overflow: ellipsis;
 }

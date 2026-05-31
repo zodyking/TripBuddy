@@ -32,6 +32,7 @@ import {
 import {
   needsEnglishSenderNameTranslation,
 } from '../utils/senderNameLocale.js'
+import { formatChatDisplayName } from '../utils/chatDisplayName.js'
 import {
   getCachedThread,
   setCachedThread,
@@ -131,7 +132,7 @@ export function useWahaMessenger(opts = {}) {
     }
     const hit = chats.value.find((c) => c.id === id)
     if (hit) {
-      chatTitle.value = hit.name
+      chatTitle.value = formatChatDisplayName(hit.name).displayTitle
       return
     }
     chatTitle.value = id.split('@')[0] || id
@@ -676,12 +677,15 @@ export function useWahaMessenger(opts = {}) {
     }
   }
 
-  function selectChat(chat) {
+  function selectChat(chat, opts = {}) {
     if (!chat?.id) return
     setWahaChatId(chat.id)
     void syncCurrentWahaChatIdToServer().catch(() => {})
     activeChatId.value = chat.id
-    chatTitle.value = chat.name || chat.id
+    const formatted = formatChatDisplayName(
+      String(opts.displayTitle || chat.name || chat.id),
+    )
+    chatTitle.value = formatted.displayTitle
     lastSeenId = ''
     mediaGen++
     rawThreadMessages.value = []
@@ -742,10 +746,15 @@ export function useWahaMessenger(opts = {}) {
     stopPolling()
   })
 
+  function formatChatLabel(raw) {
+    return formatChatDisplayName(raw).displayTitle
+  }
+
   return {
     configured,
     activeChatId,
     chatTitle,
+    formatChatLabel,
     chats,
     chatsLoading,
     messages,
