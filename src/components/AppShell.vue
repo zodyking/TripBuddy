@@ -27,6 +27,7 @@ import DailyBriefingModal from './DailyBriefingModal.vue'
 import DailyBriefingNarrator from './DailyBriefingNarrator.vue'
 import SpeechAlertModal from './SpeechAlertModal.vue'
 import ChatMessageSpeechModal from './ChatMessageSpeechModal.vue'
+import BridgeTrafficWhatsAppPreviewModal from './BridgeTrafficWhatsAppPreviewModal.vue'
 import { useDailyBriefing } from '../composables/useDailyBriefing.js'
 import { hydrateOpenrouterApiKeyFromServer } from '../stores/trafficTileKey.js'
 import { hydrateWahaPrefsFromServer } from '../utils/wahaPrefs.js'
@@ -343,6 +344,7 @@ onUnmounted(() => {
     />
     <SpeechAlertModal />
     <ChatMessageSpeechModal />
+    <BridgeTrafficWhatsAppPreviewModal />
   </div>
 </template>
 

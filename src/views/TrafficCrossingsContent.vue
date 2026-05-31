@@ -17,6 +17,7 @@ import { useMapVehicleId } from '../composables/useMapVehicleId.js'
 import { sanitizeNy511ImpactFootnote } from '../utils/ny511ImpactFootnote.js'
 import { extractYoutubeVideoIdFromInput } from '../utils/youtubeVideoId.js'
 import { isGwbUpperDeckRow } from '../bridges/gwbRoutes.js'
+import { useBridgeTrafficWhatsAppAlerts } from '../composables/useBridgeTrafficWhatsAppAlerts.js'
 
 defineOptions({ name: 'TrafficCrossingsContent' })
 
@@ -788,6 +789,25 @@ const mapPins = computed(() => {
 })
 
 const { vehicleId: mapVehicleId } = useMapVehicleId()
+
+const payloadFetchedAt = computed(() => {
+  const t = payload.value?.fetchedAt
+  return typeof t === 'number' && Number.isFinite(t) ? t : null
+})
+
+useBridgeTrafficWhatsAppAlerts({
+  rankedRows,
+  rowRouteId,
+  displayTitle,
+  trafficLevelForRow,
+  delayTierForRow,
+  isClosedRow,
+  seriesForRow,
+  bridgeChartStrokeColor,
+  trafficStatusTitle,
+  trendInfo,
+  payloadUpdatedAt: payloadFetchedAt,
+})
 
 const isLandscapeSplit = ref(false)
 let splitMql = /** @type {MediaQueryList | null} */(null)
