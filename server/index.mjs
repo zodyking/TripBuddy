@@ -1280,6 +1280,8 @@ app.post('/api/whatsapp/daily-briefing', async (req, reply) => {
       return reply.code(400).send({ ok: false, error: 'chatId required' })
     }
     const akTrim = ak.trim()
+    const wahaPrefs = await getWahaPrefsForAccount(akTrim)
+    if (wahaPrefs.wahaUrl) setAccountWahaUrl(wahaPrefs.wahaUrl)
     const openRouterApiKey = await getOpenrouterApiKeyForAccount(akTrim)
     if (!openRouterApiKey) {
       return reply.code(400).send({
