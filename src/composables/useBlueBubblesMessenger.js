@@ -8,10 +8,12 @@ import {
   getBlueBubblesPollInterval,
   fetchBlueBubblesChatMessages,
   fetchBlueBubblesRecentMessages,
+  fetchBlueBubblesContacts,
   sendBlueBubblesMessage,
   listBlueBubblesChats,
   normalizeBlueBubblesMessage,
   normalizeBlueBubblesChat,
+  buildBlueBubblesContactMap,
   bbChatKindLabel,
 } from '../utils/blueBubblesApi.js'
 import { getIMessageThreadCache, syncIMessageThread } from '../api.js'
@@ -22,6 +24,8 @@ import {
   setCachedBbThread,
   getCachedBbChats,
   setCachedBbChats,
+  getCachedBbContactMap,
+  setCachedBbContactMap,
 } from '../stores/blueBubblesChatStore.js'
 
 /**
@@ -41,6 +45,32 @@ export function useBlueBubblesMessenger(opts = {}) {
   const chatTitle = ref('')
   const chats = ref(/** @type {ReturnType<typeof normalizeBlueBubblesChat>[]} */ ([]))
   const chatsLoading = ref(false)
+  /** @type {import('vue').Ref<Map<string, string>>} */
+  const contactMap = ref(new Map())
+
+  function normalizeOpts() {
+    return { contactMap: contactMap.value }
+  }
+
+  function remapChats(rawList) {
+    chats.value = rawList.map((c) => normalizeBlueBubblesChat(c, normalizeOpts())).filter((c) => c?.id)
+  }
+
+  async function loadContacts() {
+    try {
+      const r = await fetchBlueBubblesContacts()
+      if (r.ok && Array.isArray(r.body) && r.body.length) {
+        contactMap.value = buildBlueBubblesContactMap(r.body)
+        setCachedBbContactMap(contactMap.value)
+        if (chats.value.length) {
+          const raw = getCachedBbChats()
+          if (raw.length) remapChats(raw)
+        }
+      }
+    } catch {
+      /* ignore */
+    }
+  }
 
   /** @type {ReturnType<typeof setInterval> | null} */
   let pollTimer = null
@@ -69,7 +99,7 @@ export function useBlueBubblesMessenger(opts = {}) {
     const cached = getCachedBbThread(chatGuid)
     if (!cached?.messages?.length) return false
     messages.value = cached.messages
-      .map((m) => normalizeBlueBubblesMessage(m, { chatGuid }))
+      .map((m) => normalizeBlueBubblesMessage(m, { chatGuid, ...normalizeOpts() }))
       .filter(Boolean)
     if (scroll) void scrollToBottom()
     return true
@@ -98,7 +128,7 @@ export function useBlueBubblesMessenger(opts = {}) {
       if (gen !== syncGen) return
       if (cacheRes?.messages?.length) {
         messages.value = cacheRes.messages
-          .map((m) => normalizeBlueBubblesMessage(m, { chatGuid }))
+          .map((m) => normalizeBlueBubblesMessage(m, { chatGuid, ...normalizeOpts() }))
           .filter(Boolean)
         syncProgress.value = 35
       }
@@ -108,7 +138,7 @@ export function useBlueBubblesMessenger(opts = {}) {
       if (r.stale && r.warning) syncWarning.value = r.warning
       if (Array.isArray(r.messages)) {
         const normalized = r.messages
-          .map((m) => normalizeBlueBubblesMessage(m, { chatGuid }))
+          .map((m) => normalizeBlueBubblesMessage(m, { chatGuid, ...normalizeOpts() }))
           .filter(Boolean)
         const prevIds = new Set(messages.value.map((m) => m.id))
         hadPriorMessages = messages.value.length > 0
@@ -141,8 +171,8 @@ export function useBlueBubblesMessenger(opts = {}) {
     try {
       const r = await listBlueBubblesChats({ limit: 80 })
       if (r.ok && Array.isArray(r.body)) {
-        chats.value = r.body.map(normalizeBlueBubblesChat).filter((c) => c?.id)
         setCachedBbChats(r.body)
+        remapChats(r.body)
       }
     } catch {
       /* ignore */
@@ -169,7 +199,7 @@ export function useBlueBubblesMessenger(opts = {}) {
       if (!r.ok || !Array.isArray(r.body)) return
       const normalized = [...r.body]
         .reverse()
-        .map((m) => normalizeBlueBubblesMessage(m, { chatGuid }))
+        .map((m) => normalizeBlueBubblesMessage(m, { chatGuid, ...normalizeOpts() }))
         .filter(Boolean)
       const prevIds = new Set(messages.value.map((m) => m.id))
       const incoming = normalized.filter((m) => !m.fromMe && !prevIds.has(m.id))
@@ -195,7 +225,7 @@ export function useBlueBubblesMessenger(opts = {}) {
       const r = await fetchBlueBubblesRecentMessages({ limit: 40 })
       if (!r.ok || !Array.isArray(r.body)) return
       const normalized = r.body
-        .map((m) => normalizeBlueBubblesMessage(m))
+        .map((m) => normalizeBlueBubblesMessage(m, normalizeOpts()))
         .filter(Boolean)
       const incoming = normalized.filter((m) => !m.fromMe && !seenInboxIds.has(m.id))
       for (const m of normalized) seenInboxIds.add(m.id)
@@ -307,10 +337,15 @@ export function useBlueBubblesMessenger(opts = {}) {
     void (async () => {
       await ensureBlueBubblesPrefsHydrated()
       if (!configured.value) return
+      const cachedContacts = getCachedBbContactMap()
+      if (cachedContacts && Object.keys(cachedContacts).length) {
+        contactMap.value = new Map(Object.entries(cachedContacts))
+      }
       const memChats = getCachedBbChats()
       if (memChats.length) {
-        chats.value = memChats.map(normalizeBlueBubblesChat).filter((c) => c?.id)
+        remapChats(memChats)
       }
+      void loadContacts()
       await loadChats()
       startPolling()
     })()

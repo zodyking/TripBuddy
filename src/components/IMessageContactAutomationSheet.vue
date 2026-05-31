@@ -9,6 +9,7 @@ import {
   persistContactRule,
 } from '../utils/blueBubblesContactRulesStore.js'
 import OpenRouterModelPicker from './OpenRouterModelPicker.vue'
+import { looksLikeAddress } from '../utils/blueBubblesApi.js'
 
 const props = defineProps({
   open: { type: Boolean, default: false },
@@ -24,6 +25,15 @@ const rule = ref(createDefaultContactRule())
 
 const saveMsg = ref('')
 const saving = ref(false)
+
+const subtitle = computed(() => {
+  const label = String(props.contactLabel ?? '').trim()
+  const handle = String(props.handle ?? '').trim()
+  if (label && handle && label !== handle && looksLikeAddress(handle)) {
+    return `${label} · ${handle}`
+  }
+  return label || handle || props.chatGuid
+})
 
 const keywordText = computed({
   get: () => (rule.value.keywordTriggers || []).join(', '),
@@ -91,7 +101,7 @@ function onBackdrop(e) {
       <div class="im-auto-sheet" role="dialog" aria-labelledby="im-auto-title" @click.stop>
         <header class="im-auto-head">
           <h2 id="im-auto-title" class="im-auto-title">Automation</h2>
-          <p class="im-auto-sub">{{ contactLabel || handle || chatGuid }}</p>
+          <p class="im-auto-sub">{{ subtitle }}</p>
           <button type="button" class="im-auto-close tap" aria-label="Close" @click="emit('close')">×</button>
         </header>
 
@@ -118,7 +128,10 @@ function onBackdrop(e) {
           </label>
 
           <label class="im-toggle-row">
-            <input v-model="rule.includeTripContext" type="checkbox" />
+            <span class="toggle-switch">
+              <input v-model="rule.includeTripContext" type="checkbox" />
+              <span class="toggle-slider"></span>
+            </span>
             <span>Include trip context in prompt</span>
           </label>
 
@@ -268,6 +281,53 @@ function onBackdrop(e) {
   margin: 0 0 0.25rem;
   font-size: 0.72rem;
   opacity: 0.85;
+}
+.im-auto-body .lbl {
+  display: block;
+  font-size: 0.72rem;
+  font-weight: 600;
+  opacity: 0.85;
+  margin: 0.35rem 0 0.2rem;
+}
+.im-auto-body .inp {
+  width: 100%;
+  padding: 0.625rem 0.75rem;
+  border-radius: var(--radius-md, 0.5rem);
+  border: 1px solid var(--color-border, rgba(255, 255, 255, 0.08));
+  background: var(--color-bg-elevated, #0f0f14);
+  color: var(--color-text-primary, #f4f4f8);
+  margin-bottom: 0.35rem;
+  min-height: 2.75rem;
+  font-size: 0.9375rem;
+  font-family: inherit;
+  color-scheme: dark;
+  -webkit-appearance: none;
+  appearance: none;
+}
+.im-auto-body .inp:focus {
+  outline: none;
+  border-color: var(--color-accent-purple, #7b4db5);
+  box-shadow: 0 0 0 3px rgba(123, 77, 181, 0.15);
+}
+.im-auto-body .inp::placeholder {
+  color: var(--color-text-tertiary, #6e6e7e);
+}
+.im-auto-foot .btn {
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: var(--radius-md, 0.5rem);
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--color-text-primary, #f4f4f8);
+  padding: 0.55rem 0.85rem;
+  font: inherit;
+  font-weight: 600;
+}
+.im-auto-foot .btn.primary {
+  border-color: transparent;
+  background: var(--color-accent-purple, #7b4db5);
+  color: #fff;
+}
+.im-auto-foot .btn:disabled {
+  opacity: 0.5;
 }
 @media (min-width: 640px) {
   .im-auto-backdrop {

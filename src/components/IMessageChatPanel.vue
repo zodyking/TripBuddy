@@ -229,8 +229,7 @@ onMounted(() => {
 
     <!-- Inbox -->
     <template v-else-if="!inConversation">
-      <header class="chat-toolbar chat-toolbar--inbox">
-        <h1 class="chat-toolbar-title chat-toolbar-title--inbox">Messages</h1>
+      <header class="chat-toolbar">
         <button
           type="button"
           class="chat-icon-btn tap"
@@ -239,14 +238,23 @@ onMounted(() => {
           :disabled="chatsLoading"
           @click="loadChats"
         >
-          ↻
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+            <path d="M21 12a9 9 0 1 1-2.64-6.36" stroke-linecap="round" />
+            <path d="M21 3v6h-6" stroke-linecap="round" stroke-linejoin="round" />
+          </svg>
         </button>
+        <div class="chat-toolbar-center">
+          <h1 class="chat-toolbar-title">Messages</h1>
+        </div>
         <RouterLink
           class="chat-icon-btn tap"
           aria-label="iMessage settings"
           :to="{ path: '/settings', query: { tab: 'imessage' } }"
         >
-          ⚙
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+            <circle cx="12" cy="12" r="3" />
+            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z" />
+          </svg>
         </RouterLink>
       </header>
 
@@ -260,7 +268,7 @@ onMounted(() => {
           class="im-inbox-row tap"
           @click="onInboxTap(c)"
         >
-          <span class="chat-list-avatar" aria-hidden="true">{{ chatAvatarInitial(c.name) }}</span>
+          <span class="chat-list-avatar" aria-hidden="true">{{ chatAvatarInitial(c.displayTitle || c.name) }}</span>
           <span class="im-inbox-body">
             <span class="im-inbox-top">
               <span class="chat-list-name">{{ c.displayTitle || c.name }}</span>
@@ -279,7 +287,9 @@ onMounted(() => {
     <template v-else>
       <header class="chat-toolbar">
         <button type="button" class="chat-icon-btn tap" aria-label="Back to inbox" @click="onBackToInbox">
-          ←
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+            <path d="M15 18l-6-6 6-6" stroke-linecap="round" stroke-linejoin="round" />
+          </svg>
         </button>
         <div class="chat-toolbar-center">
           <h1 class="chat-toolbar-title">{{ chatTitle || 'iMessage' }}</h1>
@@ -287,12 +297,14 @@ onMounted(() => {
         </div>
         <button
           type="button"
-          class="chat-icon-btn tap"
+          class="chat-icon-btn tap im-auto-btn"
           :class="{ 'im-auto-on': automationActive }"
           aria-label="Conversation automation"
           @click="showAutomation = true"
         >
-          ⚡
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+            <path d="M13 2L3 14h8l-1 8 10-12h-8l1-8z" stroke-linecap="round" stroke-linejoin="round" />
+          </svg>
         </button>
         <button
           type="button"
@@ -302,7 +314,10 @@ onMounted(() => {
           :disabled="loading || syncing"
           @click="refreshMessages"
         >
-          ↻
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+            <path d="M21 12a9 9 0 1 1-2.64-6.36" stroke-linecap="round" />
+            <path d="M21 3v6h-6" stroke-linecap="round" stroke-linejoin="round" />
+          </svg>
         </button>
       </header>
 
@@ -369,7 +384,7 @@ onMounted(() => {
         :open="showAutomation"
         :chat-guid="activeChatId"
         :handle="activeContactHandle"
-        :contact-label="chatTitle"
+        :contact-label="chatTitle || activeContactHandle"
         @close="showAutomation = false"
       />
     </template>
@@ -380,23 +395,14 @@ onMounted(() => {
 .chat-page--imessage {
   display: flex;
   flex-direction: column;
-  min-height: calc(100dvh - var(--app-header-h, 3.25rem));
-  max-height: calc(100dvh - var(--app-header-h, 3.25rem));
+  min-height: calc(100dvh - var(--app-header-h, 3.25rem) - 2.75rem);
+  max-height: calc(100dvh - var(--app-header-h, 3.25rem) - 2.75rem);
 }
 .chat-toolbar-sub {
   display: block;
   font-size: 0.62rem;
   opacity: 0.65;
   font-weight: 500;
-}
-.chat-toolbar--inbox {
-  padding-left: 0.75rem;
-}
-.chat-toolbar-title--inbox {
-  flex: 1;
-  text-align: left;
-  font-size: 1.35rem;
-  font-weight: 700;
 }
 .chat-empty {
   flex: 1;
@@ -419,11 +425,16 @@ onMounted(() => {
   margin: 0 0 1rem;
 }
 .chat-toolbar {
+  flex-shrink: 0;
   display: flex;
   align-items: center;
   gap: 0.35rem;
   padding: 0.45rem 0.5rem;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  background: var(--color-glass, rgba(22, 22, 29, 0.72));
+  backdrop-filter: blur(var(--blur-md, 12px));
+  -webkit-backdrop-filter: blur(var(--blur-md, 12px));
+  border-bottom: 1px solid var(--color-glass-border, rgba(255, 255, 255, 0.06));
+  min-height: 3.25rem;
 }
 .chat-toolbar-center {
   flex: 1;
@@ -431,24 +442,46 @@ onMounted(() => {
   text-align: center;
 }
 .chat-toolbar-title {
-  font-size: 0.95rem;
   margin: 0;
+  font-size: 1.0625rem;
+  font-weight: var(--weight-bold, 700);
+  line-height: 1.25;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 .chat-icon-btn {
-  width: 2.5rem;
-  height: 2.5rem;
-  border: none;
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.06);
-  color: inherit;
   flex-shrink: 0;
+  width: 2.75rem;
+  height: 2.75rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: var(--radius-full, 9999px);
+  background: transparent;
+  color: var(--color-text-secondary, #a8a8b8);
+  text-decoration: none;
+  cursor: pointer;
+}
+.chat-icon-btn svg {
+  width: 1.35rem;
+  height: 1.35rem;
+}
+.chat-icon-btn.is-spinning svg {
+  animation: chat-refresh-spin 0.85s linear infinite;
+}
+@keyframes chat-refresh-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+.chat-icon-btn:active {
+  background: var(--color-hover, rgba(255, 255, 255, 0.04));
+  color: var(--color-text-primary, #f4f4f8);
 }
 .chat-icon-btn.im-auto-on {
-  background: rgba(123, 77, 181, 0.35);
-  color: #e8d4ff;
+  color: #d8b4fe;
 }
 .im-inbox-scroll {
   flex: 1;

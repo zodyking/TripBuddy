@@ -1,5 +1,6 @@
 const THREAD_PREFIX = 'fedextool-bb-thread:'
 const CHATS_KEY = 'fedextool-bb-chats'
+const CONTACTS_KEY = 'fedextool-bb-contact-map'
 
 /**
  * @param {string} chatGuid
@@ -52,6 +53,29 @@ export function setCachedBbChats(chats) {
   if (typeof window === 'undefined' || !window.sessionStorage) return
   try {
     window.sessionStorage.setItem(CHATS_KEY, JSON.stringify(chats))
+  } catch {
+    /* ignore */
+  }
+}
+
+/** @returns {Record<string, string>} */
+export function getCachedBbContactMap() {
+  if (typeof window === 'undefined' || !window.sessionStorage) return {}
+  try {
+    const raw = window.sessionStorage.getItem(CONTACTS_KEY)
+    if (!raw) return {}
+    const data = JSON.parse(raw)
+    return data && typeof data === 'object' ? data : {}
+  } catch {
+    return {}
+  }
+}
+
+/** @param {Map<string, string>} map */
+export function setCachedBbContactMap(map) {
+  if (typeof window === 'undefined' || !window.sessionStorage) return
+  try {
+    window.sessionStorage.setItem(CONTACTS_KEY, JSON.stringify(Object.fromEntries(map.entries())))
   } catch {
     /* ignore */
   }
