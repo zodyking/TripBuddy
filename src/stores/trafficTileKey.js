@@ -254,9 +254,6 @@ export function setOpenrouterModel(model) {
 export async function hydrateOpenrouterApiKeyFromServer() {
   if (typeof window === 'undefined') return
   try {
-    const { sanitizeOpenrouterModel, OPENROUTER_DEFAULT_MODEL } = await import(
-      '../constants/openrouterModels.js'
-    )
     const r = await fetch('/api/settings/credentials?includeOpenrouterApiKey=1', {
       credentials: 'include',
     })

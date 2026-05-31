@@ -6,7 +6,6 @@ import { postWhatsAppDailyBriefing } from '../api.js'
 import {
   getWahaChatId,
   isWahaConfigured,
-  isWahaDailyBriefingEnabled,
 } from '../utils/wahaApi.js'
 import { enableSpeechAlertsForBriefing } from '../utils/briefingSpeech.js'
 import { getOpenrouterKeyEffective } from '../stores/trafficTileKey.js'
@@ -14,6 +13,10 @@ import {
   speakDailyBriefing,
   cancelDailyBriefingPlayback,
 } from '../utils/dailyBriefingPlayback.js'
+import {
+  getCachedBriefingIfValid,
+  writeBriefingCacheEntry,
+} from '../utils/dailyBriefingCache.js'
 
 const SESSION_KEY = 'tripbuddy_daily_briefing_offered_v1'
 const BRIEFING_MAX_ATTEMPTS = 3
@@ -97,7 +100,8 @@ function stopNarrator() {
 function playBriefing() {
   const text = briefingText.value.trim()
   if (!text) {
-    dismiss()
+    error.value = 'No briefing to play yet.'
+    modalOpen.value = true
     return
   }
   markOffered()
@@ -120,32 +124,37 @@ function playBriefing() {
   })
 }
 
+/** Monitored chat + OpenRouter key (local or server-hydrated). */
+export function isChatBriefingConfigured() {
+  return isWahaConfigured()
+}
+
 /**
- * @param {{ chatLabel?: string, force?: boolean, openOnError?: boolean, skipSessionGate?: boolean, skipThreadSync?: boolean, showModal?: boolean }} [opts]
+ * @param {{
+ *   chatLabel?: string,
+ *   lastMessageKey?: string,
+ *   skipThreadSync?: boolean,
+ *   openOnError?: boolean,
+ * }} [opts]
  */
-async function maybeOfferDailyBriefing(opts = {}) {
-  if (!opts.force && !opts.skipSessionGate && wasOfferedThisSession()) return
-  if (!opts.force && !isWahaDailyBriefingEnabled()) return
-  if (!isChatBriefingConfigured()) return
-
+async function fetchAndStoreBriefing(opts = {}) {
   const chatId = getWahaChatId()
-  if (!chatId) return
-
-  if (briefingText.value.trim() && !opts.force) {
-    if (opts.showModal !== false) modalOpen.value = true
-    return
+  if (!chatId) {
+    error.value = 'No chat configured.'
+    if (opts.openOnError) modalOpen.value = true
+    return false
   }
 
-  if (fetchInFlight) return
-  fetchInFlight = true
+  if (!String(getOpenrouterKeyEffective() || '').trim()) {
+    error.value = 'Add an OpenRouter API key in Settings → API.'
+    if (opts.openOnError) modalOpen.value = true
+    return false
+  }
 
-  if (opts.force || opts.openOnError) modalOpen.value = true
+  if (fetchInFlight) return false
+  fetchInFlight = true
   loading.value = true
   error.value = ''
-  if (opts.force) {
-    briefingText.value = ''
-    messageCount.value = 0
-  }
 
   try {
     const result = await fetchBriefingWithRetry({
@@ -156,60 +165,116 @@ async function maybeOfferDailyBriefing(opts = {}) {
     if (!result.ok) {
       error.value = typeof result.error === 'string' ? result.error : 'Briefing failed.'
       if (opts.openOnError) modalOpen.value = true
-      return
+      return false
     }
     if (result.empty || !result.briefing) {
-      if (opts.force || opts.openOnError) {
-        error.value = 'No messages in the last 2 days to summarize.'
-        modalOpen.value = true
-      } else {
-        markOffered()
-      }
-      return
+      error.value = 'No messages in the last 2 days to summarize.'
+      if (opts.openOnError) modalOpen.value = true
+      return false
     }
     briefingText.value = result.briefing
     messageCount.value = Number(result.messageCount) || 0
-    if (opts.autoPlay) {
-      playBriefing()
-      return
+    const lastKey = String(opts.lastMessageKey ?? '').trim()
+    if (lastKey) {
+      writeBriefingCacheEntry(chatId, {
+        briefing: result.briefing,
+        messageCount: messageCount.value,
+        lastMessageKey: lastKey,
+      })
     }
-    if (opts.showModal !== false) modalOpen.value = true
+    return true
   } catch (e) {
     error.value = e instanceof Error ? e.message : 'Briefing failed.'
     if (opts.openOnError) modalOpen.value = true
+    return false
   } finally {
     loading.value = false
     fetchInFlight = false
   }
 }
 
-async function offerBriefingNow(opts = {}) {
-  await maybeOfferDailyBriefing({ ...opts, force: true, openOnError: true })
-}
-
-/** OpenRouter key + monitored chat required (Settings). */
-export function isChatBriefingConfigured() {
-  return isWahaConfigured() && !!String(getOpenrouterKeyEffective() || '').trim()
-}
-
 /**
- * Chat page: unlock speech, generate briefing, show modal / narrator.
- * @param {{ chatLabel?: string }} [opts]
+ * Play cached briefing or fetch a new one, then speak.
+ * @param {{
+ *   chatLabel?: string,
+ *   lastMessageKey?: string,
+ *   skipThreadSync?: boolean,
+ *   openOnError?: boolean,
+ * }} [opts]
  */
-async function generateBriefingFromChat(opts = {}) {
+async function playOrGenerateBriefing(opts = {}) {
   if (!isChatBriefingConfigured()) {
-    error.value = 'Add an OpenRouter API key in Settings → API and choose a chat under WhatsApp.'
+    error.value = 'Connect WhatsApp in Settings and choose a chat.'
     modalOpen.value = true
     return
   }
+
   enableSpeechAlertsForBriefing()
-  await maybeOfferDailyBriefing({
-    force: true,
+
+  const chatId = getWahaChatId()
+  const lastKey = String(opts.lastMessageKey ?? '').trim()
+  if (chatId && lastKey) {
+    const cached = getCachedBriefingIfValid(chatId, lastKey)
+    if (cached) {
+      briefingText.value = cached.briefing
+      messageCount.value = cached.messageCount
+      error.value = ''
+      playBriefing()
+      return
+    }
+  }
+
+  const ok = await fetchAndStoreBriefing({
+    chatLabel: opts.chatLabel,
+    lastMessageKey: lastKey,
+    skipThreadSync: opts.skipThreadSync,
+    openOnError: opts.openOnError,
+  })
+  if (ok) playBriefing()
+}
+
+/**
+ * @param {{ chatLabel?: string, force?: boolean, openOnError?: boolean, skipSessionGate?: boolean }} [opts]
+ */
+async function maybeOfferDailyBriefing(opts = {}) {
+  if (!opts.force && !opts.skipSessionGate && wasOfferedThisSession()) return
+  if (!isChatBriefingConfigured()) return
+
+  const chatId = getWahaChatId()
+  if (!chatId) return
+
+  if (briefingText.value.trim() && !opts.force) {
+    if (opts.showModal !== false) modalOpen.value = true
+    return
+  }
+
+  if (opts.force || opts.openOnError) modalOpen.value = true
+
+  const ok = await fetchAndStoreBriefing({
+    chatLabel: opts.chatLabel,
+    openOnError: opts.openOnError,
+  })
+  if (ok && opts.showModal !== false) modalOpen.value = true
+}
+
+async function offerBriefingNow(opts = {}) {
+  await playOrGenerateBriefing({
+    ...opts,
     openOnError: true,
-    skipSessionGate: true,
     skipThreadSync: true,
+  })
+}
+
+/**
+ * Chat Brief button and double-tap use chat.
+ * @param {{ chatLabel?: string, lastMessageKey?: string }} [opts]
+ */
+async function generateBriefingFromChat(opts = {}) {
+  await playOrGenerateBriefing({
     chatLabel: opts.chatLabel || 'WhatsApp chat',
-    autoPlay: opts.autoPlay !== false,
+    lastMessageKey: opts.lastMessageKey,
+    skipThreadSync: true,
+    openOnError: true,
   })
 }
 
@@ -218,47 +283,10 @@ async function acceptBriefing(opts = {}) {
     playBriefing()
     return
   }
-
-  markOffered()
-  loading.value = true
-  error.value = ''
-  briefingText.value = ''
-
-  const chatId = getWahaChatId()
-  if (!chatId) {
-    loading.value = false
-    error.value = 'No chat configured.'
-    return
-  }
-
-  try {
-    const result = await fetchBriefingWithRetry({
-      chatId,
-      chatLabel: opts.chatLabel || 'WhatsApp chat',
-    })
-    loading.value = false
-    if (!result.ok) {
-      error.value = typeof result.error === 'string' ? result.error : 'Briefing failed.'
-      return
-    }
-    if (result.empty || !result.briefing) {
-      error.value = 'No messages in the last 2 days to summarize.'
-      return
-    }
-    briefingText.value = result.briefing
-    messageCount.value = Number(result.messageCount) || 0
-    modalOpen.value = false
-    narratorActive.value = true
-    narratorWordIndex.value = -1
-    speakDailyBriefing(result.briefing, {
-      onWordIndex: (i) => { narratorWordIndex.value = i },
-      onEnd: () => { narratorActive.value = false; narratorWordIndex.value = -1 },
-      onError: () => { narratorActive.value = false; narratorWordIndex.value = -1 },
-    })
-  } catch (e) {
-    loading.value = false
-    error.value = e instanceof Error ? e.message : 'Briefing failed.'
-  }
+  await playOrGenerateBriefing({
+    chatLabel: opts.chatLabel,
+    openOnError: true,
+  })
 }
 
 export function useDailyBriefing() {
@@ -273,6 +301,7 @@ export function useDailyBriefing() {
     maybeOfferDailyBriefing,
     offerBriefingNow,
     generateBriefingFromChat,
+    playOrGenerateBriefing,
     acceptBriefing,
     playBriefing,
     dismiss,

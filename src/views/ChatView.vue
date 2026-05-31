@@ -7,6 +7,8 @@ import { wahaPrefsHydrated, hydrateWahaPrefsFromServer } from '../utils/wahaPref
 import { hydrateOpenrouterApiKeyFromServer } from '../stores/trafficTileKey.js'
 import { formatChatDisplayName, chatAvatarInitial } from '../utils/chatDisplayName.js'
 import { createDoubleTapHandlers } from '../utils/doubleTap.js'
+import { computeThreadLastMessageKey } from '../utils/dailyBriefingCache.js'
+import { speakChatMessageAloud } from '../utils/chatMessageSpeech.js'
 
 const {
   generateBriefingFromChat,
@@ -46,13 +48,23 @@ const chatPickToast = ref('')
 const hasActiveChat = computed(() => !!activeChatId.value)
 const threadBusy = computed(() => loading.value || syncing.value)
 const briefingAvailable = computed(
-  () => wahaPrefsHydrated.value && isChatBriefingConfigured(),
+  () => wahaPrefsHydrated.value && configured.value && hasActiveChat.value,
 )
 const briefingBusy = computed(() => briefingLoading.value)
 
+function threadLastMessageKey() {
+  return computeThreadLastMessageKey(displayMessages.value)
+}
+
+function briefingChatLabel() {
+  return formatChatLabel(chatTitle.value) || chatTitle.value || 'WhatsApp chat'
+}
+
 function onGenerateBriefingTap() {
-  const label = formatChatLabel(chatTitle.value) || chatTitle.value || 'WhatsApp chat'
-  void generateBriefingFromChat({ chatLabel: label })
+  void generateBriefingFromChat({
+    chatLabel: briefingChatLabel(),
+    lastMessageKey: threadLastMessageKey(),
+  })
 }
 const showThreadLoader = computed(() => threadBusy.value)
 
@@ -162,6 +174,12 @@ function setMonitoredChat(chat) {
   setTimeout(() => {
     chatPickToast.value = ''
   }, 2800)
+  setTimeout(() => {
+    void generateBriefingFromChat({
+      chatLabel: names.briefingLabel || names.displayTitle,
+      lastMessageKey: threadLastMessageKey(),
+    })
+  }, 1800)
 }
 
 const chatListTap = createDoubleTapHandlers({
@@ -184,6 +202,31 @@ function onChatListDblClick(chat) {
   chatListTap.cancelPending()
   pendingChatTap.value = chat
   setMonitoredChat(chat)
+}
+
+/** @type {import('vue').Ref<typeof displayMessages.value[0] | null>} */
+const pendingMessageTap = ref(null)
+
+const messageBubbleTap = createDoubleTapHandlers({
+  onSingle() {
+    pendingMessageTap.value = null
+  },
+  onDouble() {
+    const msg = pendingMessageTap.value
+    if (msg) speakChatMessageAloud(msg)
+    pendingMessageTap.value = null
+  },
+})
+
+function onMessageBubbleTap(msg) {
+  pendingMessageTap.value = msg
+  messageBubbleTap.onTap(msg.id || String(msg.ts))
+}
+
+function onMessageBubbleDblClick(msg) {
+  messageBubbleTap.cancelPending()
+  pendingMessageTap.value = msg
+  speakChatMessageAloud(msg)
 }
 
 async function onSend() {
@@ -298,7 +341,7 @@ function retryMedia(msg) {
         </svg>
       </button>
     </header>
-    <p class="chat-list-hint">Double-tap a chat to use it for alerts and briefings.</p>
+    <p class="chat-list-hint">Double-tap a chat to use it and play today’s briefing. Double-tap a message to hear it.</p>
     <div class="chat-list-scroll">
       <p v-if="chatsLoading" class="chat-list-status">Loading chats…</p>
       <p v-else-if="!chats.length" class="chat-list-status">No chats found. Check WAHA connection in Settings.</p>
@@ -434,7 +477,16 @@ function retryMedia(msg) {
             class="chat-bubble-row"
             :class="item.msg.fromMe ? 'chat-bubble-row--out' : 'chat-bubble-row--in'"
           >
-            <div class="chat-bubble" :class="item.msg.fromMe ? 'chat-bubble--out' : 'chat-bubble--in'">
+            <div
+              class="chat-bubble tap"
+              :class="item.msg.fromMe ? 'chat-bubble--out' : 'chat-bubble--in'"
+              role="button"
+              tabindex="0"
+              :aria-label="item.msg.text ? `Message: ${item.msg.text.slice(0, 80)}` : 'Message attachment'"
+              @click="onMessageBubbleTap(item.msg)"
+              @dblclick.prevent.stop="onMessageBubbleDblClick(item.msg)"
+              @keydown.enter.prevent="onMessageBubbleDblClick(item.msg)"
+            >
               <button
                 v-if="!item.msg.fromMe && item.msg.isGroupChat && item.msg.senderName"
                 type="button"
