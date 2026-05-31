@@ -8,6 +8,12 @@ import {
   cleanChatText,
   formatTranscript,
 } from './waha-daily-briefing.mjs'
+import {
+  normalizeWahaHistoryMessage,
+  rowsToWahaMessages,
+  wahaHistoryMessageId,
+  wahaHistoryTimestampMs,
+} from './waha-chat-history-pg.mjs'
 
 test('formatTranscript produces clean timezone-aware chat text', () => {
   const transcript = formatTranscript(
@@ -101,4 +107,46 @@ test('openRouterComplete posts the documented OpenRouter chat completion payload
 
 test('cleanChatText strips control and zero-width characters', () => {
   assert.equal(cleanChatText(' A\u0000\u200B  B\nC '), 'A B C')
+})
+
+test('WAHA history normalization extracts stable ids and millisecond timestamps', () => {
+  const raw = {
+    id: { _serialized: 'msg-1' },
+    timestamp: 1_780_000_000,
+    fromMe: false,
+    body: 'Dispatch update',
+  }
+
+  assert.equal(wahaHistoryMessageId(raw), 'msg-1')
+  assert.equal(wahaHistoryTimestampMs(raw), 1_780_000_000_000)
+  assert.deepEqual(normalizeWahaHistoryMessage(raw), {
+    messageId: 'msg-1',
+    tsMs: 1_780_000_000_000,
+    fromMe: false,
+    body: 'Dispatch update',
+    raw,
+  })
+})
+
+test('WAHA history normalization creates fallback ids for id-less messages', () => {
+  const first = normalizeWahaHistoryMessage({
+    ts: 1_780_000_100_000,
+    fromMe: true,
+    text: 'Confirmed',
+  })
+  const second = normalizeWahaHistoryMessage({
+    ts: 1_780_000_100_000,
+    fromMe: true,
+    text: 'Confirmed',
+  })
+
+  assert.ok(first.messageId.startsWith('fallback:'))
+  assert.equal(first.messageId, second.messageId)
+  assert.equal(first.fromMe, true)
+  assert.equal(first.body, 'Confirmed')
+})
+
+test('rowsToWahaMessages restores raw WAHA payloads only', () => {
+  const raw = { id: 'a', timestamp: 1_780_000_000, body: 'Hi' }
+  assert.deepEqual(rowsToWahaMessages([{ raw }, { raw: null }, {}]), [raw])
 })

@@ -9,6 +9,7 @@ import fastifyStatic from '@fastify/static'
 import { API_PORT, UPLOADS_DIR, PERSISTENCE_DATA_ROOT, LOCAL_DIR } from './config.mjs'
 import { runDataMigrationOnStartup } from './data-migration.mjs'
 import { requirePostgresOrThrow } from './kv-pg.mjs'
+import { getDataAccountKey } from './scope-kv.mjs'
 import {
   ensureUserProfileTable,
   getTomtomApiKeyForAccount,
@@ -145,6 +146,7 @@ import {
   fetchOpenrouterModelsCatalog,
   filterOpenrouterModels,
 } from './openrouter-models.mjs'
+import { ensureWahaChatHistoryTable } from './waha-chat-history-pg.mjs'
 import { translateSenderNamesToEnglish } from './google-translate.mjs'
 import { needsEnglishSenderNameTranslation } from '../src/utils/senderNameLocale.js'
 import { readAssignment, writeAssignment } from './assignment-store.mjs'
@@ -530,7 +532,8 @@ app.get('/api/whatsapp/thread', async (req, reply) => {
   reply.header('Cache-Control', 'no-store')
   const chatId = String(req.query?.chatId ?? '').trim()
   if (!chatId) return reply.code(400).send({ ok: false, error: 'chatId required' })
-  const cache = await readThreadCache(chatId)
+  const accountKey = String(req.credentialAccountKey || getDataAccountKey() || '').trim()
+  const cache = await readThreadCache(chatId, accountKey)
   return {
     ok: true,
     cached: Boolean(cache?.messages?.length),
@@ -548,7 +551,7 @@ app.post('/api/whatsapp/thread/sync', async (req, reply) => {
   if (!chatId) return reply.code(400).send({ ok: false, error: 'chatId required' })
   const limit = Number(req.body?.limit) || 60
   const downloadMedia = req.body?.downloadMedia === true
-  const ak = req.credentialAccountKey
+  const ak = String(req.credentialAccountKey || getDataAccountKey() || '').trim()
   if (typeof ak === 'string' && ak.trim()) {
     try {
       const prefs = await getWahaPrefsForAccount(ak.trim())
@@ -569,9 +572,15 @@ app.post('/api/whatsapp/thread/sync', async (req, reply) => {
   } catch {
     /* optional */
   }
-  const r = await syncThreadCache(chatId, { limit, downloadMedia, contacts, lids })
+  const r = await syncThreadCache(chatId, {
+    limit,
+    downloadMedia,
+    contacts,
+    lids,
+    accountKey: ak,
+  })
   if (!r.ok) {
-    const stale = await readThreadCache(chatId)
+    const stale = await readThreadCache(chatId, ak)
     if (stale?.messages?.length) {
       return {
         ok: true,
@@ -2414,6 +2423,7 @@ if (process.env.NODE_ENV === 'production' && host === '127.0.0.1') {
 try {
   await requirePostgresOrThrow({ attempts: 12, delayMs: 2500 })
   await ensureUserProfileTable()
+  await ensureWahaChatHistoryTable()
 } catch (e) {
   console.error('[postgres]', (e && e.message) || e)
   process.exit(1)
