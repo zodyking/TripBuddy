@@ -142,23 +142,13 @@ import {
   getBlueBubblesPasswordForSettings,
   setBlueBubblesPassword,
   isBlueBubblesProxyMode,
-  getBlueBubblesChatGuid,
-  setBlueBubblesChatGuid,
-  isBlueBubblesTtsEnabled,
-  setBlueBubblesTtsEnabled,
-  isBlueBubblesAutoReplyEnabled,
-  setBlueBubblesAutoReplyEnabled,
-  getBlueBubblesContactRules,
   pingBlueBubblesViaServer,
-  listBlueBubblesChats,
-  sendBlueBubblesMessage,
 } from '../utils/blueBubblesApi.js'
 import {
   saveBlueBubblesPrefsToServer,
   registerBlueBubblesWebhookOnServer,
   applyBlueBubblesPrefsFromCredentials,
 } from '../utils/blueBubblesPrefs.js'
-import BlueBubblesContactRulesEditor from '../components/BlueBubblesContactRulesEditor.vue'
 import {
   appGeoLat,
   appGeoLng,
@@ -806,21 +796,13 @@ const wahaSendMsg = ref('')
 
 const wahaQrUrl = ref('')
 
-/** BlueBubbles / iMessage settings */
+/** BlueBubbles / iMessage settings (connection + webhook only) */
 const bbUrlDraft = ref(getBlueBubblesUrlForSettings())
 const bbPasswordDraft = ref(getBlueBubblesPasswordForSettings())
 const bbUsesServerProxy = computed(() => isBlueBubblesProxyMode())
-const bbChatGuidDraft = ref(getBlueBubblesChatGuid())
-const bbTtsOn = ref(isBlueBubblesTtsEnabled())
-const bbAutoReplyOn = ref(isBlueBubblesAutoReplyEnabled())
 const bbConnMsg = ref('')
-const bbChatMsg = ref('')
-const bbChatsLoading = ref(false)
-const bbChatsList = ref([])
-const bbSendText = ref('')
-const bbSendMsg = ref('')
+const bbSaveMsg = ref('')
 const bbWebhookUrl = ref('')
-const bbContactRulesDraft = ref(getBlueBubblesContactRules())
 
 async function testBlueBubblesConnection() {
   setBlueBubblesBaseUrl(bbUrlDraft.value)
@@ -842,48 +824,17 @@ async function testBlueBubblesConnection() {
 }
 
 async function saveBlueBubblesSettings() {
-  bbChatMsg.value = 'Saving…'
+  bbSaveMsg.value = 'Saving…'
   try {
     const res = await saveBlueBubblesPrefsToServer({
       serverUrl: bbUrlDraft.value,
       password: bbPasswordDraft.value,
-      chatGuid: bbChatGuidDraft.value,
-      ttsEnabled: bbTtsOn.value,
-      autoReplyEnabled: bbAutoReplyOn.value,
-      contactRules: bbContactRulesDraft.value,
     })
     if (res?.blueBubblesWebhookUrl) bbWebhookUrl.value = res.blueBubblesWebhookUrl
-    bbChatMsg.value = 'Saved — synced to your account.'
+    bbSaveMsg.value = 'Saved — synced to your account.'
   } catch (e) {
-    bbChatMsg.value = e instanceof Error ? e.message : String(e)
+    bbSaveMsg.value = e instanceof Error ? e.message : String(e)
   }
-}
-
-async function loadBlueBubblesChats() {
-  setBlueBubblesBaseUrl(bbUrlDraft.value)
-  setBlueBubblesPassword(bbPasswordDraft.value)
-  bbChatsLoading.value = true
-  bbChatMsg.value = ''
-  try {
-    const r = await listBlueBubblesChats({ limit: 80 })
-    if (r.ok && Array.isArray(r.body)) {
-      bbChatsList.value = r.body
-      bbChatMsg.value = `${bbChatsList.value.length} conversation(s). Tap one to select.`
-    } else {
-      bbChatMsg.value = r.error || `Failed (${r.status}). Check connection first.`
-    }
-  } catch (e) {
-    bbChatMsg.value = e instanceof Error ? e.message : String(e)
-  } finally {
-    bbChatsLoading.value = false
-  }
-}
-
-/** @param {{ guid?: string, chatIdentifier?: string, displayName?: string }} chat */
-function selectBlueBubblesChat(chat) {
-  const guid = String(chat?.guid ?? chat?.chatIdentifier ?? '').trim()
-  if (!guid) return
-  bbChatGuidDraft.value = guid
 }
 
 async function registerBbWebhook() {
@@ -902,22 +853,6 @@ async function registerBbWebhook() {
     }
   } catch (e) {
     bbConnMsg.value = e instanceof Error ? e.message : String(e)
-  }
-}
-
-async function sendBlueBubblesTestMessage() {
-  const text = bbSendText.value.trim()
-  const guid = bbChatGuidDraft.value.trim()
-  if (!text || !guid) return
-  setBlueBubblesBaseUrl(bbUrlDraft.value)
-  setBlueBubblesPassword(bbPasswordDraft.value)
-  bbSendMsg.value = 'Sending…'
-  try {
-    const r = await sendBlueBubblesMessage(guid, text)
-    bbSendMsg.value = r.ok ? 'Sent.' : r.error || `Failed (${r.status})`
-    if (r.ok) bbSendText.value = ''
-  } catch (e) {
-    bbSendMsg.value = e instanceof Error ? e.message : String(e)
   }
 }
 
@@ -1224,10 +1159,6 @@ async function loadCredentials() {
     wahaChatIdDraft.value = getWahaChatId()
     bbUrlDraft.value = getBlueBubblesUrlForSettings()
     bbPasswordDraft.value = getBlueBubblesPasswordForSettings()
-    bbChatGuidDraft.value = getBlueBubblesChatGuid()
-    bbTtsOn.value = isBlueBubblesTtsEnabled()
-    bbAutoReplyOn.value = isBlueBubblesAutoReplyEnabled()
-    bbContactRulesDraft.value = getBlueBubblesContactRules()
     if (typeof credMeta.value?.blueBubblesWebhookToken === 'string' && credMeta.value.blueBubblesWebhookToken) {
       const origin = typeof window !== 'undefined' ? window.location.origin : ''
       bbWebhookUrl.value = `${origin}/api/bluebubbles/webhook/${credMeta.value.blueBubblesWebhookToken}`
@@ -3011,9 +2942,8 @@ onUnmounted(() => {
         <p class="cred-hint">
           Connect to your
           <a href="https://docs.bluebubbles.app/server/developer-guides/rest-api-and-webhooks" target="_blank" rel="noopener noreferrer" class="ext-link">BlueBubbles</a>
-          server for Open Bubbles / iMessage. Set your server URL and password, pick a conversation,
-          configure per-contact automation (TTS + OpenRouter replies), and register the webhook for
-          real-time incoming messages.
+          server for Open Bubbles / iMessage. All conversations appear in Chats → iMessage.
+          Per-contact speech and auto-reply settings are configured inside each conversation.
         </p>
 
         <h4 class="api-sub-heading" style="margin-top:0;padding-top:0;border-top:none">Connection</h4>
@@ -3045,83 +2975,19 @@ onUnmounted(() => {
         />
         <div class="btn-row">
           <button type="button" class="btn tap" @click="testBlueBubblesConnection">Check connection</button>
+          <button type="button" class="btn primary tap" @click="saveBlueBubblesSettings">Save settings</button>
           <button type="button" class="btn tap" @click="registerBbWebhook">Register webhook</button>
         </div>
         <p v-if="bbConnMsg" class="cred-msg">{{ bbConnMsg }}</p>
+        <p v-if="bbSaveMsg" class="cred-msg">{{ bbSaveMsg }}</p>
         <p v-if="bbWebhookUrl" class="cred-hint">
           Webhook URL (add in BlueBubbles → API &amp; Webhooks if auto-register fails):<br />
           <code>{{ bbWebhookUrl }}</code>
         </p>
-
-        <h4 class="api-sub-heading">Conversation</h4>
-        <label class="lbl" for="bb-chat-guid">Chat GUID</label>
-        <input
-          id="bb-chat-guid"
-          v-model="bbChatGuidDraft"
-          class="inp tap"
-          type="text"
-          autocomplete="off"
-          placeholder="any;-;+15551234567"
-        />
-        <div class="btn-row">
-          <button type="button" class="btn primary tap" @click="saveBlueBubblesSettings">Save settings</button>
-          <button type="button" class="btn tap" :disabled="bbChatsLoading" @click="loadBlueBubblesChats">
-            {{ bbChatsLoading ? 'Loading…' : 'List chats' }}
-          </button>
-        </div>
-        <p v-if="bbChatMsg" class="cred-msg">{{ bbChatMsg }}</p>
-        <div v-if="bbChatsList.length" class="waha-chats-list">
-          <button
-            v-for="c in bbChatsList"
-            :key="c.guid || c.chatIdentifier"
-            type="button"
-            class="waha-chat-item tap"
-            :class="{ 'is-active': (c.guid || c.chatIdentifier) === bbChatGuidDraft }"
-            @click="selectBlueBubblesChat(c)"
-          >
-            <span class="waha-chat-name">{{ c.displayName || c.chatIdentifier || c.guid }}</span>
-            <span class="waha-chat-meta">
-              <span class="waha-chat-id">{{ c.guid }}</span>
-            </span>
-          </button>
-        </div>
-
-        <h4 class="api-sub-heading">Automation</h4>
-        <div class="waha-toggle-row">
-          <label class="toggle-switch">
-            <input type="checkbox" :checked="bbTtsOn" @change="bbTtsOn = $event.target.checked" />
-            <span class="toggle-slider"></span>
-          </label>
-          <span class="audio-row-label">Read new messages aloud (global default)</span>
-        </div>
-        <div class="waha-toggle-row">
-          <label class="toggle-switch">
-            <input type="checkbox" :checked="bbAutoReplyOn" @change="bbAutoReplyOn = $event.target.checked" />
-            <span class="toggle-slider"></span>
-          </label>
-          <span class="audio-row-label">Enable OpenRouter auto-replies (per contact rules below)</span>
-        </div>
         <p class="cred-hint">
-          Requires OpenRouter API key in Settings → General → API. Auto-replies run on the server via
-          webhook (when Mac is online) and when the Chats page is open (polling).
+          OpenRouter auto-replies require an API key in Settings → General → API. Enable speech or
+          auto-reply per contact from the ⚡ button inside each iMessage conversation.
         </p>
-
-        <h4 class="api-sub-heading">Per-contact rules</h4>
-        <BlueBubblesContactRulesEditor v-model:rules="bbContactRulesDraft" />
-
-        <div class="waha-send-row">
-          <input
-            v-model="bbSendText"
-            class="inp tap waha-send-input"
-            type="text"
-            placeholder="Type a test iMessage…"
-            @keydown.enter.prevent="sendBlueBubblesTestMessage"
-          />
-          <button type="button" class="btn primary tap" :disabled="!bbSendText.trim()" @click="sendBlueBubblesTestMessage">
-            Send
-          </button>
-        </div>
-        <p v-if="bbSendMsg" class="cred-msg">{{ bbSendMsg }}</p>
       </SettingsSection>
     </main>
 

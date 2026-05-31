@@ -1,21 +1,19 @@
 /**
- * Client-side iMessage automation helpers (TTS + auto-reply trigger).
+ * Client-side iMessage automation (per-contact rules only).
  */
+import { isBlueBubblesConfigured } from './blueBubblesApi.js'
 import {
-  getBlueBubblesContactRules,
-  isBlueBubblesAutoReplyEnabled,
-  isBlueBubblesConfigured,
-  isBlueBubblesTtsEnabled,
-  getBlueBubblesChatGuid,
-} from './blueBubblesApi.js'
-import { matchContactRule, shouldTtsForContact } from '../constants/blueBubblesContactRules.js'
+  findContactRule,
+  contactTtsEnabled,
+  contactAutoReplyEnabled,
+} from './blueBubblesContactRulesStore.js'
 import { announceIMessageChatMessage } from './imessageChatSpeech.js'
 import { postIMessageAutoReply } from '../api.js'
 import { pushLiveLog } from '../stores/liveLogStore.js'
 
 /** @type {Set<string>} */
 const announcedIds = new Set()
-const ANNOUNCED_CAP = 400
+const ANNOUNCED_CAP = 800
 
 /** @type {Set<string>} */
 const autoReplyQueued = new Set()
@@ -35,19 +33,15 @@ export function handleIncomingIMessageAutomation(msg) {
   if (!msg?.id || msg.fromMe) return
   if (!isBlueBubblesConfigured()) return
 
-  const rules = getBlueBubblesContactRules()
-  const ctx = { handle: msg.senderHandle, chatGuid: msg.chatGuid || getBlueBubblesChatGuid() }
-  const rule = matchContactRule(rules, ctx)
+  const ctx = { handle: msg.senderHandle, chatGuid: msg.chatGuid }
+  const rule = findContactRule(ctx)
 
-  const globalTts = isBlueBubblesTtsEnabled()
-  const ttsOn = shouldTtsForContact(rule, globalTts)
-  if (ttsOn && !announcedIds.has(msg.id)) {
+  if (contactTtsEnabled(rule) && !announcedIds.has(msg.id)) {
     announceIMessageChatMessage(msg, { rule })
     markAnnounced(msg.id)
   }
 
-  if (!isBlueBubblesAutoReplyEnabled()) return
-  if (!rule?.autoReplyEnabled) return
+  if (!contactAutoReplyEnabled(rule)) return
   if (autoReplyQueued.has(msg.id)) return
   autoReplyQueued.add(msg.id)
 
@@ -55,7 +49,7 @@ export function handleIncomingIMessageAutomation(msg) {
     messageId: msg.id,
     text: msg.text,
     handle: msg.senderHandle,
-    chatGuid: msg.chatGuid || getBlueBubblesChatGuid(),
+    chatGuid: msg.chatGuid,
     senderLabel: msg.senderName,
   })
     .then((r) => {
@@ -74,7 +68,7 @@ export function handleIncomingIMessageAutomation(msg) {
 }
 
 /**
- * @param {Array<{ id: string, fromMe?: boolean }>} newMessages
+ * @param {Array<{ id: string, fromMe?: boolean, ts?: number }>} newMessages
  * @param {{ skipIfNoPriorMessages?: boolean, hadPriorMessages?: boolean }} [opts]
  */
 export function handleNewIncomingIMessageBatch(newMessages, opts = {}) {

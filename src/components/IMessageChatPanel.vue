@@ -9,17 +9,20 @@ import {
 import { formatChatDisplayName, chatAvatarInitial } from '../utils/chatDisplayName.js'
 import { createDoubleTapHandlers } from '../utils/doubleTap.js'
 import { speakIMessageAloud } from '../utils/imessageChatSpeech.js'
+import { findContactRule, contactTtsEnabled, contactAutoReplyEnabled } from '../utils/blueBubblesContactRulesStore.js'
 import ChatMessageText from '../components/ChatMessageText.vue'
+import IMessageContactAutomationSheet from './IMessageContactAutomationSheet.vue'
 
 const scrollEl = ref(/** @type {HTMLElement | null} */ (null))
 const draft = ref('')
-const showChatList = ref(false)
+const showAutomation = ref(false)
 
 const {
   configured,
+  inConversation,
   activeChatId,
   chatTitle,
-  chats,
+  sortedChats,
   chatsLoading,
   displayMessages,
   loading,
@@ -33,13 +36,30 @@ const {
   loadChats,
   refreshMessages,
   sendText,
-  selectChat,
+  openConversation,
+  closeConversation,
   formatChatLabel,
+  contactHandleForChat,
 } = useBlueBubblesMessenger({ scrollEl, poll: true })
 
-const hasActiveChat = computed(() => !!activeChatId.value)
 const threadBusy = computed(() => loading.value || syncing.value)
 const showThreadLoader = computed(() => threadBusy.value)
+
+const activeChat = computed(() =>
+  sortedChats.value.find((c) => c.id === activeChatId.value) ?? null,
+)
+
+const activeContactHandle = computed(() => contactHandleForChat(activeChat.value))
+
+const activeAutomationRule = computed(() =>
+  findContactRule({ chatGuid: activeChatId.value, handle: activeContactHandle.value }),
+)
+
+const automationActive = computed(
+  () =>
+    contactTtsEnabled(activeAutomationRule.value) ||
+    contactAutoReplyEnabled(activeAutomationRule.value),
+)
 
 const loaderLabel = computed(() => {
   if (syncStatusLabel.value) return syncStatusLabel.value
@@ -57,6 +77,31 @@ function fmtTime(ts) {
   if (!ts) return ''
   try {
     return new Date(ts).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })
+  } catch {
+    return ''
+  }
+}
+
+function fmtInboxTime(ts) {
+  if (!ts) return ''
+  try {
+    const d = new Date(ts)
+    const now = new Date()
+    const sameDay =
+      d.getFullYear() === now.getFullYear() &&
+      d.getMonth() === now.getMonth() &&
+      d.getDate() === now.getDate()
+    if (sameDay) {
+      return d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })
+    }
+    const yesterday = new Date(now)
+    yesterday.setDate(yesterday.getDate() - 1)
+    const isYesterday =
+      d.getFullYear() === yesterday.getFullYear() &&
+      d.getMonth() === yesterday.getMonth() &&
+      d.getDate() === yesterday.getDate()
+    if (isYesterday) return 'Yesterday'
+    return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
   } catch {
     return ''
   }
@@ -95,22 +140,17 @@ const threadItems = computed(() => {
   return items
 })
 
-async function openChatList() {
-  showChatList.value = true
-  await loadChats()
-}
-
-const chatsForList = computed(() =>
-  chats.value.map((c) => {
+const inboxRows = computed(() =>
+  sortedChats.value.map((c) => {
     const names = formatChatDisplayName(c.name || c.id)
-    return { ...c, ...names }
+    const preview = c.lastMessageText
+      ? c.lastMessageText.length > 72
+        ? `${c.lastMessageText.slice(0, 72)}…`
+        : c.lastMessageText
+      : ''
+    return { ...c, ...names, preview, inboxTime: fmtInboxTime(c.lastMessageTs) }
   }),
 )
-
-function pickChat(chat) {
-  selectChat(chat)
-  showChatList.value = false
-}
 
 /** @type {import('vue').Ref<{ id: string, name: string } | null>} */
 const pendingChatTap = ref(null)
@@ -118,15 +158,15 @@ const pendingChatTap = ref(null)
 const chatListTap = createDoubleTapHandlers({
   onSingle() {
     const c = pendingChatTap.value
-    if (c) pickChat(c)
+    if (c) openConversation(c)
   },
   onDouble() {
     const c = pendingChatTap.value
-    if (c) pickChat(c)
+    if (c) openConversation(c)
   },
 })
 
-function onChatListTap(chat) {
+function onInboxTap(chat) {
   pendingChatTap.value = chat
   chatListTap.onTap(chat.id)
 }
@@ -148,6 +188,10 @@ function onComposeKeydown(e) {
     e.preventDefault()
     void onSend()
   }
+}
+
+function onBackToInbox() {
+  closeConversation()
 }
 
 watch(
@@ -175,7 +219,7 @@ onMounted(() => {
       <div class="chat-empty-card">
         <p class="chat-empty-title">iMessage not set up</p>
         <p class="chat-empty-hint">
-          Connect BlueBubbles in Settings → iMessage, then choose a conversation to monitor.
+          Connect BlueBubbles in Settings → iMessage to view all your conversations here.
         </p>
         <RouterLink class="btn primary tap chat-empty-btn" :to="{ path: '/settings', query: { tab: 'imessage' } }">
           Open iMessage settings
@@ -183,50 +227,19 @@ onMounted(() => {
       </div>
     </div>
 
-    <div v-else-if="showChatList" class="chat-list-screen" role="dialog" aria-label="iMessage chats">
-      <header class="chat-toolbar">
-        <button type="button" class="chat-icon-btn tap" aria-label="Back" @click="showChatList = false">
-          ←
-        </button>
-        <h1 class="chat-toolbar-title">iMessage chats</h1>
-        <button type="button" class="chat-icon-btn tap" :disabled="chatsLoading" @click="loadChats">↻</button>
-      </header>
-      <div class="chat-list-scroll">
-        <p v-if="chatsLoading" class="chat-list-status">Loading…</p>
-        <button
-          v-for="c in chatsForList"
-          :key="c.id"
-          type="button"
-          class="chat-list-item tap"
-          :class="{ 'is-active': c.id === activeChatId }"
-          @click="onChatListTap(c)"
-        >
-          <span class="chat-list-avatar" aria-hidden="true">{{ chatAvatarInitial(c.name) }}</span>
-          <span class="chat-list-body">
-            <span class="chat-list-name">{{ c.displayTitle || c.name }}</span>
-            <span class="chat-list-meta">
-              <span class="chat-list-kind">{{ chatKindLabel(c.kind) }}</span>
-            </span>
-          </span>
-        </button>
-      </div>
-    </div>
-
-    <template v-else>
-      <header class="chat-toolbar">
+    <!-- Inbox -->
+    <template v-else-if="!inConversation">
+      <header class="chat-toolbar chat-toolbar--inbox">
+        <h1 class="chat-toolbar-title chat-toolbar-title--inbox">Messages</h1>
         <button
           type="button"
           class="chat-icon-btn tap"
-          :class="{ 'is-spinning': loading || syncing }"
-          aria-label="Refresh"
-          :disabled="loading || syncing"
-          @click="refreshMessages"
+          :class="{ 'is-spinning': chatsLoading }"
+          aria-label="Refresh conversations"
+          :disabled="chatsLoading"
+          @click="loadChats"
         >
           ↻
-        </button>
-        <button type="button" class="chat-toolbar-center tap chat-title-btn" @click="openChatList">
-          <h1 class="chat-toolbar-title">{{ chatTitle || 'iMessage' }}</h1>
-          <span class="chat-toolbar-sub">Open Bubbles</span>
         </button>
         <RouterLink
           class="chat-icon-btn tap"
@@ -237,71 +250,128 @@ onMounted(() => {
         </RouterLink>
       </header>
 
-      <div v-if="!hasActiveChat" class="chat-pick-prompt">
-        <p>No conversation selected.</p>
-        <button type="button" class="btn primary tap" @click="openChatList">Pick a chat</button>
+      <div class="im-inbox-scroll">
+        <p v-if="chatsLoading && !inboxRows.length" class="chat-list-status">Loading conversations…</p>
+        <p v-else-if="!inboxRows.length" class="chat-list-status">No conversations found.</p>
+        <button
+          v-for="c in inboxRows"
+          :key="c.id"
+          type="button"
+          class="im-inbox-row tap"
+          @click="onInboxTap(c)"
+        >
+          <span class="chat-list-avatar" aria-hidden="true">{{ chatAvatarInitial(c.name) }}</span>
+          <span class="im-inbox-body">
+            <span class="im-inbox-top">
+              <span class="chat-list-name">{{ c.displayTitle || c.name }}</span>
+              <span v-if="c.inboxTime" class="im-inbox-time">{{ c.inboxTime }}</span>
+            </span>
+            <span class="im-inbox-bottom">
+              <span v-if="c.preview" class="im-inbox-preview">{{ c.preview }}</span>
+              <span v-else class="im-inbox-preview im-inbox-preview--muted">{{ chatKindLabel(c.kind) }}</span>
+            </span>
+          </span>
+        </button>
+      </div>
+    </template>
+
+    <!-- Conversation thread -->
+    <template v-else>
+      <header class="chat-toolbar">
+        <button type="button" class="chat-icon-btn tap" aria-label="Back to inbox" @click="onBackToInbox">
+          ←
+        </button>
+        <div class="chat-toolbar-center">
+          <h1 class="chat-toolbar-title">{{ chatTitle || 'iMessage' }}</h1>
+          <span class="chat-toolbar-sub">{{ chatKindLabel(activeChat?.kind) }}</span>
+        </div>
+        <button
+          type="button"
+          class="chat-icon-btn tap"
+          :class="{ 'im-auto-on': automationActive }"
+          aria-label="Conversation automation"
+          @click="showAutomation = true"
+        >
+          ⚡
+        </button>
+        <button
+          type="button"
+          class="chat-icon-btn tap"
+          :class="{ 'is-spinning': loading || syncing }"
+          aria-label="Refresh"
+          :disabled="loading || syncing"
+          @click="refreshMessages"
+        >
+          ↻
+        </button>
+      </header>
+
+      <div class="chat-thread-wrap">
+        <div
+          v-if="showThreadLoader && !displayMessages.length"
+          class="chat-thread-loader"
+          role="status"
+        >
+          <p class="chat-thread-loader-label">{{ loaderLabel }}</p>
+        </div>
+        <div ref="scrollEl" class="chat-thread" role="log" aria-live="polite">
+          <p v-if="syncWarning && displayMessages.length" class="chat-thread-sync-hint">{{ syncWarning }}</p>
+          <p v-if="error && !displayMessages.length" class="chat-thread-status-text">{{ error }}</p>
+          <template v-for="item in threadItems" :key="item.type === 'day' ? `d-${item.key}` : item.msg.id">
+            <p v-if="item.type === 'day'" class="chat-day-divider">{{ item.label }}</p>
+            <div
+              v-else
+              class="chat-bubble-row"
+              :class="item.msg.fromMe ? 'chat-bubble-row--out' : 'chat-bubble-row--in'"
+            >
+              <div
+                class="chat-bubble"
+                :class="item.msg.fromMe ? 'chat-bubble--out' : 'chat-bubble--in'"
+                @dblclick.prevent.stop="onMessageBubbleDblClick(item.msg)"
+              >
+                <p v-if="!item.msg.fromMe && item.msg.senderName" class="chat-bubble-sender">
+                  {{ formatChatLabel(item.msg.senderName) }}
+                </p>
+                <p v-if="item.msg.hasMedia && !item.msg.text" class="chat-bubble-text chat-bubble-text--muted">
+                  {{ item.msg.media?.count > 1 ? `${item.msg.media.count} attachments` : 'Attachment' }}
+                </p>
+                <p v-if="item.msg.text" class="chat-bubble-text">
+                  <ChatMessageText :text="item.msg.text" />
+                </p>
+                <time class="chat-bubble-time">{{ fmtTime(item.msg.ts) }}</time>
+              </div>
+            </div>
+          </template>
+        </div>
       </div>
 
-      <template v-else>
-        <div class="chat-thread-wrap">
-          <div
-            v-if="showThreadLoader && !displayMessages.length"
-            class="chat-thread-loader"
-            role="status"
-          >
-            <p class="chat-thread-loader-label">{{ loaderLabel }}</p>
-          </div>
-          <div ref="scrollEl" class="chat-thread" role="log" aria-live="polite">
-            <p v-if="syncWarning && displayMessages.length" class="chat-thread-sync-hint">{{ syncWarning }}</p>
-            <p v-if="error && !displayMessages.length" class="chat-thread-status-text">{{ error }}</p>
-            <template v-for="item in threadItems" :key="item.type === 'day' ? `d-${item.key}` : item.msg.id">
-              <p v-if="item.type === 'day'" class="chat-day-divider">{{ item.label }}</p>
-              <div
-                v-else
-                class="chat-bubble-row"
-                :class="item.msg.fromMe ? 'chat-bubble-row--out' : 'chat-bubble-row--in'"
-              >
-                <div
-                  class="chat-bubble"
-                  :class="item.msg.fromMe ? 'chat-bubble--out' : 'chat-bubble--in'"
-                  @dblclick.prevent.stop="onMessageBubbleDblClick(item.msg)"
-                >
-                  <p v-if="!item.msg.fromMe && item.msg.senderName" class="chat-bubble-sender">
-                    {{ formatChatLabel(item.msg.senderName) }}
-                  </p>
-                  <p v-if="item.msg.hasMedia && !item.msg.text" class="chat-bubble-text chat-bubble-text--muted">
-                    {{ item.msg.media?.count > 1 ? `${item.msg.media.count} attachments` : 'Attachment' }}
-                  </p>
-                  <p v-if="item.msg.text" class="chat-bubble-text">
-                    <ChatMessageText :text="item.msg.text" />
-                  </p>
-                  <time class="chat-bubble-time">{{ fmtTime(item.msg.ts) }}</time>
-                </div>
-              </div>
-            </template>
-          </div>
-        </div>
+      <footer class="chat-compose">
+        <textarea
+          v-model="draft"
+          class="chat-compose-input tap"
+          rows="1"
+          placeholder="iMessage…"
+          :disabled="sending"
+          @keydown="onComposeKeydown"
+        />
+        <button
+          type="button"
+          class="chat-compose-send tap"
+          :disabled="!draft.trim() || sending"
+          aria-label="Send"
+          @click="onSend"
+        >
+          Send
+        </button>
+      </footer>
 
-        <footer class="chat-compose">
-          <textarea
-            v-model="draft"
-            class="chat-compose-input tap"
-            rows="1"
-            placeholder="iMessage…"
-            :disabled="sending"
-            @keydown="onComposeKeydown"
-          />
-          <button
-            type="button"
-            class="chat-compose-send tap"
-            :disabled="!draft.trim() || sending"
-            aria-label="Send"
-            @click="onSend"
-          >
-            Send
-          </button>
-        </footer>
-      </template>
+      <IMessageContactAutomationSheet
+        :open="showAutomation"
+        :chat-guid="activeChatId"
+        :handle="activeContactHandle"
+        :contact-label="chatTitle"
+        @close="showAutomation = false"
+      />
     </template>
   </div>
 </template>
@@ -313,22 +383,22 @@ onMounted(() => {
   min-height: calc(100dvh - var(--app-header-h, 3.25rem));
   max-height: calc(100dvh - var(--app-header-h, 3.25rem));
 }
-.chat-title-btn {
-  background: none;
-  border: none;
-  color: inherit;
-  text-align: center;
-  flex: 1;
-  min-width: 0;
-}
 .chat-toolbar-sub {
   display: block;
   font-size: 0.62rem;
   opacity: 0.65;
   font-weight: 500;
 }
-.chat-empty,
-.chat-pick-prompt {
+.chat-toolbar--inbox {
+  padding-left: 0.75rem;
+}
+.chat-toolbar-title--inbox {
+  flex: 1;
+  text-align: left;
+  font-size: 1.35rem;
+  font-weight: 700;
+}
+.chat-empty {
   flex: 1;
   display: flex;
   align-items: center;
@@ -358,6 +428,7 @@ onMounted(() => {
 .chat-toolbar-center {
   flex: 1;
   min-width: 0;
+  text-align: center;
 }
 .chat-toolbar-title {
   font-size: 0.95rem;
@@ -374,6 +445,82 @@ onMounted(() => {
   background: rgba(255, 255, 255, 0.06);
   color: inherit;
   flex-shrink: 0;
+}
+.chat-icon-btn.im-auto-on {
+  background: rgba(123, 77, 181, 0.35);
+  color: #e8d4ff;
+}
+.im-inbox-scroll {
+  flex: 1;
+  overflow-y: auto;
+  min-height: 0;
+}
+.im-inbox-row {
+  display: flex;
+  gap: 0.65rem;
+  width: 100%;
+  text-align: left;
+  padding: 0.7rem 0.75rem;
+  border: none;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  background: transparent;
+  color: inherit;
+}
+.im-inbox-body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+.im-inbox-top {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+.im-inbox-bottom {
+  min-width: 0;
+}
+.im-inbox-time {
+  font-size: 0.62rem;
+  opacity: 0.55;
+  flex-shrink: 0;
+}
+.im-inbox-preview {
+  display: block;
+  font-size: 0.72rem;
+  opacity: 0.65;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.im-inbox-preview--muted {
+  font-style: italic;
+}
+.chat-list-avatar {
+  width: 2.5rem;
+  height: 2.5rem;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.1);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+.chat-list-name {
+  font-weight: 600;
+  font-size: 0.88rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.chat-list-status {
+  text-align: center;
+  font-size: 0.75rem;
+  opacity: 0.7;
+  padding: 1.5rem 1rem;
 }
 .chat-thread-wrap {
   flex: 1;
@@ -463,48 +610,6 @@ onMounted(() => {
   background: var(--color-accent-purple, #7b4db5);
   color: #fff;
   font-weight: 600;
-}
-.chat-list-screen {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-}
-.chat-list-scroll {
-  flex: 1;
-  overflow-y: auto;
-}
-.chat-list-item {
-  display: flex;
-  gap: 0.65rem;
-  width: 100%;
-  text-align: left;
-  padding: 0.65rem 0.75rem;
-  border: none;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
-  background: transparent;
-  color: inherit;
-}
-.chat-list-item.is-active {
-  background: rgba(123, 77, 181, 0.15);
-}
-.chat-list-avatar {
-  width: 2.25rem;
-  height: 2.25rem;
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.1);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-weight: 700;
-}
-.chat-list-name {
-  font-weight: 600;
-  font-size: 0.85rem;
-}
-.chat-list-meta {
-  font-size: 0.65rem;
-  opacity: 0.65;
 }
 .chat-thread-loader-label,
 .chat-thread-sync-hint,

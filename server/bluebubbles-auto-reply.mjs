@@ -190,15 +190,9 @@ export async function handleBlueBubblesAutoReply(accountKey, msg, opts = {}) {
   if (hasResponded(ak, msg.messageId)) return { replied: false }
 
   const prefs = await getBlueBubblesPrefsForAccount(ak)
-  if (!prefs.autoReplyEnabled) return { replied: false }
-
   const rules = normalizeContactRules(prefs.contactRules)
   const rule = matchContactRule(rules, { handle: msg.handle, chatGuid: msg.chatGuid })
   if (!rule || !rule.autoReplyEnabled) return { replied: false }
-
-  if (rule.onlyWhenMonitoredChat && prefs.chatGuid && msg.chatGuid !== prefs.chatGuid) {
-    return { replied: false }
-  }
 
   const text = String(msg.text ?? '').trim()
   if (!text) return { replied: false }

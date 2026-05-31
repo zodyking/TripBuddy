@@ -47,7 +47,7 @@ export function createDefaultContactRule(overrides = {}) {
     quietHoursEnd: String(overrides.quietHoursEnd ?? '').trim(),
     cooldownSeconds: Math.max(0, Number(overrides.cooldownSeconds) || 15),
     maxRepliesPerHour: Math.max(0, Number(overrides.maxRepliesPerHour) || 20),
-    onlyWhenMonitoredChat: overrides.onlyWhenMonitoredChat !== false,
+    onlyWhenMonitoredChat: false,
   }
 }
 
@@ -88,8 +88,6 @@ export function matchContactRule(rules, ctx) {
  * @param {ContactRule | null} rule
  * @param {boolean} globalTts
  */
-export function shouldTtsForContact(rule, globalTts) {
-  if (rule?.ttsEnabled === true) return true
-  if (rule?.ttsEnabled === false) return false
-  return globalTts
+export function shouldTtsForContact(rule) {
+  return rule?.ttsEnabled === true
 }

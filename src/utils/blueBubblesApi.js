@@ -130,10 +130,13 @@ export function setBlueBubblesContactRules(rules) {
   window.localStorage.setItem(BB_CONTACT_RULES_KEY, JSON.stringify(list))
 }
 
+export function isBlueBubblesConnected() {
+  return !!(getBlueBubblesRemoteUrl() && getBlueBubblesPassword())
+}
+
+/** True when BlueBubbles server URL + password are configured. */
 export function isBlueBubblesConfigured() {
-  const hasChat = !!getBlueBubblesChatGuid()
-  const hasConnection = !!(getBlueBubblesRemoteUrl() || getBlueBubblesPasswordForSettings())
-  return hasChat && hasConnection
+  return isBlueBubblesConnected()
 }
 
 function bbHeaders() {
@@ -234,6 +237,14 @@ export async function listBlueBubblesChats(opts = {}) {
   return blueBubblesRequest('/api/v1/chat/query', {
     method: 'POST',
     body: { limit, offset: 0, with: ['lastMessage'] },
+  })
+}
+
+/** Recent messages across all chats (for inbox polling + automation). */
+export async function fetchBlueBubblesRecentMessages(opts = {}) {
+  const limit = Math.min(100, Math.max(1, Number(opts.limit) || 30))
+  return blueBubblesRequest('/api/v1/message', {
+    query: { limit, offset: 0, sort: 'DESC' },
   })
 }
 

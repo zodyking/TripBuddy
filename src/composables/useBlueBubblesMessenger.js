@@ -1,23 +1,18 @@
 /**
- * BlueBubbles messenger: cache hydrate + background sync + polling.
+ * BlueBubbles messenger: iMessage-style inbox + per-conversation threads.
  */
 import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
+import { ensureBlueBubblesPrefsHydrated } from '../utils/blueBubblesPrefs.js'
 import {
-  ensureBlueBubblesPrefsHydrated,
-  syncCurrentBlueBubblesChatToServer,
-} from '../utils/blueBubblesPrefs.js'
-import {
-  getBlueBubblesChatGuid,
-  setBlueBubblesChatGuid,
   isBlueBubblesConfigured,
   getBlueBubblesPollInterval,
   fetchBlueBubblesChatMessages,
+  fetchBlueBubblesRecentMessages,
   sendBlueBubblesMessage,
   listBlueBubblesChats,
   normalizeBlueBubblesMessage,
   normalizeBlueBubblesChat,
   bbChatKindLabel,
-  bbMessageId,
 } from '../utils/blueBubblesApi.js'
 import { getIMessageThreadCache, syncIMessageThread } from '../api.js'
 import { formatChatDisplayName } from '../utils/chatDisplayName.js'
@@ -42,20 +37,26 @@ export function useBlueBubblesMessenger(opts = {}) {
   const sending = ref(false)
   const error = ref('')
   const syncWarning = ref('')
-  const activeChatGuid = ref(getBlueBubblesChatGuid())
+  const activeChatGuid = ref('')
   const chatTitle = ref('')
   const chats = ref(/** @type {ReturnType<typeof normalizeBlueBubblesChat>[]} */ ([]))
   const chatsLoading = ref(false)
 
   /** @type {ReturnType<typeof setInterval> | null} */
   let pollTimer = null
-  let lastSeenId = ''
   let syncGen = 0
   let hadPriorMessages = false
+  /** @type {Set<string>} */
+  const seenInboxIds = new Set()
 
   const configured = computed(() => isBlueBubblesConfigured())
+  const inConversation = computed(() => !!activeChatGuid.value)
   const displayMessages = computed(() =>
     [...messages.value].sort((a, b) => a.ts - b.ts),
+  )
+
+  const sortedChats = computed(() =>
+    [...chats.value].sort((a, b) => (b.lastMessageTs || 0) - (a.lastMessageTs || 0)),
   )
 
   async function scrollToBottom() {
@@ -72,6 +73,18 @@ export function useBlueBubblesMessenger(opts = {}) {
       .filter(Boolean)
     if (scroll) void scrollToBottom()
     return true
+  }
+
+  function updateChatPreview(chatGuid, msg) {
+    if (!chatGuid || !msg) return
+    const idx = chats.value.findIndex((c) => c.id === chatGuid)
+    if (idx < 0) return
+    const c = chats.value[idx]
+    chats.value[idx] = {
+      ...c,
+      lastMessageText: msg.text || (msg.hasMedia ? 'Attachment' : c.lastMessageText),
+      lastMessageTs: msg.ts || c.lastMessageTs,
+    }
   }
 
   async function syncThread(chatGuid, { scroll = true, limit = 60 } = {}) {
@@ -105,6 +118,8 @@ export function useBlueBubblesMessenger(opts = {}) {
         }
         messages.value = normalized
         setCachedBbThread(chatGuid, r.messages, r.updatedAt || Date.now())
+        const last = normalized[normalized.length - 1]
+        if (last) updateChatPreview(chatGuid, last)
       }
       syncProgress.value = 100
     } catch (e) {
@@ -137,18 +152,21 @@ export function useBlueBubblesMessenger(opts = {}) {
   }
 
   async function refreshMessages() {
-    if (!activeChatGuid.value) return
+    if (!activeChatGuid.value) {
+      await loadChats()
+      return
+    }
     loading.value = true
     await syncThread(activeChatGuid.value, { scroll: true })
     loading.value = false
   }
 
-  async function pollOnce() {
-    if (!activeChatGuid.value || syncing.value) return
+  async function pollActiveThread() {
+    const chatGuid = activeChatGuid.value
+    if (!chatGuid || syncing.value) return
     try {
-      const r = await fetchBlueBubblesChatMessages(activeChatGuid.value, { limit: 40 })
+      const r = await fetchBlueBubblesChatMessages(chatGuid, { limit: 40 })
       if (!r.ok || !Array.isArray(r.body)) return
-      const chatGuid = activeChatGuid.value
       const normalized = [...r.body]
         .reverse()
         .map((m) => normalizeBlueBubblesMessage(m, { chatGuid }))
@@ -162,20 +180,57 @@ export function useBlueBubblesMessenger(opts = {}) {
         })
         messages.value = normalized
         setCachedBbThread(chatGuid, r.body.reverse(), Date.now())
-        const newest = [...incoming].sort((a, b) => b.ts - a.ts)[0]
-        if (newest?.id && newest.id !== lastSeenId) {
-          lastSeenId = newest.id
-          await scrollToBottom()
-        }
+        const last = normalized[normalized.length - 1]
+        if (last) updateChatPreview(chatGuid, last)
+        await scrollToBottom()
       }
     } catch (e) {
       error.value = e instanceof Error ? e.message : String(e)
     }
   }
 
+  async function pollInboxRecent() {
+    if (syncing.value) return
+    try {
+      const r = await fetchBlueBubblesRecentMessages({ limit: 40 })
+      if (!r.ok || !Array.isArray(r.body)) return
+      const normalized = r.body
+        .map((m) => normalizeBlueBubblesMessage(m))
+        .filter(Boolean)
+      const incoming = normalized.filter((m) => !m.fromMe && !seenInboxIds.has(m.id))
+      for (const m of normalized) seenInboxIds.add(m.id)
+      if (seenInboxIds.size > 1200) {
+        const drop = [...seenInboxIds].slice(0, 400)
+        for (const id of drop) seenInboxIds.delete(id)
+      }
+      if (incoming.length) {
+        handleNewIncomingIMessageBatch(incoming, {
+          hadPriorMessages: true,
+          skipIfNoPriorMessages: false,
+        })
+        for (const m of incoming) {
+          if (m.chatGuid) updateChatPreview(m.chatGuid, m)
+        }
+      }
+      if (activeChatGuid.value) {
+        await pollActiveThread()
+      }
+    } catch {
+      /* ignore inbox poll errors */
+    }
+  }
+
+  async function pollOnce() {
+    if (activeChatGuid.value) {
+      await pollActiveThread()
+    } else {
+      await pollInboxRecent()
+    }
+  }
+
   function startPolling() {
     if (!shouldPoll || pollTimer) return
-    if (!activeChatGuid.value) return
+    if (!configured.value) return
     pollTimer = setInterval(pollOnce, getBlueBubblesPollInterval())
   }
 
@@ -197,7 +252,7 @@ export function useBlueBubblesMessenger(opts = {}) {
         error.value = `Send failed (${r.status})`
         return false
       }
-      await pollOnce()
+      await pollActiveThread()
       await scrollToBottom()
       return true
     } catch (e) {
@@ -208,17 +263,26 @@ export function useBlueBubblesMessenger(opts = {}) {
     }
   }
 
-  function selectChat(chat, opts = {}) {
+  function openConversation(chat, opts = {}) {
     if (!chat?.id) return
-    setBlueBubblesChatGuid(chat.id)
-    void syncCurrentBlueBubblesChatToServer().catch(() => {})
     activeChatGuid.value = chat.id
     const formatted = formatChatDisplayName(String(opts.displayTitle || chat.name || chat.id))
     chatTitle.value = formatted.displayTitle
-    lastSeenId = ''
+    messages.value = []
+    syncWarning.value = ''
+    error.value = ''
     const had = hydrateThreadFromClientCache(chat.id, { scroll: true })
     if (!had) loading.value = true
-    void syncThread(chat.id, { scroll: !had }).then(() => startPolling())
+    void syncThread(chat.id, { scroll: !had })
+  }
+
+  function closeConversation() {
+    activeChatGuid.value = ''
+    chatTitle.value = ''
+    messages.value = []
+    syncWarning.value = ''
+    error.value = ''
+    loading.value = false
   }
 
   async function resolveChatTitle() {
@@ -242,18 +306,13 @@ export function useBlueBubblesMessenger(opts = {}) {
   onMounted(() => {
     void (async () => {
       await ensureBlueBubblesPrefsHydrated()
-      activeChatGuid.value = getBlueBubblesChatGuid()
       if (!configured.value) return
       const memChats = getCachedBbChats()
       if (memChats.length) {
         chats.value = memChats.map(normalizeBlueBubblesChat).filter((c) => c?.id)
       }
-      void loadChats().then(() => {
-        if (!activeChatGuid.value) return
-        const had = hydrateThreadFromClientCache(activeChatGuid.value, { scroll: true })
-        if (!had) loading.value = true
-        void syncThread(activeChatGuid.value, { scroll: !had }).then(() => startPolling())
-      })
+      await loadChats()
+      startPolling()
     })()
   })
 
@@ -265,12 +324,24 @@ export function useBlueBubblesMessenger(opts = {}) {
     return formatChatDisplayName(raw).displayTitle
   }
 
+  /** @param {ReturnType<typeof normalizeBlueBubblesChat>} chat */
+  function contactHandleForChat(chat) {
+    if (!chat) return ''
+    const id = String(chat.chatIdentifier || chat.id || '').trim()
+    if (id && !id.includes(';')) return id
+    const parts = String(chat.id || '').split(';')
+    return parts[parts.length - 1] || chat.chatIdentifier || ''
+  }
+
   return {
     configured,
     activeChatId: activeChatGuid,
+    inConversation,
     chatTitle,
     formatChatLabel,
+    contactHandleForChat,
     chats,
+    sortedChats,
     chatsLoading,
     displayMessages,
     loading,
@@ -284,7 +355,8 @@ export function useBlueBubblesMessenger(opts = {}) {
     loadChats,
     refreshMessages,
     sendText,
-    selectChat,
+    openConversation,
+    closeConversation,
     stopPolling,
     startPolling,
   }

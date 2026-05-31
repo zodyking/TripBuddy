@@ -8,8 +8,7 @@ import {
   pushChatMessageSpeech,
   focusChatMessageSpeechByCategory,
 } from '../stores/chatMessageSpeechStore.js'
-import { isBlueBubblesTtsEnabled } from './blueBubblesApi.js'
-import { shouldTtsForContact } from '../constants/blueBubblesContactRules.js'
+import { contactTtsEnabled } from './blueBubblesContactRulesStore.js'
 
 /**
  * @param {{ text?: string, hasMedia?: boolean, media?: { kind?: string, count?: number } | null, fromMe?: boolean, senderName?: string }} msg
@@ -62,8 +61,7 @@ export function buildIMessageSpeechItem(msg) {
  * @param {{ rule?: import('../constants/blueBubblesContactRules.js').ContactRule | null, focusNewest?: boolean }} [opts]
  */
 export function announceIMessageChatMessage(msg, opts = {}) {
-  const globalTts = isBlueBubblesTtsEnabled()
-  if (!shouldTtsForContact(opts.rule ?? null, globalTts)) return
+  if (!contactTtsEnabled(opts.rule ?? null)) return
   const item = buildIMessageSpeechItem(msg)
   if (!item) return
   pushChatMessageSpeech(item, { focusNewest: opts.focusNewest })
