@@ -33,6 +33,7 @@ let preparing = false
  *     videoUrl?: string | null,
  *     status?: string,
  *   } | null,
+ *   travelDirection?: import('vue').ComputedRef<'ToNY' | 'ToNJ'> | import('vue').Ref<'ToNY' | 'ToNJ'>,
  *   payloadUpdatedAt?: import('vue').ComputedRef<number | null> | import('vue').Ref<number | null>,
  * }} hooks
  */
@@ -52,7 +53,12 @@ export function useBridgeTrafficWhatsAppAlerts(hooks) {
       const crossingMin =
         o.routeTravelTime != null && !o.isCrossingClosed ? String(o.routeTravelTime) : '—'
       const speedMph = o.routeSpeed != null ? String(o.routeSpeed) : '—'
-      const message = buildBridgeTrafficAlertMessage(bridgeName, kind, { crossingMin })
+      const travelDirection =
+        o.travelDirection ?? hooks.travelDirection?.value ?? ''
+      const message = buildBridgeTrafficAlertMessage(bridgeName, kind, {
+        crossingMin,
+        travelDirection,
+      })
       const level = hooks.trafficLevelForRow(row)
       const accentColor = level === 'standstill' ? '#a78bfa' : '#f87171'
       const cameraFeed = hooks.getBridgeCameraFeed?.(row) ?? null

@@ -807,6 +807,7 @@ useBridgeTrafficWhatsAppAlerts({
   trafficStatusTitle,
   trendInfo,
   getBridgeCameraFeed,
+  travelDirection: direction,
   payloadUpdatedAt: payloadFetchedAt,
 })
 

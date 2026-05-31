@@ -60,29 +60,62 @@ export function markBridgeTrafficAlertDismissed(routeId) {
 }
 
 /**
- * Shorter name for chat (drops deck suffix when present).
- * @param {string} bridgeName
+ * Short location label for alerts (e.g. "GWB upper level", "Goethals Bridge").
+ * @param {string} displayTitle from crossings UI
  */
-export function casualBridgeNameForAlert(bridgeName) {
-  const full = String(bridgeName ?? '').trim()
-  if (!full) return 'the bridge'
-  return full.replace(/\s*[—–-]\s*(upper|lower)\s*$/i, '').trim() || full
+export function bridgeAlertLocationLabel(displayTitle) {
+  const full = String(displayTitle ?? '').trim()
+  if (!full) return 'the crossing'
+
+  const deckMatch = full.match(/\s*[—–-]\s*(upper|lower)\s*$/i)
+  const deck = deckMatch ? String(deckMatch[1]).toLowerCase() : ''
+  const base = full.replace(/\s*[—–-]\s*(upper|lower)\s*$/i, '').trim() || full
+
+  let short = base
+  if (/george\s+washington/i.test(base)) short = 'GWB'
+  else if (/bayonne/i.test(base) && !/bridge/i.test(base)) short = 'Bayonne Bridge'
+  else if (/outerbridge/i.test(base) && !/crossing/i.test(base)) short = 'Outerbridge Crossing'
+
+  if (deck) return `${short} ${deck} level`
+  return short
 }
 
 /**
- * @param {string} bridgeName
+ * @param {unknown} travelDirection ToNY | ToNJ | row value
+ */
+export function bridgeAlertDirectionPhrase(travelDirection) {
+  const raw = String(travelDirection ?? '')
+    .replace(/\s+/g, '')
+    .replace(/[–—-]/g, '')
+    .toUpperCase()
+  if (raw === 'TONY' || raw === 'TOWARDNY' || raw === 'TONYC') return 'heading towards NY'
+  if (raw === 'TONJ' || raw === 'TOWARDNJ' || raw === 'TONJE') return 'heading towards NJ'
+  if (raw.includes('NY') && !raw.includes('NJ')) return 'heading towards NY'
+  if (raw.includes('NJ') && !raw.includes('NY')) return 'heading towards NJ'
+  return ''
+}
+
+/** @deprecated use bridgeAlertLocationLabel */
+export function casualBridgeNameForAlert(bridgeName) {
+  return bridgeAlertLocationLabel(bridgeName)
+}
+
+/**
+ * @param {string} bridgeName display title from crossings card
  * @param {BridgeTrafficAlertKind} kind
- * @param {{ crossingMin?: string }} [opts]
+ * @param {{ crossingMin?: string, travelDirection?: unknown }} [opts]
  */
 export function buildBridgeTrafficAlertMessage(bridgeName, kind, opts = {}) {
-  const name = casualBridgeNameForAlert(bridgeName)
+  const location = bridgeAlertLocationLabel(bridgeName)
+  const dir = bridgeAlertDirectionPhrase(opts.travelDirection)
+  const dirBit = dir ? ` ${dir}` : ''
   const min = String(opts.crossingMin ?? '').trim()
-  const minBit = min && min !== '—' ? ` (${min} min right now)` : ''
+  const minBit = min && min !== '—' ? ` (${min} min)` : ''
 
   if (kind === 'gridlock') {
-    return `${name} is basically at a standstill${minBit}.`
+    return `Standstill traffic on ${location}${dirBit}${minBit}.`
   }
-  return `Traffic's really heavy on ${name}${minBit}.`
+  return `Heavy traffic on ${location}${dirBit}${minBit}.`
 }
 
 /**
