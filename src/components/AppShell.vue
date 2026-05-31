@@ -99,6 +99,8 @@ const headerTitle = computed(() => {
   return 'Linehaul'
 })
 
+const showBottomNav = computed(() => route.name !== 'trailer-map')
+
 function onOfferBriefingEvent() {
   void offerDailyBriefingNow({ force: true })
 }
@@ -139,7 +141,10 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div class="app-shell">
+  <div
+    class="app-shell"
+    :class="{ 'app-shell--with-bottom-nav': showBottomNav }"
+  >
     <header class="app-header" role="banner" :aria-label="headerAriaLabel">
       <div class="header-inner">
         <div class="header-left">
@@ -224,7 +229,7 @@ onUnmounted(() => {
       </div>
     </div>
 
-    <nav v-if="route.name !== 'trailer-map'" class="bottom-nav" aria-label="Main navigation">
+    <nav v-if="showBottomNav" class="bottom-nav" aria-label="Main navigation">
       <RouterLink
         class="nav-item"
         :class="{ 'is-active': route.name === 'home' }"
@@ -356,6 +361,8 @@ onUnmounted(() => {
   flex-direction: column;
   overflow: hidden;
   overscroll-behavior: none;
+  --bottom-nav-safe-bottom: env(safe-area-inset-bottom, 0px);
+  --bottom-nav-reserved-height: calc(var(--nav-height, 4rem) + var(--bottom-nav-safe-bottom));
 }
 
 /* Linehaul bearer capture — full-screen lock (teleported to body) */
@@ -704,6 +711,11 @@ onUnmounted(() => {
   min-height: 0;
   display: flex;
   flex-direction: column;
+  box-sizing: border-box;
+}
+
+.app-shell--with-bottom-nav .app-body {
+  padding-bottom: var(--bottom-nav-reserved-height);
 }
 
 .app-scroll {
@@ -715,6 +727,7 @@ onUnmounted(() => {
   overscroll-behavior: contain;
   display: flex;
   flex-direction: column;
+  scroll-padding-bottom: var(--bottom-nav-reserved-height);
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
@@ -869,20 +882,31 @@ onUnmounted(() => {
    BOTTOM NAVIGATION — Opaque bar (content must not show through)
    ═══════════════════════════════════════════════════════════════════════════ */
 .bottom-nav {
-  flex-shrink: 0;
-  position: relative;
-  z-index: var(--z-sticky, 20);
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: var(--z-header, 30);
   display: flex;
   width: 100%;
-  height: calc(var(--nav-height, 4rem) + env(safe-area-inset-bottom, 0px));
-  min-height: calc(var(--nav-height, 4rem) + env(safe-area-inset-bottom, 0px));
-  max-height: calc(var(--nav-height, 4rem) + env(safe-area-inset-bottom, 0px));
+  height: var(--bottom-nav-reserved-height);
+  min-height: var(--bottom-nav-reserved-height);
+  max-height: var(--bottom-nav-reserved-height);
   background: var(--color-bg-base, #08080a);
   border-top: 1px solid var(--color-border, rgba(255, 255, 255, 0.08));
   box-shadow: 0 -4px 24px rgba(0, 0, 0, 0.35);
-  padding-bottom: env(safe-area-inset-bottom, 0);
+  padding-bottom: var(--bottom-nav-safe-bottom);
   overscroll-behavior: none;
   touch-action: manipulation;
+  contain: layout paint size;
+  transform: translateZ(0);
+  -webkit-transform: translateZ(0);
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+  box-sizing: border-box;
 }
 
 .nav-item {
@@ -898,10 +922,18 @@ onUnmounted(() => {
   transition: var(--transition-colors);
   position: relative;
   -webkit-tap-highlight-color: transparent;
+  min-width: 0;
+  height: var(--nav-height, 4rem);
+  max-height: var(--nav-height, 4rem);
+  overflow: hidden;
+  touch-action: manipulation;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
 }
 
 .nav-item:active {
-  transform: scale(0.96);
+  transform: none;
 }
 
 .nav-icon {
