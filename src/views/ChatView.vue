@@ -9,10 +9,6 @@ import { formatChatDisplayName, chatAvatarInitial } from '../utils/chatDisplayNa
 import { createDoubleTapHandlers } from '../utils/doubleTap.js'
 import { computeThreadLastMessageKey } from '../utils/dailyBriefingCache.js'
 import { speakChatMessageAloud } from '../utils/chatMessageSpeech.js'
-import {
-  getChatMediaDisplayState,
-  shouldFetchChatMedia,
-} from '../utils/chatMediaPolicy.js'
 
 const {
   generateBriefingFromChat,
@@ -258,19 +254,15 @@ function openMedia(url) {
   if (url) window.open(url, '_blank', 'noopener,noreferrer')
 }
 
-function mediaDisplayState(msg) {
-  return getChatMediaDisplayState(msg)
-}
-
-/** @param {{ id: string, media?: { url?: string } | null }} msg */
+/** @param {{ id: string, hasMedia?: boolean, media?: { url?: string } | null }} msg */
 function onMediaLoadError(msg) {
-  if (!msg?.id || !shouldFetchChatMedia(msg)) return
+  if (!msg?.id || !msg.hasMedia) return
   void fetchMessageMedia(msg.id)
 }
 
-/** @param {{ id: string, media?: { url?: string } | null }} msg */
+/** @param {{ id: string }} msg */
 function retryMedia(msg) {
-  if (!msg?.id || !shouldFetchChatMedia(msg)) return
+  if (!msg?.id) return
   void fetchMessageMedia(msg.id)
 }
 
@@ -569,11 +561,9 @@ async function onSendPoll() {
                   Multiple answers allowed
                 </p>
               </div>
-              <div
-                v-else-if="mediaDisplayState(item.msg) === 'inline'"
-                class="chat-bubble-media"
-              >
+              <div v-else-if="item.msg.media?.url" class="chat-bubble-media">
                 <img
+                  v-if="item.msg.media.kind === 'image' || item.msg.media.kind === 'sticker'"
                   :src="item.msg.media.url"
                   class="chat-media-img tap"
                   :class="{ 'chat-media-img--sticker': item.msg.media.kind === 'sticker' }"
@@ -582,20 +572,43 @@ async function onSendPoll() {
                   @error="onMediaLoadError(item.msg)"
                   @click="openMedia(item.msg.media.url)"
                 />
+                <video
+                  v-else-if="item.msg.media.kind === 'video'"
+                  class="chat-media-video"
+                  :src="item.msg.media.url"
+                  controls
+                  playsinline
+                  preload="metadata"
+                  @error="onMediaLoadError(item.msg)"
+                />
+                <audio
+                  v-else-if="item.msg.media.kind === 'audio'"
+                  class="chat-media-audio"
+                  :src="item.msg.media.url"
+                  controls
+                  preload="metadata"
+                  @error="onMediaLoadError(item.msg)"
+                />
+                <a
+                  v-else
+                  class="chat-media-file tap"
+                  :href="item.msg.media.url"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  <span class="chat-media-file-icon" aria-hidden="true">📎</span>
+                  {{ item.msg.media.filename || 'Open attachment' }}
+                  <span v-if="item.msg.media.mimetype" class="chat-media-file-type">{{
+                    item.msg.media.mimetype
+                  }}</span>
+                </a>
                 <p v-if="item.msg.media.error" class="chat-media-err">{{ item.msg.media.error }}</p>
               </div>
               <div
-                v-else-if="mediaDisplayState(item.msg) === 'placeholder'"
-                class="chat-bubble-media chat-bubble-media--phone"
-              >
-                <span class="chat-media-phone-icon" aria-hidden="true">📱</span>
-                <p class="chat-bubble-text chat-bubble-text--muted">Open app on your phone</p>
-              </div>
-              <div
-                v-else-if="mediaDisplayState(item.msg) === 'pending'"
+                v-else-if="item.msg.hasMedia && !item.msg.media?.url"
                 class="chat-bubble-media chat-bubble-media--pending"
               >
-                <p class="chat-bubble-text chat-bubble-text--muted">Loading image…</p>
+                <p class="chat-bubble-text chat-bubble-text--muted">Loading attachment…</p>
                 <button type="button" class="chat-media-retry tap" @click="retryMedia(item.msg)">
                   Retry
                 </button>
@@ -1304,21 +1317,6 @@ async function onSendPoll() {
   margin: 0.35rem 0 0;
   font-size: 0.7rem;
   color: var(--color-text-tertiary, #6e6e7e);
-}
-
-.chat-bubble-media--phone {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  padding: 0.5rem 0.65rem;
-  border-radius: var(--radius-md, 0.5rem);
-  background: rgba(255, 255, 255, 0.06);
-  border: 1px dashed rgba(255, 255, 255, 0.12);
-}
-
-.chat-media-phone-icon {
-  font-size: 1.25rem;
-  line-height: 1;
 }
 
 .chat-bubble-media--pending {

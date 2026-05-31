@@ -40,7 +40,6 @@ import { formatChatDisplayName } from '../utils/chatDisplayName.js'
 import { announceChatMessage } from '../utils/chatMessageSpeech.js'
 import { handleNewIncomingAutoRespondBatch } from '../utils/wahaAutoResponder.js'
 import { isWahaTtsEnabled } from '../utils/wahaApi.js'
-import { shouldFetchChatMedia } from '../utils/chatMediaPolicy.js'
 import {
   getCachedThread,
   setCachedThread,
@@ -442,7 +441,7 @@ export function useWahaMessenger(opts = {}) {
 
   async function hydrateMediaLazy(chatId) {
     const gen = ++mediaGen
-    const pending = messages.value.filter((m) => shouldFetchChatMedia(m) && m.id)
+    const pending = messages.value.filter((m) => m.hasMedia && !m.media?.url && m.id)
     for (const m of pending.slice(0, 24)) {
       if (gen !== mediaGen) return
       try {
@@ -587,8 +586,6 @@ export function useWahaMessenger(opts = {}) {
   async function fetchMessageMedia(messageId) {
     const chatId = activeChatId.value
     if (!chatId || !messageId) return
-    const existing = messages.value.find((m) => m.id === messageId)
-    if (!shouldFetchChatMedia(existing)) return
     const gen = mediaGen
     try {
       const r = await fetchWhatsAppMessageMedia(chatId, messageId)
@@ -799,7 +796,7 @@ export function useWahaMessenger(opts = {}) {
     (list) => {
       const chatId = activeChatId.value
       if (!chatId || !Array.isArray(list)) return
-      const needs = list.some((m) => shouldFetchChatMedia(m))
+      const needs = list.some((m) => m.hasMedia && !m.media?.url && m.id)
       if (needs) void hydrateMediaLazy(chatId)
     },
     { deep: true },
