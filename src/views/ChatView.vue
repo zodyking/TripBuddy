@@ -9,6 +9,10 @@ import { formatChatDisplayName, chatAvatarInitial } from '../utils/chatDisplayNa
 import { createDoubleTapHandlers } from '../utils/doubleTap.js'
 import { computeThreadLastMessageKey } from '../utils/dailyBriefingCache.js'
 import { speakChatMessageAloud } from '../utils/chatMessageSpeech.js'
+import {
+  getChatMediaDisplayState,
+  shouldFetchChatMedia,
+} from '../utils/chatMediaPolicy.js'
 
 const {
   generateBriefingFromChat,
@@ -38,10 +42,20 @@ const {
   loadChats,
   refreshMessages,
   sendText,
+  sendMedia,
+  sendPoll,
   selectChat,
   fetchMessageMedia,
   formatChatLabel,
 } = useWahaMessenger({ scrollEl, poll: true })
+
+const imageInputRef = ref(/** @type {HTMLInputElement | null} */ (null))
+const voiceInputRef = ref(/** @type {HTMLInputElement | null} */ (null))
+const fileInputRef = ref(/** @type {HTMLInputElement | null} */ (null))
+const showPollComposer = ref(false)
+const pollQuestion = ref('')
+const pollOptionA = ref('')
+const pollOptionB = ref('')
 
 const chatPickToast = ref('')
 
@@ -244,16 +258,76 @@ function openMedia(url) {
   if (url) window.open(url, '_blank', 'noopener,noreferrer')
 }
 
+function mediaDisplayState(msg) {
+  return getChatMediaDisplayState(msg)
+}
+
 /** @param {{ id: string, media?: { url?: string } | null }} msg */
 function onMediaLoadError(msg) {
-  if (!msg?.id || msg.media?.url) return
+  if (!msg?.id || !shouldFetchChatMedia(msg)) return
   void fetchMessageMedia(msg.id)
 }
 
 /** @param {{ id: string, media?: { url?: string } | null }} msg */
 function retryMedia(msg) {
-  if (!msg?.id) return
+  if (!msg?.id || !shouldFetchChatMedia(msg)) return
   void fetchMessageMedia(msg.id)
+}
+
+function openImagePicker() {
+  imageInputRef.value?.click()
+}
+
+function openVoicePicker() {
+  voiceInputRef.value?.click()
+}
+
+function openFilePicker() {
+  fileInputRef.value?.click()
+}
+
+/** @param {Event} e */
+async function onImagePicked(e) {
+  const input = /** @type {HTMLInputElement} */ (e.target)
+  const file = input.files?.[0]
+  input.value = ''
+  if (!file) return
+  const caption = draft.value.trim()
+  const ok = await sendMedia(file, 'image', caption)
+  if (ok && caption) draft.value = ''
+}
+
+/** @param {Event} e */
+async function onVoicePicked(e) {
+  const input = /** @type {HTMLInputElement} */ (e.target)
+  const file = input.files?.[0]
+  input.value = ''
+  if (!file) return
+  await sendMedia(file, 'voice')
+}
+
+/** @param {Event} e */
+async function onFilePicked(e) {
+  const input = /** @type {HTMLInputElement} */ (e.target)
+  const file = input.files?.[0]
+  input.value = ''
+  if (!file) return
+  const caption = draft.value.trim()
+  const ok = await sendMedia(file, 'file', caption)
+  if (ok && caption) draft.value = ''
+}
+
+async function onSendPoll() {
+  const name = pollQuestion.value.trim()
+  const options = [pollOptionA.value, pollOptionB.value].map((o) => o.trim()).filter(Boolean)
+  if (!name || options.length < 2) return
+  const ok = await sendPoll(name, options)
+  if (ok) {
+    showPollComposer.value = false
+    pollQuestion.value = ''
+    pollOptionA.value = ''
+    pollOptionB.value = ''
+  }
 }
 </script>
 
@@ -486,9 +560,20 @@ function retryMedia(msg) {
               >
                 {{ senderNameLabel(item.msg) }}
               </button>
-              <div v-if="item.msg.media?.url" class="chat-bubble-media">
+              <div v-if="item.msg.poll" class="chat-bubble-poll">
+                <p class="chat-bubble-poll-title">{{ item.msg.poll.name }}</p>
+                <ul class="chat-bubble-poll-options">
+                  <li v-for="(opt, oi) in item.msg.poll.options" :key="oi">{{ opt }}</li>
+                </ul>
+                <p v-if="item.msg.poll.multipleAnswers" class="chat-bubble-poll-hint">
+                  Multiple answers allowed
+                </p>
+              </div>
+              <div
+                v-else-if="mediaDisplayState(item.msg) === 'inline'"
+                class="chat-bubble-media"
+              >
                 <img
-                  v-if="item.msg.media.kind === 'image' || item.msg.media.kind === 'sticker'"
                   :src="item.msg.media.url"
                   class="chat-media-img tap"
                   :class="{ 'chat-media-img--sticker': item.msg.media.kind === 'sticker' }"
@@ -497,43 +582,20 @@ function retryMedia(msg) {
                   @error="onMediaLoadError(item.msg)"
                   @click="openMedia(item.msg.media.url)"
                 />
-                <video
-                  v-else-if="item.msg.media.kind === 'video'"
-                  class="chat-media-video"
-                  :src="item.msg.media.url"
-                  controls
-                  playsinline
-                  preload="metadata"
-                  @error="onMediaLoadError(item.msg)"
-                />
-                <audio
-                  v-else-if="item.msg.media.kind === 'audio'"
-                  class="chat-media-audio"
-                  :src="item.msg.media.url"
-                  controls
-                  preload="metadata"
-                  @error="onMediaLoadError(item.msg)"
-                />
-                <a
-                  v-else
-                  class="chat-media-file tap"
-                  :href="item.msg.media.url"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                >
-                  <span class="chat-media-file-icon" aria-hidden="true">📎</span>
-                  {{ item.msg.media.filename || 'Open attachment' }}
-                  <span v-if="item.msg.media.mimetype" class="chat-media-file-type">{{
-                    item.msg.media.mimetype
-                  }}</span>
-                </a>
                 <p v-if="item.msg.media.error" class="chat-media-err">{{ item.msg.media.error }}</p>
               </div>
               <div
-                v-else-if="item.msg.hasMedia && !item.msg.media?.url"
+                v-else-if="mediaDisplayState(item.msg) === 'placeholder'"
+                class="chat-bubble-media chat-bubble-media--phone"
+              >
+                <span class="chat-media-phone-icon" aria-hidden="true">📱</span>
+                <p class="chat-bubble-text chat-bubble-text--muted">Open app on your phone</p>
+              </div>
+              <div
+                v-else-if="mediaDisplayState(item.msg) === 'pending'"
                 class="chat-bubble-media chat-bubble-media--pending"
               >
-                <p class="chat-bubble-text chat-bubble-text--muted">Loading attachment…</p>
+                <p class="chat-bubble-text chat-bubble-text--muted">Loading image…</p>
                 <button type="button" class="chat-media-retry tap" @click="retryMedia(item.msg)">
                   Retry
                 </button>
@@ -546,7 +608,124 @@ function retryMedia(msg) {
         </div>
       </div>
 
+      <div v-if="showPollComposer" class="chat-poll-compose">
+        <input
+          v-model="pollQuestion"
+          type="text"
+          class="chat-poll-input tap"
+          placeholder="Poll question"
+          aria-label="Poll question"
+          :disabled="sending"
+        />
+        <input
+          v-model="pollOptionA"
+          type="text"
+          class="chat-poll-input tap"
+          placeholder="Option 1"
+          aria-label="Poll option 1"
+          :disabled="sending"
+        />
+        <input
+          v-model="pollOptionB"
+          type="text"
+          class="chat-poll-input tap"
+          placeholder="Option 2"
+          aria-label="Poll option 2"
+          :disabled="sending"
+        />
+        <div class="chat-poll-actions">
+          <button type="button" class="chat-poll-cancel tap" :disabled="sending" @click="showPollComposer = false">
+            Cancel
+          </button>
+          <button
+            type="button"
+            class="chat-poll-send tap"
+            :disabled="sending || !pollQuestion.trim() || !pollOptionA.trim() || !pollOptionB.trim()"
+            @click="onSendPoll"
+          >
+            Send poll
+          </button>
+        </div>
+      </div>
       <form class="chat-compose" @submit.prevent="onSend">
+        <input
+          ref="imageInputRef"
+          type="file"
+          accept="image/jpeg,image/png,image/gif,image/webp"
+          class="chat-compose-file"
+          tabindex="-1"
+          aria-hidden="true"
+          @change="onImagePicked"
+        />
+        <input
+          ref="voiceInputRef"
+          type="file"
+          accept="audio/*,.ogg,.opus,.m4a,.mp3,.wav"
+          class="chat-compose-file"
+          tabindex="-1"
+          aria-hidden="true"
+          @change="onVoicePicked"
+        />
+        <input
+          ref="fileInputRef"
+          type="file"
+          class="chat-compose-file"
+          tabindex="-1"
+          aria-hidden="true"
+          @change="onFilePicked"
+        />
+        <button
+          type="button"
+          class="chat-compose-attach tap"
+          aria-label="Send image"
+          title="Send image"
+          :disabled="sending"
+          @click="openImagePicker"
+        >
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+            <rect x="3" y="5" width="18" height="14" rx="2" />
+            <circle cx="8.5" cy="10" r="1.5" />
+            <path d="M21 16l-5.5-5.5a2 2 0 0 0-2.8 0L3 18" />
+          </svg>
+        </button>
+        <button
+          type="button"
+          class="chat-compose-attach tap"
+          aria-label="Send voice"
+          title="Send voice"
+          :disabled="sending"
+          @click="openVoicePicker"
+        >
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+            <path d="M12 14a3 3 0 0 0 3-3V6a3 3 0 1 0-6 0v5a3 3 0 0 0 3 3z" />
+            <path d="M19 11v1a7 7 0 0 1-14 0v-1M12 18v3" />
+          </svg>
+        </button>
+        <button
+          type="button"
+          class="chat-compose-attach tap"
+          aria-label="Send file"
+          title="Send file"
+          :disabled="sending"
+          @click="openFilePicker"
+        >
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+            <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
+          </svg>
+        </button>
+        <button
+          type="button"
+          class="chat-compose-attach tap"
+          :class="{ 'is-active': showPollComposer }"
+          aria-label="Send poll"
+          title="Send poll"
+          :disabled="sending"
+          @click="showPollComposer = !showPollComposer"
+        >
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+            <path d="M9 11h6M9 15h4M7 4h10a2 2 0 0 1 2 2v14l-4-3-4 3V6a2 2 0 0 1-2-2z" />
+          </svg>
+        </button>
         <textarea
           v-model="draft"
           class="chat-compose-input tap"
@@ -1101,6 +1280,47 @@ function retryMedia(msg) {
   object-fit: contain;
 }
 
+.chat-bubble-poll {
+  margin-bottom: 0.25rem;
+  padding: 0.35rem 0.45rem;
+  border-radius: var(--radius-md, 0.5rem);
+  background: rgba(0, 0, 0, 0.12);
+}
+
+.chat-bubble-poll-title {
+  margin: 0 0 0.35rem;
+  font-size: 0.9rem;
+  font-weight: var(--weight-semibold, 600);
+}
+
+.chat-bubble-poll-options {
+  margin: 0;
+  padding: 0 0 0 1rem;
+  font-size: 0.85rem;
+  line-height: 1.4;
+}
+
+.chat-bubble-poll-hint {
+  margin: 0.35rem 0 0;
+  font-size: 0.7rem;
+  color: var(--color-text-tertiary, #6e6e7e);
+}
+
+.chat-bubble-media--phone {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0.65rem;
+  border-radius: var(--radius-md, 0.5rem);
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px dashed rgba(255, 255, 255, 0.12);
+}
+
+.chat-media-phone-icon {
+  font-size: 1.25rem;
+  line-height: 1;
+}
+
 .chat-bubble-media--pending {
   display: flex;
   flex-direction: column;
@@ -1183,11 +1403,95 @@ function retryMedia(msg) {
   opacity: 0.9;
 }
 
+.chat-poll-compose {
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  padding: 0.45rem 0.55rem 0;
+  background: var(--color-glass, rgba(22, 22, 29, 0.72));
+  border-top: 1px solid var(--color-glass-border, rgba(255, 255, 255, 0.06));
+}
+
+.chat-poll-input {
+  width: 100%;
+  border: 1px solid var(--color-border, rgba(255, 255, 255, 0.08));
+  border-radius: var(--radius-md, 0.5rem);
+  padding: 0.45rem 0.65rem;
+  font: inherit;
+  font-size: 0.9rem;
+  color: var(--color-text-primary, #f4f4f8);
+  background: var(--color-bg-elevated, #0f0f14);
+}
+
+.chat-poll-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.45rem;
+}
+
+.chat-poll-cancel,
+.chat-poll-send {
+  border: none;
+  border-radius: var(--radius-full, 9999px);
+  padding: 0.35rem 0.75rem;
+  font: inherit;
+  font-size: 0.8rem;
+  cursor: pointer;
+}
+
+.chat-poll-cancel {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--color-text-secondary, #a8a8b8);
+}
+
+.chat-poll-send {
+  background: var(--color-accent-purple, #7b4db5);
+  color: #fff;
+}
+
+.chat-compose-file {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.chat-compose-attach {
+  flex-shrink: 0;
+  width: 2.5rem;
+  height: 2.5rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: var(--radius-full, 9999px);
+  background: transparent;
+  color: var(--color-text-secondary, #a8a8b8);
+  cursor: pointer;
+}
+
+.chat-compose-attach.is-active {
+  color: var(--color-accent-purple-light, #9d6fd7);
+  background: rgba(123, 77, 181, 0.2);
+}
+
+.chat-compose-attach svg {
+  width: 1.2rem;
+  height: 1.2rem;
+}
+
+.chat-compose-attach:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
 .chat-compose {
   flex-shrink: 0;
   display: flex;
   align-items: flex-end;
-  gap: 0.45rem;
+  gap: 0.35rem;
   padding: 0.45rem 0.55rem;
   padding-bottom: max(0.45rem, env(safe-area-inset-bottom, 0px));
   background: var(--color-glass, rgba(22, 22, 29, 0.72));

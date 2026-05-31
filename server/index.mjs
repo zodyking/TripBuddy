@@ -625,11 +625,21 @@ app.post('/api/whatsapp/thread/media', async (req, reply) => {
   if (!chatId || !messageId) {
     return reply.code(400).send({ ok: false, error: 'chatId and messageId required' })
   }
-  const r = await fetchWahaMessageMedia(chatId, messageId)
-  if (!r.ok) {
-    return reply.code(r.status || 502).send({ ok: false, status: r.status, message: null })
+  const ak = String(req.credentialAccountKey || getDataAccountKey() || '').trim()
+  if (ak) {
+    try {
+      applyWahaPrefsForAccount(await getWahaPrefsForAccount(ak))
+    } catch { /* ignore */ }
   }
-  return { ok: true, message: r.body }
+  try {
+    const r = await fetchWahaMessageMedia(chatId, messageId)
+    if (!r.ok) {
+      return reply.code(r.status || 502).send({ ok: false, status: r.status, message: null })
+    }
+    return { ok: true, message: r.body }
+  } finally {
+    clearAccountWahaPrefs()
+  }
 })
 
 /** Public: which Vite bundle the running container serves (compare after deploy / vs browser Sources). */

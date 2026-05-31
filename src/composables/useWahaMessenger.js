@@ -10,6 +10,10 @@ import {
   getWahaPollInterval,
   fetchChatMessagesForChat,
   sendChatMessage,
+  sendChatImage,
+  sendChatVoice,
+  sendChatFile,
+  sendChatPoll,
   listChats,
   listContacts,
   buildContactNameMap,
@@ -36,6 +40,7 @@ import { formatChatDisplayName } from '../utils/chatDisplayName.js'
 import { announceChatMessage } from '../utils/chatMessageSpeech.js'
 import { handleNewIncomingAutoRespondBatch } from '../utils/wahaAutoResponder.js'
 import { isWahaTtsEnabled } from '../utils/wahaApi.js'
+import { shouldFetchChatMedia } from '../utils/chatMediaPolicy.js'
 import {
   getCachedThread,
   setCachedThread,
@@ -299,7 +304,7 @@ export function useWahaMessenger(opts = {}) {
     const opts = normalizeOpts(chatId)
     return raw
       .map((m) => normalizeWahaMessage(m, opts))
-      .filter((m) => m.id && (m.text || m.hasMedia))
+      .filter((m) => m.id && (m.text || m.hasMedia || m.poll))
   }
 
   function applyMessages(normalized, chatId, updatedAt, rawMessages) {
@@ -437,9 +442,7 @@ export function useWahaMessenger(opts = {}) {
 
   async function hydrateMediaLazy(chatId) {
     const gen = ++mediaGen
-    const pending = messages.value.filter(
-      (m) => m.hasMedia && !m.media?.url && m.id,
-    )
+    const pending = messages.value.filter((m) => shouldFetchChatMedia(m) && m.id)
     for (const m of pending.slice(0, 24)) {
       if (gen !== mediaGen) return
       try {
@@ -564,20 +567,33 @@ export function useWahaMessenger(opts = {}) {
   /**
    * @param {string} messageId
    */
+  function patchMessageMedia(messageId, rawMessage, chatId) {
+    const updated = normalizeWahaMessage(rawMessage, normalizeOpts(chatId))
+    const idx = messages.value.findIndex((x) => x.id === messageId)
+    if (idx >= 0) {
+      const next = [...messages.value]
+      next[idx] = { ...next[idx], ...updated, media: updated.media || next[idx].media }
+      messages.value = next
+    }
+    const rawIdx = rawThreadMessages.value.findIndex((x) => getWahaMessageId(x) === messageId)
+    if (rawIdx >= 0) {
+      const rawNext = [...rawThreadMessages.value]
+      rawNext[rawIdx] = rawMessage
+      rawThreadMessages.value = rawNext
+      setCachedThread(chatId, rawNext, Date.now())
+    }
+  }
+
   async function fetchMessageMedia(messageId) {
     const chatId = activeChatId.value
     if (!chatId || !messageId) return
+    const existing = messages.value.find((m) => m.id === messageId)
+    if (!shouldFetchChatMedia(existing)) return
     const gen = mediaGen
     try {
       const r = await fetchWhatsAppMessageMedia(chatId, messageId)
       if (gen !== mediaGen || !r.ok || !r.message) return
-      const updated = normalizeWahaMessage(r.message, normalizeOpts(chatId))
-      const idx = messages.value.findIndex((x) => x.id === messageId)
-      if (idx >= 0) {
-        const next = [...messages.value]
-        next[idx] = { ...next[idx], ...updated, media: updated.media || next[idx].media }
-        messages.value = next
-      }
+      patchMessageMedia(messageId, r.message, chatId)
     } catch {
       /* skip */
     }
@@ -695,6 +711,60 @@ export function useWahaMessenger(opts = {}) {
     }
   }
 
+  /**
+   * @param {File} file
+   * @param {'image' | 'voice' | 'file'} kind
+   * @param {string} [caption]
+   */
+  async function sendMedia(file, kind, caption = '') {
+    if (!file || !activeChatId.value) return false
+    sending.value = true
+    error.value = ''
+    try {
+      let r
+      if (kind === 'image') r = await sendChatImage(file, caption)
+      else if (kind === 'voice') r = await sendChatVoice(file)
+      else r = await sendChatFile(file, caption)
+      if (!r.ok) {
+        error.value = `Send failed (${r.status})`
+        return false
+      }
+      await pollOnce()
+      await scrollToBottom()
+      return true
+    } catch (e) {
+      error.value = e instanceof Error ? e.message : String(e)
+      return false
+    } finally {
+      sending.value = false
+    }
+  }
+
+  /**
+   * @param {string} name
+   * @param {string[]} options
+   */
+  async function sendPoll(name, options) {
+    if (!activeChatId.value) return false
+    sending.value = true
+    error.value = ''
+    try {
+      const r = await sendChatPoll(name, options)
+      if (!r.ok) {
+        error.value = `Poll failed (${r.status})`
+        return false
+      }
+      await pollOnce()
+      await scrollToBottom()
+      return true
+    } catch (e) {
+      error.value = e instanceof Error ? e.message : String(e)
+      return false
+    } finally {
+      sending.value = false
+    }
+  }
+
   function selectChat(chat, opts = {}) {
     if (!chat?.id) return
     setWahaChatId(chat.id)
@@ -729,7 +799,7 @@ export function useWahaMessenger(opts = {}) {
     (list) => {
       const chatId = activeChatId.value
       if (!chatId || !Array.isArray(list)) return
-      const needs = list.some((m) => m.hasMedia && !m.media?.url && m.id)
+      const needs = list.some((m) => shouldFetchChatMedia(m))
       if (needs) void hydrateMediaLazy(chatId)
     },
     { deep: true },
@@ -789,6 +859,8 @@ export function useWahaMessenger(opts = {}) {
     refreshMessages,
     fetchMessageMedia,
     sendText,
+    sendMedia,
+    sendPoll,
     selectChat,
     loadContacts,
     stopPolling,

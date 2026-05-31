@@ -367,6 +367,128 @@ export async function sendChatMessage(text) {
   return { ok: r.ok, status: r.status, body: await r.json().catch(() => null) }
 }
 
+/**
+ * Read a browser File as base64 (no data: prefix).
+ * @param {File} file
+ */
+export function readFileAsBase64(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => {
+      const result = String(reader.result || '')
+      const comma = result.indexOf(',')
+      resolve(comma >= 0 ? result.slice(comma + 1) : result)
+    }
+    reader.onerror = () => reject(reader.error || new Error('Failed to read file'))
+    reader.readAsDataURL(file)
+  })
+}
+
+/**
+ * @param {File} file
+ */
+export async function fileToWahaPayload(file) {
+  const data = await readFileAsBase64(file)
+  const mimetype = file.type || 'application/octet-stream'
+  return {
+    mimetype,
+    filename: file.name || 'file',
+    data,
+  }
+}
+
+/**
+ * @param {File} file
+ * @param {string} [caption]
+ */
+export async function sendChatImage(file, caption = '') {
+  const session = getWahaSessionName()
+  const chatId = getWahaChatId()
+  if (!chatId) throw new Error('No WhatsApp chat configured')
+  const filePayload = await fileToWahaPayload(file)
+  const r = await fetch(wahaUrl('/api/sendImage'), {
+    method: 'POST',
+    headers: wahaHeaders(),
+    body: JSON.stringify({
+      session,
+      chatId,
+      file: filePayload,
+      caption: String(caption || '').trim() || undefined,
+    }),
+  })
+  return { ok: r.ok, status: r.status, body: await r.json().catch(() => null) }
+}
+
+/**
+ * @param {File} file
+ */
+export async function sendChatVoice(file) {
+  const session = getWahaSessionName()
+  const chatId = getWahaChatId()
+  if (!chatId) throw new Error('No WhatsApp chat configured')
+  const filePayload = await fileToWahaPayload(file)
+  const r = await fetch(wahaUrl('/api/sendVoice'), {
+    method: 'POST',
+    headers: wahaHeaders(),
+    body: JSON.stringify({
+      session,
+      chatId,
+      file: filePayload,
+      convert: true,
+    }),
+  })
+  return { ok: r.ok, status: r.status, body: await r.json().catch(() => null) }
+}
+
+/**
+ * @param {File} file
+ * @param {string} [caption]
+ */
+export async function sendChatFile(file, caption = '') {
+  const session = getWahaSessionName()
+  const chatId = getWahaChatId()
+  if (!chatId) throw new Error('No WhatsApp chat configured')
+  const filePayload = await fileToWahaPayload(file)
+  const r = await fetch(wahaUrl('/api/sendFile'), {
+    method: 'POST',
+    headers: wahaHeaders(),
+    body: JSON.stringify({
+      session,
+      chatId,
+      file: filePayload,
+      caption: String(caption || '').trim() || undefined,
+    }),
+  })
+  return { ok: r.ok, status: r.status, body: await r.json().catch(() => null) }
+}
+
+/**
+ * @param {string} name
+ * @param {string[]} options
+ * @param {{ multipleAnswers?: boolean }} [opts]
+ */
+export async function sendChatPoll(name, options, opts = {}) {
+  const session = getWahaSessionName()
+  const chatId = getWahaChatId()
+  if (!chatId) throw new Error('No WhatsApp chat configured')
+  const cleanOptions = options.map((o) => String(o || '').trim()).filter(Boolean)
+  if (cleanOptions.length < 2) throw new Error('Poll needs at least two options')
+  const r = await fetch(wahaUrl('/api/sendPoll'), {
+    method: 'POST',
+    headers: wahaHeaders(),
+    body: JSON.stringify({
+      session,
+      chatId,
+      poll: {
+        name: String(name || 'Poll').trim(),
+        options: cleanOptions,
+        multipleAnswers: opts.multipleAnswers === true,
+      },
+    }),
+  })
+  return { ok: r.ok, status: r.status, body: await r.json().catch(() => null) }
+}
+
 /** @deprecated use sendChatMessage */
 export const sendGroupMessage = sendChatMessage
 
@@ -479,6 +601,25 @@ function resolveJidToDisplayName(jid, contactMap, lidMap) {
  * Rewrite WAHA file URLs to a URL the browser can load (TripBuddy /api/waha proxy).
  * @param {string} mediaUrl
  */
+function appendWahaMediaApiKey(url) {
+  if (!url || isWahaProxyMode()) return url
+  const key = getWahaApiKey()
+  if (!key) return url
+  try {
+    const base =
+      typeof window !== 'undefined' ? window.location.origin : 'http://localhost'
+    const parsed = new URL(url, base)
+    if (!parsed.searchParams.has('x-api-key')) {
+      parsed.searchParams.set('x-api-key', key)
+    }
+    if (url.startsWith('http://') || url.startsWith('https://')) return parsed.toString()
+    return `${parsed.pathname}${parsed.search}`
+  } catch {
+    const sep = url.includes('?') ? '&' : '?'
+    return `${url}${sep}x-api-key=${encodeURIComponent(key)}`
+  }
+}
+
 export function resolveWahaMediaUrl(mediaUrl) {
   const raw = String(mediaUrl ?? '').trim()
   if (!raw) return ''
@@ -497,7 +638,7 @@ export function resolveWahaMediaUrl(mediaUrl) {
       pathname = parsed.pathname
       search = parsed.search
     } catch {
-      return raw
+      return appendWahaMediaApiKey(raw)
     }
   }
 
@@ -509,10 +650,38 @@ export function resolveWahaMediaUrl(mediaUrl) {
   if (isWahaFile || (pathname.startsWith('/api/') && isWahaProxyMode())) {
     const stored = getWahaUrlForSettings().replace(/\/+$/, '')
     const base = stored || proxyBase
-    return `${base}${pathname}${search}`
+    return appendWahaMediaApiKey(`${base}${pathname}${search}`)
   }
 
-  return raw
+  return appendWahaMediaApiKey(raw)
+}
+
+/**
+ * @param {Record<string, unknown>} msg
+ * @returns {{ name: string, options: string[], multipleAnswers: boolean } | null}
+ */
+export function extractWahaPoll(msg) {
+  if (!msg || typeof msg !== 'object') return null
+  const data = msg._data && typeof msg._data === 'object' ? msg._data : {}
+  const inner =
+    data.message && typeof data.message === 'object' ? data.message : {}
+  const poll =
+    inner.pollCreationMessageV3
+    || inner.pollCreationMessageV2
+    || inner.pollCreationMessage
+    || msg.poll
+  if (!poll || typeof poll !== 'object') return null
+  const name = String(poll.name || poll.question || '').trim()
+  const rawOptions = Array.isArray(poll.options) ? poll.options : []
+  const options = rawOptions
+    .map((o) => (typeof o === 'string' ? o : String(o?.optionName || o?.name || '').trim()))
+    .filter(Boolean)
+  if (!name && !options.length) return null
+  return {
+    name: name || 'Poll',
+    options,
+    multipleAnswers: Boolean(poll.multipleAnswers ?? poll.allowMultipleAnswers),
+  }
 }
 
 /**
@@ -696,12 +865,14 @@ export function normalizeWahaMessage(msg, opts = {}) {
   const raw = isRawWahaMessage(msg) ? msg : null
   const src = raw || msg
   const id = getWahaMessageId(src)
-  const text = String(src?.body ?? src?.text ?? src?.caption ?? '').trim()
+  const poll = extractWahaPoll(src)
+  let text = String(src?.body ?? src?.text ?? src?.caption ?? '').trim()
+  if (!text && poll?.name) text = poll.name
   const fromMe = Boolean(src?.fromMe)
   let ts = wahaMessageTimestampMs(src)
   if (!ts) ts = Date.now()
-  const media = normalizeWahaMedia(src)
-  const hasMedia = Boolean(src?.hasMedia || media?.url)
+  const media = poll ? null : normalizeWahaMedia(src)
+  const hasMedia = poll ? false : Boolean(src?.hasMedia || media?.url || media)
   let senderName = resolveWahaSenderName(src, contactMap, activeChatId, lidMap, participantMap)
   const senderNameOriginal = senderName ? String(senderName).trim() : ''
   let isSenderNameTranslated = false
@@ -727,6 +898,7 @@ export function normalizeWahaMessage(msg, opts = {}) {
     isSenderNameTranslated,
     hasMedia,
     media,
+    poll,
     isGroupChat,
   }
 }
