@@ -18,9 +18,12 @@ import {
   recordApiCompletedCall,
   ApiQuotaError,
 } from './api-quota.mjs'
+import { POLL_MS } from './bridge-panynj.mjs'
 
 const KEY = G('bridge:verrazzano:series')
 const MAX_POINTS_PER_DIRECTION = 500
+/** Same ~24h window as PANYNJ cards (288 samples × 5 min poll). */
+const CHART_SERIES_WINDOW_MS = 288 * POLL_MS
 const MPS_TO_MPH = 2.23694
 
 /**
@@ -333,9 +336,12 @@ export async function getVerrazzanoResponsePayload(accountKey) {
   /** @type {Record<string, { trend: 'better' | 'worse' | 'neutral' | 'unknown', series: DataPoint[], live: { routeTravelTime: number | null, routeSpeed: number | null } }>} */
   const byDirection = {}
 
+  const chartCutoff = now - CHART_SERIES_WINDOW_MS
   for (const dir of /** @type {const} */ (['ToNY', 'ToNJ'])) {
     const series = st.pointsByDirection?.[dir] || []
-    const recent = series.slice(-288)
+    const recent = series
+      .filter((p) => p && Number.isFinite(p.t) && p.t >= chartCutoff)
+      .slice(-288)
     const live = lastLive?.[dir] || { travelMinutes: null, speedMph: null }
     
     byDirection[dir] = {

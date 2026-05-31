@@ -71,7 +71,12 @@ const effectiveSource = computed(() => {
 })
 
 const isDisabled = computed(() => {
-  return props.status === 'Disabled' || props.status === 'Blocked'
+  const inactive =
+    props.status === 'Disabled' ||
+    props.status === 'Blocked' ||
+    props.status === 'Offline'
+  if (!inactive) return false
+  return !props.videoUrl && !props.imageUrl && !props.youtubeVideoId?.trim()
 })
 
 async function loadHls() {

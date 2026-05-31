@@ -231,6 +231,7 @@ import {
   writeBridgeTrafficProfileOverrides,
 } from './bridge-traffic-profiles-store.mjs'
 import { getNy511TruckNycPayload } from './ny511-traffic-feeds.mjs'
+import { resolveBridgeCamerasFrom511List } from './ny511-bridge-cameras.mjs'
 import { registerTrafficMonitoredRoutes } from './traffic-monitored-routes-routes.mjs'
 import {
   getApiQuotaSnapshot,
@@ -732,26 +733,6 @@ app.get('/api/511ny/traffic', async (req, reply) => {
 const NY511_CAMERA_CACHE_TTL_MS = 5 * 60 * 1000
 let ny511CamerasCache = { data: null, fetchedAt: 0 }
 
-const NY511_BRIDGE_CAMERAS = [
-  { bridge: 'Bayonne', location: 'NY440 at Walker Street', locationAlt: 'Bayonne Br' },
-  { bridge: 'Goethals', location: 'I-278 at Forest Avenue' },
-  { bridge: 'Outerbridge', location: '909C at Tyrellan Avenue', locationAlt: 'Tyrellan' },
-  { bridge: 'Verrazzano-ToNJ', location: 'I-278 at 92nd Street' },
-  { bridge: 'Verrazzano-ToNY', location: 'I-278 at Fingerboard Road' },
-]
-
-function matchCameraLocation(cameraLocation, targetLocation, targetAlt) {
-  if (!cameraLocation || typeof cameraLocation !== 'string') return false
-  const loc = cameraLocation.toLowerCase()
-  const tgt = targetLocation.toLowerCase()
-  if (loc.includes(tgt) || tgt.includes(loc)) return true
-  if (targetAlt) {
-    const alt = targetAlt.toLowerCase()
-    if (loc.includes(alt) || alt.includes(loc)) return true
-  }
-  return false
-}
-
 app.get('/api/511ny/cameras', async (req, reply) => {
   try {
     const ak = req.credentialAccountKey
@@ -810,27 +791,7 @@ app.get('/api/511ny/cameras', async (req, reply) => {
       return reply.code(502).send({ error: '511NY returned invalid data' })
     }
 
-    const bridgeCameras = []
-    for (const mapping of NY511_BRIDGE_CAMERAS) {
-      const cam = allCameras.find((c) =>
-        matchCameraLocation(c.Location, mapping.location, mapping.locationAlt),
-      )
-      if (cam) {
-        const view = Array.isArray(cam.Views) && cam.Views.length > 0 ? cam.Views[0] : null
-        bridgeCameras.push({
-          bridge: mapping.bridge,
-          cameraId: cam.Id,
-          location: cam.Location,
-          roadway: cam.Roadway,
-          direction: cam.Direction,
-          lat: cam.Latitude,
-          lng: cam.Longitude,
-          imageUrl: view?.Url || null,
-          videoUrl: view?.VideoUrl || null,
-          status: view?.Status || 'Unknown',
-        })
-      }
-    }
+    const bridgeCameras = resolveBridgeCamerasFrom511List(allCameras)
 
     ny511CamerasCache = { data: bridgeCameras, fetchedAt: now }
     if (typeof ak === 'string' && ak.trim()) {

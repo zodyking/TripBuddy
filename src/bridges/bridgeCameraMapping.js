@@ -71,7 +71,9 @@ export function getCameraKeyForDisplayName(displayName) {
 
 /**
  * Get the Verrazzano camera key for a given travel direction.
- * Verrazzano is not in PANYNJ data, so we use direction-specific cameras.
+ * Verrazzano is not in PANYNJ data, so we use direction-specific 511NY cameras:
+ * ToNJ → Fingerboard Rd (Staten Island / NJ-bound approach);
+ * ToNY → 92nd St (Brooklyn / NY-bound approach).
  * @param {'ToNY' | 'ToNJ'} direction
  * @returns {string} Camera key 'Verrazzano-ToNY' or 'Verrazzano-ToNJ'
  */

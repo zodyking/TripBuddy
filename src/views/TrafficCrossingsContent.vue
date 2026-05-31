@@ -443,8 +443,20 @@ function bridgeChartStrokeColor(row) {
 }
 
 const MAX_CHART_POINTS = 96
+/** Match PANYNJ history cards (~24h of 5‑minute samples). */
+const BRIDGE_CHART_WINDOW_MS = 24 * 60 * 60 * 1000
 /** Cap time-axis labels — long Verrazzano histories used 4h ticks across weeks and overlapped. */
 const MAX_X_AXIS_TICKS = 6
+
+/**
+ * Keep chart series within the same time window as other crossing cards.
+ * @param {Array<{ t: number, m: number, s: number }>} raw
+ */
+function chartSeriesWithinWindow(raw) {
+  if (!Array.isArray(raw) || raw.length === 0) return []
+  const cutoff = Date.now() - BRIDGE_CHART_WINDOW_MS
+  return raw.filter((p) => p && Number.isFinite(p.t) && p.t >= cutoff)
+}
 
 /**
  * Pick tick step so we stay at or under `maxTicks` labels across [tMin, tMax].
@@ -508,7 +520,7 @@ function makeAxisTimeFormatter(spanMs) {
   return (ts) => {
     try {
       const d = new Date(ts)
-      if (spanMs <= 40 * 60 * 60 * 1000) {
+      if (spanMs <= BRIDGE_CHART_WINDOW_MS + 60 * 60 * 1000) {
         return d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })
       }
       if (spanMs <= 16 * 24 * 60 * 60 * 1000) {
@@ -575,7 +587,7 @@ function bridgeChartModel(row) {
     }
   }
 
-  const raw = seriesForRow(row)
+  const raw = chartSeriesWithinWindow(seriesForRow(row))
   let pts = downsampleSeries(raw, MAX_CHART_POINTS)
     .slice()
     .sort((a, b) => a.t - b.t)
