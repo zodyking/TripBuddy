@@ -125,16 +125,18 @@ export async function openRouterComplete(apiKey, messages, opts = {}) {
 /**
  * @param {string} transcript
  * @param {string} chatLabel
- * @param {{ dateLabel?: string, timeZone?: string }} [opts]
+ * @param {{ dateLabel?: string, windowLabel?: string, timeZone?: string }} [opts]
  */
 export function buildBriefingPrompt(transcript, chatLabel, opts = {}) {
   const label = String(chatLabel || 'WhatsApp chat').trim() || 'WhatsApp chat'
   const dateLabel = cleanPromptText(opts.dateLabel || '')
+  const windowLabel = cleanPromptText(opts.windowLabel || '')
   const timeZone = cleanPromptText(opts.timeZone || '')
   const cleanTranscript = cleanPromptText(transcript)
   const scope = [
     `Chat: ${label}`,
     dateLabel ? `Current date: ${dateLabel}` : '',
+    windowLabel ? `Briefing window: ${windowLabel}` : '',
     timeZone ? `Time zone: ${timeZone}` : '',
   ]
     .filter(Boolean)
@@ -146,7 +148,7 @@ export function buildBriefingPrompt(transcript, chatLabel, opts = {}) {
     },
     {
       role: 'user',
-      content: `${scope}\n\nToday's clean chat transcript:\n\n${cleanTranscript}`,
+      content: `${scope}\n\nRecent clean chat transcript:\n\n${cleanTranscript}`,
     },
   ]
 }

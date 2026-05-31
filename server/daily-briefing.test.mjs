@@ -5,8 +5,11 @@ import {
   openRouterComplete,
 } from './openrouter-briefing.mjs'
 import {
+  BRIEFING_LOOKBACK_MS,
+  briefingWindowForNow,
   cleanChatText,
   formatTranscript,
+  isInBriefingWindow,
 } from './waha-daily-briefing.mjs'
 import {
   normalizeWahaHistoryMessage,
@@ -38,19 +41,52 @@ test('formatTranscript produces clean timezone-aware chat text', () => {
   )
 })
 
-test('buildBriefingPrompt scopes the clean transcript to the current date', () => {
+test('formatTranscript can include dates for multi-day briefings', () => {
+  const transcript = formatTranscript(
+    [
+      {
+        ts: Date.UTC(2026, 4, 30, 23, 15),
+        sender: 'Dispatcher',
+        text: 'Tomorrow plan posted',
+      },
+    ],
+    'UTC',
+    { includeDate: true },
+  )
+
+  assert.equal(transcript, '[May 30, 11:15 PM] Dispatcher: Tomorrow plan posted')
+})
+
+test('buildBriefingPrompt scopes the clean transcript to the recent briefing window', () => {
   const prompt = buildBriefingPrompt(
-    '[9:00 AM] Driver: Bring empty trailers',
+    '[May 31, 9:00 AM] Driver: Bring empty trailers',
     'Linehaul Group',
-    { dateLabel: '2026-05-31', timeZone: 'America/New_York' },
+    {
+      dateLabel: '2026-05-31',
+      windowLabel: '2026-05-29 through 2026-05-31',
+      timeZone: 'America/New_York',
+    },
   )
 
   assert.equal(prompt[0].role, 'system')
   assert.equal(prompt[1].role, 'user')
   assert.match(prompt[1].content, /Current date: 2026-05-31/)
+  assert.match(prompt[1].content, /Briefing window: 2026-05-29 through 2026-05-31/)
   assert.match(prompt[1].content, /Time zone: America\/New_York/)
-  assert.match(prompt[1].content, /Today's clean chat transcript:/)
+  assert.match(prompt[1].content, /Recent clean chat transcript:/)
   assert.match(prompt[1].content, /Bring empty trailers/)
+})
+
+test('briefing window includes the rolling last two days', () => {
+  const now = Date.UTC(2026, 4, 31, 12, 0)
+  const window = briefingWindowForNow(now, 'UTC')
+
+  assert.equal(window.endMs, now)
+  assert.equal(window.startMs, now - BRIEFING_LOOKBACK_MS)
+  assert.equal(window.label, '2026-05-29 through 2026-05-31')
+  assert.equal(isInBriefingWindow(now - BRIEFING_LOOKBACK_MS, now, 'UTC'), true)
+  assert.equal(isInBriefingWindow(now - BRIEFING_LOOKBACK_MS - 1, now, 'UTC'), false)
+  assert.equal(isInBriefingWindow(now + 1, now, 'UTC'), false)
 })
 
 test('openRouterComplete posts the documented OpenRouter chat completion payload', async (t) => {

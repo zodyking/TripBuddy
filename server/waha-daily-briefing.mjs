@@ -18,6 +18,9 @@ import {
 } from './openrouter-briefing.mjs'
 import { readWahaThreadHistoryAroundDate } from './waha-chat-history-pg.mjs'
 
+export const BRIEFING_LOOKBACK_DAYS = 2
+export const BRIEFING_LOOKBACK_MS = BRIEFING_LOOKBACK_DAYS * 24 * 60 * 60 * 1000
+
 /**
  * @param {unknown} msg
  */
@@ -83,6 +86,29 @@ function calendarDayInTz(d, timeZone) {
     /* fall through */
   }
   return d.toISOString().slice(0, 10)
+}
+
+export function briefingWindowForNow(now, timeZone = 'UTC') {
+  const end = new Date(now)
+  const safeEnd = Number.isFinite(end.getTime()) ? end : new Date()
+  const start = new Date(safeEnd.getTime() - BRIEFING_LOOKBACK_MS)
+  const startDay = calendarDayInTz(start, timeZone)
+  const endDay = calendarDayInTz(safeEnd, timeZone)
+  return {
+    startMs: start.getTime(),
+    endMs: safeEnd.getTime(),
+    startDay,
+    endDay,
+    label: startDay === endDay
+      ? `${endDay} last ${BRIEFING_LOOKBACK_DAYS} days`
+      : `${startDay} through ${endDay}`,
+  }
+}
+
+export function isInBriefingWindow(ts, now, timeZone = 'UTC') {
+  const window = briefingWindowForNow(now, timeZone)
+  const ms = Number(ts)
+  return Number.isFinite(ms) && ms >= window.startMs && ms <= window.endMs
 }
 
 /**
@@ -267,9 +293,9 @@ export async function collectTodayMessages(chatId, timeZone, opts = {}) {
 
   const contactMap = buildContactMap(contacts)
   const lidMap = buildLidPhoneMap(lidEntries)
-  const today = calendarDayInTz(safeNow, timeZone)
+  const briefingWindow = briefingWindowForNow(safeNow, timeZone)
 
-  const todayMsgs = rawMessages
+  const briefingMsgs = rawMessages
     .map((m) => ({
       id: getMessageId(m),
       ts: messageTimestampMs(m),
@@ -277,10 +303,10 @@ export async function collectTodayMessages(chatId, timeZone, opts = {}) {
       text: messageBody(m),
     }))
     .filter((m) => m.text && m.ts > 0)
-    .filter((m) => calendarDayInTz(new Date(m.ts), timeZone) === today)
+    .filter((m) => isInBriefingWindow(m.ts, safeNow, timeZone))
     .sort((a, b) => a.ts - b.ts)
 
-  return { messages: todayMsgs, contacts }
+  return { messages: briefingMsgs, contacts, window: briefingWindow }
 }
 
 /**
@@ -320,7 +346,7 @@ export async function applyEnglishSenderLabels(messages, accountKey) {
   }
 }
 
-export function formatTranscript(messages, timeZone = 'UTC') {
+export function formatTranscript(messages, timeZone = 'UTC', opts = {}) {
   return messages
     .map((m) => {
       const time = new Date(m.ts).toLocaleTimeString('en-US', {
@@ -329,8 +355,15 @@ export function formatTranscript(messages, timeZone = 'UTC') {
         minute: '2-digit',
         hour12: true,
       })
+      const date = opts.includeDate
+        ? new Date(m.ts).toLocaleDateString('en-US', {
+          timeZone,
+          month: 'short',
+          day: 'numeric',
+        })
+        : ''
       const who = m.sender || 'Unknown'
-      return `[${time}] ${cleanChatText(who)}: ${cleanChatText(m.text)}`
+      return `[${date ? `${date}, ` : ''}${time}] ${cleanChatText(who)}: ${cleanChatText(m.text)}`
     })
     .join('\n')
 }
@@ -351,7 +384,7 @@ export async function generateDailyBriefing(opts) {
   const chatLabel = String(opts.chatLabel || chatId).trim()
 
   const now = new Date()
-  const today = calendarDayInTz(now, timeZone)
+  const window = briefingWindowForNow(now, timeZone)
   const { messages } = await collectTodayMessages(chatId, timeZone, {
     now,
     accountKey: opts.accountKey,
@@ -361,9 +394,10 @@ export async function generateDailyBriefing(opts) {
   }
 
   await applyEnglishSenderLabels(messages, opts.accountKey)
-  const transcript = formatTranscript(messages, timeZone)
+  const transcript = formatTranscript(messages, timeZone, { includeDate: true })
   const prompt = buildBriefingPrompt(transcript, chatLabel, {
-    dateLabel: today,
+    dateLabel: window.endDay,
+    windowLabel: window.label,
     timeZone,
   })
   const ai = await openRouterComplete(opts.openRouterApiKey, prompt, {

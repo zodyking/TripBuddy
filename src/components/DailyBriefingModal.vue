@@ -42,7 +42,7 @@ const emit = defineEmits(['play', 'dismiss'])
           {{ error }}
         </p>
         <p v-else class="daily-briefing-lead">
-          Review the clean summary before playback. It is scoped to today's messages from your monitored chat.
+          Review the clean summary before playback. It is scoped to recent messages from your monitored chat.
         </p>
         <div class="daily-briefing-status-grid" aria-label="Briefing status">
           <div class="daily-briefing-status-card">
@@ -54,7 +54,7 @@ const emit = defineEmits(['play', 'dismiss'])
             <span class="daily-briefing-status-label">status</span>
           </div>
           <div class="daily-briefing-status-card">
-            <span class="daily-briefing-status-value">Today</span>
+            <span class="daily-briefing-status-value">Last 2 days</span>
             <span class="daily-briefing-status-label">date scope</span>
           </div>
         </div>
