@@ -1,6 +1,11 @@
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import { LOCAL_DIR } from './config.mjs'
+import {
+  readWahaThreadHistory,
+  upsertWahaChatMeta,
+  upsertWahaMessages,
+} from './waha-chat-history-pg.mjs'
 
 const WAHA_SESSION = process.env.WAHA_SESSION_NAME || 'default'
 const CACHE_DIR = path.join(LOCAL_DIR, 'waha-chat-cache')
@@ -20,8 +25,15 @@ function getWahaUrl() {
 /** @type {Map<string, { updatedAt: number, messages: unknown[] }>} */
 const memoryCache = new Map()
 
-function safeFileName(chatId) {
-  return String(chatId).replace(/[^a-zA-Z0-9@._-]/g, '_') + '.json'
+function cacheKey(chatId, accountKey = '') {
+  const ak = String(accountKey || '').trim()
+  const id = String(chatId || '').trim()
+  return ak ? `${ak}:${id}` : id
+}
+
+function safeFileName(chatId, accountKey = '') {
+  const raw = cacheKey(chatId, accountKey)
+  return String(raw).replace(/[^a-zA-Z0-9@._-]/g, '_') + '.json'
 }
 
 async function ensureCacheDir() {
@@ -30,15 +42,30 @@ async function ensureCacheDir() {
 
 /**
  * @param {string} chatId
+ * @param {string} [accountKey]
  */
-export async function readThreadCache(chatId) {
+export async function readThreadCache(chatId, accountKey = '') {
   const id = String(chatId || '').trim()
   if (!id) return null
-  const mem = memoryCache.get(id)
+  const key = cacheKey(id, accountKey)
+  const pgHistory = accountKey
+    ? await readWahaThreadHistory(accountKey, id, { limit: 1000 }).catch(() => null)
+    : null
+  if (pgHistory?.messages?.length) {
+    memoryCache.set(key, { updatedAt: pgHistory.updatedAt, messages: pgHistory.messages })
+    return pgHistory
+  }
+  const mem = memoryCache.get(key)
   if (mem) return { ...mem, chatId: id, fromMemory: true }
   try {
     await ensureCacheDir()
-    const raw = await fs.readFile(path.join(CACHE_DIR, safeFileName(id)), 'utf8')
+    let raw
+    try {
+      raw = await fs.readFile(path.join(CACHE_DIR, safeFileName(id, accountKey)), 'utf8')
+    } catch (e) {
+      if (!accountKey) throw e
+      raw = await fs.readFile(path.join(CACHE_DIR, safeFileName(id)), 'utf8')
+    }
     const data = JSON.parse(raw)
     if (!data || typeof data !== 'object') return null
     const payload = {
@@ -48,7 +75,7 @@ export async function readThreadCache(chatId) {
       contacts: Array.isArray(data.contacts) ? data.contacts : [],
       lids: Array.isArray(data.lids) ? data.lids : [],
     }
-    memoryCache.set(id, { updatedAt: payload.updatedAt, messages: payload.messages })
+    memoryCache.set(key, { updatedAt: payload.updatedAt, messages: payload.messages })
     return payload
   } catch {
     return null
@@ -57,20 +84,28 @@ export async function readThreadCache(chatId) {
 
 /**
  * @param {string} chatId
- * @param {{ updatedAt?: number, messages: unknown[], contacts?: unknown[], lids?: unknown[] }} payload
+ * @param {{ updatedAt?: number, messages: unknown[], contacts?: unknown[], lids?: unknown[], accountKey?: string }} payload
  */
 export async function writeThreadCache(chatId, payload) {
   const id = String(chatId || '').trim()
   if (!id) return
+  const accountKey = String(payload.accountKey || '').trim()
+  const key = cacheKey(id, accountKey)
   const updatedAt = Number(payload.updatedAt) || Date.now()
   const messages = Array.isArray(payload.messages) ? payload.messages : []
   const contacts = Array.isArray(payload.contacts) ? payload.contacts : []
   const lids = Array.isArray(payload.lids) ? payload.lids : []
-  memoryCache.set(id, { updatedAt, messages })
+  memoryCache.set(key, { updatedAt, messages })
+  if (accountKey) {
+    await Promise.all([
+      upsertWahaMessages(accountKey, id, messages),
+      upsertWahaChatMeta(accountKey, id, { contacts, lids }),
+    ]).catch(() => {})
+  }
   try {
     await ensureCacheDir()
     await fs.writeFile(
-      path.join(CACHE_DIR, safeFileName(id)),
+      path.join(CACHE_DIR, safeFileName(id, accountKey)),
       JSON.stringify({ chatId: id, updatedAt, messages, contacts, lids }),
       'utf8',
     )
@@ -119,7 +154,7 @@ export async function fetchWahaMessageMedia(chatId, messageId) {
 
 /**
  * @param {string} chatId
- * @param {{ limit?: number, downloadMedia?: boolean, contacts?: unknown[], lids?: unknown[] }} [opts]
+ * @param {{ limit?: number, downloadMedia?: boolean, contacts?: unknown[], lids?: unknown[], accountKey?: string }} [opts]
  */
 export async function syncThreadCache(chatId, opts = {}) {
   const r = await fetchWahaChatMessages(chatId, {
@@ -136,6 +171,7 @@ export async function syncThreadCache(chatId, opts = {}) {
     messages,
     contacts: opts.contacts,
     lids: opts.lids,
+    accountKey: opts.accountKey,
   })
   return { ok: true, status: r.status, messages, updatedAt }
 }
