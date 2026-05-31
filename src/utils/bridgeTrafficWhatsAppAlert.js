@@ -36,7 +36,21 @@ export function canOfferBridgeTrafficAlert(routeId) {
   if (!id) return false
   const key = storageKey(id)
   const v = window.localStorage.getItem(key)
-  return v !== 'sent' && v !== 'dismissed'
+  return v !== 'sent' && v !== 'dismissed' && v !== 'offered'
+}
+
+/**
+ * Preview was shown this hour (avoid re-queueing every poll).
+ * @param {string} routeId
+ */
+export function markBridgeTrafficAlertOffered(routeId) {
+  if (typeof window === 'undefined' || !window.localStorage) return
+  const id = String(routeId ?? '').trim()
+  if (!id) return
+  const key = storageKey(id)
+  const v = window.localStorage.getItem(key)
+  if (v === 'sent' || v === 'dismissed') return
+  window.localStorage.setItem(key, 'offered')
 }
 
 /**

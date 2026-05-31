@@ -69,15 +69,25 @@ export async function captureBridgeTileElement(tileEl, opts = {}) {
   const routeId = String(opts.routeId ?? '').trim()
   const scale = Math.min(2.5, Math.max(1.5, window.devicePixelRatio || 2))
 
+  const rect = tileEl.getBoundingClientRect()
+  if (rect.width < 40 || rect.height < 40) {
+    throw new Error('Bridge tile not laid out yet')
+  }
+
   const canvas = await html2canvas(tileEl, {
     backgroundColor: '#0a0a0e',
     scale,
     useCORS: true,
     allowTaint: true,
     logging: false,
-    scrollX: 0,
+    width: Math.ceil(rect.width),
+    height: Math.ceil(rect.height),
+    scrollX: -window.scrollX,
     scrollY: -window.scrollY,
+    x: rect.left + window.scrollX,
+    y: rect.top + window.scrollY,
     windowWidth: document.documentElement.clientWidth,
+    windowHeight: document.documentElement.clientHeight,
     onclone: (clonedDoc) => {
       const tile = routeId
         ? clonedDoc.getElementById(`bridge-tile-${routeId}`)

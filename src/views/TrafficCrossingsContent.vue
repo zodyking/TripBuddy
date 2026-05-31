@@ -796,6 +796,15 @@ const payloadFetchedAt = computed(() => {
   return typeof t === 'number' && Number.isFinite(t) ? t : null
 })
 
+/** Crossings list + cards are on screen (not loading skeleton). */
+const crossingsReady = computed(
+  () =>
+    viewMode.value === 'crossings' &&
+    !loading.value &&
+    Boolean(payload.value) &&
+    rankedRows.value.length > 0,
+)
+
 /**
  * Snapshot the live bridge card DOM for WhatsApp alerts.
  * @param {unknown} row
@@ -812,7 +821,7 @@ async function captureBridgeTileImageForRow(row) {
     /* ignore */
   }
   await new Promise((r) => {
-    requestAnimationFrame(() => requestAnimationFrame(() => setTimeout(r, 220)))
+    requestAnimationFrame(() => requestAnimationFrame(() => setTimeout(r, 400)))
   })
   try {
     return await captureBridgeTileElement(el, {
@@ -831,15 +840,10 @@ useBridgeTrafficWhatsAppAlerts({
   trafficLevelForRow,
   delayTierForRow,
   isClosedRow,
-  seriesForRow,
-  bridgeChartStrokeColor,
-  trafficStatusTitle,
-  trendInfo,
-  getBridgeCameraFeed,
-  travelDirection: direction,
-  viewMode,
   captureBridgeTileImage: captureBridgeTileImageForRow,
-  payloadUpdatedAt: payloadFetchedAt,
+  viewMode,
+  crossingsReady,
+  travelDirection: direction,
 })
 
 const isLandscapeSplit = ref(false)
