@@ -1944,7 +1944,7 @@ onUnmounted(() => {
         <!-- OpenRouter -->
         <h4 class="api-sub-heading">OpenRouter</h4>
         <p class="cred-hint">
-          Summarizes today’s monitored WhatsApp chat into a spoken briefing on login.
+          Powers the <strong>Brief</strong> button on the Chat page (spoken summary of the last 2 days).
           <a href="https://openrouter.ai/" target="_blank" rel="noopener noreferrer" class="ext-link">OpenRouter API key</a>
         </p>
         <div class="api-key-row">
@@ -2213,7 +2213,7 @@ onUnmounted(() => {
             />
             <span class="toggle-slider"></span>
           </label>
-          <span class="audio-row-label">Daily briefing on login</span>
+          <span class="audio-row-label">AI chat briefing (Chat → Brief button)</span>
         </div>
       </SettingsSection>
     </main>

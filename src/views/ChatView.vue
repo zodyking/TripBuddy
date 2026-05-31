@@ -3,9 +3,14 @@ import { ref, computed, watch } from 'vue'
 import { RouterLink } from 'vue-router'
 import { useWahaMessenger } from '../composables/useWahaMessenger.js'
 import { useDailyBriefing } from '../composables/useDailyBriefing.js'
-import { wahaPrefsHydrated } from '../utils/wahaPrefs.js'
+import { wahaPrefsHydrated, hydrateWahaPrefsFromServer } from '../utils/wahaPrefs.js'
+import { hydrateOpenrouterApiKeyFromServer } from '../stores/trafficTileKey.js'
 
-const { loadBriefingOnChatPage } = useDailyBriefing()
+const {
+  generateBriefingFromChat,
+  loading: briefingLoading,
+  isChatBriefingConfigured,
+} = useDailyBriefing()
 
 const scrollEl = ref(/** @type {HTMLElement | null} */ (null))
 const draft = ref('')
@@ -35,6 +40,14 @@ const {
 
 const hasActiveChat = computed(() => !!activeChatId.value)
 const threadBusy = computed(() => loading.value || syncing.value)
+const briefingAvailable = computed(
+  () => wahaPrefsHydrated.value && isChatBriefingConfigured(),
+)
+const briefingBusy = computed(() => briefingLoading.value)
+
+function onGenerateBriefingTap() {
+  void generateBriefingFromChat({ chatLabel: chatTitle.value || 'WhatsApp chat' })
+}
 const showThreadLoader = computed(() => threadBusy.value)
 
 const loaderLabel = computed(() => {
@@ -147,10 +160,11 @@ watch(activeChatId, () => {
 })
 
 watch(
-  [wahaPrefsHydrated, configured, chatTitle],
-  () => {
-    if (!wahaPrefsHydrated.value || !configured.value) return
-    loadBriefingOnChatPage({ chatLabel: chatTitle.value || 'WhatsApp chat' })
+  wahaPrefsHydrated,
+  (hydrated) => {
+    if (!hydrated) {
+      void Promise.all([hydrateWahaPrefsFromServer(), hydrateOpenrouterApiKeyFromServer()])
+    }
   },
   { immediate: true },
 )
@@ -276,6 +290,21 @@ function retryMedia(msg) {
       <div class="chat-toolbar-center">
         <h1 class="chat-toolbar-title">{{ chatTitle || 'Chat' }}</h1>
       </div>
+      <button
+        type="button"
+        class="chat-briefing-btn tap"
+        :disabled="!briefingAvailable || briefingBusy || !hasActiveChat"
+        :title="
+          briefingAvailable
+            ? 'Summarize the last 2 days and read aloud'
+            : 'Set OpenRouter API key (Settings → API) and choose a chat (Settings → WhatsApp)'
+        "
+        aria-label="Generate spoken chat briefing"
+        @click="onGenerateBriefingTap"
+      >
+        <span class="chat-briefing-btn-icon" aria-hidden="true">AI</span>
+        <span class="chat-briefing-btn-label">{{ briefingBusy ? '…' : 'Brief' }}</span>
+      </button>
       <RouterLink
         class="chat-icon-btn tap"
         aria-label="WhatsApp settings"
@@ -535,6 +564,45 @@ function retryMedia(msg) {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.chat-briefing-btn {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  min-height: 2.75rem;
+  padding: 0 0.65rem;
+  border: 1px solid rgba(168, 85, 247, 0.45);
+  border-radius: var(--radius-full, 9999px);
+  background: linear-gradient(135deg, rgba(124, 58, 237, 0.35), rgba(249, 115, 22, 0.22));
+  color: var(--color-text-primary, #f4f4f5);
+  font-size: 0.8125rem;
+  font-weight: var(--weight-semibold, 600);
+  cursor: pointer;
+}
+
+.chat-briefing-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.chat-briefing-btn-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.35rem;
+  height: 1.35rem;
+  border-radius: 50%;
+  font-size: 0.625rem;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  background: linear-gradient(135deg, #a855f7, #f97316);
+  color: #fff;
+}
+
+.chat-briefing-btn-label {
+  line-height: 1;
 }
 
 .chat-icon-btn {

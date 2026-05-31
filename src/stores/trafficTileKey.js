@@ -8,6 +8,7 @@
  * Register for 511NY API: https://511ny.org/my511/register
  */
 import { ref, computed } from 'vue'
+import { OPENROUTER_DEFAULT_MODEL, sanitizeOpenrouterModel } from '../constants/openrouterModels.js'
 
 // TomTom key (legacy - used for traffic tiles)
 const LS_TOMTOM = 'fedextool_tomtom_traffic_key'
@@ -253,6 +254,9 @@ export function setOpenrouterModel(model) {
 export async function hydrateOpenrouterApiKeyFromServer() {
   if (typeof window === 'undefined') return
   try {
+    const { sanitizeOpenrouterModel, OPENROUTER_DEFAULT_MODEL } = await import(
+      '../constants/openrouterModels.js'
+    )
     const r = await fetch('/api/settings/credentials?includeOpenrouterApiKey=1', {
       credentials: 'include',
     })
@@ -261,9 +265,9 @@ export async function hydrateOpenrouterApiKeyFromServer() {
     if (typeof data.openrouterApiKey === 'string') {
       setOpenrouterApiKey(data.openrouterApiKey)
     }
-    if (typeof data.openrouterModel === 'string' && data.openrouterModel.trim()) {
-      setOpenrouterModel(data.openrouterModel.trim())
-    }
+    setOpenrouterModel(
+      sanitizeOpenrouterModel(data.openrouterModel || OPENROUTER_DEFAULT_MODEL),
+    )
   } catch {
     /* ignore */
   }

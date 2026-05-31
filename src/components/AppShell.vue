@@ -41,8 +41,7 @@ const {
   error: dailyBriefingError,
   narratorActive: dailyBriefingNarratorActive,
   narratorWordIndex: dailyBriefingNarratorWordIndex,
-  maybeOfferDailyBriefing,
-  offerBriefingNow: offerDailyBriefingNow,
+  generateBriefingFromChat,
   playBriefing: playDailyBriefing,
   dismiss: dismissDailyBriefing,
   stopNarrator: stopDailyBriefingNarrator,
@@ -100,7 +99,7 @@ const headerTitle = computed(() => {
 })
 
 function onOfferBriefingEvent() {
-  void offerDailyBriefingNow({ force: true })
+  void generateBriefingFromChat()
 }
 
 onMounted(() => {
@@ -114,8 +113,6 @@ onMounted(() => {
         hydrateOpenrouterApiKeyFromServer(),
         hydrateWahaPrefsFromServer(),
       ])
-      await new Promise((r) => setTimeout(r, 900))
-      void maybeOfferDailyBriefing()
     })()
   }
   for (const ms of [500, 1500, 3500]) {

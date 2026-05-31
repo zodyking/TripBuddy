@@ -1092,7 +1092,6 @@ function syncTripVoiceUnlockHint() {
 function onUnlockTripVoiceTap() {
   unlockTripVoiceFromUserGesture()
   syncTripVoiceUnlockHint()
-  setTimeout(() => window.dispatchEvent(new Event('tripbuddy:offer-briefing')), 1200)
 }
 
 async function loadQuickActions() {

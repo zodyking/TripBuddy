@@ -2,6 +2,10 @@
  * Spoken daily briefing with live on-screen word highlighting (speechSynthesis).
  */
 import { pushLiveLog } from '../stores/liveLogStore.js'
+import {
+  hideSpeechAlertModal,
+  showSpeechAlertModal,
+} from '../stores/speechAlertModalStore.js'
 
 const BRIEFING_PREFIX = 'Daily briefing.'
 
@@ -91,6 +95,7 @@ export function speakDailyBriefing(bodyText, callbacks = {}) {
     } catch {
       /* ignore */
     }
+    hideSpeechAlertModal()
     cleanup()
     callbacks.onEnd?.()
   }
@@ -115,6 +120,7 @@ export function speakDailyBriefing(bodyText, callbacks = {}) {
 
     u.onstart = () => {
       pushLiveLog({ type: 'info', message: '[Briefing] TTS started', ts: Date.now() })
+      showSpeechAlertModal(utterText)
       callbacks.onStart?.()
       callbacks.onWordIndex?.(0)
 
@@ -130,6 +136,7 @@ export function speakDailyBriefing(bodyText, callbacks = {}) {
 
     u.onend = () => {
       pushLiveLog({ type: 'info', message: '[Briefing] TTS ended', ts: Date.now() })
+      hideSpeechAlertModal()
       cleanup()
       callbacks.onWordIndex?.(Math.max(0, words.length - 1))
       callbacks.onEnd?.()
@@ -141,6 +148,7 @@ export function speakDailyBriefing(bodyText, callbacks = {}) {
         message: `[Briefing] TTS error: ${e?.error || 'unknown'}`,
         ts: Date.now(),
       })
+      hideSpeechAlertModal()
       cleanup()
       callbacks.onError?.(e?.error || 'error')
     }

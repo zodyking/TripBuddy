@@ -8,6 +8,8 @@ import {
   isWahaConfigured,
   isWahaDailyBriefingEnabled,
 } from '../utils/wahaApi.js'
+import { enableSpeechAlertsForBriefing } from '../utils/briefingSpeech.js'
+import { getOpenrouterKeyEffective } from '../stores/trafficTileKey.js'
 import {
   speakDailyBriefing,
   cancelDailyBriefingPlayback,
@@ -25,8 +27,6 @@ const narratorActive = ref(false)
 const narratorWordIndex = ref(-1)
 
 let fetchInFlight = false
-/** @type {ReturnType<typeof setTimeout> | null} */
-let chatPageBriefingTimer = null
 
 function markOffered() {
   try {
@@ -125,8 +125,8 @@ function playBriefing() {
  */
 async function maybeOfferDailyBriefing(opts = {}) {
   if (!opts.force && !opts.skipSessionGate && wasOfferedThisSession()) return
-  if (!isWahaDailyBriefingEnabled()) return
-  if (!isWahaConfigured()) return
+  if (!opts.force && !isWahaDailyBriefingEnabled()) return
+  if (!isChatBriefingConfigured()) return
 
   const chatId = getWahaChatId()
   if (!chatId) return
@@ -169,6 +169,10 @@ async function maybeOfferDailyBriefing(opts = {}) {
     }
     briefingText.value = result.briefing
     messageCount.value = Number(result.messageCount) || 0
+    if (opts.autoPlay) {
+      playBriefing()
+      return
+    }
     if (opts.showModal !== false) modalOpen.value = true
   } catch (e) {
     error.value = e instanceof Error ? e.message : 'Briefing failed.'
@@ -181,6 +185,32 @@ async function maybeOfferDailyBriefing(opts = {}) {
 
 async function offerBriefingNow(opts = {}) {
   await maybeOfferDailyBriefing({ ...opts, force: true, openOnError: true })
+}
+
+/** OpenRouter key + monitored chat required (Settings). */
+export function isChatBriefingConfigured() {
+  return isWahaConfigured() && !!String(getOpenrouterKeyEffective() || '').trim()
+}
+
+/**
+ * Chat page: unlock speech, generate briefing, show modal / narrator.
+ * @param {{ chatLabel?: string }} [opts]
+ */
+async function generateBriefingFromChat(opts = {}) {
+  if (!isChatBriefingConfigured()) {
+    error.value = 'Add an OpenRouter API key in Settings → API and choose a chat under WhatsApp.'
+    modalOpen.value = true
+    return
+  }
+  enableSpeechAlertsForBriefing()
+  await maybeOfferDailyBriefing({
+    force: true,
+    openOnError: true,
+    skipSessionGate: true,
+    skipThreadSync: true,
+    chatLabel: opts.chatLabel || 'WhatsApp chat',
+    autoPlay: opts.autoPlay !== false,
+  })
 }
 
 async function acceptBriefing(opts = {}) {
@@ -231,24 +261,6 @@ async function acceptBriefing(opts = {}) {
   }
 }
 
-/**
- * Load briefing when the user opens the Chat tab (after messenger sync has time to finish).
- * @param {{ chatLabel?: string }} [opts]
- */
-function loadBriefingOnChatPage(opts = {}) {
-  if (!isWahaDailyBriefingEnabled() || !isWahaConfigured()) return
-  if (chatPageBriefingTimer) clearTimeout(chatPageBriefingTimer)
-  chatPageBriefingTimer = setTimeout(() => {
-    chatPageBriefingTimer = null
-    void maybeOfferDailyBriefing({
-      skipSessionGate: true,
-      openOnError: true,
-      skipThreadSync: true,
-      chatLabel: opts.chatLabel || 'WhatsApp chat',
-    })
-  }, 1800)
-}
-
 export function useDailyBriefing() {
   return {
     modalOpen,
@@ -260,10 +272,11 @@ export function useDailyBriefing() {
     narratorWordIndex,
     maybeOfferDailyBriefing,
     offerBriefingNow,
+    generateBriefingFromChat,
     acceptBriefing,
     playBriefing,
     dismiss,
     stopNarrator,
-    loadBriefingOnChatPage,
+    isChatBriefingConfigured,
   }
 }
