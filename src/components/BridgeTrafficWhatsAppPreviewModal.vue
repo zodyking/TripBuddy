@@ -16,9 +16,9 @@ const canSend = computed(() => isWahaConfigured() && !!getWahaChatId())
 
 const alertTitle = computed(() => {
   const k = preview.value?.alertKind
-  if (k === 'gridlock') return 'Gridlock warning'
-  if (k === 'highTraffic') return 'High traffic warning'
-  return 'Bridge traffic alert'
+  if (k === 'gridlock') return 'Standstill / gridlock'
+  if (k === 'highTraffic') return 'Heavy traffic'
+  return 'Bridge traffic heads-up'
 })
 
 function dismiss() {
@@ -125,8 +125,8 @@ async function confirmSend() {
 }
 
 .bridge-wa-preview-dialog {
-  width: min(100%, 22rem);
-  max-height: min(92vh, 40rem);
+  width: min(100%, 26rem);
+  max-height: min(92vh, 44rem);
   overflow-y: auto;
   padding: 1.1rem 1rem 1rem;
   border-radius: 14px;
@@ -170,9 +170,10 @@ async function confirmSend() {
 .bridge-wa-preview-image {
   display: block;
   width: 100%;
-  max-width: 280px;
+  max-width: 100%;
   height: auto;
   object-fit: contain;
+  aspect-ratio: 720 / 400;
 }
 
 .bridge-wa-preview-message-label {

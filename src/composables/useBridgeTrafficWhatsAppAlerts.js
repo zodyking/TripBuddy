@@ -27,6 +27,12 @@ let preparing = false
  *   bridgeChartStrokeColor: (row: unknown) => string,
  *   trafficStatusTitle: (row: unknown) => string,
  *   trendInfo: (row: unknown) => { short: string },
+ *   getBridgeCameraFeed?: (row: unknown) => {
+ *     youtubeVideoId?: string | null,
+ *     imageUrl?: string | null,
+ *     videoUrl?: string | null,
+ *     status?: string,
+ *   } | null,
  *   payloadUpdatedAt?: import('vue').ComputedRef<number | null> | import('vue').Ref<number | null>,
  * }} hooks
  */
@@ -42,13 +48,14 @@ export function useBridgeTrafficWhatsAppAlerts(hooks) {
     preparing = true
     try {
       const bridgeName = hooks.displayTitle(row)
-      const message = buildBridgeTrafficAlertMessage(bridgeName, kind)
-      const level = hooks.trafficLevelForRow(row)
-      const accentColor = level === 'standstill' ? '#a78bfa' : '#f87171'
       const o = row && typeof row === 'object' ? /** @type {Record<string, unknown>} */ (row) : {}
       const crossingMin =
         o.routeTravelTime != null && !o.isCrossingClosed ? String(o.routeTravelTime) : '—'
       const speedMph = o.routeSpeed != null ? String(o.routeSpeed) : '—'
+      const message = buildBridgeTrafficAlertMessage(bridgeName, kind, { crossingMin })
+      const level = hooks.trafficLevelForRow(row)
+      const accentColor = level === 'standstill' ? '#a78bfa' : '#f87171'
+      const cameraFeed = hooks.getBridgeCameraFeed?.(row) ?? null
       const updatedMs = hooks.payloadUpdatedAt?.value
       const updatedAtLabel =
         typeof updatedMs === 'number' && Number.isFinite(updatedMs) && updatedMs > 0
@@ -65,6 +72,7 @@ export function useBridgeTrafficWhatsAppAlerts(hooks) {
         accentColor,
         series: hooks.seriesForRow(row),
         updatedAtLabel,
+        cameraFeed,
       })
 
       const imageUrl = URL.createObjectURL(blob)

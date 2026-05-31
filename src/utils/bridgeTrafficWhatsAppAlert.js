@@ -60,15 +60,29 @@ export function markBridgeTrafficAlertDismissed(routeId) {
 }
 
 /**
+ * Shorter name for chat (drops deck suffix when present).
+ * @param {string} bridgeName
+ */
+export function casualBridgeNameForAlert(bridgeName) {
+  const full = String(bridgeName ?? '').trim()
+  if (!full) return 'the bridge'
+  return full.replace(/\s*[—–-]\s*(upper|lower)\s*$/i, '').trim() || full
+}
+
+/**
  * @param {string} bridgeName
  * @param {BridgeTrafficAlertKind} kind
+ * @param {{ crossingMin?: string }} [opts]
  */
-export function buildBridgeTrafficAlertMessage(bridgeName, kind) {
-  const name = String(bridgeName ?? '').trim() || 'this crossing'
+export function buildBridgeTrafficAlertMessage(bridgeName, kind, opts = {}) {
+  const name = casualBridgeNameForAlert(bridgeName)
+  const min = String(opts.crossingMin ?? '').trim()
+  const minBit = min && min !== '—' ? ` (${min} min right now)` : ''
+
   if (kind === 'gridlock') {
-    return `Gridlock warning — standstill traffic on ${name}.`
+    return `${name} is basically at a standstill${minBit}.`
   }
-  return `High traffic warning on ${name}.`
+  return `Traffic's really heavy on ${name}${minBit}.`
 }
 
 /**
