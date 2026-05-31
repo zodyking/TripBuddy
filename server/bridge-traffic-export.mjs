@@ -26,6 +26,12 @@ const PANYNJ_ROUTE_META = Object.freeze({
   86: { bridge: 'Goethals Bridge', travelDirection: 'ToNY', facilityType: 'bridge' },
   260: { bridge: 'Outerbridge Crossing', travelDirection: 'ToNJ', facilityType: 'bridge' },
   2520: { bridge: 'Outerbridge Crossing', travelDirection: 'ToNY', facilityType: 'bridge' },
+  5219: {
+    bridge: 'George Washington Bridge',
+    travelDirection: 'ToNJ',
+    deck: 'Upper',
+    facilityType: 'bridge',
+  },
   12: {
     bridge: 'George Washington Bridge',
     travelDirection: 'ToNJ',
@@ -36,6 +42,12 @@ const PANYNJ_ROUTE_META = Object.freeze({
     bridge: 'George Washington Bridge',
     travelDirection: 'ToNJ',
     deck: 'Lower',
+    facilityType: 'bridge',
+  },
+  881: {
+    bridge: 'George Washington Bridge',
+    travelDirection: 'ToNY',
+    deck: 'Upper',
     facilityType: 'bridge',
   },
   211: {

@@ -16,6 +16,7 @@ import {
 import { useMapVehicleId } from '../composables/useMapVehicleId.js'
 import { sanitizeNy511ImpactFootnote } from '../utils/ny511ImpactFootnote.js'
 import { extractYoutubeVideoIdFromInput } from '../utils/youtubeVideoId.js'
+import { isGwbUpperRouteId } from '../bridges/gwbRoutes.js'
 
 defineOptions({ name: 'TrafficCrossingsContent' })
 
@@ -163,18 +164,14 @@ function isGwbRow(row) {
 
 /**
  * GWB: show **upper deck only** (one card + one map pin). Lower deck still in API for data.
- * To NY: 211 upper / 212 lower. To NJ: 12 upper / 11 lower.
+ * Upper: To NY 881 (was 211), To NJ 5219 (was 12). Lower: 212 / 11.
  * @param {unknown} row
  * @param {'ToNY' | 'ToNJ'} d
  */
 function gwbMatchRouteForToggle(row, d) {
-  const o = /** @type {Record<string, unknown>} */(row)
-  const rid = o.routeId
-  const n = typeof rid === 'number' ? rid : Number(rid)
-  if (d === 'ToNY') {
-    return n === 211
-  }
-  return n === 12
+  if (row == null || typeof row !== 'object') return false
+  const rid = /** @type {Record<string, unknown>} */(row).routeId
+  return isGwbUpperRouteId(rid, d)
 }
 
 const hasVerrazzanoCamera = computed(() => {

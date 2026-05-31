@@ -21,9 +21,9 @@ describe('classifyBridgeTraffic (calibrated profiles)', () => {
     assert.equal(r.tier, 'green')
   })
 
-  it('GWB upper To NJ 13 min / 27 mph → low', () => {
+  it('GWB upper To NJ (current routeId 5219) 13 min / 27 mph → low', () => {
     const r = classifyBridgeTraffic({
-      routeId: 12,
+      routeId: 5219,
       travelDirection: 'ToNJ',
       facilityModifier: 'Upper',
       routeTravelTime: 13,
@@ -32,9 +32,9 @@ describe('classifyBridgeTraffic (calibrated profiles)', () => {
     assert.equal(r.level, 'low')
   })
 
-  it('GWB upper To NY 18 min / 17 mph → low', () => {
+  it('GWB upper To NY (current routeId 881) 18 min / 17 mph → low', () => {
     const r = classifyBridgeTraffic({
-      routeId: 211,
+      routeId: 881,
       travelDirection: 'ToNY',
       facilityModifier: 'Upper',
       routeTravelTime: 18,

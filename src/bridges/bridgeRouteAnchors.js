@@ -21,8 +21,12 @@ const BRIDGE_ANCHORS_BYDIR = Object.freeze(
     },
     /**
      * George Washington Bridge — Wikipedia landmark: 40.8517°N, 73.9527°W (Hudson center span).
-     * 211, 212: eastbound / To NY. 12, 11: westbound / To NJ. Upper/lower: tiny offsets along the span.
+     * Upper To NY: 881 (was 211). Upper To NJ: 5219 (was 12). Lower: 212 / 11.
      */
+    5219: {
+      ToNY: [40.8514, -73.9534],
+      ToNJ: [40.85185, -73.9521],
+    },
     12: {
       ToNY: [40.8514, -73.9534],
       ToNJ: [40.85185, -73.9521],
@@ -30,6 +34,10 @@ const BRIDGE_ANCHORS_BYDIR = Object.freeze(
     11: {
       ToNY: [40.8509, -73.9536],
       ToNJ: [40.8514, -73.9520],
+    },
+    881: {
+      ToNY: [40.85175, -73.9530],
+      ToNJ: [40.8512, -73.9533],
     },
     211: {
       ToNY: [40.85175, -73.9530],

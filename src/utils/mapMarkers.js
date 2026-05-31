@@ -331,7 +331,9 @@ export function bridgeShortLabelForRouteId(routeId) {
     // George Washington (upper deck per direction filter in UI)
     11: 'GW',
     12: 'GW',
+    5219: 'GW',
     211: 'GW',
+    881: 'GW',
     212: 'GW',
     // Goethals
     86: 'Goethals',
