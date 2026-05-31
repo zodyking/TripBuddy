@@ -42,7 +42,7 @@ const {
   narratorActive: dailyBriefingNarratorActive,
   narratorWordIndex: dailyBriefingNarratorWordIndex,
   maybeOfferDailyBriefing,
-  acceptBriefing: acceptDailyBriefing,
+  offerBriefingNow: offerDailyBriefingNow,
   playBriefing: playDailyBriefing,
   dismiss: dismissDailyBriefing,
   stopNarrator: stopDailyBriefingNarrator,
@@ -100,7 +100,7 @@ const headerTitle = computed(() => {
 })
 
 function onOfferBriefingEvent() {
-  offerBriefingNow({ force: true })
+  void offerDailyBriefingNow({ force: true })
 }
 
 onMounted(() => {
@@ -334,7 +334,7 @@ onUnmounted(() => {
       :preview="dailyBriefingText"
       :busy="dailyBriefingLoading"
       :error="dailyBriefingError"
-      @play="acceptDailyBriefing"
+      @play="playDailyBriefing"
       @dismiss="dismissDailyBriefing"
     />
     <DailyBriefingNarrator

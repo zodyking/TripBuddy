@@ -30,11 +30,33 @@ function getMessageId(msg) {
   return ''
 }
 
+function messageKeyObject(msg) {
+  const data = msg?._data && typeof msg._data === 'object' ? msg._data : {}
+  if (msg?.key && typeof msg.key === 'object') return msg.key
+  if (data?.key && typeof data.key === 'object') return data.key
+  return {}
+}
+
+function isFromMe(msg) {
+  const data = msg?._data && typeof msg._data === 'object' ? msg._data : {}
+  const key = messageKeyObject(msg)
+  return Boolean(msg?.fromMe ?? data?.fromMe ?? key?.fromMe)
+}
+
 /**
  * @param {unknown} msg
  */
 function messageTimestampMs(msg) {
-  let ts = Number(msg?.timestamp)
+  const data = msg?._data && typeof msg._data === 'object' ? msg._data : {}
+  const candidates = [
+    msg?.timestamp,
+    msg?.ts,
+    msg?.t,
+    data?.timestamp,
+    data?.ts,
+    data?.t,
+  ]
+  let ts = candidates.map((v) => Number(v)).find((v) => Number.isFinite(v) && v > 0)
   if (!Number.isFinite(ts)) return 0
   if (ts < 1e12) ts *= 1000
   return ts
@@ -46,15 +68,20 @@ function messageTimestampMs(msg) {
  */
 function calendarDayInTz(d, timeZone) {
   try {
-    return new Intl.DateTimeFormat('en-CA', {
+    const parts = new Intl.DateTimeFormat('en-CA', {
       timeZone,
       year: 'numeric',
       month: '2-digit',
       day: '2-digit',
-    }).format(d)
+    }).formatToParts(d)
+    const byType = Object.fromEntries(parts.map((p) => [p.type, p.value]))
+    if (byType.year && byType.month && byType.day) {
+      return `${byType.year}-${byType.month}-${byType.day}`
+    }
   } catch {
-    return d.toISOString().slice(0, 10)
+    /* fall through */
   }
+  return d.toISOString().slice(0, 10)
 }
 
 /**
@@ -81,10 +108,11 @@ function resolveJidName(jid, contactMap, lidMap) {
 }
 
 function resolveSenderName(msg, contactMap, activeChatId, lidMap) {
-  if (msg?.fromMe) return ''
+  if (isFromMe(msg)) return 'You'
   const data = msg?._data && typeof msg._data === 'object' ? msg._data : {}
-  const key = msg?.key && typeof msg.key === 'object' ? msg.key : data?.key || {}
+  const key = messageKeyObject(msg)
   const candidates = [
+    msg?.notifyName,
     data?.notifyName,
     data?.pushName,
     msg?.pushName,
@@ -118,8 +146,17 @@ function resolveSenderName(msg, contactMap, activeChatId, lidMap) {
 /**
  * @param {unknown} msg
  */
+export function cleanChatText(text) {
+  return String(text ?? '')
+    .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, ' ')
+    .replace(/[\u200B-\u200D\uFEFF]/g, '')
+    .replace(/[\u202A-\u202E\u2066-\u2069]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
 function messageBody(msg) {
-  const text = String(msg?.body ?? msg?.text ?? msg?.caption ?? '').trim()
+  const text = cleanChatText(msg?.body ?? msg?.text ?? msg?.caption ?? '')
   if (text) return text
   if (msg?.hasMedia) return '[attachment]'
   return ''
@@ -136,26 +173,53 @@ function buildContactMap(contacts) {
     if (!id) continue
     const name = String(c?.name || c?.pushname || c?.pushName || c?.shortName || '').trim()
     if (name) map.set(id, name)
+    const num = String(c?.number ?? '').replace(/\D/g, '')
+    if (num && name) map.set(`${num}@c.us`, name)
   }
   return map
+}
+
+function rawMessageDedupeKey(msg) {
+  const id = getMessageId(msg)
+  if (id) return `id:${id}`
+  return [
+    'fallback',
+    messageTimestampMs(msg),
+    isFromMe(msg) ? 'me' : 'them',
+    messageBody(msg).slice(0, 120),
+  ].join(':')
+}
+
+function mergeRawMessages(...lists) {
+  const byKey = new Map()
+  for (const list of lists) {
+    if (!Array.isArray(list)) continue
+    for (const msg of list) {
+      if (!msg || typeof msg !== 'object') continue
+      byKey.set(rawMessageDedupeKey(msg), msg)
+    }
+  }
+  return [...byKey.values()]
 }
 
 /**
  * @param {string} chatId
  * @param {string} timeZone
- * @param {{ limit?: number }} [opts]
+ * @param {{ limit?: number, now?: Date | number | string }} [opts]
  */
 export async function collectTodayMessages(chatId, timeZone, opts = {}) {
   const id = String(chatId || '').trim()
   if (!id) return { messages: [], contacts: [] }
 
-  let rawMessages = []
+  const cachedBeforeSync = await readThreadCache(id)
+  let rawMessages = Array.isArray(cachedBeforeSync?.messages) ? cachedBeforeSync.messages : []
   let contacts = []
+  if (Array.isArray(cachedBeforeSync?.contacts)) contacts = cachedBeforeSync.contacts
 
-  const sync = await syncThreadCache(id, { limit: opts.limit ?? 80, downloadMedia: false })
+  const sync = await syncThreadCache(id, { limit: opts.limit ?? 100, downloadMedia: false })
   if (sync.ok && Array.isArray(sync.messages)) {
-    rawMessages = sync.messages
-  } else {
+    rawMessages = mergeRawMessages(rawMessages, sync.messages)
+  } else if (!rawMessages.length) {
     const cache = await readThreadCache(id)
     rawMessages = Array.isArray(cache?.messages) ? cache.messages : []
     contacts = Array.isArray(cache?.contacts) ? cache.contacts : []
@@ -180,10 +244,10 @@ export async function collectTodayMessages(chatId, timeZone, opts = {}) {
 
   const contactMap = buildContactMap(contacts)
   const lidMap = buildLidPhoneMap(lidEntries)
-  const today = calendarDayInTz(new Date(), timeZone)
+  const nowDate = opts.now ? new Date(opts.now) : new Date()
+  const today = calendarDayInTz(Number.isFinite(nowDate.getTime()) ? nowDate : new Date(), timeZone)
 
   const todayMsgs = rawMessages
-    .filter((m) => !m?.fromMe)
     .map((m) => ({
       id: getMessageId(m),
       ts: messageTimestampMs(m),
@@ -199,10 +263,6 @@ export async function collectTodayMessages(chatId, timeZone, opts = {}) {
 
 /**
  * @param {Array<{ sender: string, text: string, ts: number }>} messages
- */
-/**
- * @param {Array<{ sender: string, text: string, ts: number }>} messages
- * @param {string} [accountKey]
  */
 export async function applyEnglishSenderLabels(messages, accountKey) {
   if (!Array.isArray(messages) || !messages.length) return
@@ -238,16 +298,17 @@ export async function applyEnglishSenderLabels(messages, accountKey) {
   }
 }
 
-export function formatTranscript(messages) {
+export function formatTranscript(messages, timeZone = 'UTC') {
   return messages
     .map((m) => {
       const time = new Date(m.ts).toLocaleTimeString('en-US', {
+        timeZone,
         hour: 'numeric',
         minute: '2-digit',
         hour12: true,
       })
       const who = m.sender || 'Unknown'
-      return `[${time}] ${who}: ${m.text}`
+      return `[${time}] ${cleanChatText(who)}: ${cleanChatText(m.text)}`
     })
     .join('\n')
 }
@@ -267,14 +328,19 @@ export async function generateDailyBriefing(opts) {
   const timeZone = String(opts.timeZone || 'UTC').trim() || 'UTC'
   const chatLabel = String(opts.chatLabel || chatId).trim()
 
-  const { messages } = await collectTodayMessages(chatId, timeZone)
+  const now = new Date()
+  const today = calendarDayInTz(now, timeZone)
+  const { messages } = await collectTodayMessages(chatId, timeZone, { now })
   if (!messages.length) {
     return { ok: true, empty: true, messageCount: 0, briefing: '' }
   }
 
   await applyEnglishSenderLabels(messages, opts.accountKey)
-  const transcript = formatTranscript(messages)
-  const prompt = buildBriefingPrompt(transcript, chatLabel)
+  const transcript = formatTranscript(messages, timeZone)
+  const prompt = buildBriefingPrompt(transcript, chatLabel, {
+    dateLabel: today,
+    timeZone,
+  })
   const ai = await openRouterComplete(opts.openRouterApiKey, prompt, {
     model: opts.openRouterModel,
   })
