@@ -4,7 +4,7 @@
 
 /** @typedef {'highTraffic' | 'gridlock'} BridgeTrafficAlertKind */
 
-const STORAGE_PREFIX = 'bridgeWaAlert:v1:'
+const STORAGE_PREFIX = 'bridgeWaAlert:v3:'
 
 /**
  * Clock-hour bucket key (local timezone).

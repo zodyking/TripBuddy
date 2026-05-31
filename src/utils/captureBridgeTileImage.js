@@ -70,9 +70,6 @@ export async function captureBridgeTileElement(tileEl, opts = {}) {
   const scale = Math.min(2.5, Math.max(1.5, window.devicePixelRatio || 2))
 
   const rect = tileEl.getBoundingClientRect()
-  if (rect.width < 40 || rect.height < 40) {
-    throw new Error('Bridge tile not laid out yet')
-  }
 
   const canvas = await html2canvas(tileEl, {
     backgroundColor: '#0a0a0e',

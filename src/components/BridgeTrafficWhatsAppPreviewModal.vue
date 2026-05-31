@@ -25,9 +25,16 @@ function dismiss() {
   closeBridgeTrafficAlertPreview({ dismissed: true })
 }
 
+const hasImage = computed(() => Boolean(preview.value?.imageBlob))
+const imageLoading = computed(() => Boolean(preview.value?.imageLoading) && !hasImage.value)
+
 async function confirmSend() {
   const p = preview.value
   if (!p || bridgeTrafficAlertSending.value) return
+  if (!p.imageBlob) {
+    bridgeTrafficAlertSendError.value = 'No card image to send — open Traffic and try again.'
+    return
+  }
   if (!canSend.value) {
     bridgeTrafficAlertSendError.value =
       'Set up WhatsApp under Settings (monitored chat required).'
@@ -67,13 +74,19 @@ async function confirmSend() {
         <h2 class="bridge-wa-preview-heading">{{ alertTitle }}</h2>
         <p class="bridge-wa-preview-bridge">{{ preview.bridgeName }}</p>
 
-        <div class="bridge-wa-preview-image-wrap">
+        <div v-if="preview.imageUrl" class="bridge-wa-preview-image-wrap">
           <img
             :src="preview.imageUrl"
             class="bridge-wa-preview-image"
             alt="Bridge crossing traffic snapshot"
           />
         </div>
+        <p v-else-if="imageLoading" class="bridge-wa-preview-no-image bridge-wa-preview-loading">
+          Capturing bridge card…
+        </p>
+        <p v-else class="bridge-wa-preview-no-image">
+          Card snapshot unavailable — you can still read the message below. Scroll the crossings list and try again later for the image.
+        </p>
 
         <p class="bridge-wa-preview-message-label">Message</p>
         <p class="bridge-wa-preview-message">{{ preview.message }}</p>
@@ -89,7 +102,7 @@ async function confirmSend() {
           <button
             type="button"
             class="btn bridge-wa-preview-send tap"
-            :disabled="bridgeTrafficAlertSending || !canSend"
+            :disabled="bridgeTrafficAlertSending || !canSend || !hasImage"
             @click="confirmSend"
           >
             {{ bridgeTrafficAlertSending ? 'Sending…' : 'Send to chat' }}
@@ -183,6 +196,20 @@ async function confirmSend() {
   text-transform: uppercase;
   letter-spacing: 0.05em;
   color: #6b7280;
+}
+
+.bridge-wa-preview-no-image {
+  margin: 0 0 0.75rem;
+  padding: 0.55rem 0.65rem;
+  border-radius: 8px;
+  background: #1a1a24;
+  font-size: 0.82rem;
+  line-height: 1.35;
+  color: #9ca3af;
+}
+
+.bridge-wa-preview-loading {
+  color: #c4b5fd;
 }
 
 .bridge-wa-preview-message {

@@ -13,7 +13,8 @@ import {
  *   alertKind: BridgeTrafficAlertKind,
  *   message: string,
  *   imageUrl: string,
- *   imageBlob: Blob,
+ *   imageBlob: Blob | null,
+ *   imageLoading?: boolean,
  * }} BridgeTrafficAlertPreview
  */
 
@@ -35,6 +36,24 @@ export function openBridgeTrafficAlertPreview(payload) {
   bridgeTrafficAlertPreview.value = payload
   bridgeTrafficAlertPreviewOpen.value = true
   bridgeTrafficAlertSendError.value = ''
+}
+
+/**
+ * Attach or replace the preview card image after async capture.
+ * @param {string} routeId
+ * @param {Blob | null} blob
+ */
+export function setBridgeTrafficAlertPreviewImage(routeId, blob) {
+  const cur = bridgeTrafficAlertPreview.value
+  if (!cur || cur.routeId !== routeId) return
+  if (cur.imageUrl) URL.revokeObjectURL(cur.imageUrl)
+  const imageUrl = blob ? URL.createObjectURL(blob) : ''
+  bridgeTrafficAlertPreview.value = {
+    ...cur,
+    imageUrl,
+    imageBlob: blob,
+    imageLoading: false,
+  }
 }
 
 /**
