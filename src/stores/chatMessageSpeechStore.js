@@ -55,7 +55,7 @@ export const canGoToNewerChatSpeech = computed(() => chatMessageSpeechIndex.valu
  * }} item
  * @param {{ focusNewest?: boolean }} [opts]
  */
-export function pushChatMessageSpeech(item) {
+export function pushChatMessageSpeech(item, opts = {}) {
   const id = String(item.id || '').trim()
   if (!id) return
   const next = chatMessageSpeechItems.value.filter((row) => row.id !== id)

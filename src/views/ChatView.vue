@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed, watch } from 'vue'
+import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
 import { RouterLink } from 'vue-router'
 import { useWahaMessenger } from '../composables/useWahaMessenger.js'
 import { useDailyBriefing } from '../composables/useDailyBriefing.js'
@@ -9,6 +9,7 @@ import { formatChatDisplayName, chatAvatarInitial } from '../utils/chatDisplayNa
 import { createDoubleTapHandlers } from '../utils/doubleTap.js'
 import { computeThreadLastMessageKey } from '../utils/dailyBriefingCache.js'
 import { speakChatMessageAloud } from '../utils/chatMessageSpeech.js'
+import { resolveWahaMediaUrl } from '../utils/wahaApi.js'
 
 const {
   generateBriefingFromChat,
@@ -52,6 +53,9 @@ const showPollComposer = ref(false)
 const pollQuestion = ref('')
 const pollOptionA = ref('')
 const pollOptionB = ref('')
+
+/** @type {import('vue').Ref<{ url: string, kind: string, caption: string } | null>} */
+const mediaViewer = ref(null)
 
 const chatPickToast = ref('')
 
@@ -250,9 +254,68 @@ watch(
   { immediate: true },
 )
 
-function openMedia(url) {
-  if (url) window.open(url, '_blank', 'noopener,noreferrer')
+function isSameOriginMediaUrl(url) {
+  const raw = String(url || '').trim()
+  if (!raw) return false
+  if (raw.startsWith('data:') || raw.startsWith('blob:')) return true
+  try {
+    return new URL(raw, window.location.origin).origin === window.location.origin
+  } catch {
+    return false
+  }
 }
+
+function closeMediaViewer() {
+  mediaViewer.value = null
+}
+
+/**
+ * @param {{ media?: { url?: string, kind?: string } | null, text?: string }} msg
+ */
+function openMediaViewer(msg) {
+  const media = msg?.media
+  const url = resolveWahaMediaUrl(media?.url || '')
+  if (!url || !isSameOriginMediaUrl(url)) return
+  const kind = String(media?.kind || 'image')
+  if (kind !== 'image' && kind !== 'sticker' && kind !== 'video') return
+  mediaViewer.value = {
+    url,
+    kind,
+    caption: String(msg?.text || '').trim(),
+  }
+}
+
+/**
+ * @param {{ media?: { url?: string, filename?: string } | null }} msg
+ */
+function openFileAttachment(msg) {
+  const url = resolveWahaMediaUrl(msg?.media?.url || '')
+  if (!url || !isSameOriginMediaUrl(url)) return
+  const a = document.createElement('a')
+  a.href = url
+  a.target = '_blank'
+  a.rel = 'noopener noreferrer'
+  if (msg?.media?.filename) a.download = msg.media.filename
+  a.click()
+}
+
+function onMediaViewerKeydown(e) {
+  if (e.key === 'Escape') closeMediaViewer()
+}
+
+watch(mediaViewer, (open) => {
+  if (typeof document === 'undefined') return
+  document.body.style.overflow = open ? 'hidden' : ''
+})
+
+onMounted(() => {
+  window.addEventListener('keydown', onMediaViewerKeydown)
+})
+
+onBeforeUnmount(() => {
+  window.removeEventListener('keydown', onMediaViewerKeydown)
+  if (typeof document !== 'undefined') document.body.style.overflow = ''
+})
 
 /** @param {{ id: string, hasMedia?: boolean, media?: { url?: string } | null }} msg */
 function onMediaLoadError(msg) {
@@ -570,17 +633,26 @@ async function onSendPoll() {
                   alt=""
                   loading="lazy"
                   @error="onMediaLoadError(item.msg)"
-                  @click="openMedia(item.msg.media.url)"
+                  @click.stop="openMediaViewer(item.msg)"
                 />
-                <video
-                  v-else-if="item.msg.media.kind === 'video'"
-                  class="chat-media-video"
-                  :src="item.msg.media.url"
-                  controls
-                  playsinline
-                  preload="metadata"
-                  @error="onMediaLoadError(item.msg)"
-                />
+                <div v-else-if="item.msg.media.kind === 'video'" class="chat-bubble-video-wrap">
+                  <video
+                    class="chat-media-video"
+                    :src="item.msg.media.url"
+                    controls
+                    playsinline
+                    preload="metadata"
+                    @error="onMediaLoadError(item.msg)"
+                  />
+                  <button
+                    type="button"
+                    class="chat-media-expand tap"
+                    aria-label="Open video full screen"
+                    @click.stop="openMediaViewer(item.msg)"
+                  >
+                    Expand
+                  </button>
+                </div>
                 <audio
                   v-else-if="item.msg.media.kind === 'audio'"
                   class="chat-media-audio"
@@ -591,10 +663,9 @@ async function onSendPoll() {
                 />
                 <a
                   v-else
+                  href="#"
                   class="chat-media-file tap"
-                  :href="item.msg.media.url"
-                  target="_blank"
-                  rel="noopener noreferrer"
+                  @click.prevent.stop="openFileAttachment(item.msg)"
                 >
                   <span class="chat-media-file-icon" aria-hidden="true">📎</span>
                   {{ item.msg.media.filename || 'Open attachment' }}
@@ -762,6 +833,48 @@ async function onSendPoll() {
     </template>
   </template>
   </div>
+
+  <Teleport to="body">
+    <div
+      v-if="mediaViewer"
+      class="chat-media-viewer"
+      role="dialog"
+      aria-modal="true"
+      aria-label="Media preview"
+    >
+      <button
+        type="button"
+        class="chat-media-viewer-backdrop tap"
+        aria-label="Close preview"
+        @click="closeMediaViewer"
+      />
+      <div class="chat-media-viewer-panel">
+        <button
+          type="button"
+          class="chat-media-viewer-close tap"
+          aria-label="Close"
+          @click="closeMediaViewer"
+        >
+          ×
+        </button>
+        <img
+          v-if="mediaViewer.kind === 'image' || mediaViewer.kind === 'sticker'"
+          :src="mediaViewer.url"
+          class="chat-media-viewer-img"
+          alt=""
+        />
+        <video
+          v-else-if="mediaViewer.kind === 'video'"
+          class="chat-media-viewer-video"
+          :src="mediaViewer.url"
+          controls
+          autoplay
+          playsinline
+        />
+        <p v-if="mediaViewer.caption" class="chat-media-viewer-caption">{{ mediaViewer.caption }}</p>
+      </div>
+    </div>
+  </Teleport>
 </template>
 
 <style scoped>
@@ -1351,11 +1464,32 @@ async function onSendPoll() {
   opacity: 0.75;
 }
 
+.chat-bubble-video-wrap {
+  position: relative;
+  display: inline-block;
+  max-width: 100%;
+}
+
 .chat-media-video {
   display: block;
   max-width: 100%;
   max-height: 14rem;
   border-radius: var(--radius-md, 0.5rem);
+}
+
+.chat-media-expand {
+  position: absolute;
+  right: 0.35rem;
+  bottom: 0.35rem;
+  border: none;
+  border-radius: var(--radius-full, 9999px);
+  padding: 0.2rem 0.55rem;
+  font: inherit;
+  font-size: 0.68rem;
+  font-weight: 600;
+  color: #fff;
+  background: rgba(0, 0, 0, 0.55);
+  cursor: pointer;
 }
 
 .chat-media-audio {
@@ -1573,5 +1707,75 @@ async function onSendPoll() {
   .chat-icon-btn.is-spinning svg {
     animation: none;
   }
+}
+</style>
+
+<style>
+.chat-media-viewer {
+  position: fixed;
+  inset: 0;
+  z-index: 10060;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: env(safe-area-inset-top, 0) env(safe-area-inset-right, 0.5rem)
+    env(safe-area-inset-bottom, 0) env(safe-area-inset-left, 0.5rem);
+}
+
+.chat-media-viewer-backdrop {
+  position: absolute;
+  inset: 0;
+  border: none;
+  background: rgba(0, 0, 0, 0.88);
+  cursor: pointer;
+}
+
+.chat-media-viewer-panel {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.65rem;
+  max-width: min(96vw, 42rem);
+  max-height: min(92vh, 92dvh);
+}
+
+.chat-media-viewer-close {
+  align-self: flex-end;
+  width: 2.75rem;
+  height: 2.75rem;
+  border: none;
+  border-radius: var(--radius-full, 9999px);
+  background: rgba(255, 255, 255, 0.12);
+  color: #fff;
+  font-size: 1.75rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.chat-media-viewer-img {
+  display: block;
+  max-width: 100%;
+  max-height: min(78vh, 78dvh);
+  object-fit: contain;
+  border-radius: var(--radius-md, 0.5rem);
+}
+
+.chat-media-viewer-video {
+  display: block;
+  max-width: 100%;
+  max-height: min(78vh, 78dvh);
+  border-radius: var(--radius-md, 0.5rem);
+  background: #000;
+}
+
+.chat-media-viewer-caption {
+  margin: 0;
+  max-width: 100%;
+  text-align: center;
+  font-size: 0.9rem;
+  line-height: 1.4;
+  color: #e8e8ee;
 }
 </style>
