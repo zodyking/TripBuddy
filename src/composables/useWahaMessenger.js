@@ -33,6 +33,8 @@ import {
   needsEnglishSenderNameTranslation,
 } from '../utils/senderNameLocale.js'
 import { formatChatDisplayName } from '../utils/chatDisplayName.js'
+import { announceChatMessage } from '../utils/chatMessageSpeech.js'
+import { isWahaTtsEnabled } from '../utils/wahaApi.js'
 import {
   getCachedThread,
   setCachedThread,
@@ -615,7 +617,16 @@ export function useWahaMessenger(opts = {}) {
         }
         byId.set(m.id, merged)
       }
+      const prevIds = new Set(messages.value.map((m) => m.id))
       const merged = [...byId.values()]
+      if (hasNew && isWahaTtsEnabled()) {
+        const newOnes = [...incoming]
+          .filter((m) => !prevIds.has(m.id) && !m.fromMe)
+          .sort((a, b) => b.ts - a.ts)
+        for (let i = newOnes.length - 1; i >= 0; i--) {
+          announceChatMessage(newOnes[i], { focusNewest: i === 0 })
+        }
+      }
       messages.value = merged
       const rawById = new Map(
         rawThreadMessages.value.map((m) => [getWahaMessageId(m), m]),

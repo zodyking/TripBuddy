@@ -204,28 +204,7 @@ function onChatListDblClick(chat) {
   setMonitoredChat(chat)
 }
 
-/** @type {import('vue').Ref<typeof displayMessages.value[0] | null>} */
-const pendingMessageTap = ref(null)
-
-const messageBubbleTap = createDoubleTapHandlers({
-  onSingle() {
-    pendingMessageTap.value = null
-  },
-  onDouble() {
-    const msg = pendingMessageTap.value
-    if (msg) speakChatMessageAloud(msg)
-    pendingMessageTap.value = null
-  },
-})
-
 function onMessageBubbleTap(msg) {
-  pendingMessageTap.value = msg
-  messageBubbleTap.onTap(msg.id || String(msg.ts))
-}
-
-function onMessageBubbleDblClick(msg) {
-  messageBubbleTap.cancelPending()
-  pendingMessageTap.value = msg
   speakChatMessageAloud(msg)
 }
 
@@ -341,7 +320,7 @@ function retryMedia(msg) {
         </svg>
       </button>
     </header>
-    <p class="chat-list-hint">Double-tap a chat to use it and play today’s briefing. Double-tap a message to hear it.</p>
+    <p class="chat-list-hint">Double-tap a chat to use it and play today’s briefing. Tap a message to hear it again.</p>
     <div class="chat-list-scroll">
       <p v-if="chatsLoading" class="chat-list-status">Loading chats…</p>
       <p v-else-if="!chats.length" class="chat-list-status">No chats found. Check WAHA connection in Settings.</p>
@@ -483,9 +462,8 @@ function retryMedia(msg) {
               role="button"
               tabindex="0"
               :aria-label="item.msg.text ? `Message: ${item.msg.text.slice(0, 80)}` : 'Message attachment'"
-              @click="onMessageBubbleTap(item.msg)"
-              @dblclick.prevent.stop="onMessageBubbleDblClick(item.msg)"
-              @keydown.enter.prevent="onMessageBubbleDblClick(item.msg)"
+              @click.stop="onMessageBubbleTap(item.msg)"
+              @keydown.enter.prevent="onMessageBubbleTap(item.msg)"
             >
               <button
                 v-if="!item.msg.fromMe && item.msg.isGroupChat && item.msg.senderName"

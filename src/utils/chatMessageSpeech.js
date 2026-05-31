@@ -1,14 +1,19 @@
 /**
- * Speak a single chat message aloud (user double-tap).
+ * WhatsApp chat message TTS + swipeable popup.
  */
 import { enqueueAnnouncement } from './alertAudioQueue.js'
 import { formatChatDisplayName } from './chatDisplayName.js'
 import { enableSpeechAlertsForBriefing } from './briefingSpeech.js'
+import {
+  pushChatMessageSpeech,
+  focusChatMessageSpeechByCategory,
+} from '../stores/chatMessageSpeechStore.js'
+import { isWahaTtsEnabled } from './wahaApi.js'
 
 /**
  * @param {{ text?: string, hasMedia?: boolean, media?: { kind?: string } | null, fromMe?: boolean, senderName?: string }} msg
  */
-function messageBodyForSpeech(msg) {
+export function messageBodyForSpeech(msg) {
   const text = String(msg?.text ?? '').trim()
   if (text) return text
   if (!msg?.hasMedia) return ''
@@ -31,12 +36,66 @@ export function buildChatMessageSpeech(msg) {
 }
 
 /**
- * @param {{ text?: string, fromMe?: boolean, senderName?: string, hasMedia?: boolean, media?: object, id?: string }} msg
+ * @param {{ text?: string, fromMe?: boolean, senderName?: string, hasMedia?: boolean, media?: object, id?: string, ts?: number }} msg
+ */
+export function buildChatSpeechItem(msg) {
+  const speech = buildChatMessageSpeech(msg)
+  const displayBody = messageBodyForSpeech(msg)
+  if (!speech || !displayBody) return null
+  const id = String(msg?.id ?? '').trim() || `ts-${Date.now()}`
+  const senderLabel = msg.fromMe
+    ? 'You'
+    : formatChatDisplayName(String(msg.senderName || 'Unknown')).displayTitle
+  return {
+    id,
+    speech,
+    displayBody,
+    senderLabel,
+    fromMe: Boolean(msg.fromMe),
+    ts: Number(msg?.ts) || Date.now(),
+    receivedAt: Date.now(),
+  }
+}
+
+/**
+ * @param {string} category
+ */
+export function isChatMessageSpeechCategory(category) {
+  const c = String(category || '')
+  return c.startsWith('whatsapp:') || c.startsWith('chatmsg:')
+}
+
+/**
+ * Show popup and queue TTS for a normalized chat message.
+ * @param {{ text?: string, fromMe?: boolean, senderName?: string, hasMedia?: boolean, media?: object, id?: string, ts?: number }} msg
+ * @param {{ focusNewest?: boolean }} [opts]
+ */
+export function announceChatMessage(msg, opts = {}) {
+  if (!isWahaTtsEnabled()) return
+  const item = buildChatSpeechItem(msg)
+  if (!item) return
+  pushChatMessageSpeech(item, { focusNewest: opts.focusNewest })
+  enqueueAnnouncement(item.speech, { category: `whatsapp:${item.id}` })
+}
+
+/**
+ * @param {{ id: string, speech: string }} item
+ */
+export function replayChatMessageSpeech(item) {
+  if (!item?.speech) return
+  enableSpeechAlertsForBriefing()
+  focusChatMessageSpeechByCategory(`chatmsg:${item.id}`)
+  enqueueAnnouncement(item.speech, { category: `chatmsg:${item.id}` })
+}
+
+/**
+ * Tap a message in the thread to show popup and read again.
+ * @param {{ text?: string, fromMe?: boolean, senderName?: string, hasMedia?: boolean, media?: object, id?: string, ts?: number }} msg
  */
 export function speakChatMessageAloud(msg) {
-  const speech = buildChatMessageSpeech(msg)
-  if (!speech) return
+  const item = buildChatSpeechItem(msg)
+  if (!item) return
   enableSpeechAlertsForBriefing()
-  const id = String(msg?.id ?? '').trim() || String(Date.now())
-  enqueueAnnouncement(speech, { category: `chatmsg:${id}` })
+  pushChatMessageSpeech(item, { focusNewest: true })
+  enqueueAnnouncement(item.speech, { category: `chatmsg:${item.id}` })
 }

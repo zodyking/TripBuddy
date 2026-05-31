@@ -18,7 +18,7 @@ import {
 import { buildEnglishParticipantDisplayMap } from '../utils/senderNameTranslateClient.js'
 import { englishDisplayName } from '../utils/senderNameLocale.js'
 import { getCachedSenderTextEn } from '../stores/wahaChatStore.js'
-import { enqueueAnnouncement } from '../utils/alertAudioQueue.js'
+import { announceChatMessage } from '../utils/chatMessageSpeech.js'
 import { pushLiveLog } from '../stores/liveLogStore.js'
 
 /** @type {Map<string, string>} */
@@ -128,10 +128,12 @@ export function useWhatsAppGroup() {
           if (norm.senderName) {
             norm.senderName = englishDisplayName(norm.senderName, textEn)
           }
-          const speech = buildNewMessageSpeech(norm)
-          if (!speech) continue
-          pushLiveLog({ type: 'info', message: `[WhatsApp] TTS: ${speech}`, ts: Date.now() })
-          enqueueAnnouncement(speech, { category: `whatsapp:${norm.id}` })
+          pushLiveLog({
+            type: 'info',
+            message: `[WhatsApp] TTS: ${buildNewMessageSpeech(norm)}`,
+            ts: Date.now(),
+          })
+          announceChatMessage(norm)
         }
       }
 

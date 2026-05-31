@@ -9,6 +9,9 @@ import {
   showSpeechAlertModal,
   hideSpeechAlertModal,
 } from '../stores/speechAlertModalStore.js'
+import { closeChatMessageSpeech } from '../stores/chatMessageSpeechStore.js'
+import { isChatMessageSpeechCategory } from './chatMessageSpeech.js'
+import { focusChatMessageSpeechByCategory } from '../stores/chatMessageSpeechStore.js'
 import { isTripAlertEnabled } from './tripVoiceAnnouncement.js'
 import { isWahaTtsEnabled } from './wahaApi.js'
 
@@ -70,6 +73,8 @@ let speechQueue = []
 let isSpeaking = false
 let currentAudio = null
 let currentUtterance = null
+/** @type {string} */
+let currentSpeechCategory = ''
 
 const DEDUP_WINDOW_MS = 2000
 
@@ -89,12 +94,13 @@ function processNextSpeech() {
   if (!item) return
 
   isSpeaking = true
+  currentSpeechCategory = String(item.category || '')
   pushLiveLog({ type: 'info', message: `[Queue] processing: ${item.text}`, ts: Date.now() })
 
   if (item.bell) {
-    playBellThenSpeak(item.text)
+    playBellThenSpeak(item.text, item.category)
   } else {
-    speakText(item.text)
+    speakText(item.text, item.category)
   }
 }
 
@@ -102,7 +108,7 @@ function processNextSpeech() {
  * Play bell sound, then speak text after bell ends.
  * @param {string} text
  */
-function playBellThenSpeak(text) {
+function playBellThenSpeak(text, category = '') {
   if (typeof window === 'undefined') {
     isSpeaking = false
     processNextSpeech()
@@ -123,30 +129,31 @@ function playBellThenSpeak(text) {
     audio.addEventListener('ended', () => {
       if (currentAudio === audio) currentAudio = null
       pushLiveLog({ type: 'info', message: `[Queue] bell ended, speaking: ${text}`, ts: Date.now() })
-      setTimeout(() => speakText(text), 300)
+      setTimeout(() => speakText(text, category), 300)
     }, { once: true })
 
     audio.addEventListener('error', () => {
       pushLiveLog({ type: 'error', message: `[Queue] bell failed, speaking anyway: ${text}`, ts: Date.now() })
       if (currentAudio === audio) currentAudio = null
-      speakText(text)
+      speakText(text, category)
     }, { once: true })
 
     audio.play().catch((e) => {
       pushLiveLog({ type: 'error', message: `[Queue] bell play rejected: ${e.message || e}`, ts: Date.now() })
-      speakText(text)
+      speakText(text, category)
     })
   } catch (e) {
     pushLiveLog({ type: 'error', message: `[Queue] bell exception: ${e.message || e}`, ts: Date.now() })
-    speakText(text)
+    speakText(text, category)
   }
 }
 
 /**
  * Speak text and wait for completion via onend before processing next.
  * @param {string} text
+ * @param {string} [category]
  */
-function speakText(text) {
+function speakText(text, category = '') {
   if (typeof window === 'undefined' || !window.speechSynthesis) {
     pushLiveLog({ type: 'warn', message: `[Queue] skipped (no speechSynthesis): ${text}`, ts: Date.now() })
     isSpeaking = false
@@ -163,21 +170,30 @@ function speakText(text) {
 
     u.onstart = () => {
       pushLiveLog({ type: 'info', message: `[Queue] TTS started: ${text}`, ts: Date.now() })
-      if (shouldShowSpeechAlertModal()) showSpeechAlertModal(text)
+      const cat = category || currentSpeechCategory
+      if (isChatMessageSpeechCategory(cat)) {
+        focusChatMessageSpeechByCategory(cat)
+      } else if (shouldShowSpeechAlertModal()) {
+        showSpeechAlertModal(text)
+      }
     }
 
     u.onend = () => {
       pushLiveLog({ type: 'info', message: `[Queue] TTS ended: ${text}`, ts: Date.now() })
-      hideSpeechAlertModal()
+      const cat = category || currentSpeechCategory
+      if (!isChatMessageSpeechCategory(cat)) hideSpeechAlertModal()
       currentUtterance = null
+      currentSpeechCategory = ''
       isSpeaking = false
       processNextSpeech()
     }
 
     u.onerror = (e) => {
       pushLiveLog({ type: 'error', message: `[Queue] TTS error: ${text} - ${e.error || 'unknown'}`, ts: Date.now() })
-      hideSpeechAlertModal()
+      const cat = category || currentSpeechCategory
+      if (!isChatMessageSpeechCategory(cat)) hideSpeechAlertModal()
       currentUtterance = null
+      currentSpeechCategory = ''
       isSpeaking = false
       processNextSpeech()
     }
@@ -345,7 +361,9 @@ export function announceApiReconnect() {
 
 export function cancelAllAlerts() {
   hideSpeechAlertModal()
+  closeChatMessageSpeech()
   speechQueue = []
+  currentSpeechCategory = ''
   isSpeaking = false
   if (typeof window !== 'undefined') {
     try {
