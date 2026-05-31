@@ -7,6 +7,10 @@ import {
   assertApiAllowed,
   recordApiCompletedCall,
 } from './api-quota.mjs'
+import {
+  canonicalPanynjSeriesKey,
+  panynjSeriesStorageKeys,
+} from '../src/bridges/panynjRouteKeys.js'
 
 const KEY = G('bridge:panynj:series')
 const PA_URL =
@@ -19,6 +23,8 @@ let lastFetchError = null
 let lastFetchAt = 0
 /** @type {unknown[]|null} */
 let lastLiveArray = null
+/** @type {Promise<unknown> | null} */
+let refreshInFlight = null
 
 /**
  * @param {unknown} x
@@ -33,7 +39,10 @@ function isOb(x) {
  */
 export async function fetchPanynjCrossingJson() {
   const r = await fetch(PA_URL, {
-    headers: { accept: 'application/json' },
+    headers: {
+      accept: 'application/json',
+      'user-agent': 'TripBuddy/1.0 (+https://github.com/zodyking/TripBuddy)',
+    },
   })
   if (!r.ok) {
     throw new Error(`Port Authority: HTTP ${r.status}`)
@@ -68,6 +77,38 @@ function trimRoutePoints(st) {
 }
 
 /**
+ * Merge history from canonical + legacy routeId keys (GWB id churn).
+ * @param {SeriesState['pointsByRoute']} pointsByRoute
+ * @param {unknown} row
+ */
+function mergedSeriesForRow(pointsByRoute, row) {
+  if (!pointsByRoute || typeof pointsByRoute !== 'object') return []
+  /** @type {Array<{ t: number, m: number, s: number }>} */
+  const merged = []
+  const seen = new Set()
+  for (const key of panynjSeriesStorageKeys(row)) {
+    const a = pointsByRoute[key]
+    if (!Array.isArray(a)) continue
+    for (const p of a) {
+      if (!p || typeof p !== 'object') continue
+      const t = Number(p.t)
+      if (!Number.isFinite(t) || seen.has(t)) continue
+      seen.add(t)
+      merged.push({
+        t,
+        m: Number(p.m),
+        s: Number(p.s),
+      })
+    }
+  }
+  merged.sort((a, b) => a.t - b.t)
+  if (merged.length > MAX_POINTS_PER_ROUTE) {
+    return merged.slice(merged.length - MAX_POINTS_PER_ROUTE)
+  }
+  return merged
+}
+
+/**
  * Append one sample from live API array.
  * @param {unknown[]} live
  */
@@ -76,11 +117,10 @@ export async function appendPanynjSnapshotFromLive(live) {
   const now = Date.now()
   for (const row of live) {
     if (!isOb(row)) continue
-    const id = row.routeId
-    if (id == null || (typeof id !== 'number' && typeof id !== 'string')) {
+    if (row.routeId == null || (typeof row.routeId !== 'number' && typeof row.routeId !== 'string')) {
       continue
     }
-    const key = String(id)
+    const key = canonicalPanynjSeriesKey(row) || String(row.routeId)
     const m =
       typeof row.routeTravelTime === 'number' && Number.isFinite(row.routeTravelTime)
         ? row.routeTravelTime
@@ -113,14 +153,36 @@ export async function refreshPanynjCrossingData() {
   lastFetchAt = Date.now()
   lastFetchError = null
   const st = await appendPanynjSnapshotFromLive(live)
-  // In-app bridge traffic notifications disabled until improved tier alerts ship.
-  // Data poll + tier logic remain for the Traffic tab and future notifications.
   if (process.env.BRIDGE_IN_APP_NOTIFICATIONS === '1') {
     maybeNotifyBridgeCrossingDigest(live)
     await maybeNotifyBridgeTierChanges(live)
   }
   if (ak) await recordApiCompletedCall(ak, 'panynj').catch(() => {})
   return st
+}
+
+/**
+ * Refresh when cache is empty or older than poll interval (client reads stay fresh).
+ */
+async function ensureFreshPanynjLive() {
+  const now = Date.now()
+  const stale = !lastLiveArray || !lastFetchAt || now - lastFetchAt > POLL_MS
+  if (!stale) return
+  if (!refreshInFlight) {
+    refreshInFlight = refreshPanynjCrossingData()
+      .catch((e) => {
+        lastFetchError = e instanceof Error ? e.message : String(e)
+        throw e
+      })
+      .finally(() => {
+        refreshInFlight = null
+      })
+  }
+  try {
+    await refreshInFlight
+  } catch {
+    /* serve last good cache if refresh fails */
+  }
 }
 
 export function getLastPanynjLive() {
@@ -142,6 +204,7 @@ export function startPanynjBridgePoll(onErr) {
       onErr?.(e)
     })
   }
+  tick()
   pollTimer = setInterval(tick, POLL_MS)
 }
 
@@ -161,6 +224,7 @@ function trendFromSeries(a) {
 }
 
 export async function getBridgesResponsePayload() {
+  await ensureFreshPanynjLive()
   const { live, fetchedAt, fetchError } = getLastPanynjLive()
   const st = await readState()
   /** @type {Record<string, { trend: 'better' | 'worse' | 'neutral' | 'unknown', series: { t: number, m: number, s: number }[] }>} */
@@ -170,13 +234,12 @@ export async function getBridgesResponsePayload() {
       if (!isOb(row) || row.routeId == null) continue
       const id = String(row.routeId)
       if (byRoute[id]) continue
-      const a = st.pointsByRoute?.[id]
-      if (!Array.isArray(a) || a.length < 1) {
+      const merged = mergedSeriesForRow(st.pointsByRoute, row)
+      if (!merged.length) {
         byRoute[id] = { trend: 'unknown', series: [] }
         continue
       }
-      const full = a.slice(-288)
-      byRoute[id] = { trend: trendFromSeries(a), series: full }
+      byRoute[id] = { trend: trendFromSeries(merged), series: merged.slice(-288) }
     }
   }
   return {

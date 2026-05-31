@@ -8,7 +8,7 @@ RUN npm install
 # Dokploy → Build → Build Args (recommended):
 #   GIT_COMMIT = commit SHA from your deploy (or ${{COMMIT_SHA}} if your template supports it)
 # Also enable "Disable build cache" / clean build when UI still looks stale.
-# UI rebuild trigger: gwb-upper-route-ids-5219-881
+# UI rebuild trigger: panynj-fresh-live-series-keys
 ARG GIT_COMMIT=unknown
 ARG BUILD_TIMESTAMP=
 

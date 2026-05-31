@@ -1,13 +1,13 @@
 /**
  * George Washington Bridge upper-deck PANYNJ route IDs.
- * API switched from 12 (To NJ) / 211 (To NY) to 5219 / 881; keep both for stored history.
+ * API has used 12 / 211 and 5219 / 881 for the same upper-deck legs.
  */
 
 /** @type {readonly number[]} */
-export const GWB_UPPER_ROUTE_IDS_TO_NJ = Object.freeze([5219, 12])
+export const GWB_UPPER_ROUTE_IDS_TO_NJ = Object.freeze([12, 5219])
 
 /** @type {readonly number[]} */
-export const GWB_UPPER_ROUTE_IDS_TO_NY = Object.freeze([881, 211])
+export const GWB_UPPER_ROUTE_IDS_TO_NY = Object.freeze([211, 881])
 
 /**
  * @param {unknown} routeId
@@ -21,7 +21,22 @@ export function isGwbUpperRouteId(routeId, direction) {
 }
 
 /**
- * Preferred route id for map anchors / export (current PANYNJ API).
+ * @param {unknown} row
+ * @param {'ToNY' | 'ToNJ'} direction
+ */
+export function isGwbUpperDeckRow(row, direction) {
+  if (row == null || typeof row !== 'object') return false
+  const o = /** @type {Record<string, unknown>} */ (row)
+  const name = String(o.crossingDisplayName ?? '')
+  if (!/george washington bridge/i.test(name)) return false
+  const mod = String(o.facilityModifier ?? '').trim().toLowerCase()
+  if (mod === 'lower') return false
+  if (mod === 'upper') return true
+  return isGwbUpperRouteId(o.routeId, direction)
+}
+
+/**
+ * First known route id for map anchors (12 / 211 are current PANYNJ ids).
  * @param {'ToNY' | 'ToNJ'} direction
  */
 export function gwbUpperRouteIdForDirection(direction) {

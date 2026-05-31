@@ -2,7 +2,7 @@
  * Maps bridge routeIds and names to 511NY camera identifiers.
  * Cameras are matched by the server using Location strings from the 511NY API.
  */
-import { isGwbUpperRouteId } from './gwbRoutes.js'
+import { isGwbUpperDeckRow } from './gwbRoutes.js'
 
 /**
  * Camera bridge keys returned by GET /api/511ny/cameras
@@ -16,18 +16,7 @@ const CAMERA_BRIDGE_KEYS = Object.freeze({
   'Verrazzano-ToNY': 'Verrazzano-ToNY',
 })
 
-/**
- * George Washington Bridge upper deck row for the active direction toggle.
- * @param {unknown} row
- * @param {'ToNY' | 'ToNJ'} direction
- */
-export function isGwbUpperDeckRow(row, direction) {
-  if (row == null || typeof row !== 'object') return false
-  const o = /** @type {Record<string, unknown>} */ (row)
-  const name = String(o.crossingDisplayName ?? '')
-  if (!/george washington bridge/i.test(name)) return false
-  return isGwbUpperRouteId(o.routeId, direction)
-}
+export { isGwbUpperDeckRow } from './gwbRoutes.js'
 
 /**
  * Maps PANYNJ routeIds to camera bridge keys.

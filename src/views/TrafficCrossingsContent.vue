@@ -16,7 +16,7 @@ import {
 import { useMapVehicleId } from '../composables/useMapVehicleId.js'
 import { sanitizeNy511ImpactFootnote } from '../utils/ny511ImpactFootnote.js'
 import { extractYoutubeVideoIdFromInput } from '../utils/youtubeVideoId.js'
-import { isGwbUpperRouteId } from '../bridges/gwbRoutes.js'
+import { isGwbUpperDeckRow } from '../bridges/gwbRoutes.js'
 
 defineOptions({ name: 'TrafficCrossingsContent' })
 
@@ -169,9 +169,7 @@ function isGwbRow(row) {
  * @param {'ToNY' | 'ToNJ'} d
  */
 function gwbMatchRouteForToggle(row, d) {
-  if (row == null || typeof row !== 'object') return false
-  const rid = /** @type {Record<string, unknown>} */(row).routeId
-  return isGwbUpperRouteId(rid, d)
+  return isGwbUpperDeckRow(row, d)
 }
 
 const hasVerrazzanoCamera = computed(() => {
