@@ -36,6 +36,12 @@ const emit = defineEmits(['play', 'dismiss'])
         <p v-else class="daily-briefing-lead">
           Hear a spoken AI summary of today's WhatsApp group chat.
         </p>
+        <div v-if="!busy && !error && preview" class="daily-briefing-preview">
+          <p class="daily-briefing-preview-label">
+            {{ messageCount > 0 ? `${messageCount} message${messageCount === 1 ? '' : 's'} summarized` : 'Ready to play' }}
+          </p>
+          <p class="daily-briefing-preview-text">{{ preview }}</p>
+        </div>
         <div v-if="!busy" class="daily-briefing-actions">
           <button type="button" class="btn ghost tap" @click="emit('dismiss')">
             {{ error ? 'Close' : 'Not now' }}
@@ -90,6 +96,33 @@ const emit = defineEmits(['play', 'dismiss'])
 
 .daily-briefing-error {
   color: #f87171;
+}
+
+.daily-briefing-preview {
+  margin: 0 0 0.9rem;
+  padding: 0.75rem;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.daily-briefing-preview-label {
+  margin: 0 0 0.35rem;
+  font-size: 0.6875rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--color-accent-purple-light, #9d6fd7);
+}
+
+.daily-briefing-preview-text {
+  margin: 0;
+  max-height: min(28vh, 12rem);
+  overflow: auto;
+  font-size: 0.875rem;
+  line-height: 1.45;
+  color: var(--color-text, #f4f4f5);
+  white-space: pre-wrap;
 }
 
 .daily-briefing-actions {

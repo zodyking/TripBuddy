@@ -7,7 +7,6 @@ import {
   getWahaChatId,
   isWahaConfigured,
   isWahaDailyBriefingEnabled,
-  isWahaTtsEnabled,
 } from '../utils/wahaApi.js'
 import {
   speakDailyBriefing,
@@ -78,11 +77,16 @@ export function useDailyBriefing() {
     })
   }
 
-  function offerBriefingNow() {
-    modalOpen.value = true
+  async function offerBriefingNow(opts = {}) {
+    await maybeOfferDailyBriefing({ ...opts, force: true, openOnError: true })
   }
 
   async function acceptBriefing(opts = {}) {
+    if (briefingText.value.trim()) {
+      playBriefing()
+      return
+    }
+
     markOffered()
     loading.value = true
     error.value = ''
@@ -126,17 +130,17 @@ export function useDailyBriefing() {
   }
 
   /**
-   * @param {{ chatLabel?: string }} [opts]
+   * @param {{ chatLabel?: string, force?: boolean, openOnError?: boolean }} [opts]
    */
   async function maybeOfferDailyBriefing(opts = {}) {
-    if (wasOfferedThisSession()) return
+    if (!opts.force && wasOfferedThisSession()) return
     if (!isWahaDailyBriefingEnabled()) return
-    if (!isWahaTtsEnabled()) return
     if (!isWahaConfigured()) return
 
     const chatId = getWahaChatId()
     if (!chatId) return
 
+    if (opts.force) modalOpen.value = true
     loading.value = true
     error.value = ''
     briefingText.value = ''
@@ -149,10 +153,16 @@ export function useDailyBriefing() {
       })
       if (!result.ok) {
         error.value = typeof result.error === 'string' ? result.error : 'Briefing failed.'
+        if (opts.openOnError) modalOpen.value = true
         return
       }
       if (result.empty || !result.briefing) {
-        markOffered()
+        if (opts.force || opts.openOnError) {
+          error.value = 'No messages to summarize today.'
+          modalOpen.value = true
+        } else {
+          markOffered()
+        }
         return
       }
       briefingText.value = result.briefing
