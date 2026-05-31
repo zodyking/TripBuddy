@@ -693,9 +693,22 @@ export function extractWahaPoll(msg) {
  * @param {string} filename
  * @param {Record<string, unknown>} msg
  */
+function wahaMessageType(msg) {
+  const data = msg?._data && typeof msg._data === 'object' ? msg._data : {}
+  const inner = data?.message && typeof data.message === 'object' ? data.message : {}
+  return String(
+    msg?.type ?? data?.type ?? inner?.type ?? '',
+  ).toLowerCase()
+}
+
 function mediaKindFromMeta(mimetype, filename, msg) {
-  const type = String(msg?.type ?? msg?._data?.type ?? '').toLowerCase()
-  if (type === 'sticker' || mimetype === 'image/webp') return 'sticker'
+  const type = wahaMessageType(msg)
+  if (type === 'sticker') return 'sticker'
+  if (type === 'video' || type === 'ptv' || type === 'gif') return 'video'
+  if (type === 'audio' || type === 'ptt' || type === 'voice') return 'audio'
+  if (type === 'image') return 'image'
+  if (type === 'document') return 'document'
+  if (mimetype === 'image/webp' && type !== 'video') return 'sticker'
   if (mimetype.startsWith('image/')) return 'image'
   if (mimetype.startsWith('video/')) return 'video'
   if (mimetype.startsWith('audio/') || mimetype === 'audio/ogg' || mimetype.includes('opus')) {
@@ -708,6 +721,48 @@ function mediaKindFromMeta(mimetype, filename, msg) {
   if (/\.(pdf|doc|docx|xls|xlsx|ppt|pptx|txt|csv|zip)$/i.test(fn)) return 'document'
   if (mimetype.startsWith('application/') || mimetype.startsWith('text/')) return 'document'
   return 'file'
+}
+
+/** Prefer video over thumbnail image when WAHA emits duplicate media rows. */
+function mediaMessageKeepScore(msg) {
+  const k = String(msg?.media?.kind || '')
+  let score = msg?.media?.url ? 16 : 0
+  if (k === 'video') score += 12
+  else if (k === 'audio') score += 10
+  else if (k === 'image' || k === 'sticker') score += 6
+  else if (k === 'document' || k === 'file') score += 4
+  if (String(msg?.text || '').trim()) score += 2
+  return score
+}
+
+/**
+ * Collapse paired media rows (e.g. video + jpeg thumbnail) at the same timestamp.
+ * @param {Array<{ id: string, ts: number, fromMe: boolean, text?: string, hasMedia?: boolean, media?: { kind?: string, url?: string } | null }>} messages
+ */
+export function dedupeThreadMediaMessages(messages) {
+  if (!Array.isArray(messages) || messages.length < 2) return messages
+  const skip = new Set()
+  const windowMs = 5000
+  for (let i = 0; i < messages.length; i++) {
+    if (skip.has(i)) continue
+    const a = messages[i]
+    if (!a?.hasMedia) continue
+    for (let j = i + 1; j < messages.length; j++) {
+      if (skip.has(j)) continue
+      const b = messages[j]
+      if (!b?.hasMedia) continue
+      if (a.fromMe !== b.fromMe) continue
+      if (Math.abs(a.ts - b.ts) > windowMs) continue
+      const aText = String(a.text || '').trim()
+      const bText = String(b.text || '').trim()
+      if (aText && bText && aText !== bText) continue
+      const scoreA = mediaMessageKeepScore(a)
+      const scoreB = mediaMessageKeepScore(b)
+      if (scoreB > scoreA) skip.add(i)
+      else skip.add(j)
+    }
+  }
+  return messages.filter((_, idx) => !skip.has(idx))
 }
 
 export function normalizeWahaMedia(msg) {
