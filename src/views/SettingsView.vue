@@ -2776,8 +2776,10 @@ onUnmounted(() => {
 
         <h4 class="api-sub-heading">Auto-replies</h4>
         <p class="cred-hint">
-          Reply automatically to new incoming messages in the monitored chat (not chat history).
-          Location IDs are usually 3–4 digits. “Who’s at” uses your tractor location and en-route GPS.
+          Reply automatically to <strong>new</strong> incoming messages only (not chat history).
+          Locations are matched from your shared directory by <strong>ID</strong> (e.g. 89),
+          <strong>name</strong> (e.g. Woodbridge), or <strong>abbreviation</strong> (e.g. WOOD).
+          “Who’s at” uses tractor location + en-route GPS.
         </p>
         <div class="waha-toggle-row">
           <label class="toggle-switch">
@@ -2790,6 +2792,11 @@ onUnmounted(() => {
           </label>
           <span class="audio-row-label">Phone / number for a location</span>
         </div>
+        <ul class="waha-auto-examples" aria-label="Phone auto-reply examples">
+          <li><span class="waha-ex-q">What's the number for Woodbridge?</span> → <span class="waha-ex-a">89 (WOODBRIDGE): (732) 512-5528</span></li>
+          <li><span class="waha-ex-q">phone for WOOD</span> → <span class="waha-ex-a">89 (WOODBRIDGE): …</span></li>
+          <li><span class="waha-ex-q">3117 number?</span> → <span class="waha-ex-a">3117 (station name): …</span></li>
+        </ul>
         <div class="waha-toggle-row">
           <label class="toggle-switch">
             <input
@@ -2801,6 +2808,11 @@ onUnmounted(() => {
           </label>
           <span class="audio-row-label">Where is a location (address from directory)</span>
         </div>
+        <ul class="waha-auto-examples" aria-label="Where auto-reply examples">
+          <li><span class="waha-ex-q">where is Woodbridge?</span> → <span class="waha-ex-a">89 — WOODBRIDGE. 6000 RIVERSIDE DR…</span></li>
+          <li><span class="waha-ex-q">where's WOOD?</span> → <span class="waha-ex-a">89 — WOODBRIDGE. …</span></li>
+          <li><span class="waha-ex-q">location of 89</span> → <span class="waha-ex-a">89 — WOODBRIDGE. …</span></li>
+        </ul>
         <div class="waha-toggle-row">
           <label class="toggle-switch">
             <input
@@ -2812,6 +2824,11 @@ onUnmounted(() => {
           </label>
           <span class="audio-row-label">Who’s at a location (I’m there / miles away)</span>
         </div>
+        <ul class="waha-auto-examples" aria-label="Who's at auto-reply examples">
+          <li><span class="waha-ex-q">who's at Woodbridge?</span> → <span class="waha-ex-a">I'm there.</span> <span class="waha-ex-note">(tractor at 89)</span></li>
+          <li><span class="waha-ex-q">who's at WOOD?</span> → <span class="waha-ex-a">I'm about 12 mi away from WOODBRIDGE.</span> <span class="waha-ex-note">(en route)</span></li>
+          <li><span class="waha-ex-q">anyone at 89?</span> → <span class="waha-ex-a">I'm there.</span> or miles-away reply</li>
+        </ul>
 
         <div class="waha-send-row">
           <input
@@ -4151,6 +4168,27 @@ code {
   color: var(--color-text-secondary, #c8c8d4);
   cursor: pointer;
   margin-bottom: 0.5rem;
+}
+.waha-auto-examples {
+  list-style: none;
+  margin: 0 0 1rem;
+  padding: 0 0 0 0.25rem;
+  font-size: 0.8rem;
+  line-height: 1.45;
+  color: var(--muted, #9ca3af);
+}
+.waha-auto-examples li {
+  margin-bottom: 0.35rem;
+}
+.waha-ex-q {
+  color: var(--text-soft, #c4cad4);
+}
+.waha-ex-a {
+  color: var(--accent, #a78bfa);
+}
+.waha-ex-note {
+  font-size: 0.75rem;
+  opacity: 0.85;
 }
 .waha-toggle-row input[type="checkbox"] {
   width: 1.1rem;
