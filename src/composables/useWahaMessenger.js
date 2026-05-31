@@ -25,6 +25,7 @@ import {
   normalizeWahaMessage,
   normalizeWahaChat,
   wahaChatKindLabel,
+  dedupeThreadMediaMessages,
 } from '../utils/wahaApi.js'
 import {
   getWhatsAppThreadCache,
@@ -301,9 +302,10 @@ export function useWahaMessenger(opts = {}) {
   function normalizeList(raw, chatId) {
     absorbParticipantNames(raw, chatId)
     const opts = normalizeOpts(chatId)
-    return raw
+    const list = raw
       .map((m) => normalizeWahaMessage(m, opts))
       .filter((m) => m.id && (m.text || m.hasMedia || m.poll))
+    return dedupeThreadMediaMessages(list)
   }
 
   function applyMessages(normalized, chatId, updatedAt, rawMessages) {
