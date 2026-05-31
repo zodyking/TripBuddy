@@ -10,6 +10,9 @@ import { createDoubleTapHandlers } from '../utils/doubleTap.js'
 import { computeThreadLastMessageKey } from '../utils/dailyBriefingCache.js'
 import { speakChatMessageAloud } from '../utils/chatMessageSpeech.js'
 import { resolveWahaMediaUrl } from '../utils/wahaApi.js'
+import { isLinkOnlyMessage, primaryUrlFromText } from '../utils/chatMessageLinks.js'
+import ChatMessageText from '../components/ChatMessageText.vue'
+import ChatLinkPreview from '../components/ChatLinkPreview.vue'
 
 const {
   generateBriefingFromChat,
@@ -218,7 +221,28 @@ function onChatListDblClick(chat) {
   setMonitoredChat(chat)
 }
 
+/** @type {import('vue').Ref<typeof displayMessages.value[0] | null>} */
+const pendingMessageTap = ref(null)
+
+const messageBubbleTap = createDoubleTapHandlers({
+  onSingle() {
+    /* Images use their own single-tap handler; text links use <a @click.stop>. */
+  },
+  onDouble() {
+    const m = pendingMessageTap.value
+    if (m) speakChatMessageAloud(m)
+  },
+})
+
+/** @param {typeof displayMessages.value[0]} msg */
 function onMessageBubbleTap(msg) {
+  pendingMessageTap.value = msg
+  messageBubbleTap.onTap(msg.id)
+}
+
+/** @param {typeof displayMessages.value[0]} msg */
+function onMessageBubbleDblClick(msg) {
+  messageBubbleTap.cancelPending()
   speakChatMessageAloud(msg)
 }
 
@@ -449,7 +473,7 @@ async function onSendPoll() {
         </svg>
       </button>
     </header>
-    <p class="chat-list-hint">Double-tap a chat to use it and play today’s briefing. Tap a message to hear it again.</p>
+    <p class="chat-list-hint">Double-tap a chat to use it and play today’s briefing. Double-tap a message to hear it again.</p>
     <div class="chat-list-scroll">
       <p v-if="chatsLoading" class="chat-list-status">Loading chats…</p>
       <p v-else-if="!chats.length" class="chat-list-status">No chats found. Check WAHA connection in Settings.</p>
@@ -586,13 +610,10 @@ async function onSendPoll() {
             :class="item.msg.fromMe ? 'chat-bubble-row--out' : 'chat-bubble-row--in'"
           >
             <div
-              class="chat-bubble tap"
+              class="chat-bubble"
               :class="item.msg.fromMe ? 'chat-bubble--out' : 'chat-bubble--in'"
-              role="button"
-              tabindex="0"
-              :aria-label="item.msg.text ? `Message: ${item.msg.text.slice(0, 80)}` : 'Message attachment'"
               @click.stop="onMessageBubbleTap(item.msg)"
-              @keydown.enter.prevent="onMessageBubbleTap(item.msg)"
+              @dblclick.prevent.stop="onMessageBubbleDblClick(item.msg)"
             >
               <button
                 v-if="!item.msg.fromMe && item.msg.isGroupChat && item.msg.senderName"
@@ -684,7 +705,13 @@ async function onSendPoll() {
                   Retry
                 </button>
               </div>
-              <p v-if="item.msg.text" class="chat-bubble-text">{{ item.msg.text }}</p>
+              <p v-if="item.msg.text" class="chat-bubble-text">
+                <ChatMessageText :text="item.msg.text" />
+              </p>
+              <ChatLinkPreview
+                v-if="item.msg.text && isLinkOnlyMessage(item.msg.text)"
+                :url="primaryUrlFromText(item.msg.text)"
+              />
               <time class="chat-bubble-time" :datetime="new Date(item.msg.ts).toISOString()">{{ fmtTime(item.msg.ts) }}</time>
             </div>
           </div>

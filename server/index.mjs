@@ -132,6 +132,7 @@ import {
   writeCheckInFlowFromMerged,
 } from './check-in-flow-store.mjs'
 import { startPoll, stopPoll, getPollStatus } from './poll.mjs'
+import { fetchLinkPreview, isAllowedLinkPreviewUrl } from './link-preview.mjs'
 import {
   readThreadCache,
   syncThreadCache,
@@ -616,6 +617,19 @@ app.post('/api/whatsapp/thread/sync', async (req, reply) => {
   } finally {
     clearAccountWahaPrefs()
   }
+})
+
+app.get('/api/link-preview', async (req, reply) => {
+  reply.header('Cache-Control', 'private, max-age=300')
+  const url = String(req.query?.url ?? '').trim()
+  if (!url || !isAllowedLinkPreviewUrl(url)) {
+    return reply.code(400).send({ ok: false, error: 'Invalid URL' })
+  }
+  const preview = await fetchLinkPreview(url)
+  if (!preview.ok) {
+    return reply.code(502).send(preview)
+  }
+  return preview
 })
 
 app.post('/api/whatsapp/thread/media', async (req, reply) => {

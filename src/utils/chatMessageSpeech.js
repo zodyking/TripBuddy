@@ -89,7 +89,7 @@ export function replayChatMessageSpeech(item) {
 }
 
 /**
- * Tap a message in the thread to show popup and read again.
+ * Double-tap a message in the thread to show popup and read again.
  * @param {{ text?: string, fromMe?: boolean, senderName?: string, hasMedia?: boolean, media?: object, id?: string, ts?: number }} msg
  */
 export function speakChatMessageAloud(msg) {

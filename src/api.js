@@ -1371,6 +1371,18 @@ export async function syncWhatsAppThread(chatId, opts = {}) {
   return handleJson(r)
 }
 
+/** Open-graph style preview for a public https URL. */
+export async function fetchLinkPreview(url) {
+  const u = encodeURIComponent(String(url || '').trim())
+  const r = await apiFetch(`/api/link-preview?url=${u}`)
+  const text = await r.text()
+  try {
+    return text ? JSON.parse(text) : { ok: false }
+  } catch {
+    return { ok: false, error: 'Invalid response' }
+  }
+}
+
 /** Fetch one message with media attached (lazy load). */
 export async function fetchWhatsAppMessageMedia(chatId, messageId) {
   const r = await apiFetch('/api/whatsapp/thread/media', {
