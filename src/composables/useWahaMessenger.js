@@ -34,6 +34,7 @@ import {
 } from '../utils/senderNameLocale.js'
 import { formatChatDisplayName } from '../utils/chatDisplayName.js'
 import { announceChatMessage } from '../utils/chatMessageSpeech.js'
+import { handleNewIncomingAutoRespondBatch } from '../utils/wahaAutoResponder.js'
 import { isWahaTtsEnabled } from '../utils/wahaApi.js'
 import {
   getCachedThread,
@@ -618,14 +619,20 @@ export function useWahaMessenger(opts = {}) {
         byId.set(m.id, merged)
       }
       const prevIds = new Set(messages.value.map((m) => m.id))
+      const hadPriorMessages = messages.value.length > 0
       const merged = [...byId.values()]
+      const newIncoming = [...incoming].filter((m) => !prevIds.has(m.id) && !m.fromMe)
       if (hasNew && isWahaTtsEnabled()) {
-        const newOnes = [...incoming]
-          .filter((m) => !prevIds.has(m.id) && !m.fromMe)
-          .sort((a, b) => b.ts - a.ts)
+        const newOnes = [...newIncoming].sort((a, b) => b.ts - a.ts)
         for (let i = newOnes.length - 1; i >= 0; i--) {
           announceChatMessage(newOnes[i], { focusNewest: i === 0 })
         }
+      }
+      if (hasNew && newIncoming.length) {
+        handleNewIncomingAutoRespondBatch(newIncoming, {
+          skipIfNoPriorMessages: true,
+          hadPriorMessages,
+        })
       }
       messages.value = merged
       const rawById = new Map(

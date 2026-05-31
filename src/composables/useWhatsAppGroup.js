@@ -19,6 +19,7 @@ import { buildEnglishParticipantDisplayMap } from '../utils/senderNameTranslateC
 import { englishDisplayName } from '../utils/senderNameLocale.js'
 import { getCachedSenderTextEn } from '../stores/wahaChatStore.js'
 import { announceChatMessage } from '../utils/chatMessageSpeech.js'
+import { handleIncomingAutoRespond } from '../utils/wahaAutoResponder.js'
 import { pushLiveLog } from '../stores/liveLogStore.js'
 
 /** @type {Map<string, string>} */
@@ -134,6 +135,21 @@ export function useWhatsAppGroup() {
             ts: Date.now(),
           })
           announceChatMessage(norm)
+          void handleIncomingAutoRespond(norm)
+        }
+      } else if (lastSeenId) {
+        await ensureContacts()
+        for (const msg of incoming) {
+          const msgId = getMsgId(msg)
+          if (msgId === lastSeenId) break
+          if (msg.fromMe) continue
+          const norm = normalizeWahaMessage(msg, {
+            contactMap,
+            lidMap,
+            participantMap: participantNameMap,
+            activeChatId: chatId,
+          })
+          void handleIncomingAutoRespond(norm)
         }
       }
 

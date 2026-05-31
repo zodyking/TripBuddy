@@ -96,6 +96,15 @@ export async function ensureUserProfileTable() {
       ALTER TABLE ${TABLE} ADD COLUMN IF NOT EXISTS waha_daily_briefing_enabled BOOLEAN
     `)
     await client.query(`
+      ALTER TABLE ${TABLE} ADD COLUMN IF NOT EXISTS waha_auto_respond_phone BOOLEAN
+    `)
+    await client.query(`
+      ALTER TABLE ${TABLE} ADD COLUMN IF NOT EXISTS waha_auto_respond_where BOOLEAN
+    `)
+    await client.query(`
+      ALTER TABLE ${TABLE} ADD COLUMN IF NOT EXISTS waha_auto_respond_who_at BOOLEAN
+    `)
+    await client.query(`
       ALTER TABLE ${TABLE} ADD COLUMN IF NOT EXISTS waha_url TEXT
     `)
     await client.query(`
@@ -451,15 +460,35 @@ export async function setHelpersAutoArrivePrefsForAccount(accountKey, prefs) {
 export async function getWahaPrefsForAccount(accountKey) {
   const ak = String(accountKey || '').trim()
   if (!ak) {
-    return { chatId: '', ttsEnabled: null, dailyBriefingEnabled: null, wahaUrl: '', wahaApiKey: '' }
+    return {
+      chatId: '',
+      ttsEnabled: null,
+      dailyBriefingEnabled: null,
+      autoRespondPhoneEnabled: null,
+      autoRespondWhereEnabled: null,
+      autoRespondWhoAtEnabled: null,
+      wahaUrl: '',
+      wahaApiKey: '',
+    }
   }
   const p = await getPostgresPool()
   if (!p) {
-    return { chatId: '', ttsEnabled: null, dailyBriefingEnabled: null, wahaUrl: '', wahaApiKey: '' }
+    return {
+      chatId: '',
+      ttsEnabled: null,
+      dailyBriefingEnabled: null,
+      autoRespondPhoneEnabled: null,
+      autoRespondWhereEnabled: null,
+      autoRespondWhoAtEnabled: null,
+      wahaUrl: '',
+      wahaApiKey: '',
+    }
   }
   await ensureUserProfileTable()
   const { rows } = await p.query(
-    `SELECT waha_chat_id, waha_tts_enabled, waha_daily_briefing_enabled, waha_url, waha_api_key_enc
+    `SELECT waha_chat_id, waha_tts_enabled, waha_daily_briefing_enabled,
+            waha_auto_respond_phone, waha_auto_respond_where, waha_auto_respond_who_at,
+            waha_url, waha_api_key_enc
      FROM ${TABLE} WHERE account_key = $1`,
     [ak],
   )
@@ -478,17 +507,51 @@ export async function getWahaPrefsForAccount(accountKey) {
       : row?.waha_daily_briefing_enabled === false
         ? false
         : null
+  const autoRespondPhoneEnabled =
+    row?.waha_auto_respond_phone === true
+      ? true
+      : row?.waha_auto_respond_phone === false
+        ? false
+        : null
+  const autoRespondWhereEnabled =
+    row?.waha_auto_respond_where === true
+      ? true
+      : row?.waha_auto_respond_where === false
+        ? false
+        : null
+  const autoRespondWhoAtEnabled =
+    row?.waha_auto_respond_who_at === true
+      ? true
+      : row?.waha_auto_respond_who_at === false
+        ? false
+        : null
   const wahaUrl = typeof row?.waha_url === 'string' ? row.waha_url.trim() : ''
   let wahaApiKey = ''
   if (row?.waha_api_key_enc && typeof row.waha_api_key_enc === 'object') {
     try { wahaApiKey = decryptString(row.waha_api_key_enc).trim() } catch { /* ignore */ }
   }
-  return { chatId, ttsEnabled, dailyBriefingEnabled, wahaUrl, wahaApiKey }
+  return {
+    chatId,
+    ttsEnabled,
+    dailyBriefingEnabled,
+    autoRespondPhoneEnabled,
+    autoRespondWhereEnabled,
+    autoRespondWhoAtEnabled,
+    wahaUrl,
+    wahaApiKey,
+  }
 }
 
 /**
  * @param {string} accountKey
- * @param {{ chatId?: string, ttsEnabled?: boolean | null, dailyBriefingEnabled?: boolean | null }} prefs
+ * @param {{
+ *   chatId?: string,
+ *   ttsEnabled?: boolean | null,
+ *   dailyBriefingEnabled?: boolean | null,
+ *   autoRespondPhoneEnabled?: boolean | null,
+ *   autoRespondWhereEnabled?: boolean | null,
+ *   autoRespondWhoAtEnabled?: boolean | null,
+ * }} prefs
  */
 export async function setWahaPrefsForAccount(accountKey, prefs) {
   const ak = String(accountKey || '').trim()
@@ -500,10 +563,56 @@ export async function setWahaPrefsForAccount(accountKey, prefs) {
   const hasTts = prefs && Object.prototype.hasOwnProperty.call(prefs, 'ttsEnabled')
   const hasBriefing =
     prefs && Object.prototype.hasOwnProperty.call(prefs, 'dailyBriefingEnabled')
+  const hasArPhone =
+    prefs && Object.prototype.hasOwnProperty.call(prefs, 'autoRespondPhoneEnabled')
+  const hasArWhere =
+    prefs && Object.prototype.hasOwnProperty.call(prefs, 'autoRespondWhereEnabled')
+  const hasArWhoAt =
+    prefs && Object.prototype.hasOwnProperty.call(prefs, 'autoRespondWhoAtEnabled')
   const ttsEnabled = hasTts && prefs.ttsEnabled === true
   const ttsNull = hasTts && prefs.ttsEnabled == null
   const dailyBriefingEnabled = hasBriefing && prefs.dailyBriefingEnabled === true
   const briefingNull = hasBriefing && prefs.dailyBriefingEnabled == null
+  const arPhoneEnabled = hasArPhone && prefs.autoRespondPhoneEnabled === true
+  const arPhoneNull = hasArPhone && prefs.autoRespondPhoneEnabled == null
+  const arWhereEnabled = hasArWhere && prefs.autoRespondWhereEnabled === true
+  const arWhereNull = hasArWhere && prefs.autoRespondWhereEnabled == null
+  const arWhoAtEnabled = hasArWhoAt && prefs.autoRespondWhoAtEnabled === true
+  const arWhoAtNull = hasArWhoAt && prefs.autoRespondWhoAtEnabled == null
+  const hasUrl = prefs && Object.prototype.hasOwnProperty.call(prefs, 'wahaUrl')
+  const hasKey = prefs && Object.prototype.hasOwnProperty.call(prefs, 'wahaApiKey')
+  const hasChatId = prefs && Object.prototype.hasOwnProperty.call(prefs, 'chatId')
+
+  if (hasArPhone) {
+    await p.query(
+      `INSERT INTO ${TABLE} (account_key, waha_auto_respond_phone, updated_at)
+       VALUES ($1, $2, now())
+       ON CONFLICT (account_key) DO UPDATE SET
+         waha_auto_respond_phone = EXCLUDED.waha_auto_respond_phone,
+         updated_at = now()`,
+      [ak, arPhoneNull ? null : arPhoneEnabled],
+    )
+  }
+  if (hasArWhere) {
+    await p.query(
+      `INSERT INTO ${TABLE} (account_key, waha_auto_respond_where, updated_at)
+       VALUES ($1, $2, now())
+       ON CONFLICT (account_key) DO UPDATE SET
+         waha_auto_respond_where = EXCLUDED.waha_auto_respond_where,
+         updated_at = now()`,
+      [ak, arWhereNull ? null : arWhereEnabled],
+    )
+  }
+  if (hasArWhoAt) {
+    await p.query(
+      `INSERT INTO ${TABLE} (account_key, waha_auto_respond_who_at, updated_at)
+       VALUES ($1, $2, now())
+       ON CONFLICT (account_key) DO UPDATE SET
+         waha_auto_respond_who_at = EXCLUDED.waha_auto_respond_who_at,
+         updated_at = now()`,
+      [ak, arWhoAtNull ? null : arWhoAtEnabled],
+    )
+  }
 
   if (hasTts && hasBriefing) {
     await p.query(
@@ -550,11 +659,18 @@ export async function setWahaPrefsForAccount(accountKey, prefs) {
     return
   }
 
-  const hasUrl = prefs && Object.prototype.hasOwnProperty.call(prefs, 'wahaUrl')
-  const hasKey = prefs && Object.prototype.hasOwnProperty.call(prefs, 'wahaApiKey')
-  const hasChatId = prefs && Object.prototype.hasOwnProperty.call(prefs, 'chatId')
-
-  if (!hasTts && !hasBriefing && !hasChatId && !hasUrl && !hasKey) return
+  if (
+    !hasTts &&
+    !hasBriefing &&
+    !hasChatId &&
+    !hasUrl &&
+    !hasKey &&
+    !hasArPhone &&
+    !hasArWhere &&
+    !hasArWhoAt
+  ) {
+    return
+  }
 
   if (hasChatId) {
     await p.query(

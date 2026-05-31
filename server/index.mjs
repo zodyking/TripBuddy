@@ -1062,6 +1062,9 @@ app.get('/api/settings/credentials', async (req) => {
           wahaChatId: wahaPrefs.chatId,
           wahaTtsEnabled: wahaPrefs.ttsEnabled,
           wahaDailyBriefingEnabled: wahaPrefs.dailyBriefingEnabled,
+          wahaAutoRespondPhoneEnabled: wahaPrefs.autoRespondPhoneEnabled,
+          wahaAutoRespondWhereEnabled: wahaPrefs.autoRespondWhereEnabled,
+          wahaAutoRespondWhoAtEnabled: wahaPrefs.autoRespondWhoAtEnabled,
           wahaUrl: wahaPrefs.wahaUrl || '',
           wahaApiKey: wahaPrefs.wahaApiKey || '',
         }
@@ -1385,6 +1388,15 @@ app.put('/api/settings/waha-prefs', async (req, reply) => {
     if (Object.prototype.hasOwnProperty.call(body, 'dailyBriefingEnabled')) {
       prefs.dailyBriefingEnabled = body.dailyBriefingEnabled === true
     }
+    if (Object.prototype.hasOwnProperty.call(body, 'autoRespondPhoneEnabled')) {
+      prefs.autoRespondPhoneEnabled = body.autoRespondPhoneEnabled === true
+    }
+    if (Object.prototype.hasOwnProperty.call(body, 'autoRespondWhereEnabled')) {
+      prefs.autoRespondWhereEnabled = body.autoRespondWhereEnabled === true
+    }
+    if (Object.prototype.hasOwnProperty.call(body, 'autoRespondWhoAtEnabled')) {
+      prefs.autoRespondWhoAtEnabled = body.autoRespondWhoAtEnabled === true
+    }
     if (Object.prototype.hasOwnProperty.call(body, 'wahaUrl')) {
       prefs.wahaUrl = String(body.wahaUrl ?? '').trim().slice(0, 500)
     }
@@ -1401,6 +1413,9 @@ app.put('/api/settings/waha-prefs', async (req, reply) => {
       wahaChatId: stored.chatId,
       wahaTtsEnabled: stored.ttsEnabled,
       wahaDailyBriefingEnabled: stored.dailyBriefingEnabled,
+      wahaAutoRespondPhoneEnabled: stored.autoRespondPhoneEnabled,
+      wahaAutoRespondWhereEnabled: stored.autoRespondWhereEnabled,
+      wahaAutoRespondWhoAtEnabled: stored.autoRespondWhoAtEnabled,
       wahaUrl: stored.wahaUrl || '',
       wahaApiKey: stored.wahaApiKey ? '••••' : '',
     }

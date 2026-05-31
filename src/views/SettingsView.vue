@@ -90,6 +90,12 @@ import {
   setWahaTtsEnabled,
   isWahaDailyBriefingEnabled,
   setWahaDailyBriefingEnabled,
+  isWahaAutoRespondPhoneEnabled,
+  setWahaAutoRespondPhoneEnabled,
+  isWahaAutoRespondWhereEnabled,
+  setWahaAutoRespondWhereEnabled,
+  isWahaAutoRespondWhoAtEnabled,
+  setWahaAutoRespondWhoAtEnabled,
   wahaAuthErrorHint,
   getSessionStatus, ensureSession, getQr, listChats, sendChatMessage,
 } from '../utils/wahaApi.js'
@@ -765,6 +771,9 @@ const wahaUsesServerProxy = computed(() => isWahaProxyMode())
 const wahaChatIdDraft = ref(getWahaChatId())
 const wahaChatSpeechOn = ref(isWahaTtsEnabled())
 const wahaDailyBriefingOn = ref(isWahaDailyBriefingEnabled())
+const wahaAutoRespondPhoneOn = ref(isWahaAutoRespondPhoneEnabled())
+const wahaAutoRespondWhereOn = ref(isWahaAutoRespondWhereEnabled())
+const wahaAutoRespondWhoAtOn = ref(isWahaAutoRespondWhoAtEnabled())
 const wahaConnMsg = ref('')
 const wahaChatMsg = ref('')
 const wahaChatsLoading = ref(false)
@@ -819,6 +828,9 @@ async function saveWahaChat() {
       chatId,
       ttsEnabled: wahaChatSpeechOn.value,
       dailyBriefingEnabled: wahaDailyBriefingOn.value,
+      autoRespondPhoneEnabled: wahaAutoRespondPhoneOn.value,
+      autoRespondWhereEnabled: wahaAutoRespondWhereOn.value,
+      autoRespondWhoAtEnabled: wahaAutoRespondWhoAtOn.value,
     })
     wahaChatMsg.value = 'Chat saved — synced to your account for all devices.'
   } catch (e) {
@@ -857,6 +869,38 @@ function selectWahaChat(chat) {
 function syncWahaSpeechPrefsFromStorage() {
   wahaChatSpeechOn.value = isWahaTtsEnabled()
   wahaDailyBriefingOn.value = isWahaDailyBriefingEnabled()
+  wahaAutoRespondPhoneOn.value = isWahaAutoRespondPhoneEnabled()
+  wahaAutoRespondWhereOn.value = isWahaAutoRespondWhereEnabled()
+  wahaAutoRespondWhoAtOn.value = isWahaAutoRespondWhoAtEnabled()
+}
+
+function saveWahaAutoRespondPrefs() {
+  void saveWahaPrefsToServer({
+    chatId: wahaChatIdDraft.value.trim() || getWahaChatId(),
+    ttsEnabled: wahaChatSpeechOn.value,
+    dailyBriefingEnabled: wahaDailyBriefingOn.value,
+    autoRespondPhoneEnabled: wahaAutoRespondPhoneOn.value,
+    autoRespondWhereEnabled: wahaAutoRespondWhereOn.value,
+    autoRespondWhoAtEnabled: wahaAutoRespondWhoAtOn.value,
+  }).catch(() => {})
+}
+
+function onWahaAutoRespondPhoneToggle(enabled) {
+  wahaAutoRespondPhoneOn.value = enabled
+  setWahaAutoRespondPhoneEnabled(enabled)
+  saveWahaAutoRespondPrefs()
+}
+
+function onWahaAutoRespondWhereToggle(enabled) {
+  wahaAutoRespondWhereOn.value = enabled
+  setWahaAutoRespondWhereEnabled(enabled)
+  saveWahaAutoRespondPrefs()
+}
+
+function onWahaAutoRespondWhoAtToggle(enabled) {
+  wahaAutoRespondWhoAtOn.value = enabled
+  setWahaAutoRespondWhoAtEnabled(enabled)
+  saveWahaAutoRespondPrefs()
 }
 
 function onWahaChatSpeechToggle(enabled) {
@@ -2728,6 +2772,45 @@ onUnmounted(() => {
               <span class="waha-chat-id">{{ c.id }}</span>
             </span>
           </button>
+        </div>
+
+        <h4 class="api-sub-heading">Auto-replies</h4>
+        <p class="cred-hint">
+          Reply automatically to new incoming messages in the monitored chat (not chat history).
+          Location IDs are usually 3–4 digits. “Who’s at” uses your tractor location and en-route GPS.
+        </p>
+        <div class="waha-toggle-row">
+          <label class="toggle-switch">
+            <input
+              type="checkbox"
+              :checked="wahaAutoRespondPhoneOn"
+              @change="onWahaAutoRespondPhoneToggle($event.target.checked)"
+            />
+            <span class="toggle-slider"></span>
+          </label>
+          <span class="audio-row-label">Phone / number for a location</span>
+        </div>
+        <div class="waha-toggle-row">
+          <label class="toggle-switch">
+            <input
+              type="checkbox"
+              :checked="wahaAutoRespondWhereOn"
+              @change="onWahaAutoRespondWhereToggle($event.target.checked)"
+            />
+            <span class="toggle-slider"></span>
+          </label>
+          <span class="audio-row-label">Where is a location (address from directory)</span>
+        </div>
+        <div class="waha-toggle-row">
+          <label class="toggle-switch">
+            <input
+              type="checkbox"
+              :checked="wahaAutoRespondWhoAtOn"
+              @change="onWahaAutoRespondWhoAtToggle($event.target.checked)"
+            />
+            <span class="toggle-slider"></span>
+          </label>
+          <span class="audio-row-label">Who’s at a location (I’m there / miles away)</span>
         </div>
 
         <div class="waha-send-row">

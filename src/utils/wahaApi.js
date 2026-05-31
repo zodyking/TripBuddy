@@ -21,6 +21,9 @@ const WAHA_CHAT_ID_KEY = 'wahaChatId'
 const WAHA_CHAT_ID_LEGACY_KEY = 'wahaGroupId'
 const WAHA_TTS_ENABLED_KEY = 'wahaTtsEnabled'
 const WAHA_DAILY_BRIEFING_KEY = 'wahaDailyBriefingEnabled'
+const WAHA_AUTO_RESPOND_PHONE_KEY = 'wahaAutoRespondPhoneEnabled'
+const WAHA_AUTO_RESPOND_WHERE_KEY = 'wahaAutoRespondWhereEnabled'
+const WAHA_AUTO_RESPOND_WHO_AT_KEY = 'wahaAutoRespondWhoAtEnabled'
 const WAHA_POLL_INTERVAL_KEY = 'wahaPollIntervalMs'
 
 const DEFAULT_SESSION = 'default'
@@ -146,6 +149,36 @@ export function isWahaDailyBriefingEnabled() {
 export function setWahaDailyBriefingEnabled(enabled) {
   if (typeof window === 'undefined' || !window.localStorage) return
   window.localStorage.setItem(WAHA_DAILY_BRIEFING_KEY, enabled ? 'true' : 'false')
+}
+
+export function isWahaAutoRespondPhoneEnabled() {
+  if (typeof window === 'undefined' || !window.localStorage) return false
+  return window.localStorage.getItem(WAHA_AUTO_RESPOND_PHONE_KEY) === 'true'
+}
+
+export function setWahaAutoRespondPhoneEnabled(enabled) {
+  if (typeof window === 'undefined' || !window.localStorage) return
+  window.localStorage.setItem(WAHA_AUTO_RESPOND_PHONE_KEY, enabled ? 'true' : 'false')
+}
+
+export function isWahaAutoRespondWhereEnabled() {
+  if (typeof window === 'undefined' || !window.localStorage) return false
+  return window.localStorage.getItem(WAHA_AUTO_RESPOND_WHERE_KEY) === 'true'
+}
+
+export function setWahaAutoRespondWhereEnabled(enabled) {
+  if (typeof window === 'undefined' || !window.localStorage) return
+  window.localStorage.setItem(WAHA_AUTO_RESPOND_WHERE_KEY, enabled ? 'true' : 'false')
+}
+
+export function isWahaAutoRespondWhoAtEnabled() {
+  if (typeof window === 'undefined' || !window.localStorage) return false
+  return window.localStorage.getItem(WAHA_AUTO_RESPOND_WHO_AT_KEY) === 'true'
+}
+
+export function setWahaAutoRespondWhoAtEnabled(enabled) {
+  if (typeof window === 'undefined' || !window.localStorage) return
+  window.localStorage.setItem(WAHA_AUTO_RESPOND_WHO_AT_KEY, enabled ? 'true' : 'false')
 }
 
 export function getWahaPollInterval() {

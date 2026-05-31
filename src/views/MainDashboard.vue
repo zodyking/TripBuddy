@@ -89,6 +89,7 @@ import {
 } from '../utils/linehaulLocationDisplay.js'
 import { writeTrailerGpsSession, patchTrailerGpsSessionMap } from '../utils/trailerGpsMapSession.js'
 import { useWhatsAppGroup } from '../composables/useWhatsAppGroup.js'
+import { setTripPresenceSnapshot } from '../stores/tripPresenceStore.js'
 import { copyTextToClipboard } from '../utils/copyToClipboard.js'
 import { vehicleIdForUserMapMarker } from '../utils/mapVehicleLabel.js'
 import {
@@ -458,6 +459,27 @@ const tripProgressDenomNm = computed(() => {
   }
   return 180
 })
+
+watch(
+  [
+    () => linehaulTractorBody.value?.locationId,
+    tripDestLocationId,
+    tripOriginLocationId,
+    tripPhase,
+    tripProgressDistM,
+  ],
+  () => {
+    const t = linehaulTractorBody.value
+    setTripPresenceSnapshot({
+      tractorLocationId: t?.locationId != null ? String(t.locationId).trim() : '',
+      tripDestLocationId: tripDestLocationId.value,
+      tripOriginLocationId: tripOriginLocationId.value,
+      tripPhase: tripPhase.value,
+      remainingDistM: tripProgressDistM.value,
+    })
+  },
+  { immediate: true },
+)
 
 const showTripOdProgressBar = computed(
   () => Boolean(linehaulTripsBody.value) && !linehaulTripsError.value && dispatchSlideIndex.value === 0,

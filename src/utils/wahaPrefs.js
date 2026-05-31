@@ -3,6 +3,9 @@ import {
   setWahaChatId,
   setWahaTtsEnabled,
   setWahaDailyBriefingEnabled,
+  setWahaAutoRespondPhoneEnabled,
+  setWahaAutoRespondWhereEnabled,
+  setWahaAutoRespondWhoAtEnabled,
   setWahaBaseUrl,
   setWahaApiKey,
   getWahaChatId,
@@ -38,6 +41,9 @@ export function applyWahaPrefsFromCredentials(meta) {
   const hasChat = Object.prototype.hasOwnProperty.call(m, 'wahaChatId')
   const hasTts = Object.prototype.hasOwnProperty.call(m, 'wahaTtsEnabled')
   const hasBriefing = Object.prototype.hasOwnProperty.call(m, 'wahaDailyBriefingEnabled')
+  const hasArPhone = Object.prototype.hasOwnProperty.call(m, 'wahaAutoRespondPhoneEnabled')
+  const hasArWhere = Object.prototype.hasOwnProperty.call(m, 'wahaAutoRespondWhereEnabled')
+  const hasArWhoAt = Object.prototype.hasOwnProperty.call(m, 'wahaAutoRespondWhoAtEnabled')
   const hasUrl = Object.prototype.hasOwnProperty.call(m, 'wahaUrl')
   const hasApiKey = Object.prototype.hasOwnProperty.call(m, 'wahaApiKey')
 
@@ -49,6 +55,15 @@ export function applyWahaPrefsFromCredentials(meta) {
   }
   if (hasBriefing && typeof m.wahaDailyBriefingEnabled === 'boolean') {
     setWahaDailyBriefingEnabled(m.wahaDailyBriefingEnabled)
+  }
+  if (hasArPhone && typeof m.wahaAutoRespondPhoneEnabled === 'boolean') {
+    setWahaAutoRespondPhoneEnabled(m.wahaAutoRespondPhoneEnabled)
+  }
+  if (hasArWhere && typeof m.wahaAutoRespondWhereEnabled === 'boolean') {
+    setWahaAutoRespondWhereEnabled(m.wahaAutoRespondWhereEnabled)
+  }
+  if (hasArWhoAt && typeof m.wahaAutoRespondWhoAtEnabled === 'boolean') {
+    setWahaAutoRespondWhoAtEnabled(m.wahaAutoRespondWhoAtEnabled)
   }
   if (hasUrl && typeof m.wahaUrl === 'string' && m.wahaUrl.trim()) {
     setWahaBaseUrl(m.wahaUrl.trim())
@@ -108,7 +123,14 @@ export async function ensureWahaPrefsHydrated() {
 
 /**
  * Persist WhatsApp prefs to PostgreSQL (and localStorage).
- * @param {{ chatId?: string, ttsEnabled?: boolean, dailyBriefingEnabled?: boolean }} prefs
+ * @param {{
+ *   chatId?: string,
+ *   ttsEnabled?: boolean,
+ *   dailyBriefingEnabled?: boolean,
+ *   autoRespondPhoneEnabled?: boolean,
+ *   autoRespondWhereEnabled?: boolean,
+ *   autoRespondWhoAtEnabled?: boolean,
+ * }} prefs
  */
 export async function saveWahaPrefsToServer(prefs) {
   const body = {}
@@ -124,6 +146,18 @@ export async function saveWahaPrefsToServer(prefs) {
   if (prefs && Object.prototype.hasOwnProperty.call(prefs, 'dailyBriefingEnabled')) {
     setWahaDailyBriefingEnabled(Boolean(prefs.dailyBriefingEnabled))
     body.dailyBriefingEnabled = Boolean(prefs.dailyBriefingEnabled)
+  }
+  if (prefs && Object.prototype.hasOwnProperty.call(prefs, 'autoRespondPhoneEnabled')) {
+    setWahaAutoRespondPhoneEnabled(Boolean(prefs.autoRespondPhoneEnabled))
+    body.autoRespondPhoneEnabled = Boolean(prefs.autoRespondPhoneEnabled)
+  }
+  if (prefs && Object.prototype.hasOwnProperty.call(prefs, 'autoRespondWhereEnabled')) {
+    setWahaAutoRespondWhereEnabled(Boolean(prefs.autoRespondWhereEnabled))
+    body.autoRespondWhereEnabled = Boolean(prefs.autoRespondWhereEnabled)
+  }
+  if (prefs && Object.prototype.hasOwnProperty.call(prefs, 'autoRespondWhoAtEnabled')) {
+    setWahaAutoRespondWhoAtEnabled(Boolean(prefs.autoRespondWhoAtEnabled))
+    body.autoRespondWhoAtEnabled = Boolean(prefs.autoRespondWhoAtEnabled)
   }
   if (prefs && Object.prototype.hasOwnProperty.call(prefs, 'wahaUrl')) {
     const url = String(prefs.wahaUrl ?? '').trim()
