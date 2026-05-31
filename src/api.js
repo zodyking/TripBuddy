@@ -679,11 +679,41 @@ export async function putWahaPrefs(body) {
 
 /** Persist BlueBubbles / iMessage prefs for the signed-in user. */
 export async function putBlueBubblesPrefs(body) {
-  const r = await apiFetch('/api/settings/bluebubbles-prefs', {
-    method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body ?? {}),
-  })
+  let r
+  try {
+    r = await apiFetch('/api/settings/bluebubbles-prefs', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body ?? {}),
+    })
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e)
+    throw new Error(
+      msg === 'Load failed' || msg === 'Failed to fetch'
+        ? 'Could not reach the server. Check your connection or try again after deploy finishes.'
+        : msg,
+    )
+  }
+  return handleJson(r)
+}
+
+/** Test BlueBubbles connection (server proxies to your Mac). */
+export async function postIMessagePing(body = {}) {
+  let r
+  try {
+    r = await apiFetch('/api/imessage/ping', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    })
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e)
+    throw new Error(
+      msg === 'Load failed' || msg === 'Failed to fetch'
+        ? 'Could not reach the server. Check your connection or try again after deploy finishes.'
+        : msg,
+    )
+  }
   return handleJson(r)
 }
 

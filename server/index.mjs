@@ -171,6 +171,10 @@ import {
   parseBlueBubblesWebhookMessage,
   handleBlueBubblesAutoReply,
 } from './bluebubbles-auto-reply.mjs'
+import {
+  resolveBlueBubblesCredentials,
+  getPublicAppUrl,
+} from './bluebubbles-request-context.mjs'
 import { translateSenderNamesToEnglish } from './google-translate.mjs'
 import { needsEnglishSenderNameTranslation } from '../src/utils/senderNameLocale.js'
 import { readAssignment, writeAssignment } from './assignment-store.mjs'
@@ -265,7 +269,7 @@ import {
 } from './api-quota.mjs'
 await fs.mkdir(UPLOADS_DIR, { recursive: true })
 
-const app = Fastify({ logger: false })
+const app = Fastify({ logger: false, trustProxy: true })
 
 // origin: true reflects request Origin — needed for EventSource from Vite dev (e.g. localhost:5173) to API :3847/SSE.
 await app.register(cors, { origin: true, credentials: true })
@@ -568,31 +572,51 @@ function getBlueBubblesInternalUrl() {
 async function blueBubblesProxyHandler(req, reply) {
   const subPath = req.url.replace(/^\/api\/bluebubbles/, '') || '/'
   const ak = String(req.credentialAccountKey || '').trim()
+  let accountPrefs = null
   if (ak) {
     try {
-      applyBbClientPrefs(await getBlueBubblesPrefsForAccount(ak))
+      accountPrefs = await getBlueBubblesPrefsForAccount(ak)
+      applyBbClientPrefs(accountPrefs)
     } catch { /* ignore */ }
   }
-  const base = getBlueBubblesInternalUrl()
-  const prefs = ak ? await getBlueBubblesPrefsForAccount(ak).catch(() => null) : null
-  const serverUrl = prefs?.serverUrl || base
-  if (!serverUrl) {
+
+  const body = req.body && typeof req.body === 'object' ? req.body : {}
+  const bodyUrl = String(body.serverUrl ?? body.blueBubblesUrl ?? '').trim()
+  const bodyPw = String(body.password ?? body.blueBubblesPassword ?? '').trim()
+
+  const { serverUrl, password } = resolveBlueBubblesCredentials(req, accountPrefs)
+  const resolvedUrl = bodyUrl.replace(/\/+$/, '') || serverUrl
+  const resolvedPw = bodyPw || password
+
+  if (!resolvedUrl) {
     clearBbClientPrefs()
     return reply.code(502).send({ error: 'BlueBubbles server URL not configured.' })
   }
-  const password = prefs?.password || process.env.BLUEBUBBLES_PASSWORD || ''
-  if (!password) {
+  if (!resolvedPw) {
     clearBbClientPrefs()
     return reply.code(502).send({ error: 'BlueBubbles password not configured.' })
   }
   try {
-    const u = new URL(`${serverUrl}${subPath}`)
-    u.searchParams.set('password', password)
+    const pathOnly = subPath.split('?')[0] || '/'
+    const u = new URL(`${resolvedUrl}${pathOnly}`)
+    const qIdx = subPath.indexOf('?')
+    if (qIdx >= 0) {
+      const incoming = new URLSearchParams(subPath.slice(qIdx + 1))
+      for (const [k, v] of incoming.entries()) {
+        if (k !== 'password') u.searchParams.set(k, v)
+      }
+    }
+    u.searchParams.set('password', resolvedPw)
     const headers = { Accept: 'application/json' }
     const opts = { method: req.method, headers }
     if (req.method !== 'GET' && req.method !== 'HEAD' && req.body != null) {
       headers['Content-Type'] = 'application/json'
-      opts.body = JSON.stringify(req.body)
+      const payload = { ...body }
+      delete payload.serverUrl
+      delete payload.blueBubblesUrl
+      delete payload.password
+      delete payload.blueBubblesPassword
+      opts.body = JSON.stringify(payload)
     }
     const r = await fetch(u.toString(), opts)
     const ct = r.headers.get('content-type') || 'application/octet-stream'
@@ -758,11 +782,20 @@ app.get('/api/imessage/chats', async (req, reply) => {
 
 app.post('/api/imessage/ping', async (req, reply) => {
   const ak = String(req.credentialAccountKey || getDataAccountKey() || '').trim()
+  const body = req.body && typeof req.body === 'object' ? req.body : {}
+  let accountPrefs = null
   if (ak) {
     try {
-      applyBbClientPrefs(await getBlueBubblesPrefsForAccount(ak))
+      accountPrefs = await getBlueBubblesPrefsForAccount(ak)
     } catch { /* ignore */ }
   }
+  const { serverUrl, password } = resolveBlueBubblesCredentials(req, accountPrefs)
+  const testUrl = String(body.serverUrl ?? '').trim().replace(/\/+$/, '') || serverUrl
+  const testPw = String(body.password ?? '').trim() || password
+  if (!testUrl || !testPw) {
+    return reply.code(400).send({ ok: false, error: 'BlueBubbles server URL and password required.' })
+  }
+  applyBbClientPrefs({ serverUrl: testUrl, password: testPw })
   try {
     const r = await pingBlueBubbles()
     if (!r.ok) {
@@ -1720,9 +1753,7 @@ app.put('/api/settings/bluebubbles-prefs', async (req, reply) => {
     }
     await setBlueBubblesPrefsForAccount(ak.trim(), prefs)
     const stored = await getBlueBubblesPrefsForAccount(ak.trim())
-    const appUrl =
-      (process.env.APP_PUBLIC_URL || process.env.VITE_APP_URL || '').trim().replace(/\/+$/, '') ||
-      `${req.protocol}://${req.headers.host || 'localhost'}`
+    const appUrl = getPublicAppUrl(req)
     const webhookUrl = stored.webhookToken
       ? `${appUrl}/api/bluebubbles/webhook/${stored.webhookToken}`
       : ''
@@ -1754,9 +1785,7 @@ app.post('/api/settings/bluebubbles-register-webhook', async (req, reply) => {
     if (!stored.webhookToken) {
       return reply.code(500).send({ error: 'Could not generate webhook token.' })
     }
-    const appUrl =
-      (process.env.APP_PUBLIC_URL || process.env.VITE_APP_URL || '').trim().replace(/\/+$/, '') ||
-      `${req.protocol}://${req.headers.host || 'localhost'}`
+    const appUrl = getPublicAppUrl(req)
     const webhookUrl = `${appUrl}/api/bluebubbles/webhook/${stored.webhookToken}`
     applyBbClientPrefs(stored)
     try {

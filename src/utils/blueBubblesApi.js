@@ -26,11 +26,16 @@ export function getBlueBubblesUrlForSettings() {
 
 export function getBlueBubblesBaseUrl() {
   if (typeof window === 'undefined') return ''
+  // Browser always uses TripBuddy proxy — BlueBubbles does not allow cross-origin browser calls.
+  return defaultProxyUrl()
+}
+
+/** URL stored in settings (forwarded to server via proxy headers). */
+export function getBlueBubblesRemoteUrl() {
+  if (typeof window === 'undefined') return ''
   const stored = getBlueBubblesUrlForSettings()
   if (stored) return stored.replace(/\/+$/, '')
-  const env = (import.meta.env.VITE_BLUEBUBBLES_URL || '').trim().replace(/\/+$/, '')
-  if (env) return env
-  return defaultProxyUrl()
+  return (import.meta.env.VITE_BLUEBUBBLES_URL || '').trim().replace(/\/+$/, '')
 }
 
 export function setBlueBubblesBaseUrl(url) {
@@ -59,8 +64,7 @@ export function setBlueBubblesPassword(password) {
 }
 
 export function isBlueBubblesProxyMode() {
-  const base = getBlueBubblesBaseUrl().replace(/\/+$/, '')
-  return base === defaultProxyUrl().replace(/\/+$/, '')
+  return typeof window !== 'undefined'
 }
 
 export function getBlueBubblesChatGuid() {
@@ -127,22 +131,22 @@ export function setBlueBubblesContactRules(rules) {
 }
 
 export function isBlueBubblesConfigured() {
-  return !!(getBlueBubblesBaseUrl() && getBlueBubblesChatGuid())
+  const hasChat = !!getBlueBubblesChatGuid()
+  const hasConnection = !!(getBlueBubblesRemoteUrl() || getBlueBubblesPasswordForSettings())
+  return hasChat && hasConnection
 }
 
 function bbHeaders() {
   const headers = { Accept: 'application/json' }
-  if (!isBlueBubblesProxyMode()) {
-    const password = getBlueBubblesPassword()
-    if (password) headers['X-BlueBubbles-Password'] = password
-  }
+  const url = getBlueBubblesRemoteUrl()
+  const password = getBlueBubblesPassword()
+  if (url) headers['X-BlueBubbles-Server-Url'] = url
+  if (password) headers['X-BlueBubbles-Password'] = password
   return headers
 }
 
 function authQuery() {
-  if (isBlueBubblesProxyMode()) return ''
-  const password = getBlueBubblesPassword()
-  return password ? `password=${encodeURIComponent(password)}` : ''
+  return ''
 }
 
 /**
@@ -194,6 +198,34 @@ export async function blueBubblesRequest(path, opts = {}) {
 
 export async function pingBlueBubblesClient() {
   return blueBubblesRequest('/api/v1/ping')
+}
+
+/** Server-side ping with optional unsaved credentials (Settings test). */
+export async function pingBlueBubblesViaServer(opts = {}) {
+  const r = await fetch('/api/imessage/ping', {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+    body: JSON.stringify({
+      serverUrl: String(opts.serverUrl ?? getBlueBubblesRemoteUrl() ?? '').trim(),
+      password: String(opts.password ?? getBlueBubblesPassword() ?? '').trim(),
+    }),
+  })
+  const text = await r.text()
+  let data = null
+  try {
+    data = text ? JSON.parse(text) : null
+  } catch {
+    data = null
+  }
+  if (!r.ok) {
+    return {
+      ok: false,
+      status: r.status,
+      error: data?.error || data?.message || r.statusText || 'Ping failed',
+    }
+  }
+  return { ok: true, status: r.status, body: data?.data ?? data }
 }
 
 /** @param {{ limit?: number }} [opts] */

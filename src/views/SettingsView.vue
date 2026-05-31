@@ -149,7 +149,7 @@ import {
   isBlueBubblesAutoReplyEnabled,
   setBlueBubblesAutoReplyEnabled,
   getBlueBubblesContactRules,
-  pingBlueBubblesClient,
+  pingBlueBubblesViaServer,
   listBlueBubblesChats,
   sendBlueBubblesMessage,
 } from '../utils/blueBubblesApi.js'
@@ -827,7 +827,10 @@ async function testBlueBubblesConnection() {
   setBlueBubblesPassword(bbPasswordDraft.value)
   bbConnMsg.value = 'Checking…'
   try {
-    const r = await pingBlueBubblesClient()
+    const r = await pingBlueBubblesViaServer({
+      serverUrl: bbUrlDraft.value,
+      password: bbPasswordDraft.value,
+    })
     if (r.ok) {
       bbConnMsg.value = 'Connected to BlueBubbles server.'
     } else {
@@ -3014,9 +3017,13 @@ onUnmounted(() => {
         </p>
 
         <h4 class="api-sub-heading" style="margin-top:0;padding-top:0;border-top:none">Connection</h4>
+        <p class="cred-hint">
+          Your Mac's BlueBubbles URL and password are stored on TripBuddy and forwarded through the
+          server proxy (<code>/api/bluebubbles</code>) — the browser never calls BlueBubbles directly.
+        </p>
         <p v-if="bbUsesServerProxy && !bbUrlDraft.trim()" class="cred-hint">
-          Using server proxy (<code>/api/bluebubbles</code>). Set on the TripBuddy container:
-          <code>BLUEBUBBLES_BASE_URL</code> and <code>BLUEBUBBLES_PASSWORD</code>, or enter overrides below.
+          Optional: set <code>BLUEBUBBLES_BASE_URL</code> and <code>BLUEBUBBLES_PASSWORD</code> on the
+          TripBuddy container instead of entering them here.
         </p>
         <label class="lbl" for="bb-url">BlueBubbles server URL</label>
         <input
