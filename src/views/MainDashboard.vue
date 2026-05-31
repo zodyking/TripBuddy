@@ -460,27 +460,6 @@ const tripProgressDenomNm = computed(() => {
   return 180
 })
 
-watch(
-  [
-    () => linehaulTractorBody.value?.locationId,
-    tripDestLocationId,
-    tripOriginLocationId,
-    tripPhase,
-    tripProgressDistM,
-  ],
-  () => {
-    const t = linehaulTractorBody.value
-    setTripPresenceSnapshot({
-      tractorLocationId: t?.locationId != null ? String(t.locationId).trim() : '',
-      tripDestLocationId: tripDestLocationId.value,
-      tripOriginLocationId: tripOriginLocationId.value,
-      tripPhase: tripPhase.value,
-      remainingDistM: tripProgressDistM.value,
-    })
-  },
-  { immediate: true },
-)
-
 const showTripOdProgressBar = computed(
   () => Boolean(linehaulTripsBody.value) && !linehaulTripsError.value && dispatchSlideIndex.value === 0,
 )
@@ -949,6 +928,27 @@ const tripOriginLocationId = computed(() => {
   const cur = o.currentLocationNumber ?? o.originLocation
   return cur != null && String(cur).trim() !== '' ? String(cur).trim() : ''
 })
+
+watch(
+  [
+    () => linehaulTractorBody.value?.locationId,
+    tripDestLocationId,
+    tripOriginLocationId,
+    tripPhase,
+    tripProgressDistM,
+  ],
+  () => {
+    const t = linehaulTractorBody.value
+    setTripPresenceSnapshot({
+      tractorLocationId: t?.locationId != null ? String(t.locationId).trim() : '',
+      tripDestLocationId: tripDestLocationId.value,
+      tripOriginLocationId: tripOriginLocationId.value,
+      tripPhase: tripPhase.value,
+      remainingDistM: tripProgressDistM.value,
+    })
+  },
+  { immediate: true },
+)
 
 /** Trailer GPS modal top bar: origin / destination lines from active trip. */
 const trailerGpsOdHeader = computed(() => {
