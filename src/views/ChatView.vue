@@ -85,7 +85,8 @@ function senderNameLabel(msg) {
   ) {
     return msg.senderNameOriginal
   }
-  return msg.senderName || ''
+  const raw = msg.senderName || ''
+  return raw ? formatChatDisplayName(raw).displayTitle : ''
 }
 
 function fmtTime(ts) {
