@@ -173,7 +173,7 @@ async function confirmSend() {
   max-width: 100%;
   height: auto;
   object-fit: contain;
-  aspect-ratio: 720 / 400;
+  border-radius: 10px;
 }
 
 .bridge-wa-preview-message-label {

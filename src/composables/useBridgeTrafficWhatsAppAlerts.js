@@ -8,7 +8,6 @@ import {
   buildBridgeTrafficAlertMessage,
   canOfferBridgeTrafficAlert,
 } from '../utils/bridgeTrafficWhatsAppAlert.js'
-import { renderBridgeAlertPortraitBlob } from '../utils/bridgeAlertPortrait.js'
 import { openBridgeTrafficAlertPreview, bridgeTrafficAlertPreviewOpen } from '../stores/bridgeTrafficAlertStore.js'
 
 /** @type {Map<string, string>} */
@@ -34,6 +33,8 @@ let preparing = false
  *     status?: string,
  *   } | null,
  *   travelDirection?: import('vue').ComputedRef<'ToNY' | 'ToNJ'> | import('vue').Ref<'ToNY' | 'ToNJ'>,
+ *   captureBridgeTileImage?: (row: unknown) => Promise<Blob | null>,
+ *   viewMode?: import('vue').ComputedRef<string> | import('vue').Ref<string>,
  *   payloadUpdatedAt?: import('vue').ComputedRef<number | null> | import('vue').Ref<number | null>,
  * }} hooks
  */
@@ -43,6 +44,7 @@ export function useBridgeTrafficWhatsAppAlerts(hooks) {
   async function preparePreview(row, kind) {
     const routeId = hooks.rowRouteId(row)
     if (!routeId || preparing || bridgeTrafficAlertPreviewOpen.value) return
+    if (hooks.viewMode?.value && hooks.viewMode.value !== 'crossings') return
     if (!isWahaConfigured()) return
     if (!canOfferBridgeTrafficAlert(routeId)) return
 
@@ -59,27 +61,11 @@ export function useBridgeTrafficWhatsAppAlerts(hooks) {
         crossingMin,
         travelDirection,
       })
-      const level = hooks.trafficLevelForRow(row)
-      const accentColor = level === 'standstill' ? '#a78bfa' : '#f87171'
-      const cameraFeed = hooks.getBridgeCameraFeed?.(row) ?? null
-      const updatedMs = hooks.payloadUpdatedAt?.value
-      const updatedAtLabel =
-        typeof updatedMs === 'number' && Number.isFinite(updatedMs) && updatedMs > 0
-          ? `Updated ${new Date(updatedMs).toLocaleString()}`
-          : ''
-
-      const blob = await renderBridgeAlertPortraitBlob({
-        bridgeName,
-        statusLabel: hooks.trafficStatusTitle(row),
-        crossingMin,
-        speedMph,
-        trendShort: hooks.trendInfo(row).short,
-        strokeColor: hooks.bridgeChartStrokeColor(row),
-        accentColor,
-        series: hooks.seriesForRow(row),
-        updatedAtLabel,
-        cameraFeed,
-      })
+      let blob = null
+      if (typeof hooks.captureBridgeTileImage === 'function') {
+        blob = await hooks.captureBridgeTileImage(row)
+      }
+      if (!blob) return
 
       const imageUrl = URL.createObjectURL(blob)
       openBridgeTrafficAlertPreview({

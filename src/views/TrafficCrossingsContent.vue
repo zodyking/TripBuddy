@@ -18,6 +18,7 @@ import { sanitizeNy511ImpactFootnote } from '../utils/ny511ImpactFootnote.js'
 import { extractYoutubeVideoIdFromInput } from '../utils/youtubeVideoId.js'
 import { isGwbUpperDeckRow } from '../bridges/gwbRoutes.js'
 import { useBridgeTrafficWhatsAppAlerts } from '../composables/useBridgeTrafficWhatsAppAlerts.js'
+import { captureBridgeTileElement, findBridgeTileElement } from '../utils/captureBridgeTileImage.js'
 
 defineOptions({ name: 'TrafficCrossingsContent' })
 
@@ -795,6 +796,34 @@ const payloadFetchedAt = computed(() => {
   return typeof t === 'number' && Number.isFinite(t) ? t : null
 })
 
+/**
+ * Snapshot the live bridge card DOM for WhatsApp alerts.
+ * @param {unknown} row
+ */
+async function captureBridgeTileImageForRow(row) {
+  const id = rowRouteId(row)
+  if (!id) return null
+  await nextTick()
+  const el = findBridgeTileElement(id)
+  if (!el) return null
+  try {
+    el.scrollIntoView({ block: 'center', behavior: 'instant' })
+  } catch {
+    /* ignore */
+  }
+  await new Promise((r) => {
+    requestAnimationFrame(() => requestAnimationFrame(() => setTimeout(r, 220)))
+  })
+  try {
+    return await captureBridgeTileElement(el, {
+      routeId: id,
+      cameraFeed: getBridgeCameraFeed(row),
+    })
+  } catch {
+    return null
+  }
+}
+
 useBridgeTrafficWhatsAppAlerts({
   rankedRows,
   rowRouteId,
@@ -808,6 +837,8 @@ useBridgeTrafficWhatsAppAlerts({
   trendInfo,
   getBridgeCameraFeed,
   travelDirection: direction,
+  viewMode,
+  captureBridgeTileImage: captureBridgeTileImageForRow,
   payloadUpdatedAt: payloadFetchedAt,
 })
 
