@@ -2793,9 +2793,9 @@ onUnmounted(() => {
           <span class="audio-row-label">Phone / number for a location</span>
         </div>
         <ul class="waha-auto-examples" aria-label="Phone auto-reply examples">
-          <li><span class="waha-ex-q">What's the number for Woodbridge?</span> → <span class="waha-ex-a">89 (WOODBRIDGE): (732) 512-5528</span></li>
-          <li><span class="waha-ex-q">phone for WOOD</span> → <span class="waha-ex-a">89 (WOODBRIDGE): …</span></li>
-          <li><span class="waha-ex-q">3117 number?</span> → <span class="waha-ex-a">3117 (station name): …</span></li>
+          <li><span class="waha-ex-q">What's the number for Woodbridge?</span> → <span class="waha-ex-a">For 89 WOODBRIDGE you can try this number (732) 512-5528.</span></li>
+          <li><span class="waha-ex-q">phone for WOOD</span> → <span class="waha-ex-a">For 89 WOODBRIDGE you can try this number …</span></li>
+          <li><span class="waha-ex-q">3117 number?</span> → <span class="waha-ex-a">For 3117 … you can try this number …</span></li>
         </ul>
         <div class="waha-toggle-row">
           <label class="toggle-switch">
@@ -2809,9 +2809,9 @@ onUnmounted(() => {
           <span class="audio-row-label">Where is a location (address from directory)</span>
         </div>
         <ul class="waha-auto-examples" aria-label="Where auto-reply examples">
-          <li><span class="waha-ex-q">where is Woodbridge?</span> → <span class="waha-ex-a">89 — WOODBRIDGE. 6000 RIVERSIDE DR…</span></li>
-          <li><span class="waha-ex-q">where's WOOD?</span> → <span class="waha-ex-a">89 — WOODBRIDGE. …</span></li>
-          <li><span class="waha-ex-q">location of 89</span> → <span class="waha-ex-a">89 — WOODBRIDGE. …</span></li>
+          <li><span class="waha-ex-q">where is Woodbridge?</span> → <span class="waha-ex-a">For 89 WOODBRIDGE, the address is 6000 RIVERSIDE DR…</span></li>
+          <li><span class="waha-ex-q">where's WOOD?</span> → <span class="waha-ex-a">For 89 WOODBRIDGE, the address is …</span></li>
+          <li><span class="waha-ex-q">location of 89</span> → <span class="waha-ex-a">For 89 WOODBRIDGE, the address is …</span></li>
         </ul>
         <div class="waha-toggle-row">
           <label class="toggle-switch">
@@ -2825,9 +2825,9 @@ onUnmounted(() => {
           <span class="audio-row-label">Who’s at a location (I’m there / miles away)</span>
         </div>
         <ul class="waha-auto-examples" aria-label="Who's at auto-reply examples">
-          <li><span class="waha-ex-q">who's at Woodbridge?</span> → <span class="waha-ex-a">I'm there.</span> <span class="waha-ex-note">(tractor at 89)</span></li>
-          <li><span class="waha-ex-q">who's at WOOD?</span> → <span class="waha-ex-a">I'm about 12 mi away from WOODBRIDGE.</span> <span class="waha-ex-note">(en route)</span></li>
-          <li><span class="waha-ex-q">anyone at 89?</span> → <span class="waha-ex-a">I'm there.</span> or miles-away reply</li>
+          <li><span class="waha-ex-q">who's at Woodbridge?</span> → <span class="waha-ex-a">I'm at 89 WOODBRIDGE right now.</span> <span class="waha-ex-note">(tractor at station)</span></li>
+          <li><span class="waha-ex-q">who's at WOOD?</span> → <span class="waha-ex-a">I'm about 12 mi away from 89 WOODBRIDGE.</span> <span class="waha-ex-note">(en route)</span></li>
+          <li><span class="waha-ex-q">anyone at 89?</span> → <span class="waha-ex-a">I'm at 89 WOODBRIDGE right now.</span> or miles-away reply</li>
         </ul>
 
         <div class="waha-send-row">

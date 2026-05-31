@@ -304,25 +304,38 @@ function formatMilesRemaining(meters) {
 }
 
 /**
+ * Directory display name for replies (full station name when available).
+ * @param {DirectoryEntry | null | undefined} entry
+ * @param {string} fallbackId
+ */
+function stationNameForReply(entry, fallbackId) {
+  const name = entry?.locationName?.trim()
+  if (name) return name
+  const abbr = entry?.abbreviation?.trim()
+  if (abbr) return abbr
+  return String(fallbackId || '').trim() || 'that station'
+}
+
+/**
  * @param {AutoRespondIntent} intent
  * @returns {string}
  */
 export function buildAutoRespondReply(intent) {
   const entry = intent.entry
   const id = intent.locationId
-  const label = locationDisplayLabel(entry, id)
+  const name = stationNameForReply(entry, id)
 
   if (intent.type === 'phone') {
     const phone = entry?.phone?.trim()
-    if (phone) return `${id} (${label}): ${phone}`
-    return `I don't have a phone number on file for ${label}.`
+    if (phone) return `For ${id} ${name} you can try this number ${phone}.`
+    return `For ${id} ${name} I don't have a phone number in the directory yet.`
   }
 
   if (intent.type === 'where') {
     const addr = entry?.address?.trim()
-    if (addr) return `${id} — ${label}. ${addr}`
-    if (entry?.locationName) return `${id} — ${label}.`
-    return `I don't have an address on file for ${label}.`
+    if (addr) return `For ${id} ${name}, the address is ${addr}.`
+    if (entry?.locationName) return `For ${id} ${name} I have the station on file but no street address listed.`
+    return `For ${id} ${name} I don't have an address in the directory yet.`
   }
 
   if (intent.type === 'whoAt') {
@@ -333,13 +346,13 @@ export function buildAutoRespondReply(intent) {
     const phase = String(p.tripPhase ?? '').trim().toUpperCase()
 
     if (tractor && tractor === asked) {
-      return `I'm there.`
+      return `I'm at ${id} ${name} right now.`
     }
 
     if (phase === 'ENRT' && dest && dest === asked) {
       const mi = formatMilesRemaining(p.remainingDistM)
-      if (mi) return `I'm about ${mi} mi away from ${label}.`
-      return `I'm en route to ${label}.`
+      if (mi) return `I'm about ${mi} mi away from ${id} ${name}.`
+      return `I'm on my way to ${id} ${name}.`
     }
 
     return ''
