@@ -499,7 +499,8 @@ export function normalizeBlueBubblesMessage(raw, opts = {}) {
   const m = /** @type {Record<string, unknown>} */ (raw)
   const ts = bbMessageTimestampMs(m)
   const id = bbMessageId(m)
-  if (!id || !ts) return null
+  if (!id) return null
+  const resolvedTs = ts || Date.now()
 
   const handleObj = m.handle && typeof m.handle === 'object'
     ? /** @type {Record<string, unknown>} */ (m.handle)
@@ -525,7 +526,7 @@ export function normalizeBlueBubblesMessage(raw, opts = {}) {
 
   return {
     id,
-    ts,
+    ts: resolvedTs,
     text,
     fromMe,
     senderName,

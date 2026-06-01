@@ -1,22 +1,18 @@
 /**
- * App-wide iMessage inbox listener — polls every 2s from AppShell.
- * TTS/auto-reply only for messages that arrive after the session seed.
+ * App-wide iMessage listener — polls chat list every 2s (same data as iMessage inbox).
+ * Detects new messages when a chat's lastMessage ID changes.
  */
 import {
   isBlueBubblesConfigured,
   getBlueBubblesPollInterval,
-  fetchBlueBubblesRecentMessages,
+  listBlueBubblesChats,
   fetchBlueBubblesContacts,
   normalizeBlueBubblesMessage,
   buildBlueBubblesContactMap,
 } from './blueBubblesApi.js'
 import { ensureBlueBubblesPrefsHydrated, blueBubblesPrefsHydrated } from './blueBubblesPrefs.js'
 import { handleNewIncomingIMessageBatch } from './blueBubblesAutoResponder.js'
-import {
-  filterNewInboxMessages,
-  isInboxTrackerSeeded,
-  resetInboxTracker,
-} from './blueBubblesInboxTracker.js'
+import { resetInboxTracker } from './blueBubblesInboxTracker.js'
 import { getCachedBbContactMap, setCachedBbContactMap } from '../stores/blueBubblesChatStore.js'
 import { pushLiveLog } from '../stores/liveLogStore.js'
 
@@ -26,6 +22,10 @@ let pollTimer = null
 let startRetryTimer = null
 /** @type {Map<string, string>} */
 let contactMap = new Map()
+/** chatGuid -> last seen lastMessage id */
+/** @type {Map<string, string>} */
+const lastMsgIdByChat = new Map()
+let listenerSeeded = false
 let contactsLoaded = false
 let lastPollErrorAt = 0
 
@@ -63,33 +63,71 @@ function logPollError(message) {
   pushLiveLog({ type: 'warn', message: `[iMessage] ${message}`, ts: now })
 }
 
+/**
+ * @param {unknown[]} rawChats
+ * @returns {ReturnType<typeof normalizeBlueBubblesMessage>[]}
+ */
+function collectNewFromChats(rawChats) {
+  /** @type {ReturnType<typeof normalizeBlueBubblesMessage>[]} */
+  const incoming = []
+
+  for (const raw of rawChats) {
+    if (!raw || typeof raw !== 'object') continue
+    const c = /** @type {Record<string, unknown>} */ (raw)
+    const chatGuid = String(c.guid ?? c.chatGuid ?? '').trim()
+    if (!chatGuid) continue
+
+    const lm = c.lastMessage
+    if (!lm || typeof lm !== 'object') continue
+
+    const norm = normalizeBlueBubblesMessage(lm, { chatGuid, contactMap })
+    if (!norm?.id) continue
+
+    const prevId = lastMsgIdByChat.get(chatGuid)
+
+    if (!listenerSeeded) {
+      lastMsgIdByChat.set(chatGuid, norm.id)
+      continue
+    }
+
+    if (prevId !== norm.id) {
+      lastMsgIdByChat.set(chatGuid, norm.id)
+      incoming.push(norm)
+    }
+  }
+
+  return incoming
+}
+
 async function pollOnce() {
   if (!isBlueBubblesConfigured()) return
   await ensureContacts()
   try {
-    const r = await fetchBlueBubblesRecentMessages({ limit: 40 })
+    const r = await listBlueBubblesChats({ limit: 80 })
     if (!r.ok || !Array.isArray(r.body)) {
-      logPollError(r.error || `Inbox poll failed (${r.status || 'unknown'})`)
+      logPollError(r.error || `Chat poll failed (${r.status || 'unknown'})`)
       return
     }
 
-    const normalized = r.body
-      .map((m) => normalizeBlueBubblesMessage(m, { contactMap }))
-      .filter(Boolean)
+    const wasSeeded = listenerSeeded
+    const incoming = collectNewFromChats(r.body)
 
-    const wasSeeded = isInboxTrackerSeeded()
-    const incoming = filterNewInboxMessages(normalized)
-
-    if (!wasSeeded && isInboxTrackerSeeded()) {
+    if (!wasSeeded) {
+      listenerSeeded = true
       pushLiveLog({
         type: 'info',
-        message: '[iMessage] Listening for new messages on all pages',
+        message: `[iMessage] Listening for new messages on all pages (${lastMsgIdByChat.size} chats)`,
         ts: Date.now(),
       })
       return
     }
 
     if (incoming.length) {
+      pushLiveLog({
+        type: 'info',
+        message: `[iMessage] ${incoming.length} new message(s) detected`,
+        ts: Date.now(),
+      })
       handleNewIncomingIMessageBatch(incoming, {
         hadPriorMessages: true,
         skipIfNoPriorMessages: false,
@@ -127,6 +165,8 @@ export function startBlueBubblesBackgroundPoll() {
 }
 
 export function stopBlueBubblesBackgroundPoll() {
+  listenerSeeded = false
+  lastMsgIdByChat.clear()
   resetInboxTracker()
   if (startRetryTimer) {
     clearTimeout(startRetryTimer)
@@ -156,4 +196,11 @@ export function watchBlueBubblesBackgroundPoll() {
     if (pollTimer) clearInterval(id)
   }, 500)
   return () => clearInterval(id)
+}
+
+/** Mark a chat's current last message as seen (UI opened a thread). */
+export function markChatLastMessageSeen(chatGuid, messageId) {
+  const guid = String(chatGuid ?? '').trim()
+  const id = String(messageId ?? '').trim()
+  if (guid && id) lastMsgIdByChat.set(guid, id)
 }

@@ -19,6 +19,7 @@ import {
 import { getIMessageThreadCache, syncIMessageThread } from '../api.js'
 import { formatChatDisplayName } from '../utils/chatDisplayName.js'
 import { markInboxMessagesSeen } from '../utils/blueBubblesInboxTracker.js'
+import { markChatLastMessageSeen } from '../utils/blueBubblesBackgroundPoll.js'
 import {
   getCachedBbThread,
   setCachedBbThread,
@@ -128,6 +129,8 @@ export function useBlueBubblesMessenger(opts = {}) {
           .map((m) => normalizeBlueBubblesMessage(m, { chatGuid, ...normalizeOpts() }))
           .filter(Boolean)
         markInboxMessagesSeen(cachedNorm)
+        const cachedLast = cachedNorm[cachedNorm.length - 1]
+        if (cachedLast) markChatLastMessageSeen(chatGuid, cachedLast.id)
         messages.value = cachedNorm
         syncProgress.value = 35
       }
@@ -140,10 +143,13 @@ export function useBlueBubblesMessenger(opts = {}) {
           .map((m) => normalizeBlueBubblesMessage(m, { chatGuid, ...normalizeOpts() }))
           .filter(Boolean)
         markInboxMessagesSeen(normalized)
+        const last = normalized[normalized.length - 1]
+        if (last) {
+          markChatLastMessageSeen(chatGuid, last.id)
+          updateChatPreview(chatGuid, last)
+        }
         messages.value = normalized
         setCachedBbThread(chatGuid, r.messages, r.updatedAt || Date.now())
-        const last = normalized[normalized.length - 1]
-        if (last) updateChatPreview(chatGuid, last)
       }
       syncProgress.value = 100
     } catch (e) {
@@ -198,7 +204,6 @@ export function useBlueBubblesMessenger(opts = {}) {
       const prevIds = new Set(messages.value.map((m) => m.id))
       const incoming = normalized.filter((m) => !prevIds.has(m.id))
       if (incoming.length) {
-        markInboxMessagesSeen(incoming)
         messages.value = normalized
         setCachedBbThread(chatGuid, r.body.reverse(), Date.now())
         const last = normalized[normalized.length - 1]
@@ -218,7 +223,6 @@ export function useBlueBubblesMessenger(opts = {}) {
       const normalized = r.body
         .map((m) => normalizeBlueBubblesMessage(m, normalizeOpts()))
         .filter(Boolean)
-      markInboxMessagesSeen(normalized)
       for (const m of normalized) {
         if (m.fromMe || !m.chatGuid) continue
         const idx = chats.value.findIndex((c) => c.id === m.chatGuid)

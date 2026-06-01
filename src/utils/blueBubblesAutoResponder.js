@@ -36,16 +36,19 @@ export function handleIncomingIMessageAutomation(msg) {
   const ctx = { handle: msg.senderHandle, chatGuid: msg.chatGuid, fromMe: msg.fromMe }
   const rule = findContactRule(ctx)
 
-  if (contactTtsEnabled(rule) && !msg.fromMe && !announcedIds.has(msg.id)) {
-    const speech = buildIMessageSpeech(msg)
-    if (speech) {
-      pushLiveLog({ type: 'info', message: `[iMessage] ${speech}`, ts: Date.now() })
-    }
-    announceIMessageChatMessage(msg, { rule })
-    markAnnounced(msg.id)
-  }
+  if (msg.fromMe) return
 
-  if (!contactAutoReplyEnabled(rule) || msg.fromMe) return
+  if (!rule || !contactTtsEnabled(rule)) return
+  if (announcedIds.has(msg.id)) return
+
+  const speech = buildIMessageSpeech(msg)
+  if (!speech) return
+
+  pushLiveLog({ type: 'info', message: `[iMessage] ${speech}`, ts: Date.now() })
+  announceIMessageChatMessage(msg, { rule })
+  markAnnounced(msg.id)
+
+  if (!contactAutoReplyEnabled(rule)) return
   if (autoReplyQueued.has(msg.id)) return
   autoReplyQueued.add(msg.id)
 
