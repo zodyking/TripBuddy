@@ -33,16 +33,49 @@ export function handleIncomingIMessageAutomation(msg) {
   if (!msg?.id) return
   if (!isBlueBubblesConfigured()) return
 
-  const ctx = { handle: msg.senderHandle, chatGuid: msg.chatGuid, fromMe: msg.fromMe }
-  const rule = findContactRule(ctx)
+  // Match automation by conversation first (works for lastMessage polling).
+  const rule =
+    findContactRule({ chatGuid: msg.chatGuid, fromMe: msg.fromMe })
+    ?? findContactRule({ handle: msg.senderHandle, chatGuid: msg.chatGuid, fromMe: msg.fromMe })
 
-  if (msg.fromMe) return
+  if (msg.fromMe) {
+    pushLiveLog({
+      type: 'info',
+      message: '[iMessage] Skipped speech (last message was sent by you)',
+      ts: Date.now(),
+    })
+    return
+  }
 
-  if (!rule || !contactTtsEnabled(rule)) return
+  if (!rule) {
+    pushLiveLog({
+      type: 'info',
+      message: `[iMessage] Skipped speech (no automation saved for this chat)`,
+      ts: Date.now(),
+    })
+    return
+  }
+
+  if (!contactTtsEnabled(rule)) {
+    pushLiveLog({
+      type: 'info',
+      message: `[iMessage] Skipped speech (read-aloud off for ${rule.label || rule.handle || 'contact'})`,
+      ts: Date.now(),
+    })
+    return
+  }
+
   if (announcedIds.has(msg.id)) return
 
   const speech = buildIMessageSpeech(msg)
-  if (!speech) return
+  if (!speech) {
+    pushLiveLog({
+      type: 'info',
+      message: '[iMessage] Skipped speech (empty message body)',
+      ts: Date.now(),
+    })
+    return
+  }
 
   pushLiveLog({ type: 'info', message: `[iMessage] ${speech}`, ts: Date.now() })
   announceIMessageChatMessage(msg, { rule })

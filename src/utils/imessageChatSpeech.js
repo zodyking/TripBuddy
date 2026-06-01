@@ -1,10 +1,18 @@
 /**
  * iMessage / BlueBubbles chat message TTS + subtitles.
  */
-import { enqueueAnnouncement } from './alertAudioQueue.js'
+import { enqueueAnnouncement, speakDirect } from './alertAudioQueue.js'
 import { formatChatDisplayName } from './chatDisplayName.js'
 import { contactTtsEnabled } from './blueBubblesContactRulesStore.js'
 import { enableSpeechAlertsForBriefing } from './briefingSpeech.js'
+import {
+  tripVoiceIsGestureUnlocked,
+  unlockTripVoiceFromUserGesture,
+} from './tripVoiceAnnouncement.js'
+import {
+  showSpeechAlertModal,
+  hideSpeechAlertModal,
+} from '../stores/speechAlertModalStore.js'
 
 /**
  * @param {{ text?: string, hasMedia?: boolean, media?: { kind?: string, count?: number } | null, fromMe?: boolean, senderName?: string }} msg
@@ -61,7 +69,18 @@ export function announceIMessageChatMessage(msg, opts = {}) {
   const item = buildIMessageSpeechItem(msg)
   if (!item) return
   enableSpeechAlertsForBriefing()
-  enqueueAnnouncement(item.speech, { category: `imessage:${item.id}` })
+  unlockTripVoiceFromUserGesture({ silent: true })
+
+  const category = `imessage:${item.id}`
+
+  if (tripVoiceIsGestureUnlocked()) {
+    showSpeechAlertModal(item.speech)
+    speakDirect(item.speech)
+    setTimeout(() => hideSpeechAlertModal(), Math.max(3000, item.speech.length * 80))
+    return
+  }
+
+  enqueueAnnouncement(item.speech, { category })
 }
 
 /**

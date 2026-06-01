@@ -192,7 +192,7 @@ export async function blueBubblesRequest(path, opts = {}) {
   const url = `${base}${path}${qs ? `?${qs}` : ''}`
   const method = opts.method || 'GET'
   /** @type {RequestInit} */
-  const init = { method, headers: bbHeaders(), credentials: 'include' }
+  const init = { method, headers: bbHeaders(), credentials: 'include', cache: 'no-store' }
   if (method !== 'GET' && method !== 'HEAD' && opts.body != null) {
     init.headers = { ...init.headers, 'Content-Type': 'application/json' }
     init.body = JSON.stringify(opts.body)

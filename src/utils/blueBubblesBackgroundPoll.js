@@ -1,5 +1,5 @@
 /**
- * App-wide iMessage listener — polls chat list every 2s (same data as iMessage inbox).
+ * App-wide iMessage listener — polls chat list every 2s from AppShell.
  * Detects new messages when a chat's lastMessage ID changes.
  */
 import {
@@ -20,14 +20,15 @@ import { pushLiveLog } from '../stores/liveLogStore.js'
 let pollTimer = null
 /** @type {ReturnType<typeof setTimeout> | null} */
 let startRetryTimer = null
+let pollStarting = false
 /** @type {Map<string, string>} */
 let contactMap = new Map()
-/** chatGuid -> last seen lastMessage id */
 /** @type {Map<string, string>} */
 const lastMsgIdByChat = new Map()
 let listenerSeeded = false
 let contactsLoaded = false
 let lastPollErrorAt = 0
+let visibilityHooked = false
 
 const START_RETRY_MS = 4_000
 const POLL_ERROR_LOG_COOLDOWN_MS = 30_000
@@ -60,7 +61,7 @@ function logPollError(message) {
   const now = Date.now()
   if (now - lastPollErrorAt < POLL_ERROR_LOG_COOLDOWN_MS) return
   lastPollErrorAt = now
-  pushLiveLog({ type: 'warn', message: `[iMessage] ${message}`, ts: now })
+  pushLiveLog({ type: 'warn', message: `[iMessage] ${message}`, ts: Date.now() })
 }
 
 /**
@@ -99,7 +100,7 @@ function collectNewFromChats(rawChats) {
   return incoming
 }
 
-async function pollOnce() {
+export async function pollIMessageInboxOnce() {
   if (!isBlueBubblesConfigured()) return
   await ensureContacts()
   try {
@@ -138,8 +139,21 @@ async function pollOnce() {
   }
 }
 
+function hookVisibilityPoll() {
+  if (visibilityHooked || typeof document === 'undefined') return
+  visibilityHooked = true
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible' && pollTimer) {
+      void pollIMessageInboxOnce()
+    }
+  })
+  window.addEventListener('focus', () => {
+    if (pollTimer) void pollIMessageInboxOnce()
+  })
+}
+
 function scheduleStartRetry() {
-  if (pollTimer || startRetryTimer) return
+  if (pollTimer || startRetryTimer || pollStarting) return
   startRetryTimer = setTimeout(() => {
     startRetryTimer = null
     void attemptStart()
@@ -147,26 +161,34 @@ function scheduleStartRetry() {
 }
 
 async function attemptStart() {
-  await ensureBlueBubblesPrefsHydrated()
-  if (pollTimer) return
-  if (!isBlueBubblesConfigured()) {
-    scheduleStartRetry()
-    return
-  }
-  await pollOnce()
-  if (!pollTimer) {
-    pollTimer = setInterval(pollOnce, getBlueBubblesPollInterval())
+  if (pollTimer || pollStarting) return
+  pollStarting = true
+  try {
+    await ensureBlueBubblesPrefsHydrated()
+    if (pollTimer) return
+    if (!isBlueBubblesConfigured()) {
+      scheduleStartRetry()
+      return
+    }
+    await pollIMessageInboxOnce()
+    if (!pollTimer) {
+      pollTimer = setInterval(pollIMessageInboxOnce, getBlueBubblesPollInterval())
+      hookVisibilityPoll()
+    }
+  } finally {
+    pollStarting = false
   }
 }
 
 export function startBlueBubblesBackgroundPoll() {
-  if (pollTimer) return
+  if (pollTimer || pollStarting) return
   void attemptStart()
 }
 
 export function stopBlueBubblesBackgroundPoll() {
   listenerSeeded = false
   lastMsgIdByChat.clear()
+  pollStarting = false
   resetInboxTracker()
   if (startRetryTimer) {
     clearTimeout(startRetryTimer)
@@ -186,7 +208,7 @@ export function restartBlueBubblesBackgroundPoll() {
 export function watchBlueBubblesBackgroundPoll() {
   if (typeof window === 'undefined') return () => {}
   const tick = () => {
-    if (blueBubblesPrefsHydrated.value && !pollTimer && isBlueBubblesConfigured()) {
+    if (blueBubblesPrefsHydrated.value && !pollTimer && !pollStarting && isBlueBubblesConfigured()) {
       startBlueBubblesBackgroundPoll()
     }
   }
@@ -198,7 +220,6 @@ export function watchBlueBubblesBackgroundPoll() {
   return () => clearInterval(id)
 }
 
-/** Mark a chat's current last message as seen (UI opened a thread). */
 export function markChatLastMessageSeen(chatGuid, messageId) {
   const guid = String(chatGuid ?? '').trim()
   const id = String(messageId ?? '').trim()
