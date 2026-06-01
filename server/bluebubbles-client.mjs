@@ -44,9 +44,39 @@ function authQuery() {
   return `password=${encodeURIComponent(password)}`
 }
 
+/** @see https://docs.bluebubbles.app/server/developer-guides/rest-api-and-webhooks */
+function formatBlueBubblesApiError(body, httpStatus) {
+  if (!body || typeof body !== 'object') {
+    return httpStatus ? `HTTP ${httpStatus}` : 'Request failed'
+  }
+  const b = /** @type {Record<string, unknown>} */ (body)
+  const errObj = b.error && typeof b.error === 'object'
+    ? /** @type {Record<string, unknown>} */ (b.error)
+    : null
+  const nested = String(errObj?.message ?? errObj?.error ?? '').trim()
+  const top = String(b.message ?? (typeof b.error === 'string' ? b.error : '') ?? '').trim()
+  const statusCode = Number(b.status)
+  const prefix = Number.isFinite(statusCode) && statusCode >= 400 ? `[${statusCode}] ` : ''
+  const msg = nested || top
+  return msg ? `${prefix}${msg}` : (httpStatus ? `HTTP ${httpStatus}` : 'Request failed')
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+/** BlueBubbles docs use raw chatGuid in path segments (semicolons not encoded). */
+function chatGuidPathSegment(chatGuid) {
+  return String(chatGuid || '').trim()
+}
+
+const DEFAULT_FETCH_TIMEOUT_MS = 55_000
+const SEND_TIMEOUT_MS = 45_000
+const SEND_VERIFY_MS = 12_000
+
 /**
- * @param {string} path - e.g. `/api/v1/ping`
- * @param {{ method?: string, body?: unknown, query?: Record<string, string | number> }} [opts]
+ * @param {string} path
+ * @param {{ method?: string, body?: unknown, query?: Record<string, string | number>, timeoutMs?: number }} [opts]
  */
 export async function blueBubblesFetch(path, opts = {}) {
   const base = getServerUrl()
@@ -59,14 +89,17 @@ export async function blueBubblesFetch(path, opts = {}) {
   }
 
   const params = new URLSearchParams()
+  // Official auth: guid/password/token query param (@see BlueBubbles REST API docs)
   params.set('password', password)
+  params.set('guid', password)
   if (opts.query && typeof opts.query === 'object') {
     for (const [k, v] of Object.entries(opts.query)) {
-      if (v != null && v !== '') params.set(k, String(v))
+      if (v != null && v !== '' && k !== 'password' && k !== 'guid') params.set(k, String(v))
     }
   }
   const url = `${base}${path}?${params.toString()}`
   const method = opts.method || 'GET'
+  const timeoutMs = Number(opts.timeoutMs) > 0 ? Number(opts.timeoutMs) : DEFAULT_FETCH_TIMEOUT_MS
   /** @type {RequestInit} */
   const init = {
     method,
@@ -77,6 +110,10 @@ export async function blueBubblesFetch(path, opts = {}) {
     init.body = JSON.stringify(opts.body)
   }
 
+  const ctrl = new AbortController()
+  const timer = setTimeout(() => ctrl.abort(), timeoutMs)
+  init.signal = ctrl.signal
+
   try {
     const r = await fetch(url, init)
     const text = await r.text()
@@ -86,16 +123,22 @@ export async function blueBubblesFetch(path, opts = {}) {
     } catch {
       body = null
     }
+    const apiStatus = body && typeof body === 'object' ? Number(/** @type {Record<string, unknown>} */ (body).status) : NaN
     const data = body?.data ?? body
-    const ok = r.ok && (body?.status == null || body.status === 200)
-    return { ok, status: r.status, body: data, raw: body, error: ok ? '' : String(body?.message || body?.error || `HTTP ${r.status}`) }
+    const ok = r.ok && (!Number.isFinite(apiStatus) || apiStatus === 200)
+    const error = ok ? '' : formatBlueBubblesApiError(body, r.status)
+    return { ok, status: r.status, body: data, raw: body, error, timedOut: false }
   } catch (e) {
+    const timedOut = e instanceof Error && e.name === 'AbortError'
     return {
       ok: false,
-      status: 0,
+      status: timedOut ? 504 : 0,
       body: null,
-      error: e instanceof Error ? e.message : String(e),
+      error: timedOut ? 'BlueBubbles send timed out' : (e instanceof Error ? e.message : String(e)),
+      timedOut,
     }
+  } finally {
+    clearTimeout(timer)
   }
 }
 
@@ -126,7 +169,7 @@ export async function queryBlueBubblesChats(opts = {}) {
  * @param {{ limit?: number, offset?: number, sort?: 'ASC' | 'DESC' }} [opts]
  */
 export async function getBlueBubblesChatMessages(chatGuid, opts = {}) {
-  const guid = encodeURIComponent(String(chatGuid || '').trim())
+  const guid = chatGuidPathSegment(chatGuid)
   if (!guid) return { ok: false, status: 400, body: null, error: 'chatGuid required' }
   const limit = Math.min(500, Math.max(1, Number(opts.limit) || 50))
   const offset = Math.max(0, Number(opts.offset) || 0)
@@ -134,6 +177,39 @@ export async function getBlueBubblesChatMessages(chatGuid, opts = {}) {
   return blueBubblesFetch(`/api/v1/chat/${guid}/message`, {
     query: { limit, offset, sort },
   })
+}
+
+/**
+ * BlueBubbles may return 500/timeout even when the message was sent (server issue #801).
+ * @param {string} chatGuid
+ * @param {{ text: string, tempGuid?: string, sinceMs?: number }} opts
+ */
+async function verifyOutgoingMessage(chatGuid, opts) {
+  const guid = chatGuidPathSegment(chatGuid)
+  const text = String(opts.text ?? '').trim()
+  const tempGuid = String(opts.tempGuid ?? '').trim()
+  const sinceMs = Number(opts.sinceMs) || Date.now() - 15_000
+  const deadline = Date.now() + SEND_VERIFY_MS
+
+  while (Date.now() < deadline) {
+    const r = await getBlueBubblesChatMessages(guid, { limit: 20, sort: 'DESC' })
+    if (r.ok && Array.isArray(r.body)) {
+      for (const raw of r.body) {
+        if (!raw || typeof raw !== 'object') continue
+        const m = /** @type {Record<string, unknown>} */ (raw)
+        if (m.isFromMe !== true) continue
+        const bodyText = String(m.text ?? '').trim()
+        const msgGuid = String(m.guid ?? m.id ?? '').trim()
+        const ts = Number(m.dateCreated ?? m.date ?? 0)
+        const tsMs = ts > 0 && ts < 1e12 ? ts * 1000 : ts
+        if (tsMs && tsMs < sinceMs - 2000) continue
+        if (tempGuid && msgGuid === tempGuid) return { ok: true, body: m }
+        if (text && bodyText === text) return { ok: true, body: m }
+      }
+    }
+    await sleep(1500)
+  }
+  return { ok: false, body: null }
 }
 
 /** Recent messages across all chats (inbox polling). */
@@ -186,48 +262,66 @@ export async function getBlueBubblesRecentMessages(opts = {}) {
 }
 
 /**
+ * Send text per BlueBubbles REST API:
+ * POST /api/v1/message/text?password=… body: { chatGuid, tempGuid, message [, method] }
+ * @see https://docs.bluebubbles.app/server/developer-guides/rest-api-and-webhooks
  * @param {string} chatGuid
  * @param {string} message
  * @param {string} [tempGuid]
  */
 export async function sendBlueBubblesText(chatGuid, message, tempGuid) {
-  const guid = String(chatGuid || '').trim()
+  const guid = chatGuidPathSegment(chatGuid)
   const text = String(message || '').trim()
   if (!guid || !text) {
     return { ok: false, status: 400, body: null, error: 'chatGuid and message required' }
   }
   const crypto = await import('node:crypto')
   const temp = tempGuid || `temp-${crypto.randomUUID()}`
-  const payload = { chatGuid: guid, tempGuid: temp, message: text }
+  const sinceMs = Date.now()
+  const payloadBase = { chatGuid: guid, tempGuid: temp, message: text }
 
-  const first = await blueBubblesFetch('/api/v1/message/text', {
-    method: 'POST',
-    body: payload,
-  })
-  if (first.ok) return first
+  /** @type {Array<Record<string, unknown>>} */
+  const attempts = [
+    { ...payloadBase, method: 'private-api' },
+    payloadBase,
+  ]
 
-  const errText = String(first.error || first.raw?.message || first.raw?.error?.message || '').toLowerCase()
-  const shouldRetryPrivateApi =
-    first.status === 400 ||
-    first.status === 403 ||
-    first.status === 500 ||
-    errText.includes('private api') ||
-    errText.includes('applescript') ||
-    errText.includes('tempguid')
+  /** @type {{ ok: boolean, status: number, body: unknown, raw?: unknown, error: string, timedOut?: boolean } | null} */
+  let last = null
 
-  if (shouldRetryPrivateApi) {
-    const retry = await blueBubblesFetch('/api/v1/message/text', {
+  for (const payload of attempts) {
+    const result = await blueBubblesFetch('/api/v1/message/text', {
       method: 'POST',
-      body: { ...payload, method: 'private-api' },
+      body: payload,
+      timeoutMs: SEND_TIMEOUT_MS,
     })
-    if (retry.ok) return retry
-    return {
-      ...retry,
-      error: retry.error || first.error || `Send failed (${retry.status || first.status})`,
+    if (result.ok) return result
+    last = result
+
+    const errText = String(result.error || '').toLowerCase()
+    const maybeSentDespiteError =
+      result.timedOut ||
+      result.status === 500 ||
+      result.status === 504 ||
+      errText.includes('message send error') ||
+      errText.includes('timed out')
+
+    if (maybeSentDespiteError) {
+      const verified = await verifyOutgoingMessage(guid, { text, tempGuid: temp, sinceMs })
+      if (verified.ok) {
+        return {
+          ok: true,
+          status: 200,
+          body: verified.body,
+          raw: result.raw,
+          error: '',
+          verifiedAfterTimeout: true,
+        }
+      }
     }
   }
 
-  return first
+  return last || { ok: false, status: 0, body: null, error: 'Send failed' }
 }
 
 /** @param {{ url: string, events?: string[] }} body */

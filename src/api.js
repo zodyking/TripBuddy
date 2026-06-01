@@ -1480,14 +1480,26 @@ export async function postIMessageSend(body) {
     data = {}
   }
   if (!r.ok) {
+    const err =
+      typeof data.error === 'string'
+        ? data.error
+        : typeof data.message === 'string'
+          ? data.message
+          : r.statusText || `HTTP ${r.status}`
     return {
       ok: false,
       status: r.status,
-      error: typeof data.error === 'string' ? data.error : r.statusText || `HTTP ${r.status}`,
+      error: err,
       body: null,
     }
   }
-  return { ok: data.ok !== false, status: r.status, body: data.data ?? data, error: '' }
+  return {
+    ok: data.ok !== false,
+    status: r.status,
+    body: data.data ?? data,
+    error: '',
+    verifiedAfterTimeout: data.verifiedAfterTimeout === true,
+  }
 }
 
 /** Recent iMessage inbox (uses server-stored BlueBubbles creds for this account). */

@@ -3,6 +3,23 @@
  */
 
 /**
+ * @param {string} serverUrl
+ * @returns {string} Error message or empty string if OK
+ */
+export function validateBlueBubblesServerUrl(serverUrl) {
+  const url = String(serverUrl || '').trim()
+  if (!url) return 'BlueBubbles server URL not configured.'
+  const lower = url.toLowerCase()
+  if (lower.includes('/api/bluebubbles')) {
+    return 'BlueBubbles URL must be your Mac tunnel URL (e.g. https://….trycloudflare.com), not the TripBuddy /api/bluebubbles proxy.'
+  }
+  if (!/^https?:\/\//i.test(url)) {
+    return 'BlueBubbles server URL must start with http:// or https://'
+  }
+  return ''
+}
+
+/**
  * @param {import('fastify').FastifyRequest} req
  * @param {{ serverUrl?: string, password?: string } | null | undefined} [accountPrefs]
  */

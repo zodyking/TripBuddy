@@ -207,8 +207,13 @@ export async function blueBubblesRequest(path, opts = {}) {
       parsed = null
     }
     const data = parsed?.data ?? parsed
-    const ok = r.ok && (parsed?.status == null || parsed.status === 200)
-    return { ok, status: r.status, body: data, raw: parsed }
+    const apiStatus = parsed && typeof parsed === 'object' ? Number(parsed.status) : NaN
+    const ok = r.ok && (!Number.isFinite(apiStatus) || apiStatus === 200)
+    const result = { ok, status: r.status, body: data, raw: parsed }
+    if (!ok) {
+      result.error = extractBlueBubblesError(parsed, r.status)
+    }
+    return result
   } catch (e) {
     return { ok: false, status: 0, body: null, error: e instanceof Error ? e.message : String(e) }
   }
@@ -307,7 +312,7 @@ export async function fetchBlueBubblesRecentMessages(opts = {}) {
  * @param {{ limit?: number }} [opts]
  */
 export async function fetchBlueBubblesChatMessages(chatGuid, opts = {}) {
-  const guid = encodeURIComponent(String(chatGuid || '').trim())
+  const guid = String(chatGuid || '').trim()
   const limit = Math.min(200, Math.max(1, Number(opts.limit) || 50))
   return blueBubblesRequest(`/api/v1/chat/${guid}/message`, {
     query: { limit, offset: 0, sort: 'DESC' },
@@ -340,7 +345,7 @@ export async function sendBlueBubblesMessage(chatGuid, text) {
 
   const tempGuid = makeTempGuid()
 
-  // Prefer server route — resolves stored account credentials (password not in browser).
+  // Prefer server route — matches official API via Mac tunnel + delivery verification.
   if (isBlueBubblesConfigured()) {
     const { postIMessageSend } = await import('../api.js')
     const serverR = await postIMessageSend({ chatGuid: guid, message, tempGuid })
@@ -350,27 +355,26 @@ export async function sendBlueBubblesMessage(chatGuid, text) {
     }
   }
 
-  const proxyR = await blueBubblesRequest('/api/v1/message/text', {
-    method: 'POST',
-    body: { chatGuid: guid, tempGuid, message },
-  })
-  if (!proxyR.ok && !proxyR.error) {
-    proxyR.error = extractBlueBubblesError(proxyR.raw, proxyR.status)
-  }
-  if (proxyR.ok) return proxyR
+  /** @see https://docs.bluebubbles.app/server/developer-guides/rest-api-and-webhooks */
+  const attempts = [
+    { chatGuid: guid, tempGuid, message, method: 'private-api' },
+    { chatGuid: guid, tempGuid, message },
+  ]
 
-  const errText = String(proxyR.error || extractBlueBubblesError(proxyR.raw, proxyR.status)).toLowerCase()
-  if (proxyR.status === 400 || proxyR.status === 403 || errText.includes('private api') || errText.includes('applescript')) {
-    const retry = await blueBubblesRequest('/api/v1/message/text', {
+  /** @type {{ ok: boolean, status: number, body: unknown, raw?: unknown, error?: string } | null} */
+  let last = null
+  for (const body of attempts) {
+    const proxyR = await blueBubblesRequest('/api/v1/message/text', {
       method: 'POST',
-      body: { chatGuid: guid, tempGuid, message, method: 'private-api' },
+      body,
     })
-    if (!retry.ok && !retry.error) {
-      retry.error = extractBlueBubblesError(retry.raw, retry.status)
+    if (!proxyR.error && !proxyR.ok) {
+      proxyR.error = extractBlueBubblesError(proxyR.raw, proxyR.status)
     }
-    return retry
+    if (proxyR.ok) return proxyR
+    last = proxyR
   }
-  return proxyR
+  return last || { ok: false, status: 0, body: null, error: 'Send failed' }
 }
 
 export function bbMessageTimestampMs(msg) {

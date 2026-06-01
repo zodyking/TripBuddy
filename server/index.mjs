@@ -176,6 +176,7 @@ import {
 import {
   resolveBlueBubblesCredentials,
   getPublicAppUrl,
+  validateBlueBubblesServerUrl,
 } from './bluebubbles-request-context.mjs'
 import { translateSenderNamesToEnglish } from './google-translate.mjs'
 import { needsEnglishSenderNameTranslation } from '../src/utils/senderNameLocale.js'
@@ -609,6 +610,7 @@ async function blueBubblesProxyHandler(req, reply) {
       }
     }
     u.searchParams.set('password', resolvedPw)
+    u.searchParams.set('guid', resolvedPw)
     const headers = { Accept: 'application/json' }
     const opts = { method: req.method, headers }
     if (req.method !== 'GET' && req.method !== 'HEAD' && req.body != null) {
@@ -835,6 +837,10 @@ app.post('/api/imessage/send', async (req, reply) => {
     } catch { /* ignore */ }
   }
   const { serverUrl, password } = resolveBlueBubblesCredentials(req, accountPrefs)
+  const urlError = validateBlueBubblesServerUrl(serverUrl)
+  if (urlError) {
+    return reply.code(502).send({ ok: false, error: urlError })
+  }
   if (!serverUrl || !password) {
     return reply.code(502).send({ ok: false, error: 'BlueBubbles server URL and password required.' })
   }
@@ -847,9 +853,14 @@ app.post('/api/imessage/send', async (req, reply) => {
         ok: false,
         error: r.error || 'Failed to send iMessage',
         status: r.status,
+        blueBubbles: r.raw ?? null,
       })
     }
-    return { ok: true, data: r.body }
+    return {
+      ok: true,
+      data: r.body,
+      verifiedAfterTimeout: r.verifiedAfterTimeout === true,
+    }
   } finally {
     clearBbClientPrefs()
   }

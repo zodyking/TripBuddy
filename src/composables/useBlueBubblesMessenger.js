@@ -285,8 +285,15 @@ export function useBlueBubblesMessenger(opts = {}) {
       const r = await sendBlueBubblesMessage(chatGuid, trimmed)
       if (!r.ok) {
         messages.value = messages.value.filter((m) => m.id !== pendingId)
-        error.value = r.error || `Send failed (${r.status || 'unknown'})`
+        const detail = r.error || `Send failed (${r.status || 'unknown'})`
+        error.value = detail.includes('tempGuid')
+          ? `${detail} — BlueBubbles requires tempGuid on send (should be automatic; retry or update server).`
+          : detail
         return false
+      }
+      // BlueBubbles may deliver before API ack; brief pause then refresh thread.
+      if (r.verifiedAfterTimeout) {
+        await new Promise((resolve) => setTimeout(resolve, 800))
       }
       await pollActiveThread()
       await scrollToBottom()
