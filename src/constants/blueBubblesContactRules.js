@@ -70,16 +70,34 @@ export function sanitizeContactRules(raw) {
  * @param {{ handle?: string, chatGuid?: string }} ctx
  * @returns {ContactRule | null}
  */
+function normalizeHandle(value) {
+  return String(value ?? '').trim().toLowerCase()
+}
+
+/** @param {string} guid */
+function chatGuidMatchKeys(guid) {
+  const g = String(guid ?? '').trim()
+  if (!g) return []
+  const tail = g.split(';').pop() || ''
+  const keys = new Set([g])
+  if (tail) keys.add(tail)
+  return [...keys]
+}
+
 export function matchContactRule(rules, ctx) {
-  const handle = String(ctx.handle ?? '').trim().toLowerCase()
-  const chatGuid = String(ctx.chatGuid ?? '').trim()
+  const handle = normalizeHandle(ctx.handle)
+  const chatKeys = new Set(chatGuidMatchKeys(ctx.chatGuid))
   const enabled = rules.filter((r) => r.enabled !== false)
   for (const r of enabled) {
-    if (r.chatGuid && r.chatGuid === chatGuid) return r
+    if (!r.chatGuid) continue
+    for (const key of chatGuidMatchKeys(r.chatGuid)) {
+      if (chatKeys.has(key)) return r
+    }
   }
   for (const r of enabled) {
-    const h = String(r.handle ?? '').trim().toLowerCase()
-    if (h && handle && (h === handle || handle.includes(h))) return r
+    const h = normalizeHandle(r.handle)
+    if (!h || !handle) continue
+    if (h === handle || handle.includes(h) || h.includes(handle)) return r
   }
   return null
 }

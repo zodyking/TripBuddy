@@ -149,6 +149,7 @@ import {
   registerBlueBubblesWebhookOnServer,
   applyBlueBubblesPrefsFromCredentials,
 } from '../utils/blueBubblesPrefs.js'
+import { restartBlueBubblesBackgroundPoll } from '../utils/blueBubblesBackgroundPoll.js'
 import {
   appGeoLat,
   appGeoLng,
@@ -815,6 +816,7 @@ async function testBlueBubblesConnection() {
     })
     if (r.ok) {
       bbConnMsg.value = 'Connected to BlueBubbles server.'
+      restartBlueBubblesBackgroundPoll()
     } else {
       bbConnMsg.value = r.error || `Cannot reach BlueBubbles (${r.status}).`
     }
@@ -832,6 +834,7 @@ async function saveBlueBubblesSettings() {
     })
     if (res?.blueBubblesWebhookUrl) bbWebhookUrl.value = res.blueBubblesWebhookUrl
     bbSaveMsg.value = 'Saved — synced to your account.'
+    restartBlueBubblesBackgroundPoll()
   } catch (e) {
     bbSaveMsg.value = e instanceof Error ? e.message : String(e)
   }

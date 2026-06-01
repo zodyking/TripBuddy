@@ -31,6 +31,8 @@ import BridgeTrafficWhatsAppPreviewModal from './BridgeTrafficWhatsAppPreviewMod
 import { useDailyBriefing } from '../composables/useDailyBriefing.js'
 import { hydrateOpenrouterApiKeyFromServer } from '../stores/trafficTileKey.js'
 import { hydrateWahaPrefsFromServer } from '../utils/wahaPrefs.js'
+import { hydrateBlueBubblesPrefsFromServer } from '../utils/blueBubblesPrefs.js'
+import { startBlueBubblesBackgroundPoll } from '../utils/blueBubblesBackgroundPoll.js'
 
 const route = useRoute()
 const { apiOk, refreshHealth } = useApiHealth()
@@ -114,7 +116,9 @@ onMounted(() => {
       await Promise.all([
         hydrateOpenrouterApiKeyFromServer(),
         hydrateWahaPrefsFromServer(),
+        hydrateBlueBubblesPrefsFromServer(),
       ])
+      startBlueBubblesBackgroundPoll()
     })()
   }
   for (const ms of [500, 1500, 3500]) {

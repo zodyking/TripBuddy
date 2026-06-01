@@ -19,6 +19,7 @@ import {
 import { getIMessageThreadCache, syncIMessageThread } from '../api.js'
 import { formatChatDisplayName } from '../utils/chatDisplayName.js'
 import { handleNewIncomingIMessageBatch } from '../utils/blueBubblesAutoResponder.js'
+import { isBlueBubblesBackgroundPollActive } from '../utils/blueBubblesBackgroundPoll.js'
 import {
   getCachedBbThread,
   setCachedBbThread,
@@ -227,20 +228,29 @@ export function useBlueBubblesMessenger(opts = {}) {
       const normalized = r.body
         .map((m) => normalizeBlueBubblesMessage(m, normalizeOpts()))
         .filter(Boolean)
-      const incoming = normalized.filter((m) => !m.fromMe && !seenInboxIds.has(m.id))
-      for (const m of normalized) seenInboxIds.add(m.id)
-      if (seenInboxIds.size > 1200) {
-        const drop = [...seenInboxIds].slice(0, 400)
-        for (const id of drop) seenInboxIds.delete(id)
+      const backgroundActive = isBlueBubblesBackgroundPollActive()
+      const incoming = backgroundActive
+        ? []
+        : normalized.filter((m) => !m.fromMe && !seenInboxIds.has(m.id))
+      if (!backgroundActive) {
+        for (const m of normalized) seenInboxIds.add(m.id)
+        if (seenInboxIds.size > 1200) {
+          const drop = [...seenInboxIds].slice(0, 400)
+          for (const id of drop) seenInboxIds.delete(id)
+        }
       }
       if (incoming.length) {
         handleNewIncomingIMessageBatch(incoming, {
           hadPriorMessages: true,
           skipIfNoPriorMessages: false,
         })
-        for (const m of incoming) {
-          if (m.chatGuid) updateChatPreview(m.chatGuid, m)
-        }
+      }
+      for (const m of normalized) {
+        if (m.fromMe || !m.chatGuid) continue
+        const idx = chats.value.findIndex((c) => c.id === m.chatGuid)
+        if (idx < 0) continue
+        if (m.ts <= (chats.value[idx].lastMessageTs || 0)) continue
+        updateChatPreview(m.chatGuid, m)
       }
       if (activeChatGuid.value) {
         await pollActiveThread()
