@@ -1455,7 +1455,28 @@ export async function postIMessageAutoReply(body) {
 export async function fetchIMessageRecentMessages(opts = {}) {
   const limit = Math.min(100, Math.max(1, Number(opts.limit) || 40))
   const r = await apiFetch(`/api/imessage/recent?limit=${limit}`)
-  return handleJson(r)
+  const text = await r.text()
+  /** @type {{ ok?: boolean, error?: string, messages?: unknown[], status?: number }} */
+  let data = {}
+  try {
+    data = text ? JSON.parse(text) : {}
+  } catch {
+    data = {}
+  }
+  if (!r.ok) {
+    return {
+      ok: false,
+      status: r.status,
+      error: typeof data.error === 'string' ? data.error : r.statusText || `HTTP ${r.status}`,
+      messages: [],
+    }
+  }
+  return {
+    ok: data.ok !== false,
+    status: r.status,
+    error: typeof data.error === 'string' ? data.error : '',
+    messages: Array.isArray(data.messages) ? data.messages : [],
+  }
 }
 
 /** Open-graph style preview for a public https URL. */

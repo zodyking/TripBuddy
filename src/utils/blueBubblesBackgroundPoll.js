@@ -6,6 +6,7 @@ import {
   isBlueBubblesConfigured,
   getBlueBubblesPollInterval,
   fetchBlueBubblesContacts,
+  fetchBlueBubblesRecentMessages,
   normalizeBlueBubblesMessage,
   buildBlueBubblesContactMap,
 } from './blueBubblesApi.js'
@@ -70,13 +71,30 @@ function logPollError(message) {
   pushLiveLog({ type: 'warn', message: `[iMessage] ${message}`, ts: now })
 }
 
+/** @returns {Promise<{ ok: boolean, messages: unknown[], error?: string }>} */
+async function fetchRecentForPoll() {
+  const r = await fetchIMessageRecentMessages({ limit: 40 })
+  if (r.ok && Array.isArray(r.messages)) return r
+
+  // TripBuddy API may not have /api/imessage/recent yet — fall back to BlueBubbles proxy.
+  if (r.status === 404) {
+    const proxy = await fetchBlueBubblesRecentMessages({ limit: 40 })
+    if (proxy.ok && Array.isArray(proxy.body)) {
+      return { ok: true, messages: proxy.body }
+    }
+    return { ok: false, messages: [], error: proxy.error || r.error || 'HTTP 404' }
+  }
+
+  return { ok: false, messages: [], error: r.error || 'Background poll failed' }
+}
+
 async function pollOnce() {
   if (!isBlueBubblesConfigured()) return
   await ensureContacts()
   try {
-    const r = await fetchIMessageRecentMessages({ limit: 40 })
-    if (!r?.ok || !Array.isArray(r.messages)) {
-      logPollError(r?.error || 'Background poll failed — check iMessage settings')
+    const r = await fetchRecentForPoll()
+    if (!r.ok || !Array.isArray(r.messages)) {
+      logPollError(r.error || 'Background poll failed — check iMessage settings')
       return
     }
 

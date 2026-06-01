@@ -263,9 +263,43 @@ export async function fetchBlueBubblesContacts() {
 /** Recent messages across all chats (for inbox polling + automation). */
 export async function fetchBlueBubblesRecentMessages(opts = {}) {
   const limit = Math.min(100, Math.max(1, Number(opts.limit) || 30))
-  return blueBubblesRequest('/api/v1/message', {
+  const direct = await blueBubblesRequest('/api/v1/message', {
     query: { limit, offset: 0, sort: 'DESC' },
   })
+  if (direct.ok && Array.isArray(direct.body)) return direct
+  if (direct.status !== 404 && direct.status !== 405) return direct
+
+  const chatsR = await listBlueBubblesChats({ limit: Math.min(DEFAULT_CHATS_LIMIT, limit * 2) })
+  if (!chatsR.ok || !Array.isArray(chatsR.body)) {
+    return {
+      ok: false,
+      status: chatsR.status || direct.status,
+      body: null,
+      error: chatsR.error || direct.error || 'Failed to fetch recent iMessages',
+    }
+  }
+
+  /** @type {unknown[]} */
+  const messages = []
+  for (const chat of chatsR.body) {
+    if (!chat || typeof chat !== 'object') continue
+    const c = /** @type {Record<string, unknown>} */ (chat)
+    const lm = c.lastMessage
+    if (!lm || typeof lm !== 'object') continue
+    const m = /** @type {Record<string, unknown>} */ ({ ...lm })
+    if (!Array.isArray(m.chats) || !m.chats.length) {
+      m.chats = [{ guid: c.guid, displayName: c.displayName, chatIdentifier: c.chatIdentifier }]
+    }
+    messages.push(m)
+  }
+
+  messages.sort((a, b) => {
+    const ta = Number(/** @type {Record<string, unknown>} */ (a).dateCreated ?? 0)
+    const tb = Number(/** @type {Record<string, unknown>} */ (b).dateCreated ?? 0)
+    return tb - ta
+  })
+
+  return { ok: true, status: 200, body: messages.slice(0, limit), raw: chatsR.raw }
 }
 
 /**

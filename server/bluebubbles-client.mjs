@@ -140,9 +140,49 @@ export async function getBlueBubblesChatMessages(chatGuid, opts = {}) {
 export async function getBlueBubblesRecentMessages(opts = {}) {
   const limit = Math.min(100, Math.max(1, Number(opts.limit) || 40))
   const offset = Math.max(0, Number(opts.offset) || 0)
-  return blueBubblesFetch('/api/v1/message', {
+  const direct = await blueBubblesFetch('/api/v1/message', {
     query: { limit, offset, sort: 'DESC' },
   })
+  if (direct.ok && Array.isArray(direct.body)) return direct
+
+  // Some BlueBubbles versions return 404 for the global message endpoint — use chat lastMessage.
+  if (direct.status !== 404 && direct.status !== 405) return direct
+
+  const chatsR = await queryBlueBubblesChats({
+    limit: Math.min(80, limit * 2),
+    with: ['lastMessage'],
+  })
+  if (!chatsR.ok) {
+    return {
+      ok: false,
+      status: chatsR.status,
+      body: null,
+      error: chatsR.error || direct.error || 'Failed to fetch recent iMessages',
+    }
+  }
+
+  const chats = Array.isArray(chatsR.body) ? chatsR.body : []
+  /** @type {unknown[]} */
+  const messages = []
+  for (const chat of chats) {
+    if (!chat || typeof chat !== 'object') continue
+    const c = /** @type {Record<string, unknown>} */ (chat)
+    const lm = c.lastMessage
+    if (!lm || typeof lm !== 'object') continue
+    const m = /** @type {Record<string, unknown>} */ ({ ...lm })
+    if (!Array.isArray(m.chats) || !m.chats.length) {
+      m.chats = [{ guid: c.guid, displayName: c.displayName, chatIdentifier: c.chatIdentifier }]
+    }
+    messages.push(m)
+  }
+
+  messages.sort((a, b) => {
+    const ta = Number(/** @type {Record<string, unknown>} */ (a).dateCreated ?? 0)
+    const tb = Number(/** @type {Record<string, unknown>} */ (b).dateCreated ?? 0)
+    return tb - ta
+  })
+
+  return { ok: true, status: 200, body: messages.slice(0, limit), raw: chatsR.raw }
 }
 
 /**

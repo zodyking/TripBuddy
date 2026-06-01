@@ -7,6 +7,7 @@ import {
   isBlueBubblesConfigured,
   getBlueBubblesPollInterval,
   fetchBlueBubblesChatMessages,
+  fetchBlueBubblesRecentMessages,
   fetchBlueBubblesContacts,
   sendBlueBubblesMessage,
   listBlueBubblesChats,
@@ -222,9 +223,16 @@ export function useBlueBubblesMessenger(opts = {}) {
   async function pollInboxRecent() {
     if (syncing.value) return
     try {
-      const r = await fetchIMessageRecentMessages({ limit: 40 })
-      if (!r?.ok || !Array.isArray(r.messages)) return
-      const normalized = r.messages
+      let messages = /** @type {unknown[]} */ ([])
+      const recent = await fetchIMessageRecentMessages({ limit: 40 })
+      if (recent.ok && Array.isArray(recent.messages)) {
+        messages = recent.messages
+      } else if (recent.status === 404) {
+        const proxy = await fetchBlueBubblesRecentMessages({ limit: 40 })
+        if (proxy.ok && Array.isArray(proxy.body)) messages = proxy.body
+      }
+      if (!messages.length) return
+      const normalized = messages
         .map((m) => normalizeBlueBubblesMessage(m, normalizeOpts()))
         .filter(Boolean)
       const backgroundActive = isBlueBubblesBackgroundPollActive()
