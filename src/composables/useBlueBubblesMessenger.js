@@ -261,6 +261,7 @@ export function useBlueBubblesMessenger(opts = {}) {
   function startPolling() {
     if (!shouldPoll || pollTimer) return
     if (!configured.value) return
+    void pollOnce()
     pollTimer = setInterval(pollOnce, getBlueBubblesPollInterval())
   }
 
@@ -303,7 +304,9 @@ export function useBlueBubblesMessenger(opts = {}) {
     error.value = ''
     const had = hydrateThreadFromClientCache(chat.id, { scroll: true })
     if (!had) loading.value = true
-    void syncThread(chat.id, { scroll: !had })
+    void syncThread(chat.id, { scroll: !had }).then(() => {
+      void pollActiveThread()
+    })
   }
 
   function closeConversation() {

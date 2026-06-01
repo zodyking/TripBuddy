@@ -11,7 +11,8 @@ const BB_AUTO_REPLY_KEY = 'blueBubblesAutoReplyEnabled'
 const BB_POLL_INTERVAL_KEY = 'blueBubblesPollIntervalMs'
 const BB_CONTACT_RULES_KEY = 'blueBubblesContactRules'
 
-const DEFAULT_POLL_INTERVAL = 12_000
+const DEFAULT_POLL_INTERVAL = 2_000
+const MIN_POLL_INTERVAL = 2_000
 const DEFAULT_CHATS_LIMIT = 80
 
 function defaultProxyUrl() {
@@ -102,12 +103,15 @@ export function setBlueBubblesAutoReplyEnabled(enabled) {
 export function getBlueBubblesPollInterval() {
   if (typeof window === 'undefined' || !window.localStorage) return DEFAULT_POLL_INTERVAL
   const v = Number(window.localStorage.getItem(BB_POLL_INTERVAL_KEY))
-  return Number.isFinite(v) && v >= 3000 ? v : DEFAULT_POLL_INTERVAL
+  return Number.isFinite(v) && v >= MIN_POLL_INTERVAL ? v : DEFAULT_POLL_INTERVAL
 }
 
 export function setBlueBubblesPollInterval(ms) {
   if (typeof window === 'undefined' || !window.localStorage) return
-  window.localStorage.setItem(BB_POLL_INTERVAL_KEY, String(Math.max(3000, Number(ms) || DEFAULT_POLL_INTERVAL)))
+  window.localStorage.setItem(
+    BB_POLL_INTERVAL_KEY,
+    String(Math.max(MIN_POLL_INTERVAL, Number(ms) || DEFAULT_POLL_INTERVAL)),
+  )
 }
 
 /** @returns {import('../constants/blueBubblesContactRules.js').ContactRule[]} */
