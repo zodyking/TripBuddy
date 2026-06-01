@@ -57,11 +57,15 @@ export async function persistContactRule(rule) {
 }
 
 /**
- * @param {{ handle?: string, chatGuid?: string }} ctx
+ * @param {{ handle?: string, chatGuid?: string, fromMe?: boolean }} ctx
  * @returns {import('../constants/blueBubblesContactRules.js').ContactRule | null}
  */
 export function findContactRule(ctx) {
-  return matchContactRule(getBlueBubblesContactRules(), ctx)
+  const rules = getBlueBubblesContactRules()
+  if (ctx.fromMe && ctx.chatGuid) {
+    return matchContactRule(rules, { chatGuid: ctx.chatGuid })
+  }
+  return matchContactRule(rules, ctx)
 }
 
 /**

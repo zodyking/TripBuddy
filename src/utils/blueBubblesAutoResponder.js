@@ -30,10 +30,10 @@ function markAnnounced(id) {
  * @param {{ id: string, text?: string, fromMe?: boolean, senderName?: string, senderHandle?: string, chatGuid?: string, ts?: number }} msg
  */
 export function handleIncomingIMessageAutomation(msg) {
-  if (!msg?.id || msg.fromMe) return
+  if (!msg?.id) return
   if (!isBlueBubblesConfigured()) return
 
-  const ctx = { handle: msg.senderHandle, chatGuid: msg.chatGuid }
+  const ctx = { handle: msg.senderHandle, chatGuid: msg.chatGuid, fromMe: msg.fromMe }
   const rule = findContactRule(ctx)
 
   if (contactTtsEnabled(rule) && !announcedIds.has(msg.id)) {
@@ -45,7 +45,7 @@ export function handleIncomingIMessageAutomation(msg) {
     markAnnounced(msg.id)
   }
 
-  if (!contactAutoReplyEnabled(rule)) return
+  if (!contactAutoReplyEnabled(rule) || msg.fromMe) return
   if (autoReplyQueued.has(msg.id)) return
   autoReplyQueued.add(msg.id)
 

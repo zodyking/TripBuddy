@@ -142,7 +142,7 @@ export function useBlueBubblesMessenger(opts = {}) {
           .filter(Boolean)
         const prevIds = new Set(messages.value.map((m) => m.id))
         hadPriorMessages = messages.value.length > 0
-        const incoming = normalized.filter((m) => !m.fromMe && !prevIds.has(m.id))
+        const incoming = normalized.filter((m) => !prevIds.has(m.id))
         if (incoming.length) {
           handleNewIncomingIMessageBatch(incoming, { hadPriorMessages, skipIfNoPriorMessages: true })
         }
@@ -202,7 +202,7 @@ export function useBlueBubblesMessenger(opts = {}) {
         .map((m) => normalizeBlueBubblesMessage(m, { chatGuid, ...normalizeOpts() }))
         .filter(Boolean)
       const prevIds = new Set(messages.value.map((m) => m.id))
-      const incoming = normalized.filter((m) => !m.fromMe && !prevIds.has(m.id))
+      const incoming = normalized.filter((m) => !prevIds.has(m.id))
       if (incoming.length) {
         handleNewIncomingIMessageBatch(incoming, {
           hadPriorMessages: messages.value.length > 0,
@@ -227,7 +227,7 @@ export function useBlueBubblesMessenger(opts = {}) {
       const normalized = r.body
         .map((m) => normalizeBlueBubblesMessage(m, normalizeOpts()))
         .filter(Boolean)
-      const incoming = normalized.filter((m) => !m.fromMe && !seenInboxIds.has(m.id))
+      const incoming = normalized.filter((m) => !seenInboxIds.has(m.id))
       for (const m of normalized) seenInboxIds.add(m.id)
       if (seenInboxIds.size > 1200) {
         const drop = [...seenInboxIds].slice(0, 400)

@@ -24,8 +24,8 @@ export function imessageBodyForSpeech(msg) {
 export function buildIMessageSpeech(msg) {
   const body = imessageBodyForSpeech(msg)
   if (!body) return ''
-  if (msg.fromMe) return body
   const sender = formatChatDisplayName(String(msg.senderName || 'someone')).displayTitle || 'someone'
+  if (msg.fromMe) return `You said, ${body}`
   return `${sender} said, ${body}`
 }
 

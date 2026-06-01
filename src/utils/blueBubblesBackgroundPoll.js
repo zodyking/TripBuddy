@@ -93,7 +93,7 @@ async function pollOnce() {
       return
     }
 
-    const incoming = normalized.filter((m) => !m.fromMe && !seenInboxIds.has(m.id))
+    const incoming = normalized.filter((m) => !seenInboxIds.has(m.id))
     for (const m of normalized) seenInboxIds.add(m.id)
     trimSeenIds()
 
