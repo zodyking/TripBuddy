@@ -32,7 +32,7 @@ import { useDailyBriefing } from '../composables/useDailyBriefing.js'
 import { hydrateOpenrouterApiKeyFromServer } from '../stores/trafficTileKey.js'
 import { hydrateWahaPrefsFromServer } from '../utils/wahaPrefs.js'
 import { hydrateBlueBubblesPrefsFromServer } from '../utils/blueBubblesPrefs.js'
-import { startBlueBubblesBackgroundPoll } from '../utils/blueBubblesBackgroundPoll.js'
+import { startBlueBubblesBackgroundPoll, watchBlueBubblesBackgroundPoll } from '../utils/blueBubblesBackgroundPoll.js'
 
 const route = useRoute()
 const { apiOk, refreshHealth } = useApiHealth()
@@ -119,6 +119,7 @@ onMounted(() => {
         hydrateBlueBubblesPrefsFromServer(),
       ])
       startBlueBubblesBackgroundPoll()
+      watchBlueBubblesBackgroundPoll()
     })()
   }
   for (const ms of [500, 1500, 3500]) {

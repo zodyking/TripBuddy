@@ -166,6 +166,7 @@ import {
   clearAccountBlueBubblesPrefs as clearBbClientPrefs,
   registerBlueBubblesWebhook,
   listBlueBubblesWebhooks,
+  getBlueBubblesRecentMessages,
 } from './bluebubbles-client.mjs'
 import {
   parseBlueBubblesWebhookMessage,
@@ -646,6 +647,14 @@ app.post('/api/bluebubbles/webhook/:token', async (req, reply) => {
       const prefs = await getBlueBubblesPrefsForAccount(accountKey)
       await upsertBlueBubblesMessagesFromWebhook(accountKey, msg, prefs)
       applyBbClientPrefs(prefs)
+      emitLog('imessage-incoming', msg.text || 'New iMessage', {
+        messageId: msg.messageId,
+        text: msg.text,
+        handle: msg.handle,
+        chatGuid: msg.chatGuid,
+        senderLabel: msg.senderLabel,
+        ts: msg.ts,
+      })
       await handleBlueBubblesAutoReply(accountKey, msg)
     } catch (e) {
       emitLog('imessage', `Webhook handler error: ${e instanceof Error ? e.message : String(e)}`)
@@ -775,6 +784,33 @@ app.get('/api/imessage/chats', async (req, reply) => {
     }
     const list = Array.isArray(r.body) ? r.body : []
     return { ok: true, chats: list }
+  } finally {
+    clearAccountBlueBubblesPrefs()
+  }
+})
+
+app.get('/api/imessage/recent', async (req, reply) => {
+  reply.header('Cache-Control', 'no-store')
+  const ak = String(req.credentialAccountKey || getDataAccountKey() || '').trim()
+  if (!ak) {
+    return reply.code(401).send({ ok: false, error: 'Sign in required.' })
+  }
+  try {
+    applyBlueBubblesPrefsForAccount(await getBlueBubblesPrefsForAccount(ak))
+  } catch { /* ignore */ }
+  try {
+    const limit = Math.min(100, Math.max(1, Number(req.query?.limit) || 40))
+    const r = await getBlueBubblesRecentMessages({ limit })
+    if (!r.ok) {
+      return reply.code(r.status || 502).send({
+        ok: false,
+        error: r.error || 'Failed to fetch recent iMessages',
+        status: r.status,
+        messages: [],
+      })
+    }
+    const messages = Array.isArray(r.body) ? r.body : []
+    return { ok: true, messages }
   } finally {
     clearAccountBlueBubblesPrefs()
   }

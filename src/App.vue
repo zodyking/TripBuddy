@@ -7,6 +7,7 @@ import { hydrateBridgeTrafficProfilesFromServer } from './stores/bridgeTrafficPr
 import { hydrateSenderTextEnFromServer } from './utils/senderNameTranslateClient.js'
 import { hydrateWahaPrefsFromServer } from './utils/wahaPrefs.js'
 import { hydrateBlueBubblesPrefsFromServer } from './utils/blueBubblesPrefs.js'
+import { startBlueBubblesBackgroundPoll } from './utils/blueBubblesBackgroundPoll.js'
 
 /** One IP capture per tab session when the SPA loads (security audit). */
 const VISIT_PING_KEY = 'fedextool-visit-ping-v1'
@@ -27,7 +28,9 @@ onMounted(() => {
   void hydrateBridgeTrafficProfilesFromServer()
   void hydrateSenderTextEnFromServer()
   void hydrateWahaPrefsFromServer()
-  void hydrateBlueBubblesPrefsFromServer()
+  void hydrateBlueBubblesPrefsFromServer().then(() => {
+    startBlueBubblesBackgroundPoll()
+  })
 
   void (async () => {
     try {

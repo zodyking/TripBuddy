@@ -1451,6 +1451,13 @@ export async function postIMessageAutoReply(body) {
   return handleJson(r)
 }
 
+/** Recent iMessage inbox (uses server-stored BlueBubbles creds for this account). */
+export async function fetchIMessageRecentMessages(opts = {}) {
+  const limit = Math.min(100, Math.max(1, Number(opts.limit) || 40))
+  const r = await apiFetch(`/api/imessage/recent?limit=${limit}`)
+  return handleJson(r)
+}
+
 /** Open-graph style preview for a public https URL. */
 export async function fetchLinkPreview(url) {
   const u = encodeURIComponent(String(url || '').trim())

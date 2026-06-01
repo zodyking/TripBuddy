@@ -5,18 +5,20 @@
 import {
   isBlueBubblesConfigured,
   getBlueBubblesPollInterval,
-  fetchBlueBubblesRecentMessages,
   fetchBlueBubblesContacts,
   normalizeBlueBubblesMessage,
   buildBlueBubblesContactMap,
 } from './blueBubblesApi.js'
-import { ensureBlueBubblesPrefsHydrated } from './blueBubblesPrefs.js'
+import { ensureBlueBubblesPrefsHydrated, blueBubblesPrefsHydrated } from './blueBubblesPrefs.js'
+import { fetchIMessageRecentMessages } from '../api.js'
 import { handleNewIncomingIMessageBatch } from './blueBubblesAutoResponder.js'
 import { getCachedBbContactMap, setCachedBbContactMap } from '../stores/blueBubblesChatStore.js'
 import { pushLiveLog } from '../stores/liveLogStore.js'
 
 /** @type {ReturnType<typeof setInterval> | null} */
 let pollTimer = null
+/** @type {ReturnType<typeof setTimeout> | null} */
+let startRetryTimer = null
 let pollActive = false
 let inboxSeeded = false
 /** @type {Set<string>} */
@@ -24,9 +26,12 @@ const seenInboxIds = new Set()
 /** @type {Map<string, string>} */
 let contactMap = new Map()
 let contactsLoaded = false
+let lastPollErrorAt = 0
 
 const SEEN_CAP = 1200
 const SEEN_TRIM = 400
+const START_RETRY_MS = 4_000
+const POLL_ERROR_LOG_COOLDOWN_MS = 20_000
 
 export function isBlueBubblesBackgroundPollActive() {
   return pollActive
@@ -58,14 +63,24 @@ function trimSeenIds() {
   for (const id of drop) seenInboxIds.delete(id)
 }
 
+function logPollError(message) {
+  const now = Date.now()
+  if (now - lastPollErrorAt < POLL_ERROR_LOG_COOLDOWN_MS) return
+  lastPollErrorAt = now
+  pushLiveLog({ type: 'warn', message: `[iMessage] ${message}`, ts: now })
+}
+
 async function pollOnce() {
   if (!isBlueBubblesConfigured()) return
   await ensureContacts()
   try {
-    const r = await fetchBlueBubblesRecentMessages({ limit: 40 })
-    if (!r.ok || !Array.isArray(r.body)) return
+    const r = await fetchIMessageRecentMessages({ limit: 40 })
+    if (!r?.ok || !Array.isArray(r.messages)) {
+      logPollError(r?.error || 'Background poll failed — check iMessage settings')
+      return
+    }
 
-    const normalized = r.body
+    const normalized = r.messages
       .map((m) => normalizeBlueBubblesMessage(m, { contactMap }))
       .filter(Boolean)
 
@@ -90,24 +105,40 @@ async function pollOnce() {
         skipIfNoPriorMessages: false,
       })
     }
-  } catch {
-    /* ignore transient poll errors */
+  } catch (e) {
+    logPollError(e instanceof Error ? e.message : String(e))
+  }
+}
+
+function scheduleStartRetry() {
+  if (pollTimer || startRetryTimer) return
+  startRetryTimer = setTimeout(() => {
+    startRetryTimer = null
+    void attemptStart()
+  }, START_RETRY_MS)
+}
+
+async function attemptStart() {
+  await ensureBlueBubblesPrefsHydrated()
+  if (pollTimer) return
+  if (!isBlueBubblesConfigured()) {
+    scheduleStartRetry()
+    return
+  }
+  pollActive = true
+  await pollOnce()
+  if (!pollActive) return
+  if (!pollTimer) {
+    pollTimer = setInterval(pollOnce, getBlueBubblesPollInterval())
   }
 }
 
 /**
- * Start global iMessage inbox polling (idempotent).
+ * Start global iMessage inbox polling (idempotent, retries until configured).
  */
 export function startBlueBubblesBackgroundPoll() {
-  if (pollTimer || pollActive) return
-  void (async () => {
-    await ensureBlueBubblesPrefsHydrated()
-    if (!isBlueBubblesConfigured()) return
-    pollActive = true
-    await pollOnce()
-    if (!pollActive) return
-    pollTimer = setInterval(pollOnce, getBlueBubblesPollInterval())
-  })()
+  if (pollTimer) return
+  void attemptStart()
 }
 
 /**
@@ -117,6 +148,10 @@ export function stopBlueBubblesBackgroundPoll() {
   pollActive = false
   inboxSeeded = false
   seenInboxIds.clear()
+  if (startRetryTimer) {
+    clearTimeout(startRetryTimer)
+    startRetryTimer = null
+  }
   if (pollTimer) {
     clearInterval(pollTimer)
     pollTimer = null
@@ -129,4 +164,24 @@ export function stopBlueBubblesBackgroundPoll() {
 export function restartBlueBubblesBackgroundPoll() {
   stopBlueBubblesBackgroundPoll()
   startBlueBubblesBackgroundPoll()
+}
+
+/**
+ * Call once from AppShell — retries background poll when prefs hydrate completes.
+ */
+export function watchBlueBubblesBackgroundPoll() {
+  if (typeof window === 'undefined') return () => {}
+  const onHydrated = () => {
+    if (!pollTimer && isBlueBubblesConfigured()) {
+      startBlueBubblesBackgroundPoll()
+    }
+  }
+  if (blueBubblesPrefsHydrated.value) onHydrated()
+  const id = setInterval(() => {
+    if (blueBubblesPrefsHydrated.value) {
+      onHydrated()
+      clearInterval(id)
+    }
+  }, 500)
+  return () => clearInterval(id)
 }

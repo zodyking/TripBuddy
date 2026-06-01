@@ -136,6 +136,15 @@ export async function getBlueBubblesChatMessages(chatGuid, opts = {}) {
   })
 }
 
+/** Recent messages across all chats (inbox polling). */
+export async function getBlueBubblesRecentMessages(opts = {}) {
+  const limit = Math.min(100, Math.max(1, Number(opts.limit) || 40))
+  const offset = Math.max(0, Number(opts.offset) || 0)
+  return blueBubblesFetch('/api/v1/message', {
+    query: { limit, offset, sort: 'DESC' },
+  })
+}
+
 /**
  * @param {string} chatGuid
  * @param {string} message

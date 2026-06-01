@@ -4,6 +4,7 @@
 import { enqueueAnnouncement } from './alertAudioQueue.js'
 import { formatChatDisplayName } from './chatDisplayName.js'
 import { contactTtsEnabled } from './blueBubblesContactRulesStore.js'
+import { enableSpeechAlertsForBriefing } from './briefingSpeech.js'
 
 /**
  * @param {{ text?: string, hasMedia?: boolean, media?: { kind?: string, count?: number } | null, fromMe?: boolean, senderName?: string }} msg
@@ -59,6 +60,7 @@ export function announceIMessageChatMessage(msg, opts = {}) {
   if (!contactTtsEnabled(opts.rule ?? null)) return
   const item = buildIMessageSpeechItem(msg)
   if (!item) return
+  enableSpeechAlertsForBriefing()
   enqueueAnnouncement(item.speech, { category: `imessage:${item.id}` })
 }
 

@@ -7,7 +7,6 @@ import {
   isBlueBubblesConfigured,
   getBlueBubblesPollInterval,
   fetchBlueBubblesChatMessages,
-  fetchBlueBubblesRecentMessages,
   fetchBlueBubblesContacts,
   sendBlueBubblesMessage,
   listBlueBubblesChats,
@@ -16,7 +15,7 @@ import {
   buildBlueBubblesContactMap,
   bbChatKindLabel,
 } from '../utils/blueBubblesApi.js'
-import { getIMessageThreadCache, syncIMessageThread } from '../api.js'
+import { getIMessageThreadCache, syncIMessageThread, fetchIMessageRecentMessages } from '../api.js'
 import { formatChatDisplayName } from '../utils/chatDisplayName.js'
 import { handleNewIncomingIMessageBatch } from '../utils/blueBubblesAutoResponder.js'
 import { isBlueBubblesBackgroundPollActive } from '../utils/blueBubblesBackgroundPoll.js'
@@ -223,9 +222,9 @@ export function useBlueBubblesMessenger(opts = {}) {
   async function pollInboxRecent() {
     if (syncing.value) return
     try {
-      const r = await fetchBlueBubblesRecentMessages({ limit: 40 })
-      if (!r.ok || !Array.isArray(r.body)) return
-      const normalized = r.body
+      const r = await fetchIMessageRecentMessages({ limit: 40 })
+      if (!r?.ok || !Array.isArray(r.messages)) return
+      const normalized = r.messages
         .map((m) => normalizeBlueBubblesMessage(m, normalizeOpts()))
         .filter(Boolean)
       const backgroundActive = isBlueBubblesBackgroundPollActive()

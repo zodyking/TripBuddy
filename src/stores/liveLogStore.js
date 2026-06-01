@@ -1,6 +1,7 @@
 import { ref } from 'vue'
 import { pushInAppFromStream, fetchInAppInbox } from './inAppNotificationsStore.js'
 import { isSkippableInAppNotification } from '../utils/inAppNotificationNoise.js'
+import { handleIMessageIncomingPush } from '../utils/imessageIncomingBridge.js'
 
 const MAX_ENTRIES = 400
 /** Persist at most this many lines to localStorage (quota safety). */
@@ -167,6 +168,9 @@ export function connectLiveLogStream() {
   eventSource.onmessage = (ev) => {
     try {
       const data = JSON.parse(ev.data)
+      if (data.type === 'imessage-incoming') {
+        handleIMessageIncomingPush(data)
+      }
       if (data.type === 'session') {
         notifySessionListeners(data)
       }

@@ -138,9 +138,20 @@ export function isBlueBubblesConnected() {
   return !!(getBlueBubblesRemoteUrl() && getBlueBubblesPassword())
 }
 
-/** True when BlueBubbles server URL + password are configured. */
+/** True when signed-in account has BlueBubbles creds on the server (password not in localStorage). */
+let blueBubblesServerBacked = false
+
+export function setBlueBubblesServerBacked(enabled) {
+  blueBubblesServerBacked = Boolean(enabled)
+}
+
+export function isBlueBubblesServerBacked() {
+  return blueBubblesServerBacked
+}
+
+/** True when BlueBubbles can be used (local creds or server-stored creds for this account). */
 export function isBlueBubblesConfigured() {
-  return isBlueBubblesConnected()
+  return isBlueBubblesConnected() || blueBubblesServerBacked
 }
 
 function bbHeaders() {
