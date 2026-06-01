@@ -16,10 +16,9 @@ import {
   buildBlueBubblesContactMap,
   bbChatKindLabel,
 } from '../utils/blueBubblesApi.js'
-import { getIMessageThreadCache, syncIMessageThread, fetchIMessageRecentMessages } from '../api.js'
+import { getIMessageThreadCache, syncIMessageThread } from '../api.js'
 import { formatChatDisplayName } from '../utils/chatDisplayName.js'
 import { handleNewIncomingIMessageBatch } from '../utils/blueBubblesAutoResponder.js'
-import { isBlueBubblesBackgroundPollActive } from '../utils/blueBubblesBackgroundPoll.js'
 import {
   getCachedBbThread,
   setCachedBbThread,
@@ -223,28 +222,16 @@ export function useBlueBubblesMessenger(opts = {}) {
   async function pollInboxRecent() {
     if (syncing.value) return
     try {
-      let messages = /** @type {unknown[]} */ ([])
-      const recent = await fetchIMessageRecentMessages({ limit: 40 })
-      if (recent.ok && Array.isArray(recent.messages)) {
-        messages = recent.messages
-      } else if (recent.status === 404) {
-        const proxy = await fetchBlueBubblesRecentMessages({ limit: 40 })
-        if (proxy.ok && Array.isArray(proxy.body)) messages = proxy.body
-      }
-      if (!messages.length) return
-      const normalized = messages
+      const r = await fetchBlueBubblesRecentMessages({ limit: 40 })
+      if (!r.ok || !Array.isArray(r.body)) return
+      const normalized = r.body
         .map((m) => normalizeBlueBubblesMessage(m, normalizeOpts()))
         .filter(Boolean)
-      const backgroundActive = isBlueBubblesBackgroundPollActive()
-      const incoming = backgroundActive
-        ? []
-        : normalized.filter((m) => !m.fromMe && !seenInboxIds.has(m.id))
-      if (!backgroundActive) {
-        for (const m of normalized) seenInboxIds.add(m.id)
-        if (seenInboxIds.size > 1200) {
-          const drop = [...seenInboxIds].slice(0, 400)
-          for (const id of drop) seenInboxIds.delete(id)
-        }
+      const incoming = normalized.filter((m) => !m.fromMe && !seenInboxIds.has(m.id))
+      for (const m of normalized) seenInboxIds.add(m.id)
+      if (seenInboxIds.size > 1200) {
+        const drop = [...seenInboxIds].slice(0, 400)
+        for (const id of drop) seenInboxIds.delete(id)
       }
       if (incoming.length) {
         handleNewIncomingIMessageBatch(incoming, {

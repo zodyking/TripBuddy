@@ -1,17 +1,16 @@
 /**
- * App-wide iMessage / BlueBubbles inbox polling for per-contact TTS and auto-reply.
- * Runs on every page (not only Chats → iMessage).
+ * App-wide iMessage inbox listener — same fetch path as the iMessage chat UI.
+ * Polls every 2s from AppShell so per-contact read-aloud works on any page.
  */
 import {
   isBlueBubblesConfigured,
   getBlueBubblesPollInterval,
-  fetchBlueBubblesContacts,
   fetchBlueBubblesRecentMessages,
+  fetchBlueBubblesContacts,
   normalizeBlueBubblesMessage,
   buildBlueBubblesContactMap,
 } from './blueBubblesApi.js'
 import { ensureBlueBubblesPrefsHydrated, blueBubblesPrefsHydrated } from './blueBubblesPrefs.js'
-import { fetchIMessageRecentMessages } from '../api.js'
 import { handleNewIncomingIMessageBatch } from './blueBubblesAutoResponder.js'
 import { getCachedBbContactMap, setCachedBbContactMap } from '../stores/blueBubblesChatStore.js'
 import { pushLiveLog } from '../stores/liveLogStore.js'
@@ -20,7 +19,6 @@ import { pushLiveLog } from '../stores/liveLogStore.js'
 let pollTimer = null
 /** @type {ReturnType<typeof setTimeout> | null} */
 let startRetryTimer = null
-let pollActive = false
 let inboxSeeded = false
 /** @type {Set<string>} */
 const seenInboxIds = new Set()
@@ -32,10 +30,10 @@ let lastPollErrorAt = 0
 const SEEN_CAP = 1200
 const SEEN_TRIM = 400
 const START_RETRY_MS = 4_000
-const POLL_ERROR_LOG_COOLDOWN_MS = 20_000
+const POLL_ERROR_LOG_COOLDOWN_MS = 30_000
 
 export function isBlueBubblesBackgroundPollActive() {
-  return pollActive
+  return pollTimer != null
 }
 
 async function ensureContacts() {
@@ -60,8 +58,7 @@ async function ensureContacts() {
 
 function trimSeenIds() {
   if (seenInboxIds.size <= SEEN_CAP) return
-  const drop = [...seenInboxIds].slice(0, SEEN_TRIM)
-  for (const id of drop) seenInboxIds.delete(id)
+  for (const id of [...seenInboxIds].slice(0, SEEN_TRIM)) seenInboxIds.delete(id)
 }
 
 function logPollError(message) {
@@ -71,34 +68,17 @@ function logPollError(message) {
   pushLiveLog({ type: 'warn', message: `[iMessage] ${message}`, ts: now })
 }
 
-/** @returns {Promise<{ ok: boolean, messages: unknown[], error?: string }>} */
-async function fetchRecentForPoll() {
-  const r = await fetchIMessageRecentMessages({ limit: 40 })
-  if (r.ok && Array.isArray(r.messages)) return r
-
-  // TripBuddy API may not have /api/imessage/recent yet — fall back to BlueBubbles proxy.
-  if (r.status === 404) {
-    const proxy = await fetchBlueBubblesRecentMessages({ limit: 40 })
-    if (proxy.ok && Array.isArray(proxy.body)) {
-      return { ok: true, messages: proxy.body }
-    }
-    return { ok: false, messages: [], error: proxy.error || r.error || 'HTTP 404' }
-  }
-
-  return { ok: false, messages: [], error: r.error || 'Background poll failed' }
-}
-
 async function pollOnce() {
   if (!isBlueBubblesConfigured()) return
   await ensureContacts()
   try {
-    const r = await fetchRecentForPoll()
-    if (!r.ok || !Array.isArray(r.messages)) {
-      logPollError(r.error || 'Background poll failed — check iMessage settings')
+    const r = await fetchBlueBubblesRecentMessages({ limit: 40 })
+    if (!r.ok || !Array.isArray(r.body)) {
+      logPollError(r.error || `Inbox poll failed (${r.status || 'unknown'})`)
       return
     }
 
-    const normalized = r.messages
+    const normalized = r.body
       .map((m) => normalizeBlueBubblesMessage(m, { contactMap }))
       .filter(Boolean)
 
@@ -107,7 +87,7 @@ async function pollOnce() {
       inboxSeeded = true
       pushLiveLog({
         type: 'info',
-        message: `[iMessage] Background listener ready (${seenInboxIds.size} recent messages seeded)`,
+        message: `[iMessage] Listening on all pages (${seenInboxIds.size} messages seeded)`,
         ts: Date.now(),
       })
       return
@@ -143,27 +123,20 @@ async function attemptStart() {
     scheduleStartRetry()
     return
   }
-  pollActive = true
   await pollOnce()
-  if (!pollActive) return
   if (!pollTimer) {
     pollTimer = setInterval(pollOnce, getBlueBubblesPollInterval())
   }
 }
 
-/**
- * Start global iMessage inbox polling (idempotent, retries until configured).
- */
+/** Start global iMessage inbox listener (idempotent). */
 export function startBlueBubblesBackgroundPoll() {
   if (pollTimer) return
   void attemptStart()
 }
 
-/**
- * Stop global polling (e.g. logout). Resets seed state so the next start does not announce history.
- */
+/** Stop global listener. */
 export function stopBlueBubblesBackgroundPoll() {
-  pollActive = false
   inboxSeeded = false
   seenInboxIds.clear()
   if (startRetryTimer) {
@@ -176,30 +149,23 @@ export function stopBlueBubblesBackgroundPoll() {
   }
 }
 
-/**
- * Restart after iMessage credentials change (Settings save).
- */
 export function restartBlueBubblesBackgroundPoll() {
   stopBlueBubblesBackgroundPoll()
   startBlueBubblesBackgroundPoll()
 }
 
-/**
- * Call once from AppShell — retries background poll when prefs hydrate completes.
- */
+/** Retry start after prefs hydrate. */
 export function watchBlueBubblesBackgroundPoll() {
   if (typeof window === 'undefined') return () => {}
-  const onHydrated = () => {
-    if (!pollTimer && isBlueBubblesConfigured()) {
+  const tick = () => {
+    if (blueBubblesPrefsHydrated.value && !pollTimer && isBlueBubblesConfigured()) {
       startBlueBubblesBackgroundPoll()
     }
   }
-  if (blueBubblesPrefsHydrated.value) onHydrated()
+  tick()
   const id = setInterval(() => {
-    if (blueBubblesPrefsHydrated.value) {
-      onHydrated()
-      clearInterval(id)
-    }
+    tick()
+    if (pollTimer) clearInterval(id)
   }, 500)
   return () => clearInterval(id)
 }

@@ -7,7 +7,7 @@ import {
   contactTtsEnabled,
   contactAutoReplyEnabled,
 } from './blueBubblesContactRulesStore.js'
-import { announceIMessageChatMessage } from './imessageChatSpeech.js'
+import { announceIMessageChatMessage, buildIMessageSpeech } from './imessageChatSpeech.js'
 import { postIMessageAutoReply } from '../api.js'
 import { pushLiveLog } from '../stores/liveLogStore.js'
 
@@ -37,6 +37,10 @@ export function handleIncomingIMessageAutomation(msg) {
   const rule = findContactRule(ctx)
 
   if (contactTtsEnabled(rule) && !announcedIds.has(msg.id)) {
+    const speech = buildIMessageSpeech(msg)
+    if (speech) {
+      pushLiveLog({ type: 'info', message: `[iMessage] ${speech}`, ts: Date.now() })
+    }
     announceIMessageChatMessage(msg, { rule })
     markAnnounced(msg.id)
   }
