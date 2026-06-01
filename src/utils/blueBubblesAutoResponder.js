@@ -36,7 +36,7 @@ export function handleIncomingIMessageAutomation(msg) {
   const ctx = { handle: msg.senderHandle, chatGuid: msg.chatGuid, fromMe: msg.fromMe }
   const rule = findContactRule(ctx)
 
-  if (contactTtsEnabled(rule) && !announcedIds.has(msg.id)) {
+  if (contactTtsEnabled(rule) && !msg.fromMe && !announcedIds.has(msg.id)) {
     const speech = buildIMessageSpeech(msg)
     if (speech) {
       pushLiveLog({ type: 'info', message: `[iMessage] ${speech}`, ts: Date.now() })

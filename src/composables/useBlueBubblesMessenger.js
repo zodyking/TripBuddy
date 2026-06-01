@@ -18,7 +18,7 @@ import {
 } from '../utils/blueBubblesApi.js'
 import { getIMessageThreadCache, syncIMessageThread } from '../api.js'
 import { formatChatDisplayName } from '../utils/chatDisplayName.js'
-import { handleNewIncomingIMessageBatch } from '../utils/blueBubblesAutoResponder.js'
+import { markInboxMessagesSeen } from '../utils/blueBubblesInboxTracker.js'
 import {
   getCachedBbThread,
   setCachedBbThread,
@@ -75,9 +75,6 @@ export function useBlueBubblesMessenger(opts = {}) {
   /** @type {ReturnType<typeof setInterval> | null} */
   let pollTimer = null
   let syncGen = 0
-  let hadPriorMessages = false
-  /** @type {Set<string>} */
-  const seenInboxIds = new Set()
 
   const configured = computed(() => isBlueBubblesConfigured())
   const inConversation = computed(() => !!activeChatGuid.value)
@@ -126,10 +123,12 @@ export function useBlueBubblesMessenger(opts = {}) {
     try {
       const cacheRes = await getIMessageThreadCache(chatGuid)
       if (gen !== syncGen) return
-      if (cacheRes?.messages?.length) {
-        messages.value = cacheRes.messages
+      if (cached?.messages?.length) {
+        const cachedNorm = cacheRes.messages
           .map((m) => normalizeBlueBubblesMessage(m, { chatGuid, ...normalizeOpts() }))
           .filter(Boolean)
+        markInboxMessagesSeen(cachedNorm)
+        messages.value = cachedNorm
         syncProgress.value = 35
       }
       syncProgress.value = 55
@@ -140,12 +139,7 @@ export function useBlueBubblesMessenger(opts = {}) {
         const normalized = r.messages
           .map((m) => normalizeBlueBubblesMessage(m, { chatGuid, ...normalizeOpts() }))
           .filter(Boolean)
-        const prevIds = new Set(messages.value.map((m) => m.id))
-        hadPriorMessages = messages.value.length > 0
-        const incoming = normalized.filter((m) => !prevIds.has(m.id))
-        if (incoming.length) {
-          handleNewIncomingIMessageBatch(incoming, { hadPriorMessages, skipIfNoPriorMessages: true })
-        }
+        markInboxMessagesSeen(normalized)
         messages.value = normalized
         setCachedBbThread(chatGuid, r.messages, r.updatedAt || Date.now())
         const last = normalized[normalized.length - 1]
@@ -204,10 +198,7 @@ export function useBlueBubblesMessenger(opts = {}) {
       const prevIds = new Set(messages.value.map((m) => m.id))
       const incoming = normalized.filter((m) => !prevIds.has(m.id))
       if (incoming.length) {
-        handleNewIncomingIMessageBatch(incoming, {
-          hadPriorMessages: messages.value.length > 0,
-          skipIfNoPriorMessages: true,
-        })
+        markInboxMessagesSeen(incoming)
         messages.value = normalized
         setCachedBbThread(chatGuid, r.body.reverse(), Date.now())
         const last = normalized[normalized.length - 1]
@@ -227,18 +218,7 @@ export function useBlueBubblesMessenger(opts = {}) {
       const normalized = r.body
         .map((m) => normalizeBlueBubblesMessage(m, normalizeOpts()))
         .filter(Boolean)
-      const incoming = normalized.filter((m) => !seenInboxIds.has(m.id))
-      for (const m of normalized) seenInboxIds.add(m.id)
-      if (seenInboxIds.size > 1200) {
-        const drop = [...seenInboxIds].slice(0, 400)
-        for (const id of drop) seenInboxIds.delete(id)
-      }
-      if (incoming.length) {
-        handleNewIncomingIMessageBatch(incoming, {
-          hadPriorMessages: true,
-          skipIfNoPriorMessages: false,
-        })
-      }
+      markInboxMessagesSeen(normalized)
       for (const m of normalized) {
         if (m.fromMe || !m.chatGuid) continue
         const idx = chats.value.findIndex((c) => c.id === m.chatGuid)

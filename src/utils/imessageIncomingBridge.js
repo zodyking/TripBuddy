@@ -2,6 +2,7 @@
  * Real-time iMessage delivery via server webhook → SSE → client TTS/automation.
  */
 import { handleIncomingIMessageAutomation } from './blueBubblesAutoResponder.js'
+import { filterNewInboxMessages } from './blueBubblesInboxTracker.js'
 import { pushLiveLog } from '../stores/liveLogStore.js'
 
 /** @type {Set<string>} */
@@ -30,10 +31,13 @@ export function handleIMessageIncomingPush(data) {
     fromMe: false,
   }
 
+  const fresh = filterNewInboxMessages([msg])
+  if (!fresh.length) return
+
   pushLiveLog({
     type: 'info',
     message: `[iMessage] Incoming: ${msg.senderName}`,
     ts: Date.now(),
   })
-  handleIncomingIMessageAutomation(msg)
+  handleIncomingIMessageAutomation(fresh[0])
 }

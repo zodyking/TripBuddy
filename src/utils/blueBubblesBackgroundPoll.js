@@ -1,6 +1,6 @@
 /**
- * App-wide iMessage inbox listener — same fetch path as the iMessage chat UI.
- * Polls every 2s from AppShell so per-contact read-aloud works on any page.
+ * App-wide iMessage inbox listener — polls every 2s from AppShell.
+ * TTS/auto-reply only for messages that arrive after the session seed.
  */
 import {
   isBlueBubblesConfigured,
@@ -12,6 +12,11 @@ import {
 } from './blueBubblesApi.js'
 import { ensureBlueBubblesPrefsHydrated, blueBubblesPrefsHydrated } from './blueBubblesPrefs.js'
 import { handleNewIncomingIMessageBatch } from './blueBubblesAutoResponder.js'
+import {
+  filterNewInboxMessages,
+  isInboxTrackerSeeded,
+  resetInboxTracker,
+} from './blueBubblesInboxTracker.js'
 import { getCachedBbContactMap, setCachedBbContactMap } from '../stores/blueBubblesChatStore.js'
 import { pushLiveLog } from '../stores/liveLogStore.js'
 
@@ -19,16 +24,11 @@ import { pushLiveLog } from '../stores/liveLogStore.js'
 let pollTimer = null
 /** @type {ReturnType<typeof setTimeout> | null} */
 let startRetryTimer = null
-let inboxSeeded = false
-/** @type {Set<string>} */
-const seenInboxIds = new Set()
 /** @type {Map<string, string>} */
 let contactMap = new Map()
 let contactsLoaded = false
 let lastPollErrorAt = 0
 
-const SEEN_CAP = 1200
-const SEEN_TRIM = 400
 const START_RETRY_MS = 4_000
 const POLL_ERROR_LOG_COOLDOWN_MS = 30_000
 
@@ -56,11 +56,6 @@ async function ensureContacts() {
   contactsLoaded = true
 }
 
-function trimSeenIds() {
-  if (seenInboxIds.size <= SEEN_CAP) return
-  for (const id of [...seenInboxIds].slice(0, SEEN_TRIM)) seenInboxIds.delete(id)
-}
-
 function logPollError(message) {
   const now = Date.now()
   if (now - lastPollErrorAt < POLL_ERROR_LOG_COOLDOWN_MS) return
@@ -82,20 +77,17 @@ async function pollOnce() {
       .map((m) => normalizeBlueBubblesMessage(m, { contactMap }))
       .filter(Boolean)
 
-    if (!inboxSeeded) {
-      for (const m of normalized) seenInboxIds.add(m.id)
-      inboxSeeded = true
+    const wasSeeded = isInboxTrackerSeeded()
+    const incoming = filterNewInboxMessages(normalized)
+
+    if (!wasSeeded && isInboxTrackerSeeded()) {
       pushLiveLog({
         type: 'info',
-        message: `[iMessage] Listening on all pages (${seenInboxIds.size} messages seeded)`,
+        message: '[iMessage] Listening for new messages on all pages',
         ts: Date.now(),
       })
       return
     }
-
-    const incoming = normalized.filter((m) => !seenInboxIds.has(m.id))
-    for (const m of normalized) seenInboxIds.add(m.id)
-    trimSeenIds()
 
     if (incoming.length) {
       handleNewIncomingIMessageBatch(incoming, {
@@ -129,16 +121,13 @@ async function attemptStart() {
   }
 }
 
-/** Start global iMessage inbox listener (idempotent). */
 export function startBlueBubblesBackgroundPoll() {
   if (pollTimer) return
   void attemptStart()
 }
 
-/** Stop global listener. */
 export function stopBlueBubblesBackgroundPoll() {
-  inboxSeeded = false
-  seenInboxIds.clear()
+  resetInboxTracker()
   if (startRetryTimer) {
     clearTimeout(startRetryTimer)
     startRetryTimer = null
@@ -154,7 +143,6 @@ export function restartBlueBubblesBackgroundPoll() {
   startBlueBubblesBackgroundPoll()
 }
 
-/** Retry start after prefs hydrate. */
 export function watchBlueBubblesBackgroundPoll() {
   if (typeof window === 'undefined') return () => {}
   const tick = () => {
