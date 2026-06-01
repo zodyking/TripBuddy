@@ -59,6 +59,20 @@ function onFieldChange(idx) {
 }
 
 /** @param {number} idx */
+function onAiMediumChange(idx) {
+  const rule = localRules.value[idx]
+  if (rule?.aiMediumEnabled) rule.autoReplyEnabled = false
+  emitUpdate()
+}
+
+/** @param {number} idx */
+function onAutoReplyChange(idx) {
+  const rule = localRules.value[idx]
+  if (rule?.autoReplyEnabled) rule.aiMediumEnabled = false
+  emitUpdate()
+}
+
+/** @param {number} idx */
 function triggersText(idx) {
   return (localRules.value[idx]?.keywordTriggers || []).join(', ')
 }
@@ -94,8 +108,9 @@ function setIgnore(idx, val) {
 <template>
   <div class="bb-rules">
     <p class="bb-rules-intro">
-      Per-contact automation: read messages aloud, auto-reply with a custom OpenRouter prompt,
-      keyword filters, quiet hours, and rate limits. Match by phone/email handle or chat GUID.
+      Per-contact automation: read messages aloud, AI chat medium (direct OpenRouter passthrough),
+      assistant auto-replies, keyword filters, quiet hours, and rate limits.
+      Match by phone/email handle or chat GUID.
     </p>
     <div v-if="!localRules.length" class="bb-rules-empty">
       <p>No contact rules yet. Add one to enable tailored TTS and AI replies.</p>
@@ -143,9 +158,24 @@ function setIgnore(idx, val) {
         />
 
         <div class="bb-rule-toggles">
+          <label class="bb-toggle-row bb-toggle-feature">
+            <input
+              v-model="rule.aiMediumEnabled"
+              type="checkbox"
+              @change="onAiMediumChange(idx)"
+            />
+            <span class="bb-toggle-label">
+              <strong>AI chat medium</strong>
+              <small>Incoming message → OpenRouter → reply sent back (no rate limits)</small>
+            </span>
+          </label>
           <label class="bb-toggle-row">
-            <input v-model="rule.autoReplyEnabled" type="checkbox" @change="onFieldChange(idx)" />
-            <span>OpenRouter auto-reply</span>
+            <input
+              v-model="rule.autoReplyEnabled"
+              type="checkbox"
+              @change="onAutoReplyChange(idx)"
+            />
+            <span>OpenRouter auto-reply (assistant)</span>
           </label>
           <label class="bb-toggle-row">
             <span>TTS:</span>
@@ -155,16 +185,27 @@ function setIgnore(idx, val) {
               <option :value="false">Never read aloud</option>
             </select>
           </label>
-          <label class="bb-toggle-row">
-            <input v-model="rule.includeTripContext" type="checkbox" @change="onFieldChange(idx)" />
-            <span>Include trip context in prompt</span>
-          </label>
-          <label class="bb-toggle-row">
-            <input v-model="rule.onlyWhenMonitoredChat" type="checkbox" @change="onFieldChange(idx)" />
-            <span>Only in monitored chat</span>
-          </label>
+          <template v-if="!rule.aiMediumEnabled">
+            <label class="bb-toggle-row">
+              <input v-model="rule.includeTripContext" type="checkbox" @change="onFieldChange(idx)" />
+              <span>Include trip context in prompt</span>
+            </label>
+            <label class="bb-toggle-row">
+              <input v-model="rule.onlyWhenMonitoredChat" type="checkbox" @change="onFieldChange(idx)" />
+              <span>Only in monitored chat</span>
+            </label>
+          </template>
         </div>
 
+        <template v-if="rule.aiMediumEnabled">
+          <label class="lbl">Model (optional — uses Settings default if empty)</label>
+          <OpenRouterModelPicker
+            :model-value="rule.replyModel"
+            @update:model-value="(v) => { rule.replyModel = v; onFieldChange(idx) }"
+          />
+        </template>
+
+        <template v-else>
         <label class="lbl">System prompt (OpenRouter)</label>
         <textarea
           v-model="rule.systemPrompt"
@@ -219,6 +260,7 @@ function setIgnore(idx, val) {
             <input v-model.number="rule.maxRepliesPerHour" class="inp tap" type="number" min="0" max="120" @change="onFieldChange(idx)" />
           </div>
         </div>
+        </template>
       </div>
     </article>
 
@@ -288,6 +330,20 @@ function setIgnore(idx, val) {
   gap: 0.4rem;
   font-size: 0.78rem;
   color: var(--color-text-secondary, #c4c4d4);
+}
+.bb-toggle-feature {
+  align-items: flex-start;
+}
+.bb-toggle-label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.12rem;
+  line-height: 1.35;
+}
+.bb-toggle-label small {
+  font-size: 0.68rem;
+  opacity: 0.72;
+  font-weight: 400;
 }
 .bb-tts-select {
   width: auto;

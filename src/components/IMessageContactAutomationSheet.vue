@@ -55,6 +55,18 @@ const ignoreText = computed({
   },
 })
 
+function onAiMediumChange() {
+  if (rule.value.aiMediumEnabled) {
+    rule.value.autoReplyEnabled = false
+  }
+}
+
+function onAutoReplyChange() {
+  if (rule.value.autoReplyEnabled) {
+    rule.value.aiMediumEnabled = false
+  }
+}
+
 function loadRule() {
   rule.value = getOrCreateContactRule({
     chatGuid: props.chatGuid,
@@ -107,7 +119,7 @@ function onBackdrop(e) {
 
         <div class="im-auto-body">
           <p class="im-auto-intro">
-            Speech and OpenRouter auto-replies for this conversation only. Requires OpenRouter key in
+            Speech and OpenRouter automation for this conversation only. Requires OpenRouter key in
             Settings → General → API.
           </p>
 
@@ -119,60 +131,86 @@ function onBackdrop(e) {
             <span>Read new messages aloud</span>
           </label>
 
-          <label class="im-toggle-row">
+          <label class="im-toggle-row im-toggle-feature">
             <span class="toggle-switch">
-              <input v-model="rule.autoReplyEnabled" type="checkbox" />
+              <input
+                v-model="rule.aiMediumEnabled"
+                type="checkbox"
+                @change="onAiMediumChange"
+              />
               <span class="toggle-slider"></span>
             </span>
-            <span>OpenRouter auto-reply</span>
+            <span class="im-toggle-label">
+              <strong>AI chat medium</strong>
+              <small>Contact texts go straight to OpenRouter; the AI reply is sent back. No rate limits.</small>
+            </span>
           </label>
 
           <label class="im-toggle-row">
             <span class="toggle-switch">
-              <input v-model="rule.includeTripContext" type="checkbox" />
+              <input
+                v-model="rule.autoReplyEnabled"
+                type="checkbox"
+                @change="onAutoReplyChange"
+              />
               <span class="toggle-slider"></span>
             </span>
-            <span>Include trip context in prompt</span>
+            <span>OpenRouter auto-reply (assistant mode)</span>
           </label>
 
-          <label class="lbl">Reply instructions (system prompt)</label>
-          <textarea
-            v-model="rule.systemPrompt"
-            class="inp tap im-prompt"
-            rows="5"
-            :placeholder="DEFAULT_CONTACT_SYSTEM_PROMPT"
-          />
+          <template v-if="rule.aiMediumEnabled">
+            <label class="lbl">Model (optional — uses Settings default if empty)</label>
+            <OpenRouterModelPicker v-model="rule.replyModel" />
+          </template>
 
-          <label class="lbl">Reply model (optional)</label>
-          <OpenRouterModelPicker v-model="rule.replyModel" />
+          <template v-else-if="rule.autoReplyEnabled">
+            <label class="im-toggle-row">
+              <span class="toggle-switch">
+                <input v-model="rule.includeTripContext" type="checkbox" />
+                <span class="toggle-slider"></span>
+              </span>
+              <span>Include trip context in prompt</span>
+            </label>
 
-          <label class="lbl">Keyword triggers (comma-separated, empty = all messages)</label>
-          <input v-model="keywordText" class="inp tap" type="text" placeholder="eta, where, help" />
+            <label class="lbl">Reply instructions (system prompt)</label>
+            <textarea
+              v-model="rule.systemPrompt"
+              class="inp tap im-prompt"
+              rows="5"
+              :placeholder="DEFAULT_CONTACT_SYSTEM_PROMPT"
+            />
 
-          <label class="lbl">Ignore keywords</label>
-          <input v-model="ignoreText" class="inp tap" type="text" placeholder="spam" />
+            <label class="lbl">Reply model (optional)</label>
+            <OpenRouterModelPicker v-model="rule.replyModel" />
 
-          <div class="im-auto-row2">
-            <div>
-              <label class="lbl">Quiet start</label>
-              <input v-model="rule.quietHoursStart" class="inp tap" type="time" />
+            <label class="lbl">Keyword triggers (comma-separated, empty = all messages)</label>
+            <input v-model="keywordText" class="inp tap" type="text" placeholder="eta, where, help" />
+
+            <label class="lbl">Ignore keywords</label>
+            <input v-model="ignoreText" class="inp tap" type="text" placeholder="spam" />
+
+            <div class="im-auto-row2">
+              <div>
+                <label class="lbl">Quiet start</label>
+                <input v-model="rule.quietHoursStart" class="inp tap" type="time" />
+              </div>
+              <div>
+                <label class="lbl">Quiet end</label>
+                <input v-model="rule.quietHoursEnd" class="inp tap" type="time" />
+              </div>
             </div>
-            <div>
-              <label class="lbl">Quiet end</label>
-              <input v-model="rule.quietHoursEnd" class="inp tap" type="time" />
-            </div>
-          </div>
 
-          <div class="im-auto-row2">
-            <div>
-              <label class="lbl">Cooldown (sec)</label>
-              <input v-model.number="rule.cooldownSeconds" class="inp tap" type="number" min="0" max="600" />
+            <div class="im-auto-row2">
+              <div>
+                <label class="lbl">Cooldown (sec)</label>
+                <input v-model.number="rule.cooldownSeconds" class="inp tap" type="number" min="0" max="600" />
+              </div>
+              <div>
+                <label class="lbl">Max replies / hr</label>
+                <input v-model.number="rule.maxRepliesPerHour" class="inp tap" type="number" min="0" max="120" />
+              </div>
             </div>
-            <div>
-              <label class="lbl">Max replies / hr</label>
-              <input v-model.number="rule.maxRepliesPerHour" class="inp tap" type="number" min="0" max="120" />
-            </div>
-          </div>
+          </template>
         </div>
 
         <footer class="im-auto-foot">
@@ -256,6 +294,20 @@ function onBackdrop(e) {
   gap: 0.55rem;
   font-size: 0.82rem;
   margin: 0.15rem 0;
+}
+.im-toggle-feature {
+  align-items: flex-start;
+}
+.im-toggle-label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  line-height: 1.35;
+}
+.im-toggle-label small {
+  font-size: 0.68rem;
+  opacity: 0.72;
+  font-weight: 400;
 }
 .im-prompt {
   min-height: 5.5rem;

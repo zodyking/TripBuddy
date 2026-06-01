@@ -5,7 +5,7 @@ import { isBlueBubblesConfigured } from './blueBubblesApi.js'
 import {
   findContactRule,
   contactTtsEnabled,
-  contactAutoReplyEnabled,
+  contactOpenRouterReplyEnabled,
 } from './blueBubblesContactRulesStore.js'
 import { announceIMessageChatMessage, buildIMessageSpeech } from './imessageChatSpeech.js'
 import { postIMessageAutoReply } from '../api.js'
@@ -47,32 +47,44 @@ export function handleIncomingIMessageAutomation(msg) {
     return
   }
 
-  if (!contactTtsEnabled(rule)) {
+  const ttsOn = contactTtsEnabled(rule)
+  const openRouterOn = contactOpenRouterReplyEnabled(rule)
+
+  if (!ttsOn && !openRouterOn) {
+    pushLiveLog({
+      type: 'info',
+      message: `[iMessage] Skipped (no automation enabled for ${rule.label || rule.handle || 'contact'})`,
+      ts: Date.now(),
+    })
+    return
+  }
+
+  if (ttsOn) {
+    if (announcedIds.has(msg.id)) {
+      /* already spoken */
+    } else {
+      const speech = buildIMessageSpeech(msg)
+      if (!speech) {
+        pushLiveLog({
+          type: 'info',
+          message: '[iMessage] Skipped speech (empty message body)',
+          ts: Date.now(),
+        })
+      } else {
+        pushLiveLog({ type: 'info', message: `[iMessage] ${speech}`, ts: Date.now() })
+        announceIMessageChatMessage(msg, { rule })
+        markAnnounced(msg.id)
+      }
+    }
+  } else {
     pushLiveLog({
       type: 'info',
       message: `[iMessage] Skipped speech (read-aloud off for ${rule.label || rule.handle || 'contact'})`,
       ts: Date.now(),
     })
-    return
   }
 
-  if (announcedIds.has(msg.id)) return
-
-  const speech = buildIMessageSpeech(msg)
-  if (!speech) {
-    pushLiveLog({
-      type: 'info',
-      message: '[iMessage] Skipped speech (empty message body)',
-      ts: Date.now(),
-    })
-    return
-  }
-
-  pushLiveLog({ type: 'info', message: `[iMessage] ${speech}`, ts: Date.now() })
-  announceIMessageChatMessage(msg, { rule })
-  markAnnounced(msg.id)
-
-  if (msg.fromMe || !contactAutoReplyEnabled(rule)) return
+  if (msg.fromMe || !openRouterOn) return
   if (autoReplyQueued.has(msg.id)) return
   autoReplyQueued.add(msg.id)
 
@@ -85,9 +97,10 @@ export function handleIncomingIMessageAutomation(msg) {
   })
     .then((r) => {
       if (r?.replied) {
+        const mode = r.mode === 'ai-medium' ? 'AI medium reply' : 'Auto-reply'
         pushLiveLog({
           type: 'info',
-          message: `[iMessage] Auto-reply sent to ${msg.senderName || msg.senderHandle || 'contact'}`,
+          message: `[iMessage] ${mode} sent to ${msg.senderName || msg.senderHandle || 'contact'}`,
           ts: Date.now(),
         })
       }

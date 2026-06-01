@@ -9,7 +9,7 @@ import {
 import { formatChatDisplayName, chatAvatarInitial } from '../utils/chatDisplayName.js'
 import { createDoubleTapHandlers } from '../utils/doubleTap.js'
 import { speakIMessageAloud } from '../utils/imessageChatSpeech.js'
-import { findContactRule, contactTtsEnabled, contactAutoReplyEnabled } from '../utils/blueBubblesContactRulesStore.js'
+import { findContactRule, contactTtsEnabled, contactOpenRouterReplyEnabled } from '../utils/blueBubblesContactRulesStore.js'
 import ChatMessageText from '../components/ChatMessageText.vue'
 import IMessageContactAutomationSheet from './IMessageContactAutomationSheet.vue'
 
@@ -58,7 +58,7 @@ const activeAutomationRule = computed(() =>
 const automationActive = computed(
   () =>
     contactTtsEnabled(activeAutomationRule.value) ||
-    contactAutoReplyEnabled(activeAutomationRule.value),
+    contactOpenRouterReplyEnabled(activeAutomationRule.value),
 )
 
 const loaderLabel = computed(() => {

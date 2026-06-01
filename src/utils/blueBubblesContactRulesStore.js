@@ -81,3 +81,17 @@ export function contactTtsEnabled(rule) {
 export function contactAutoReplyEnabled(rule) {
   return rule?.enabled !== false && rule?.autoReplyEnabled === true
 }
+
+/**
+ * @param {import('../constants/blueBubblesContactRules.js').ContactRule | null} rule
+ */
+export function contactAiMediumEnabled(rule) {
+  return rule?.enabled !== false && rule?.aiMediumEnabled === true
+}
+
+/**
+ * @param {import('../constants/blueBubblesContactRules.js').ContactRule | null} rule
+ */
+export function contactOpenRouterReplyEnabled(rule) {
+  return contactAiMediumEnabled(rule) || contactAutoReplyEnabled(rule)
+}
