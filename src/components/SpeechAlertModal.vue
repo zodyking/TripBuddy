@@ -49,12 +49,16 @@ const subtitleSizeClass = computed(() => {
   pointer-events: none;
   display: flex;
   justify-content: center;
-  padding: 0 0.35rem 0.35rem;
+  align-items: flex-end;
+  padding: 0 0.75rem 0.35rem;
+  height: auto;
+  max-height: none;
 }
 
 .speech-subtitle-bar {
-  width: 100%;
-  max-width: 100%;
+  display: inline-block;
+  width: auto;
+  max-width: min(100%, calc(100vw - 1.5rem));
   margin: 0;
   padding: 0.55rem 0.85rem;
   background: #000;
@@ -65,6 +69,7 @@ const subtitleSizeClass = computed(() => {
   letter-spacing: 0.015em;
   text-shadow: 0 1px 2px rgba(0, 0, 0, 0.85);
   word-break: break-word;
+  box-sizing: border-box;
 }
 
 .speech-subtitle-text--lg {

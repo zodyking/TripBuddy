@@ -74,11 +74,11 @@ export function pushChatMessageSpeech(item, opts = {}) {
 }
 
 /**
- * @param {string} category e.g. whatsapp:msgId or chatmsg:msgId
+ * @param {string} category e.g. whatsapp-tap:msgId
  */
 export function focusChatMessageSpeechByCategory(category) {
   const raw = String(category || '')
-  const id = raw.replace(/^(whatsapp|chatmsg):/, '')
+  const id = raw.replace(/^(whatsapp-tap|whatsapp|chatmsg):/, '')
   if (!id) return
   const i = chatMessageSpeechItems.value.findIndex((row) => row.id === id)
   if (i >= 0) chatMessageSpeechIndex.value = i

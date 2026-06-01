@@ -60,9 +60,16 @@ export function buildChatSpeechItem(msg) {
 /**
  * @param {string} category
  */
+export function isWhatsAppTapToReadCategory(category) {
+  return String(category || '').startsWith('whatsapp-tap:')
+}
+
+/**
+ * @param {string} category
+ * @deprecated Use isWhatsAppTapToReadCategory — only manual WhatsApp tap uses the popup.
+ */
 export function isChatMessageSpeechCategory(category) {
-  const c = String(category || '')
-  return c.startsWith('whatsapp:') || c.startsWith('imessage:') || c.startsWith('chatmsg:')
+  return isWhatsAppTapToReadCategory(category)
 }
 
 /**
@@ -74,7 +81,6 @@ export function announceChatMessage(msg, opts = {}) {
   if (!isWahaTtsEnabled()) return
   const item = buildChatSpeechItem(msg)
   if (!item) return
-  pushChatMessageSpeech(item, { focusNewest: opts.focusNewest })
   enqueueAnnouncement(item.speech, { category: `whatsapp:${item.id}` })
 }
 
@@ -84,8 +90,8 @@ export function announceChatMessage(msg, opts = {}) {
 export function replayChatMessageSpeech(item) {
   if (!item?.speech) return
   enableSpeechAlertsForBriefing()
-  focusChatMessageSpeechByCategory(`chatmsg:${item.id}`)
-  enqueueAnnouncement(item.speech, { category: `chatmsg:${item.id}` })
+  focusChatMessageSpeechByCategory(`whatsapp-tap:${item.id}`)
+  enqueueAnnouncement(item.speech, { category: `whatsapp-tap:${item.id}` })
 }
 
 /**
@@ -97,5 +103,5 @@ export function speakChatMessageAloud(msg) {
   if (!item) return
   enableSpeechAlertsForBriefing()
   pushChatMessageSpeech(item, { focusNewest: true })
-  enqueueAnnouncement(item.speech, { category: `chatmsg:${item.id}` })
+  enqueueAnnouncement(item.speech, { category: `whatsapp-tap:${item.id}` })
 }

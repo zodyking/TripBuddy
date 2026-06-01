@@ -12,11 +12,8 @@ import {
   tokenizeSpeechWords,
   wordIndexFromCharIndex,
 } from '../stores/speechAlertModalStore.js'
-import { closeChatMessageSpeech } from '../stores/chatMessageSpeechStore.js'
-import { isChatMessageSpeechCategory } from './chatMessageSpeech.js'
-import { focusChatMessageSpeechByCategory } from '../stores/chatMessageSpeechStore.js'
-import { isTripAlertEnabled } from './tripVoiceAnnouncement.js'
-import { isWahaTtsEnabled } from './wahaApi.js'
+import { closeChatMessageSpeech, focusChatMessageSpeechByCategory } from '../stores/chatMessageSpeechStore.js'
+import { isWhatsAppTapToReadCategory } from './chatMessageSpeech.js'
 
 const PREFS_KEY = 'fedexAlertPrefs'
 
@@ -81,9 +78,8 @@ let currentSpeechCategory = ''
 
 const DEDUP_WINDOW_MS = 2000
 
-function shouldShowSpeechAlertModal() {
-  if (typeof window === 'undefined') return false
-  return isTripAlertEnabled() || isWahaTtsEnabled()
+function shouldShowSpeechSubtitles(category) {
+  return !isWhatsAppTapToReadCategory(category)
 }
 
 /**
@@ -187,9 +183,9 @@ function speakText(text, category = '') {
     u.onstart = () => {
       pushLiveLog({ type: 'info', message: `[Queue] TTS started: ${text}`, ts: Date.now() })
       const cat = category || currentSpeechCategory
-      if (isChatMessageSpeechCategory(cat)) {
+      if (isWhatsAppTapToReadCategory(cat)) {
         focusChatMessageSpeechByCategory(cat)
-      } else if (shouldShowSpeechAlertModal()) {
+      } else if (shouldShowSpeechSubtitles(cat)) {
         showSpeechAlertModal(spoken)
         setSpeechAlertWordIndex(0)
         const stepMs = Math.max(120, Math.max(3000, words.length * 380) / Math.max(1, words.length))
@@ -209,7 +205,7 @@ function speakText(text, category = '') {
         fallbackTimer = null
       }
       const cat = category || currentSpeechCategory
-      if (!isChatMessageSpeechCategory(cat)) hideSpeechAlertModal()
+      if (shouldShowSpeechSubtitles(cat)) hideSpeechAlertModal()
       currentUtterance = null
       currentSpeechCategory = ''
       isSpeaking = false
@@ -223,7 +219,7 @@ function speakText(text, category = '') {
         fallbackTimer = null
       }
       const cat = category || currentSpeechCategory
-      if (!isChatMessageSpeechCategory(cat)) hideSpeechAlertModal()
+      if (shouldShowSpeechSubtitles(cat)) hideSpeechAlertModal()
       currentUtterance = null
       currentSpeechCategory = ''
       isSpeaking = false

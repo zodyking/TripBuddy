@@ -1,13 +1,8 @@
 /**
- * iMessage / BlueBubbles chat message TTS + popup.
+ * iMessage / BlueBubbles chat message TTS + subtitles.
  */
 import { enqueueAnnouncement } from './alertAudioQueue.js'
 import { formatChatDisplayName } from './chatDisplayName.js'
-import { enableSpeechAlertsForBriefing } from './briefingSpeech.js'
-import {
-  pushChatMessageSpeech,
-  focusChatMessageSpeechByCategory,
-} from '../stores/chatMessageSpeechStore.js'
 import { contactTtsEnabled } from './blueBubblesContactRulesStore.js'
 
 /**
@@ -64,7 +59,6 @@ export function announceIMessageChatMessage(msg, opts = {}) {
   if (!contactTtsEnabled(opts.rule ?? null)) return
   const item = buildIMessageSpeechItem(msg)
   if (!item) return
-  pushChatMessageSpeech(item, { focusNewest: opts.focusNewest })
   enqueueAnnouncement(item.speech, { category: `imessage:${item.id}` })
 }
 
@@ -74,7 +68,5 @@ export function announceIMessageChatMessage(msg, opts = {}) {
 export function speakIMessageAloud(msg) {
   const item = buildIMessageSpeechItem(msg)
   if (!item) return
-  enableSpeechAlertsForBriefing()
-  pushChatMessageSpeech(item, { focusNewest: true })
-  enqueueAnnouncement(item.speech, { category: `chatmsg:${item.id}` })
+  enqueueAnnouncement(item.speech, { category: `imessage-tap:${item.id}` })
 }
