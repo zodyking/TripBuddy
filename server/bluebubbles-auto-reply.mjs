@@ -40,10 +40,20 @@ const lastReplyAt = new Map()
 
 /** @type {Set<string>} */
 const respondedMessageIds = new Set()
+/** @type {Set<string>} */
+const inFlightReplyKeys = new Set()
+/** @type {Map<string, number>} */
+const recentPromptFingerprints = new Map()
 const RESPONDED_CAP = 800
+const PROMPT_DEDUPE_MS = 90_000
 
 function ruleKey(accountKey, messageId) {
   return `${accountKey}:${messageId}`
+}
+
+function promptFingerprint(accountKey, chatGuid, text) {
+  const t = String(text ?? '').trim().toLowerCase()
+  return `${accountKey}:${String(chatGuid ?? '').trim()}:${t}`
 }
 
 function markResponded(accountKey, messageId) {
@@ -57,6 +67,38 @@ function markResponded(accountKey, messageId) {
 
 function hasResponded(accountKey, messageId) {
   return respondedMessageIds.has(ruleKey(accountKey, messageId))
+}
+
+/** Claim before OpenRouter so webhook + client poll cannot race duplicate sends. */
+function tryClaimReply(accountKey, messageId) {
+  const k = ruleKey(accountKey, messageId)
+  if (respondedMessageIds.has(k) || inFlightReplyKeys.has(k)) return false
+  inFlightReplyKeys.add(k)
+  return true
+}
+
+function releaseReplyClaim(accountKey, messageId) {
+  inFlightReplyKeys.delete(ruleKey(accountKey, messageId))
+}
+
+function recentlyHandledPrompt(accountKey, chatGuid, text) {
+  const k = promptFingerprint(accountKey, chatGuid, text)
+  const ts = recentPromptFingerprints.get(k)
+  if (!ts) return false
+  if (Date.now() - ts > PROMPT_DEDUPE_MS) {
+    recentPromptFingerprints.delete(k)
+    return false
+  }
+  return true
+}
+
+function noteHandledPrompt(accountKey, chatGuid, text) {
+  const k = promptFingerprint(accountKey, chatGuid, text)
+  recentPromptFingerprints.set(k, Date.now())
+  if (recentPromptFingerprints.size > RESPONDED_CAP) {
+    const first = recentPromptFingerprints.keys().next().value
+    if (first) recentPromptFingerprints.delete(first)
+  }
 }
 
 /**
@@ -189,70 +231,76 @@ export async function handleBlueBubblesAutoReply(accountKey, msg, opts = {}) {
   const ak = String(accountKey || '').trim()
   if (!ak || !msg?.messageId) return { replied: false }
 
-  if (hasResponded(ak, msg.messageId)) return { replied: false }
-
-  const prefs = await getBlueBubblesPrefsForAccount(ak)
-  const rules = normalizeContactRules(prefs.contactRules)
-  const rule = matchContactRule(rules, { handle: msg.handle, chatGuid: msg.chatGuid })
-  const isMedium = rule?.aiMediumEnabled === true
-  const isAutoReply = rule?.autoReplyEnabled === true
-  if (!rule || (!isMedium && !isAutoReply)) return { replied: false }
-
-  const text = String(msg.text ?? '').trim()
-  if (!text) return { replied: false }
-
-  const handleKey = String(msg.handle || msg.chatGuid || 'unknown')
-
-  if (!isMedium) {
-    if (!passesKeywordFilters(text, rule)) return { replied: false }
-    if (isInQuietHours(rule.quietHoursStart, rule.quietHoursEnd)) return { replied: false }
-    if (!canReplyNow(ak, rule, handleKey)) return { replied: false }
-  }
-
-  const apiKey = await getOpenrouterApiKeyForAccount(ak)
-  if (!apiKey) {
-    emitLog('imessage', `[iMessage] ${isMedium ? 'AI medium' : 'Auto-reply'} skipped — OpenRouter key not set (${handleKey})`)
-    return { replied: false, error: 'no_openrouter_key' }
-  }
-
-  const model = rule.replyModel || (await getOpenrouterModelForAccount(ak)) || undefined
-
-  /** @type {Array<{ role: string, content: string }>} */
-  let messages
-  let maxTokens = 280
-
-  if (isMedium) {
-    messages = [{ role: 'user', content: text }]
-    maxTokens = 2048
-  } else {
-    const sender = String(msg.senderLabel || msg.handle || 'Contact').trim()
-    const systemPrompt = rule.systemPrompt?.trim() || DEFAULT_SYSTEM_PROMPT
-    const tripBlock = rule.includeTripContext && opts.tripContext
-      ? `\n\nCurrent trip context:\n${opts.tripContext}`
-      : ''
-    messages = [
-      { role: 'system', content: systemPrompt + tripBlock },
-      {
-        role: 'user',
-        content: `Reply to this iMessage from ${sender}:\n\n${text}`,
-      },
-    ]
-  }
-
-  const result = await openRouterComplete(apiKey, messages, {
-    model,
-    maxTokens,
-  })
-  if (!result.ok || !result.text?.trim()) {
-    emitLog('imessage', `[iMessage] OpenRouter ${isMedium ? 'AI medium' : 'auto-reply'} failed: ${result.error || 'empty'}`)
-    return { replied: false, error: result.error }
-  }
-
-  let replyText = result.text.trim()
-  const maxLen = isMedium ? 4000 : 1200
-  if (replyText.length > maxLen) replyText = `${replyText.slice(0, maxLen - 1)}…`
+  if (hasResponded(ak, msg.messageId)) return { replied: false, skipped: 'already_replied' }
+  if (!tryClaimReply(ak, msg.messageId)) return { replied: false, skipped: 'in_flight' }
 
   try {
+    const prefs = await getBlueBubblesPrefsForAccount(ak)
+    const rules = normalizeContactRules(prefs.contactRules)
+    const rule = matchContactRule(rules, { handle: msg.handle, chatGuid: msg.chatGuid })
+    const isMedium = rule?.aiMediumEnabled === true
+    const isAutoReply = rule?.autoReplyEnabled === true
+    if (!rule || (!isMedium && !isAutoReply)) return { replied: false }
+
+    const text = String(msg.text ?? '').trim()
+    if (!text) return { replied: false }
+
+    if (isMedium && recentlyHandledPrompt(ak, msg.chatGuid, text)) {
+      emitLog('imessage', `[iMessage] AI medium skipped duplicate prompt (${msg.chatGuid})`)
+      return { replied: false, skipped: 'duplicate_prompt' }
+    }
+
+    const handleKey = String(msg.handle || msg.chatGuid || 'unknown')
+
+    if (!isMedium) {
+      if (!passesKeywordFilters(text, rule)) return { replied: false }
+      if (isInQuietHours(rule.quietHoursStart, rule.quietHoursEnd)) return { replied: false }
+      if (!canReplyNow(ak, rule, handleKey)) return { replied: false }
+    }
+
+    const apiKey = await getOpenrouterApiKeyForAccount(ak)
+    if (!apiKey) {
+      emitLog('imessage', `[iMessage] ${isMedium ? 'AI medium' : 'Auto-reply'} skipped — OpenRouter key not set (${handleKey})`)
+      return { replied: false, error: 'no_openrouter_key' }
+    }
+
+    const model = rule.replyModel || (await getOpenrouterModelForAccount(ak)) || undefined
+
+    /** @type {Array<{ role: string, content: string }>} */
+    let messages
+    let maxTokens = 280
+
+    if (isMedium) {
+      messages = [{ role: 'user', content: text }]
+      maxTokens = 2048
+    } else {
+      const sender = String(msg.senderLabel || msg.handle || 'Contact').trim()
+      const systemPrompt = rule.systemPrompt?.trim() || DEFAULT_SYSTEM_PROMPT
+      const tripBlock = rule.includeTripContext && opts.tripContext
+        ? `\n\nCurrent trip context:\n${opts.tripContext}`
+        : ''
+      messages = [
+        { role: 'system', content: systemPrompt + tripBlock },
+        {
+          role: 'user',
+          content: `Reply to this iMessage from ${sender}:\n\n${text}`,
+        },
+      ]
+    }
+
+    const result = await openRouterComplete(apiKey, messages, {
+      model,
+      maxTokens,
+    })
+    if (!result.ok || !result.text?.trim()) {
+      emitLog('imessage', `[iMessage] OpenRouter ${isMedium ? 'AI medium' : 'auto-reply'} failed: ${result.error || 'empty'}`)
+      return { replied: false, error: result.error }
+    }
+
+    let replyText = result.text.trim()
+    const maxLen = isMedium ? 4000 : 1200
+    if (replyText.length > maxLen) replyText = `${replyText.slice(0, maxLen - 1)}…`
+
     applyBlueBubblesPrefsForAccount(prefs)
     const send = await sendBlueBubblesText(msg.chatGuid, replyText)
     clearAccountBlueBubblesPrefs()
@@ -261,6 +309,7 @@ export async function handleBlueBubblesAutoReply(accountKey, msg, opts = {}) {
       return { replied: false, error: send.error }
     }
     markResponded(ak, msg.messageId)
+    if (isMedium) noteHandledPrompt(ak, msg.chatGuid, text)
     if (!isMedium) recordReply(ak, handleKey)
     emitLog(
       'imessage',
@@ -269,8 +318,10 @@ export async function handleBlueBubblesAutoReply(accountKey, msg, opts = {}) {
     return { replied: true, text: replyText, mode: isMedium ? 'ai-medium' : 'auto-reply' }
   } catch (e) {
     clearAccountBlueBubblesPrefs()
-    emitLog('imessage', `[iMessage] ${isMedium ? 'AI medium' : 'Auto-reply'} error: ${e instanceof Error ? e.message : String(e)}`)
+    emitLog('imessage', `[iMessage] Auto-reply error: ${e instanceof Error ? e.message : String(e)}`)
     return { replied: false, error: String(e) }
+  } finally {
+    releaseReplyClaim(ak, msg.messageId)
   }
 }
 

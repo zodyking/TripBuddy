@@ -10,6 +10,8 @@ import {
   getBlueBubblesRemoteUrl,
   getBlueBubblesPassword,
   setBlueBubblesServerBacked,
+  setBlueBubblesWebhookRegistered,
+  isBlueBubblesWebhookRegistered,
 } from './blueBubblesApi.js'
 import { putBlueBubblesPrefs, registerBlueBubblesWebhook } from '../api.js'
 import { sanitizeContactRules } from '../constants/blueBubblesContactRules.js'
@@ -54,6 +56,9 @@ export function applyBlueBubblesPrefsFromCredentials(meta) {
   if (Object.prototype.hasOwnProperty.call(m, 'blueBubblesContactRules') && Array.isArray(m.blueBubblesContactRules)) {
     setBlueBubblesContactRules(sanitizeContactRules(m.blueBubblesContactRules))
   }
+  const webhookToken =
+    typeof m.blueBubblesWebhookToken === 'string' ? m.blueBubblesWebhookToken.trim() : ''
+  setBlueBubblesWebhookRegistered(!!webhookToken)
 
   const serverUrl = typeof m.blueBubblesUrl === 'string' ? m.blueBubblesUrl.trim() : ''
   const pwField = typeof m.blueBubblesPassword === 'string' ? m.blueBubblesPassword.trim() : ''

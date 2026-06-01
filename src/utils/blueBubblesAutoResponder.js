@@ -1,7 +1,7 @@
 /**
  * Client-side iMessage automation (per-contact rules only).
  */
-import { isBlueBubblesConfigured } from './blueBubblesApi.js'
+import { isBlueBubblesConfigured, isBlueBubblesWebhookRegistered } from './blueBubblesApi.js'
 import {
   findContactRule,
   contactTtsEnabled,
@@ -85,6 +85,8 @@ export function handleIncomingIMessageAutomation(msg) {
   }
 
   if (msg.fromMe || !openRouterOn) return
+  // Webhook + server handler already replies; client poll/SSE only drives TTS here.
+  if (isBlueBubblesWebhookRegistered()) return
   if (autoReplyQueued.has(msg.id)) return
   autoReplyQueued.add(msg.id)
 

@@ -140,6 +140,8 @@ export function isBlueBubblesConnected() {
 
 /** True when signed-in account has BlueBubbles creds on the server (password not in localStorage). */
 let blueBubblesServerBacked = false
+/** True when TripBuddy webhook is registered — OpenRouter replies run on server only. */
+let blueBubblesWebhookRegistered = false
 
 export function setBlueBubblesServerBacked(enabled) {
   blueBubblesServerBacked = Boolean(enabled)
@@ -147,6 +149,14 @@ export function setBlueBubblesServerBacked(enabled) {
 
 export function isBlueBubblesServerBacked() {
   return blueBubblesServerBacked
+}
+
+export function setBlueBubblesWebhookRegistered(enabled) {
+  blueBubblesWebhookRegistered = Boolean(enabled)
+}
+
+export function isBlueBubblesWebhookRegistered() {
+  return blueBubblesWebhookRegistered
 }
 
 /** True when BlueBubbles can be used (local creds or server-stored creds for this account). */
