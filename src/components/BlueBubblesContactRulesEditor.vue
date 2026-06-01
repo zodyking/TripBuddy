@@ -201,6 +201,9 @@ function setIgnore(idx, val) {
           <label class="lbl">Model (optional — uses Settings default if empty)</label>
           <OpenRouterModelPicker
             :model-value="rule.replyModel"
+            input-id="bb-rule-ai-medium-model"
+            optional
+            preload-catalog
             @update:model-value="(v) => { rule.replyModel = v; onFieldChange(idx) }"
           />
         </template>
@@ -218,6 +221,9 @@ function setIgnore(idx, val) {
         <label class="lbl">Reply model (optional)</label>
         <OpenRouterModelPicker
           :model-value="rule.replyModel"
+          input-id="bb-rule-reply-model"
+          optional
+          preload-catalog
           @update:model-value="(v) => { rule.replyModel = v; onFieldChange(idx) }"
         />
 

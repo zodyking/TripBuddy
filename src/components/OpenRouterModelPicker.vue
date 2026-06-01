@@ -11,6 +11,12 @@ const props = defineProps({
   modelValue: { type: String, default: '' },
   disabled: { type: Boolean, default: false },
   inputId: { type: String, default: 'openrouter-model' },
+  /** When true, empty value is allowed (placeholder only — uses app default at runtime). */
+  optional: { type: Boolean, default: false },
+  /** Eager-load model catalog (e.g. inside modals). */
+  preloadCatalog: { type: Boolean, default: false },
+  /** Render dropdown in a body teleport so overflow parents (modals) do not clip it. */
+  teleportList: { type: Boolean, default: true },
 })
 
 const emit = defineEmits(['update:modelValue'])
@@ -27,12 +33,16 @@ const filterQuery = ref('')
 const catalog = ref([])
 const activeIndex = ref(-1)
 const catalogLoaded = ref(false)
+/** @type {import('vue').Ref<{ top: number, left: number, width: number }>} */
+const listStyle = ref({ top: 0, left: 0, width: 0 })
 let blurCloseTimer = null
 let selectingFromList = false
 
-const committedModel = computed(
-  () => sanitizeOpenrouterModel(props.modelValue || OPENROUTER_DEFAULT_MODEL),
-)
+const committedModel = computed(() => {
+  const raw = String(props.modelValue ?? '').trim()
+  if (props.optional && !raw) return ''
+  return sanitizeOpenrouterModel(raw || OPENROUTER_DEFAULT_MODEL)
+})
 
 const filtered = computed(() => {
   const q = filterQuery.value.trim().toLowerCase()
@@ -74,7 +84,26 @@ const listSummary = computed(() => {
 })
 
 function syncFilterFromCommitted() {
+  if (props.optional && !String(props.modelValue ?? '').trim()) {
+    filterQuery.value = ''
+    return
+  }
   filterQuery.value = committedModel.value
+}
+
+function updateListPosition() {
+  const el = inputEl.value
+  if (!el) return
+  const rect = el.getBoundingClientRect()
+  listStyle.value = {
+    top: rect.bottom + 4,
+    left: rect.left,
+    width: rect.width,
+  }
+}
+
+function onScrollOrResize() {
+  if (listOpen.value) updateListPosition()
 }
 
 async function loadCatalog() {
@@ -100,6 +129,7 @@ function openList() {
   if (props.disabled) return
   listOpen.value = true
   activeIndex.value = -1
+  updateListPosition()
   if (!catalogLoaded.value && !loading.value) {
     void loadCatalog()
   }
@@ -172,7 +202,10 @@ function onBlur() {
     blurCloseTimer = null
     if (selectingFromList) return
     const q = filterQuery.value.trim()
-    if (isValidOpenrouterModelId(q)) {
+    if (!q && props.optional) {
+      emit('update:modelValue', '')
+      filterQuery.value = ''
+    } else if (isValidOpenrouterModelId(q)) {
       commitModel(q)
     } else {
       syncFilterFromCommitted()
@@ -221,11 +254,12 @@ function scrollActiveIntoView() {
 }
 
 function onDocPointer(e) {
+  if (!(e.target instanceof Node)) return
   const root = rootEl.value
-  if (!root || !(e.target instanceof Node)) return
-  if (!root.contains(e.target)) {
-    if (!inputFocused.value) closeList()
-  }
+  if (root?.contains(e.target)) return
+  const listEl = document.getElementById(listboxId.value)
+  if (listEl?.contains(e.target)) return
+  if (!inputFocused.value) closeList()
 }
 
 watch(
@@ -245,11 +279,18 @@ watch(filterQuery, () => {
 
 onMounted(() => {
   document.addEventListener('pointerdown', onDocPointer, true)
+  window.addEventListener('scroll', onScrollOrResize, true)
+  window.addEventListener('resize', onScrollOrResize)
   syncFilterFromCommitted()
+  if (props.preloadCatalog) {
+    void loadCatalog()
+  }
 })
 
 onBeforeUnmount(() => {
   document.removeEventListener('pointerdown', onDocPointer, true)
+  window.removeEventListener('scroll', onScrollOrResize, true)
+  window.removeEventListener('resize', onScrollOrResize)
   if (blurCloseTimer) clearTimeout(blurCloseTimer)
 })
 </script>
@@ -307,8 +348,52 @@ onBeforeUnmount(() => {
       </button>
     </div>
 
+    <Teleport v-if="teleportList" to="body">
+      <ul
+        v-if="listOpen"
+        :id="listboxId"
+        class="or-model-list or-model-list--teleport"
+        :style="{ top: `${listStyle.top}px`, left: `${listStyle.left}px`, width: `${listStyle.width}px` }"
+        role="listbox"
+        aria-label="OpenRouter models"
+      >
+        <li v-if="listSummary" class="or-model-meta" role="presentation">{{ listSummary }}</li>
+        <li v-if="loading" class="or-model-item or-model-item--muted" role="presentation">
+          Loading models…
+        </li>
+        <li v-else-if="loadError" class="or-model-item or-model-item--err" role="presentation">
+          {{ loadError }}
+        </li>
+        <template v-else>
+          <li
+            v-for="(m, i) in filtered"
+            :key="m.id"
+            :id="`${inputId}-opt-${i}`"
+            class="or-model-item tap"
+            role="option"
+            :aria-selected="committedModel === m.id"
+            :class="{
+              'is-active': i === activeIndex,
+              'is-selected': committedModel === m.id,
+            }"
+            @mousedown.prevent="selectModel(m)"
+          >
+            <span class="or-model-name">{{ m.name }}</span>
+            <span class="or-model-id">{{ m.id }}</span>
+          </li>
+          <li
+            v-if="!filtered.length"
+            class="or-model-item or-model-item--muted"
+            role="presentation"
+          >
+            No models match. Type a provider/model id (e.g. openai/gpt-4o-mini).
+          </li>
+        </template>
+      </ul>
+    </Teleport>
+
     <ul
-      v-if="listOpen"
+      v-else-if="listOpen"
       :id="listboxId"
       class="or-model-list"
       role="listbox"
@@ -458,6 +543,14 @@ onBeforeUnmount(() => {
   border: 1px solid var(--color-border, rgba(255, 255, 255, 0.08));
   background: var(--color-bg-elevated, #0f0f14);
   box-shadow: var(--shadow-lg, 0 8px 24px rgba(0, 0, 0, 0.35));
+}
+
+.or-model-list--teleport {
+  position: fixed;
+  z-index: 1400;
+  right: auto;
+  top: auto;
+  max-height: min(20rem, 55vh);
 }
 
 .or-model-meta {

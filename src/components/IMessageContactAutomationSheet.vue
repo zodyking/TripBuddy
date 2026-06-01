@@ -160,7 +160,12 @@ function onBackdrop(e) {
 
           <template v-if="rule.aiMediumEnabled">
             <label class="lbl">Model (optional — uses Settings default if empty)</label>
-            <OpenRouterModelPicker v-model="rule.replyModel" />
+            <OpenRouterModelPicker
+              v-model="rule.replyModel"
+              input-id="im-auto-ai-medium-model"
+              optional
+              preload-catalog
+            />
           </template>
 
           <template v-else-if="rule.autoReplyEnabled">
@@ -181,7 +186,12 @@ function onBackdrop(e) {
             />
 
             <label class="lbl">Reply model (optional)</label>
-            <OpenRouterModelPicker v-model="rule.replyModel" />
+            <OpenRouterModelPicker
+              v-model="rule.replyModel"
+              input-id="im-auto-reply-model"
+              optional
+              preload-catalog
+            />
 
             <label class="lbl">Keyword triggers (comma-separated, empty = all messages)</label>
             <input v-model="keywordText" class="inp tap" type="text" placeholder="eta, where, help" />
@@ -355,6 +365,11 @@ function onBackdrop(e) {
   color-scheme: dark;
   -webkit-appearance: none;
   appearance: none;
+}
+.im-auto-body :deep(.or-model-picker) {
+  width: 100%;
+  flex: 1 1 auto;
+  margin-bottom: 0.35rem;
 }
 .im-auto-body .inp:focus {
   outline: none;
