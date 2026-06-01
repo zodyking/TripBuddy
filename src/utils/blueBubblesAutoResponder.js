@@ -38,15 +38,6 @@ export function handleIncomingIMessageAutomation(msg) {
     findContactRule({ chatGuid: msg.chatGuid, fromMe: msg.fromMe })
     ?? findContactRule({ handle: msg.senderHandle, chatGuid: msg.chatGuid, fromMe: msg.fromMe })
 
-  if (msg.fromMe) {
-    pushLiveLog({
-      type: 'info',
-      message: '[iMessage] Skipped speech (last message was sent by you)',
-      ts: Date.now(),
-    })
-    return
-  }
-
   if (!rule) {
     pushLiveLog({
       type: 'info',
@@ -81,7 +72,7 @@ export function handleIncomingIMessageAutomation(msg) {
   announceIMessageChatMessage(msg, { rule })
   markAnnounced(msg.id)
 
-  if (!contactAutoReplyEnabled(rule)) return
+  if (msg.fromMe || !contactAutoReplyEnabled(rule)) return
   if (autoReplyQueued.has(msg.id)) return
   autoReplyQueued.add(msg.id)
 
