@@ -8,6 +8,9 @@ import { pushLiveLog } from '../stores/liveLogStore.js'
 import {
   showSpeechAlertModal,
   hideSpeechAlertModal,
+  setSpeechAlertWordIndex,
+  tokenizeSpeechWords,
+  wordIndexFromCharIndex,
 } from '../stores/speechAlertModalStore.js'
 import { closeChatMessageSpeech } from '../stores/chatMessageSpeechStore.js'
 import { isChatMessageSpeechCategory } from './chatMessageSpeech.js'
@@ -161,12 +164,25 @@ function speakText(text, category = '') {
     return
   }
 
+  const spoken = String(text || '').trim()
+  const words = tokenizeSpeechWords(spoken)
+  let boundarySeen = false
+  /** @type {ReturnType<typeof setInterval> | null} */
+  let fallbackTimer = null
+
   try {
-    const u = new SpeechSynthesisUtterance(text)
+    const u = new SpeechSynthesisUtterance(spoken)
     u.rate = 1.05
     u.pitch = 1
     u.volume = 1
     currentUtterance = u
+
+    u.onboundary = (e) => {
+      if (e.name !== 'word' || e.charIndex == null) return
+      boundarySeen = true
+      const idx = wordIndexFromCharIndex(spoken, e.charIndex)
+      if (idx >= 0) setSpeechAlertWordIndex(idx)
+    }
 
     u.onstart = () => {
       pushLiveLog({ type: 'info', message: `[Queue] TTS started: ${text}`, ts: Date.now() })
@@ -174,12 +190,24 @@ function speakText(text, category = '') {
       if (isChatMessageSpeechCategory(cat)) {
         focusChatMessageSpeechByCategory(cat)
       } else if (shouldShowSpeechAlertModal()) {
-        showSpeechAlertModal(text)
+        showSpeechAlertModal(spoken)
+        setSpeechAlertWordIndex(0)
+        const stepMs = Math.max(120, Math.max(3000, words.length * 380) / Math.max(1, words.length))
+        let i = 0
+        fallbackTimer = setInterval(() => {
+          if (boundarySeen) return
+          i += 1
+          if (i < words.length) setSpeechAlertWordIndex(i)
+        }, stepMs)
       }
     }
 
     u.onend = () => {
       pushLiveLog({ type: 'info', message: `[Queue] TTS ended: ${text}`, ts: Date.now() })
+      if (fallbackTimer) {
+        clearInterval(fallbackTimer)
+        fallbackTimer = null
+      }
       const cat = category || currentSpeechCategory
       if (!isChatMessageSpeechCategory(cat)) hideSpeechAlertModal()
       currentUtterance = null
@@ -190,6 +218,10 @@ function speakText(text, category = '') {
 
     u.onerror = (e) => {
       pushLiveLog({ type: 'error', message: `[Queue] TTS error: ${text} - ${e.error || 'unknown'}`, ts: Date.now() })
+      if (fallbackTimer) {
+        clearInterval(fallbackTimer)
+        fallbackTimer = null
+      }
       const cat = category || currentSpeechCategory
       if (!isChatMessageSpeechCategory(cat)) hideSpeechAlertModal()
       currentUtterance = null
@@ -201,6 +233,10 @@ function speakText(text, category = '') {
     window.speechSynthesis.speak(u)
     pushLiveLog({ type: 'info', message: `[Queue] TTS triggered: ${text}`, ts: Date.now() })
   } catch (e) {
+    if (fallbackTimer) {
+      clearInterval(fallbackTimer)
+      fallbackTimer = null
+    }
     pushLiveLog({ type: 'error', message: `[Queue] TTS exception: ${e.message || e}`, ts: Date.now() })
     currentUtterance = null
     isSpeaking = false

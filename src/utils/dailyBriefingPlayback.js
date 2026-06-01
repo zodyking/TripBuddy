@@ -5,6 +5,8 @@ import { pushLiveLog } from '../stores/liveLogStore.js'
 import {
   hideSpeechAlertModal,
   showSpeechAlertModal,
+  setSpeechAlertWordIndex,
+  tokenizeSpeechWords,
 } from '../stores/speechAlertModalStore.js'
 
 const BRIEFING_PREFIX = 'Daily briefing.'
@@ -73,6 +75,7 @@ export function speakDailyBriefing(bodyText, callbacks = {}) {
   const words = tokenizeBriefingWords(body)
   const utterText = `${BRIEFING_PREFIX} ${body}`
   const prefixLen = BRIEFING_PREFIX.length + 1
+  const prefixWordCount = tokenizeSpeechWords(BRIEFING_PREFIX).length
 
   let boundarySeen = false
   /** @type {ReturnType<typeof setInterval> | null} */
@@ -113,14 +116,22 @@ export function speakDailyBriefing(bodyText, callbacks = {}) {
       if (e.name !== 'word' || e.charIndex == null) return
       boundarySeen = true
       const bodyChar = e.charIndex - prefixLen
-      if (bodyChar < 0) return
+      if (bodyChar < 0) {
+        const prefixIdx = wordIndexFromCharIndex(BRIEFING_PREFIX, e.charIndex)
+        if (prefixIdx >= 0) setSpeechAlertWordIndex(prefixIdx)
+        return
+      }
       const idx = wordIndexFromCharIndex(body, bodyChar)
-      if (idx >= 0) callbacks.onWordIndex?.(idx)
+      if (idx >= 0) {
+        callbacks.onWordIndex?.(idx)
+        setSpeechAlertWordIndex(idx + prefixWordCount)
+      }
     }
 
     u.onstart = () => {
       pushLiveLog({ type: 'info', message: '[Briefing] TTS started', ts: Date.now() })
       showSpeechAlertModal(utterText)
+      setSpeechAlertWordIndex(0)
       callbacks.onStart?.()
       callbacks.onWordIndex?.(0)
 
@@ -130,7 +141,10 @@ export function speakDailyBriefing(bodyText, callbacks = {}) {
       fallbackTimer = setInterval(() => {
         if (boundarySeen) return
         i += 1
-        if (i < words.length) callbacks.onWordIndex?.(i)
+        if (i < words.length) {
+          callbacks.onWordIndex?.(i)
+          setSpeechAlertWordIndex(i + prefixWordCount)
+        }
       }, stepMs)
     }
 
