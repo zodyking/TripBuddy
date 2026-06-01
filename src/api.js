@@ -1451,6 +1451,45 @@ export async function postIMessageAutoReply(body) {
   return handleJson(r)
 }
 
+/** Send an iMessage via server-stored BlueBubbles credentials. */
+export async function postIMessageSend(body) {
+  let r
+  try {
+    r = await apiFetch('/api/imessage/send', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body ?? {}),
+    })
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e)
+    return {
+      ok: false,
+      status: 0,
+      error:
+        msg === 'Load failed' || msg === 'Failed to fetch'
+          ? 'Could not reach the server. Check your connection or try again after deploy finishes.'
+          : msg,
+    }
+  }
+  const text = await r.text()
+  /** @type {{ ok?: boolean, error?: string, data?: unknown, status?: number }} */
+  let data = {}
+  try {
+    data = text ? JSON.parse(text) : {}
+  } catch {
+    data = {}
+  }
+  if (!r.ok) {
+    return {
+      ok: false,
+      status: r.status,
+      error: typeof data.error === 'string' ? data.error : r.statusText || `HTTP ${r.status}`,
+      body: null,
+    }
+  }
+  return { ok: data.ok !== false, status: r.status, body: data.data ?? data, error: '' }
+}
+
 /** Recent iMessage inbox (uses server-stored BlueBubbles creds for this account). */
 export async function fetchIMessageRecentMessages(opts = {}) {
   const limit = Math.min(100, Math.max(1, Number(opts.limit) || 40))

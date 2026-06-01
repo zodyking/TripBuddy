@@ -124,7 +124,7 @@ export function useBlueBubblesMessenger(opts = {}) {
     try {
       const cacheRes = await getIMessageThreadCache(chatGuid)
       if (gen !== syncGen) return
-      if (cached?.messages?.length) {
+      if (cacheRes?.messages?.length) {
         const cachedNorm = cacheRes.messages
           .map((m) => normalizeBlueBubblesMessage(m, { chatGuid, ...normalizeOpts() }))
           .filter(Boolean)
@@ -265,16 +265,34 @@ export function useBlueBubblesMessenger(opts = {}) {
     if (!trimmed || !activeChatGuid.value) return false
     sending.value = true
     error.value = ''
+    const chatGuid = activeChatGuid.value
+    const pendingId = `pending-${Date.now()}`
+    const optimistic = normalizeBlueBubblesMessage(
+      {
+        guid: pendingId,
+        text: trimmed,
+        isFromMe: true,
+        dateCreated: Date.now(),
+      },
+      { chatGuid, ...normalizeOpts() },
+    )
+    if (optimistic) {
+      messages.value = [...messages.value, optimistic]
+      updateChatPreview(chatGuid, optimistic)
+      await scrollToBottom()
+    }
     try {
-      const r = await sendBlueBubblesMessage(activeChatGuid.value, trimmed)
+      const r = await sendBlueBubblesMessage(chatGuid, trimmed)
       if (!r.ok) {
-        error.value = `Send failed (${r.status})`
+        messages.value = messages.value.filter((m) => m.id !== pendingId)
+        error.value = r.error || `Send failed (${r.status || 'unknown'})`
         return false
       }
       await pollActiveThread()
       await scrollToBottom()
       return true
     } catch (e) {
+      messages.value = messages.value.filter((m) => m.id !== pendingId)
       error.value = e instanceof Error ? e.message : String(e)
       return false
     } finally {

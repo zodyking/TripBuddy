@@ -167,6 +167,7 @@ import {
   registerBlueBubblesWebhook,
   listBlueBubblesWebhooks,
   getBlueBubblesRecentMessages,
+  sendBlueBubblesText,
 } from './bluebubbles-client.mjs'
 import {
   parseBlueBubblesWebhookMessage,
@@ -572,7 +573,7 @@ function getBlueBubblesInternalUrl() {
 
 async function blueBubblesProxyHandler(req, reply) {
   const subPath = req.url.replace(/^\/api\/bluebubbles/, '') || '/'
-  const ak = String(req.credentialAccountKey || '').trim()
+  const ak = String(req.credentialAccountKey || getDataAccountKey() || '').trim()
   let accountPrefs = null
   if (ak) {
     try {
@@ -813,6 +814,44 @@ app.get('/api/imessage/recent', async (req, reply) => {
     return { ok: true, messages }
   } finally {
     clearAccountBlueBubblesPrefs()
+  }
+})
+
+app.post('/api/imessage/send', async (req, reply) => {
+  reply.header('Cache-Control', 'no-store')
+  const ak = String(req.credentialAccountKey || getDataAccountKey() || '').trim()
+  const body = req.body && typeof req.body === 'object' ? req.body : {}
+  const chatGuid = String(body.chatGuid ?? '').trim()
+  const message = String(body.message ?? body.text ?? '').trim()
+  const tempGuid = String(body.tempGuid ?? '').trim()
+  if (!chatGuid || !message) {
+    return reply.code(400).send({ ok: false, error: 'chatGuid and message required' })
+  }
+
+  let accountPrefs = null
+  if (ak) {
+    try {
+      accountPrefs = await getBlueBubblesPrefsForAccount(ak)
+    } catch { /* ignore */ }
+  }
+  const { serverUrl, password } = resolveBlueBubblesCredentials(req, accountPrefs)
+  if (!serverUrl || !password) {
+    return reply.code(502).send({ ok: false, error: 'BlueBubbles server URL and password required.' })
+  }
+
+  applyBbClientPrefs({ serverUrl, password })
+  try {
+    const r = await sendBlueBubblesText(chatGuid, message, tempGuid || undefined)
+    if (!r.ok) {
+      return reply.code(r.status || 502).send({
+        ok: false,
+        error: r.error || 'Failed to send iMessage',
+        status: r.status,
+      })
+    }
+    return { ok: true, data: r.body }
+  } finally {
+    clearBbClientPrefs()
   }
 })
 

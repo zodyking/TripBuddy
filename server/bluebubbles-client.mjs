@@ -198,10 +198,36 @@ export async function sendBlueBubblesText(chatGuid, message, tempGuid) {
   }
   const crypto = await import('node:crypto')
   const temp = tempGuid || `temp-${crypto.randomUUID()}`
-  return blueBubblesFetch('/api/v1/message/text', {
+  const payload = { chatGuid: guid, tempGuid: temp, message: text }
+
+  const first = await blueBubblesFetch('/api/v1/message/text', {
     method: 'POST',
-    body: { chatGuid: guid, tempGuid: temp, message: text },
+    body: payload,
   })
+  if (first.ok) return first
+
+  const errText = String(first.error || first.raw?.message || first.raw?.error?.message || '').toLowerCase()
+  const shouldRetryPrivateApi =
+    first.status === 400 ||
+    first.status === 403 ||
+    first.status === 500 ||
+    errText.includes('private api') ||
+    errText.includes('applescript') ||
+    errText.includes('tempguid')
+
+  if (shouldRetryPrivateApi) {
+    const retry = await blueBubblesFetch('/api/v1/message/text', {
+      method: 'POST',
+      body: { ...payload, method: 'private-api' },
+    })
+    if (retry.ok) return retry
+    return {
+      ...retry,
+      error: retry.error || first.error || `Send failed (${retry.status || first.status})`,
+    }
+  }
+
+  return first
 }
 
 /** @param {{ url: string, events?: string[] }} body */
