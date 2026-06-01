@@ -9,7 +9,7 @@ import {
  * Rows may include `href` for address (Google Maps Street View) and phone (`tel:`).
  * @param {unknown} body
  * @returns {{
- *   rows: { label: string, value: string, href?: string }[],
+ *   rows: { label: string, value: string, href?: string, copyValue?: string }[],
  *   rawJson: string,
  * }}
  */
@@ -29,7 +29,7 @@ export function formatLinehaulLocationForDisplay(body) {
     return { rows: [], rawJson }
   }
 
-  /** @type {{ label: string, value: string, href?: string }[]} */
+  /** @type {{ label: string, value: string, href?: string, copyValue?: string }[]} */
   const rows = []
   const seen = new Set()
 
@@ -37,8 +37,9 @@ export function formatLinehaulLocationForDisplay(body) {
    * @param {string} label
    * @param {unknown} val
    * @param {string} [href]
+   * @param {string} [copyValue]
    */
-  function add(label, val, href) {
+  function add(label, val, href, copyValue) {
     if (val == null || val === '') return
     const s =
       typeof val === 'object'
@@ -48,9 +49,11 @@ export function formatLinehaulLocationForDisplay(body) {
     const key = `${label}\0${s}\0${href ?? ''}`
     if (seen.has(key)) return
     seen.add(key)
-    /** @type {{ label: string, value: string, href?: string }} */
+    /** @type {{ label: string, value: string, href?: string, copyValue?: string }} */
     const row = { label, value: s }
     if (href) row.href = href
+    const copy = String(copyValue ?? s).trim()
+    if (copy) row.copyValue = copy
     rows.push(row)
   }
 

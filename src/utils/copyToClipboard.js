@@ -28,6 +28,17 @@ function copyViaHiddenTextarea(text) {
 }
 
 /**
+ * Synchronous clipboard copy — use inside click/tap handlers (mobile Safari).
+ * @param {string} text
+ * @returns {boolean}
+ */
+export function copyTextToClipboardSync(text) {
+  const s = String(text ?? '')
+  if (!s) return false
+  return copyViaHiddenTextarea(s)
+}
+
+/**
  * @param {string} text
  * @returns {Promise<boolean>}
  */

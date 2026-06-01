@@ -90,7 +90,7 @@ import {
 import { writeTrailerGpsSession, patchTrailerGpsSessionMap } from '../utils/trailerGpsMapSession.js'
 import { useWhatsAppGroup } from '../composables/useWhatsAppGroup.js'
 import { setTripPresenceSnapshot } from '../stores/tripPresenceStore.js'
-import { copyTextToClipboard } from '../utils/copyToClipboard.js'
+import { copyTextToClipboard, copyTextToClipboardSync } from '../utils/copyToClipboard.js'
 import { vehicleIdForUserMapMarker } from '../utils/mapVehicleLabel.js'
 import {
   maybeAnnounceNewTrip,
@@ -136,6 +136,7 @@ const { startPolling: startWhatsAppPolling } = useWhatsAppGroup()
 const PORTAL_Z_MODAL = 2_147_483_001
 const PORTAL_Z_LOCATION_MODAL = 2_147_483_002
 const PORTAL_Z_TRIP_LEG_MAP = 2_147_483_003
+const PORTAL_Z_COPY_TOAST = 2_147_483_010
 
 const loadError = ref(null)
 const runErrorBanner = ref(null)
@@ -333,7 +334,7 @@ function isInteractiveEventTarget(target) {
   const el = /** @type {Node} */ (target)
   if (el.nodeType !== 1) return false
   return !!(/** @type {HTMLElement} */ (el).closest(
-    'button, a, input, textarea, select, [role="button"], details, summary, label, .copyable-dd, .copyable-inline, .copyable-block',
+    'button, a, input, textarea, select, [role="button"], details, summary, label, .copyable-dd, .copyable-inline, .copyable-block, .dest-loc-copy-chip, .dest-loc-val-copy',
   ))
 }
 
@@ -554,6 +555,8 @@ const equipmentCopyText = computed(() => {
 })
 
 const copyToast = ref('')
+const locationCopyChipKey = ref('')
+let locationCopyChipTimer = 0
 
 const dollyReg = ref(/** @type {null | { lastPrimaryNbr: string | null, items: Record<string, { rating?: string, nbr?: string }> }} */ (null))
 const dollyAddOpen = ref(false)
@@ -700,14 +703,48 @@ async function onTrailerNbrSubmit(order) {
   finally { trailerNbrPutBusy.value = false }
 }
 
-async function copyTripDetailValue(value, label) {
-  const v = String(value ?? '').trim()
-  if (!v || v === '—') return
-  const ok = await copyTextToClipboard(v)
-  copyToast.value = ok ? `Copied ${label}` : 'Could not copy'
+function showCopyToast(message, ms = 2200) {
+  copyToast.value = message
   window.setTimeout(() => {
     copyToast.value = ''
-  }, 2200)
+  }, ms)
+}
+
+function copyTripDetailValue(value, label) {
+  const v = String(value ?? '').trim()
+  if (!v || v === '—') return
+  if (copyTextToClipboardSync(v)) {
+    showCopyToast(`Copied ${label}`)
+    return
+  }
+  void copyTextToClipboard(v).then((ok) => {
+    showCopyToast(ok ? `Copied ${label}` : 'Could not copy')
+  })
+}
+
+/**
+ * @param {{ label: string, value: string, copyValue?: string }} row
+ * @param {'dest' | 'origin'} scope
+ */
+function copyLocationRow(row, scope) {
+  const v = String(row.copyValue ?? row.value ?? '').trim()
+  if (!v || v === '—') return
+  const chipKey = `${scope}:${row.label}`
+  const finish = (ok) => {
+    showCopyToast(ok ? `Copied ${row.label}` : 'Could not copy')
+    if (ok) {
+      locationCopyChipKey.value = chipKey
+      window.clearTimeout(locationCopyChipTimer)
+      locationCopyChipTimer = window.setTimeout(() => {
+        locationCopyChipKey.value = ''
+      }, 1800)
+    }
+  }
+  if (copyTextToClipboardSync(v)) {
+    finish(true)
+    return
+  }
+  void copyTextToClipboard(v).then(finish)
 }
 
 function displayOrDash(value) {
@@ -2258,7 +2295,17 @@ onUnmounted(() => {
 
 <template>
   <div class="main" :class="{ 'main--automation-preview': showAutomationPreviewFocus }">
-    <p v-if="copyToast" class="copy-toast" role="status" aria-live="polite">{{ copyToast }}</p>
+    <Teleport to="body">
+      <p
+        v-if="copyToast"
+        class="copy-toast copy-toast--portal"
+        role="status"
+        aria-live="polite"
+        :style="{ zIndex: PORTAL_Z_COPY_TOAST }"
+      >
+        {{ copyToast }}
+      </p>
+    </Teleport>
     <TripLegMapModal
       :open="tripLegMapOpen"
       :z-index="PORTAL_Z_TRIP_LEG_MAP"
@@ -2499,16 +2546,17 @@ onUnmounted(() => {
                     <button
                       type="button"
                       class="dest-loc-copy-chip tap"
-                      @click.stop="copyTripDetailValue(row.value, row.label)"
+                      :class="{ 'is-copied': locationCopyChipKey === `dest:${row.label}` }"
+                      @click.stop="copyLocationRow(row, 'dest')"
                     >
-                      Copy
+                      {{ locationCopyChipKey === `dest:${row.label}` ? 'Copied' : 'Copy' }}
                     </button>
                   </template>
                   <button
                     v-else
                     type="button"
                     class="dest-loc-val-copy tap"
-                    @click="copyTripDetailValue(row.value, row.label)"
+                    @click="copyLocationRow(row, 'dest')"
                   >
                     {{ row.value }}
                   </button>
@@ -2577,16 +2625,17 @@ onUnmounted(() => {
                     <button
                       type="button"
                       class="dest-loc-copy-chip tap"
-                      @click.stop="copyTripDetailValue(row.value, row.label)"
+                      :class="{ 'is-copied': locationCopyChipKey === `origin:${row.label}` }"
+                      @click.stop="copyLocationRow(row, 'origin')"
                     >
-                      Copy
+                      {{ locationCopyChipKey === `origin:${row.label}` ? 'Copied' : 'Copy' }}
                     </button>
                   </template>
                   <button
                     v-else
                     type="button"
                     class="dest-loc-val-copy tap"
-                    @click="copyTripDetailValue(row.value, row.label)"
+                    @click="copyLocationRow(row, 'origin')"
                   >
                     {{ row.value }}
                   </button>
@@ -3416,6 +3465,9 @@ onUnmounted(() => {
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.45);
   pointer-events: none;
 }
+.copy-toast--portal {
+  z-index: 2147483010;
+}
 
 .copyable-dd {
   display: block;
@@ -3658,6 +3710,11 @@ button.trailer-nbr.copyable-inline {
 }
 .dest-loc-copy-chip:hover {
   background: rgba(123, 77, 181, 0.22);
+}
+.dest-loc-copy-chip.is-copied {
+  background: rgba(34, 197, 94, 0.18);
+  border-color: rgba(34, 197, 94, 0.45);
+  color: #86efac;
 }
 .dest-loc-link {
   color: #90caf9;
