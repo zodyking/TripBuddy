@@ -518,6 +518,8 @@ const workWeekEndDay = ref(6)
 /** History calendar "shift day" — overnight (e.g. 19:00–07:00) uses the date the shift started. */
 const shiftStartTime = ref('00:00')
 const shiftEndTime = ref('23:59')
+/** History: smart in-card approval for 1.5× mileage on US federal holidays. */
+const federalHolidayMileage15xEnabled = ref(true)
 const credLinehaulToken = ref('')
 const credPollMinutes = ref(0)
 const weekDayOptions = [
@@ -1122,6 +1124,8 @@ async function loadCredentials() {
           ? mToStr(credMeta.value.shiftEndMins)
           : '23:59'
     }
+    federalHolidayMileage15xEnabled.value =
+      credMeta.value.federalHolidayMileage15xEnabled !== false
     credLinehaulToken.value =
       typeof credMeta.value.fedexLinehaulBearer === 'string'
         ? credMeta.value.fedexLinehaulBearer
@@ -1203,6 +1207,7 @@ async function saveCredentials() {
       workWeekEndDay: workWeekEndDay.value,
       shiftStartMins: ssm,
       shiftEndMins: sem,
+      federalHolidayMileage15xEnabled: federalHolidayMileage15xEnabled.value,
       linehaulPollMinutes: Math.max(
         0,
         Math.min(LINEHAUL_POLL_MAX, Math.floor(Number(credPollMinutes.value) || 0)),
@@ -1900,6 +1905,30 @@ onUnmounted(() => {
         <p class="cred-hint">
           The end day is the <strong>last calendar day</strong> in each work block (e.g. Thu–Mon = Thu through Mon, five days).
         </p>
+        <div class="history-federal-holiday-setting">
+          <div class="history-federal-holiday-setting__head">
+            <label class="lbl history-federal-holiday-setting__title" for="federal-holiday-mileage-switch">
+              Federal holiday 1.5× mileage
+            </label>
+            <button
+              id="federal-holiday-mileage-switch"
+              type="button"
+              class="history-federal-holiday-setting__switch tap"
+              role="switch"
+              :aria-checked="federalHolidayMileage15xEnabled"
+              title="Show smart approval on History trips assigned, dispatched, or arrived on a US federal holiday"
+              @click="federalHolidayMileage15xEnabled = !federalHolidayMileage15xEnabled"
+            >
+              <span class="history-federal-holiday-setting__thumb" aria-hidden="true" />
+            </button>
+          </div>
+          <p class="cred-hint">
+            When enabled, History shows an in-card option to manually approve <strong>1.5× billable
+            mileage</strong> on federal holidays. Approved trips include
+            <strong>federal holiday 1.5x multiplier</strong> in week PDF notes. Save credentials to
+            apply.
+          </p>
+        </div>
         <label class="lbl">Phone number</label>
         <input
           :value="phoneDisplay"
@@ -3007,6 +3036,57 @@ onUnmounted(() => {
 </template>
 
 <style scoped>
+.history-federal-holiday-setting {
+  margin: var(--space-4, 1rem) 0;
+  padding: var(--space-4, 1rem);
+  border-radius: var(--radius-lg, 12px);
+  border: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.12));
+  background: var(--surface-raised, rgba(255, 255, 255, 0.04));
+}
+
+.history-federal-holiday-setting__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3, 0.75rem);
+  margin-bottom: var(--space-2, 0.5rem);
+}
+
+.history-federal-holiday-setting__title {
+  margin: 0;
+}
+
+.history-federal-holiday-setting__switch {
+  position: relative;
+  width: 2.75rem;
+  height: 1.5rem;
+  flex-shrink: 0;
+  padding: 0;
+  border: none;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.18);
+  cursor: pointer;
+}
+
+.history-federal-holiday-setting__switch[aria-checked='true'] {
+  background: var(--accent, #6ea8fe);
+}
+
+.history-federal-holiday-setting__thumb {
+  position: absolute;
+  top: 0.15rem;
+  left: 0.15rem;
+  width: 1.2rem;
+  height: 1.2rem;
+  border-radius: 50%;
+  background: #fff;
+  transition: transform 0.15s ease;
+}
+
+.history-federal-holiday-setting__switch[aria-checked='true'] .history-federal-holiday-setting__thumb {
+  transform: translateX(1.25rem);
+}
+
 .cred-hint {
   font-size: var(--text-xs, 0.6875rem);
   line-height: 1.4;

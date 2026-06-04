@@ -5,6 +5,7 @@ import {
   getCredentials,
   patchTripHistoryOutcome,
   patchTripHistoryAuditBucket,
+  patchTripHistoryFederalHolidayMileage,
   appendTripHistoryManual,
   deleteTripHistoryEntry,
   fetchDispatchProof,
@@ -42,6 +43,11 @@ import {
   resolveHistoryTrailerLoadBadge,
   tripHasAnyLoadedTrailer,
 } from '../utils/tripDetailsDisplay.js'
+import {
+  billableMilesWithFederalHoliday,
+  FEDERAL_HOLIDAY_PDF_NOTE,
+  tripTouchesFederalHoliday,
+} from '../utils/federalHolidayMileage.js'
 
 const HistoryPdfJsViewer = defineAsyncComponent(() => import('../components/HistoryPdfJsViewer.vue'))
 
@@ -55,6 +61,7 @@ const HistoryPdfJsViewer = defineAsyncComponent(() => import('../components/Hist
  * @property {number} [dispatchedAtMs] First ENRT/DSPCH instant for this leg (server-persisted)
  * @property {number} [outcomeTouchedAt] When outcome/dispatch-header outcome was explicitly set (patch or mark-complete)
  * @property {number} [historyAuditBucketMs]
+ * @property {boolean} [federalHolidayMileage15xApproved]
  * @property {number} completedAt
  * @property {string} dailyTripLegSequence
  * @property {string} [outcome]
@@ -68,6 +75,10 @@ const workWeekFromCred = ref({
   shiftStartMins: 0,
   shiftEndMins: 1439,
 })
+
+/** Settings: smart in-card federal-holiday 1.5× mileage approval. */
+const federalHolidayMileage15xEnabled = ref(true)
+const federalHolidayMileageBusyId = ref('')
 
 /** `workWeek`: Settings work week. `paySchedule`: Sun–Sat FedEx payout window by local dispatch time (week/day rows ignore shift-day remap). */
 const historyWeekViewMode = ref(/** @type {'workWeek' | 'paySchedule'} */ ('workWeek'))
@@ -365,8 +376,12 @@ function mileageHeaderLine(sum, deliveredTrips) {
  * @param {LedgerEntry} e
  */
 function tripHeaderMilesValue(e) {
-  const n = tripPaidMiles(e)
-  return n != null ? formatMilesSum(n) : '0'
+  const paid = tripPaidMiles(e)
+  if (paid == null) return '0'
+  if (e.federalHolidayMileage15xApproved === true) {
+    return formatMilesSum(billableMilesForLedgerEntry(e, paid))
+  }
+  return formatMilesSum(paid)
 }
 
 /**
@@ -432,6 +447,39 @@ function billableMilesForPayEstimate(paidMi) {
 }
 
 /**
+ * Billable miles for pay estimate / PDF (34–50 band, then optional federal-holiday 1.5×).
+ * @param {LedgerEntry} e
+ * @param {number | null} paidMi
+ */
+function billableMilesForLedgerEntry(e, paidMi) {
+  const base = billableMilesForPayEstimate(paidMi ?? 0)
+  return billableMilesWithFederalHoliday(
+    base,
+    e.federalHolidayMileage15xApproved === true,
+  )
+}
+
+/**
+ * @param {LedgerEntry} e
+ */
+function tripQualifiesForFederalHolidayMileage(e) {
+  if (!federalHolidayMileage15xEnabled.value) return false
+  if (historyOutcomeUiSelectKey(e) !== 'delivered') return false
+  return tripTouchesFederalHoliday(e, {
+    assignedAtMs: ledgerAssignedAtMs,
+    dispatchedAtMs: ledgerDispatchedAtMsForPay,
+    arrivedAtMs: ledgerArrivedAtMs,
+  })
+}
+
+/**
+ * @param {LedgerEntry} e
+ */
+function federalHolidayPdfNoteForEntry(e) {
+  return e.federalHolidayMileage15xApproved === true ? FEDERAL_HOLIDAY_PDF_NOTE : ''
+}
+
+/**
  * Shift-day key for grouping, or local calendar day for FedEx pay schedule (Sun–Sat window).
  * @param {number} tMs
  */
@@ -455,7 +503,10 @@ function tripMilesForHistoryTotals(e) {
   const raw = tripPaidMiles(e)
   if (raw == null) return null
   if (historyGroupingOpts.value.groupLabelMode === 'fedexPaySchedule') {
-    return billableMilesForPayEstimate(raw)
+    return billableMilesForLedgerEntry(e, raw)
+  }
+  if (e.federalHolidayMileage15xApproved === true) {
+    return billableMilesForLedgerEntry(e, raw)
   }
   return raw
 }
@@ -649,7 +700,7 @@ function computeWeekPayEstimate(items) {
   for (const e of sorted) {
     const paidMi = tripPaidMiles(e)
     const base = paidMi ?? 0
-    const billableMi = billableMilesForPayEstimate(base)
+    const billableMi = billableMilesForLedgerEntry(e, paidMi)
     sumBillable += billableMi
     const dispatchCols = tripPdfDispatchColumns(e)
     const dispatchedMs = ledgerDispatchedAtMsForPay(e)
@@ -787,6 +838,7 @@ async function load() {
       shiftStartMins: ssm,
       shiftEndMins: sem,
     }
+    federalHolidayMileage15xEnabled.value = c.federalHolidayMileage15xEnabled !== false
     storedUsername.value = typeof c.username === 'string' ? c.username.trim() : ''
     pdfCredMeta.value = {
       employeeNumber:
@@ -874,6 +926,9 @@ async function load() {
         }
         if (auditMs > 0) {
           e.historyAuditBucketMs = auditMs
+        }
+        if (oRaw.federalHolidayMileage15xApproved === true) {
+          e.federalHolidayMileage15xApproved = true
         }
         if (!e.id) continue
         if (byId.has(e.id)) continue
@@ -1411,6 +1466,7 @@ async function onDownloadWeekTotalsPdf(wg) {
             deliveryAddress: dDir?.address ?? '',
           }),
           outcomeReasonRight: e ? outcomePdfReasonLine(e) : '',
+          pdfNotesRight: e ? federalHolidayPdfNoteForEntry(e) : '',
           dailyTripLegSequence: r.dailyTripLegSequence || '',
           proofDedupeKey: pk,
           ledgerEntry: e,
@@ -2091,6 +2147,28 @@ async function submitManualTrip() {
 /**
  * @param {LedgerEntry} row
  */
+/**
+ * @param {LedgerEntry} row
+ * @param {boolean} approved
+ */
+async function setFederalHolidayMileage15x(row, approved) {
+  if (!row?.id || federalHolidayMileageBusyId.value === row.id) return
+  federalHolidayMileageBusyId.value = row.id
+  try {
+    await patchTripHistoryFederalHolidayMileage({
+      id: row.id,
+      dailyTripLegSequence: row.dailyTripLegSequence,
+      federalHolidayMileage15xApproved: approved ? true : null,
+    })
+    await load()
+  } catch (err) {
+    error.value =
+      err instanceof Error ? err.message : 'Could not update federal holiday mileage'
+  } finally {
+    federalHolidayMileageBusyId.value = ''
+  }
+}
+
 function openAuditDayModal(row) {
   auditDayTarget.value = row
   auditDayDateStr.value = isoDateFromMs(row.displayDate)
@@ -2436,6 +2514,12 @@ onUnmounted(() => {
                               <span class="history-trip-od-sep" aria-hidden="true">·</span>
                               <span class="history-od-lab">Miles:</span>
                               <span class="history-od-id">{{ tripHeaderMilesValue(e) }}</span>
+                              <span
+                                v-if="e.federalHolidayMileage15xApproved"
+                                class="history-federal-holiday-badge"
+                                title="Federal holiday 1.5× billable mileage approved"
+                                >1.5×</span
+                              >
                               <template v-if="tripHeaderDurationHm(e)">
                                 <span class="history-trip-od-sep" aria-hidden="true">·</span>
                                 <span class="history-od-lab">Duration:</span>
@@ -2595,6 +2679,64 @@ onUnmounted(() => {
                               {{ stateMilesLabel(row) }}
                             </li>
                           </ul>
+                          <div
+                            v-if="
+                              tripQualifiesForFederalHolidayMileage(e) ||
+                              e.federalHolidayMileage15xApproved
+                            "
+                            class="history-federal-holiday-smart"
+                            @click.stop
+                          >
+                            <p class="history-federal-holiday-smart__lead">
+                              Federal holiday — assigned, dispatched, or arrived on a US federal
+                              holiday. Approve 1.5× billable mileage for pay estimate and PDF notes.
+                            </p>
+                            <div class="history-federal-holiday-smart__row">
+                              <span class="history-federal-holiday-smart__lab">1.5× mileage</span>
+                              <button
+                                type="button"
+                                class="history-federal-holiday-smart__switch tap"
+                                role="switch"
+                                :aria-checked="e.federalHolidayMileage15xApproved === true"
+                                :disabled="
+                                  federalHolidayMileageBusyId === e.id ||
+                                  (!e.federalHolidayMileage15xApproved &&
+                                    !tripQualifiesForFederalHolidayMileage(e))
+                                "
+                                :title="
+                                  e.federalHolidayMileage15xApproved
+                                    ? 'Turn off federal holiday 1.5× billable mileage'
+                                    : 'Approve federal holiday 1.5× billable mileage'
+                                "
+                                @click="
+                                  setFederalHolidayMileage15x(
+                                    e,
+                                    !(e.federalHolidayMileage15xApproved === true),
+                                  )
+                                "
+                              >
+                                <span
+                                  class="history-federal-holiday-smart__thumb"
+                                  aria-hidden="true"
+                                />
+                              </button>
+                              <span
+                                class="history-federal-holiday-smart__state"
+                                :class="{
+                                  'history-federal-holiday-smart__state--on':
+                                    e.federalHolidayMileage15xApproved === true,
+                                }"
+                              >
+                                {{
+                                  federalHolidayMileageBusyId === e.id
+                                    ? 'Saving…'
+                                    : e.federalHolidayMileage15xApproved
+                                      ? 'Approved'
+                                      : 'Off'
+                                }}
+                              </span>
+                            </div>
+                          </div>
                         </div>
                       </template>
                       <p
@@ -4547,6 +4689,100 @@ onUnmounted(() => {
 
 .history-body {
   padding: 0.32rem 0.45rem 0.48rem;
+}
+
+.history-federal-holiday-badge {
+  display: inline-block;
+  margin-left: 0.2rem;
+  padding: 0.05rem 0.35rem;
+  font-size: 0.65rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  line-height: 1.2;
+  color: var(--color-warning-fg, #7a4a00);
+  background: var(--color-warning-bg, rgba(255, 193, 7, 0.22));
+  border-radius: var(--radius-sm, 4px);
+  vertical-align: middle;
+}
+
+.history-federal-holiday-smart {
+  margin-top: var(--space-3, 0.75rem);
+  padding: var(--space-3, 0.75rem);
+  border-radius: var(--radius-lg, 12px);
+  border: 1px solid rgba(255, 193, 7, 0.35);
+  background: rgba(255, 193, 7, 0.08);
+}
+
+.history-federal-holiday-smart__lead {
+  margin: 0 0 var(--space-2, 0.5rem);
+  font-size: var(--text-sm, 0.875rem);
+  line-height: 1.45;
+  color: var(--text-secondary, rgba(255, 255, 255, 0.72));
+}
+
+.history-federal-holiday-smart__row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2, 0.5rem) var(--space-3, 0.75rem);
+}
+
+.history-federal-holiday-smart__lab {
+  font-size: var(--text-sm, 0.875rem);
+  font-weight: 600;
+}
+
+.history-federal-holiday-smart__state {
+  font-size: var(--text-sm, 0.875rem);
+  color: var(--text-secondary, rgba(255, 255, 255, 0.65));
+}
+
+.history-federal-holiday-smart__state--on {
+  color: var(--color-warning-fg, #e6b800);
+  font-weight: 600;
+}
+
+.history-federal-holiday-smart__switch {
+  position: relative;
+  width: 2.75rem;
+  height: 1.5rem;
+  flex-shrink: 0;
+  padding: 0;
+  border: none;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.18);
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.history-federal-holiday-smart__switch[aria-checked='true'] {
+  background: var(--color-warning-fg, #e6b800);
+}
+
+.history-federal-holiday-smart__switch:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.history-federal-holiday-smart__switch:focus-visible {
+  outline: 2px solid var(--focus-ring, #6ea8fe);
+  outline-offset: 2px;
+}
+
+.history-federal-holiday-smart__thumb {
+  position: absolute;
+  top: 0.15rem;
+  left: 0.15rem;
+  width: 1.2rem;
+  height: 1.2rem;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.35);
+  transition: transform 0.15s ease;
+}
+
+.history-federal-holiday-smart__switch[aria-checked='true'] .history-federal-holiday-smart__thumb {
+  transform: translateX(1.25rem);
 }
 
 .history-mileage {

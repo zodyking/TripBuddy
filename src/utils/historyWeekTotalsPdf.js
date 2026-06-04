@@ -365,9 +365,13 @@ function buildTableBody(opts, proofRangeByKey) {
       const reasonRaw =
         typeof r.outcomeReasonRight === 'string' ? r.outcomeReasonRight.trim() : ''
       const reasonLine = reasonRaw ? `Reason: ${ascii(reasonRaw)}` : ''
+      const notesRaw =
+        typeof r.pdfNotesRight === 'string' ? r.pdfNotesRight.trim() : ''
+      const notesLine = notesRaw ? `Notes: ${ascii(notesRaw)}` : ''
+      const rightBlock = [reasonLine, notesLine].filter(Boolean).join('\n')
       const leftBlock = [eqLine, proofLine].filter(Boolean).join('\n')
-      if (leftBlock || reasonLine) {
-        if (reasonLine) {
+      if (leftBlock || rightBlock) {
+        if (rightBlock) {
           body.push([
             {
               content: '',
@@ -379,7 +383,7 @@ function buildTableBody(opts, proofRangeByKey) {
               _equip: true,
             },
             {
-              content: reasonLine,
+              content: rightBlock,
               colSpan: 5,
               _equipReason: true,
             },

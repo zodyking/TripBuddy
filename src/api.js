@@ -326,6 +326,25 @@ export async function patchTripHistoryAuditBucket(p) {
 }
 
 /**
+ * Manual approval: billable mileage 1.5× on US federal holidays (History pay estimate + PDF notes).
+ * @param {{
+ *   id?: string,
+ *   dailyTripLegSequence?: string,
+ *   federalHolidayMileage15xApproved: boolean | null,
+ * }} p
+ */
+export async function patchTripHistoryFederalHolidayMileage(p) {
+  return putAssignment({
+    patchTripHistoryFederalHolidayMileage: {
+      id: p.id != null ? String(p.id) : '',
+      dailyTripLegSequence:
+        p.dailyTripLegSequence != null ? String(p.dailyTripLegSequence) : '',
+      federalHolidayMileage15xApproved: p.federalHolidayMileage15xApproved,
+    },
+  })
+}
+
+/**
  * Append a user-entered history row (no FedEx leg required).
  * @param {{
  *   id?: string,

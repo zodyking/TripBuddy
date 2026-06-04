@@ -130,6 +130,8 @@ function parseCredData(data) {
     shiftStartMins,
     shiftEndMins,
     driverPhone: normalizeDriverPhoneDigits(data.driverPhone),
+    federalHolidayMileage15xEnabled:
+      data.federalHolidayMileage15xEnabled === false ? false : true,
   }
 }
 
@@ -154,6 +156,7 @@ async function readFileRawForAccount(accountKey) {
     shiftStartMins: 0,
     shiftEndMins: 1439,
     driverPhone: null,
+    federalHolidayMileage15xEnabled: true,
   }
 }
 
@@ -210,6 +213,7 @@ export async function getCredentialsMeta() {
     shiftStartMins,
     shiftEndMins,
     driverPhone,
+    federalHolidayMileage15xEnabled,
   } = await readFileRaw()
   const tn = tractorNumber?.trim() || null
   const en = employeeNumber?.trim() || null
@@ -257,6 +261,7 @@ export async function getCredentialsMeta() {
     shiftEndMins: sem,
     appLoginVerified: verified,
     driverPhone: dp || null,
+    federalHolidayMileage15xEnabled: federalHolidayMileage15xEnabled !== false,
   }
 }
 
@@ -341,6 +346,7 @@ export async function getDriverName() {
  *   shiftStartMins?: number,
  *   shiftEndMins?: number,
  *   driverPhone?: string,
+ *   federalHolidayMileage15xEnabled?: boolean,
  * }} body password optional = keep; linehaulPollMinutes 0–1440 (0 = no auto refresh)
  */
 export async function saveCredentials(body) {
@@ -436,6 +442,11 @@ export async function saveCredentials(body) {
     driverPhone = normalizeDriverPhoneDigits(body.driverPhone)
   }
 
+  let federalHolidayMileage15xEnabled = prev.federalHolidayMileage15xEnabled !== false
+  if (typeof body.federalHolidayMileage15xEnabled === 'boolean') {
+    federalHolidayMileage15xEnabled = body.federalHolidayMileage15xEnabled
+  }
+
   const next = {
     username: username || null,
     passwordEnc,
@@ -449,6 +460,7 @@ export async function saveCredentials(body) {
     shiftStartMins,
     shiftEndMins,
     driverPhone,
+    federalHolidayMileage15xEnabled,
   }
   await writeKeyJson(credsKey(acc), next)
   return getCredentialsMeta()
@@ -472,6 +484,7 @@ export async function clearCredentials() {
     shiftStartMins: 0,
     shiftEndMins: 1439,
     driverPhone: null,
+    federalHolidayMileage15xEnabled: true,
   }
   await writeKeyJson(credsKey(acc), empty)
   try {

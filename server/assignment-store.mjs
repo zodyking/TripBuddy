@@ -1168,6 +1168,44 @@ export async function writeAssignment(body) {
         })
         .slice(0, MAX_TRIP_HISTORY)
     }
+  } else if (
+    body.patchTripHistoryFederalHolidayMileage &&
+    typeof body.patchTripHistoryFederalHolidayMileage === 'object'
+  ) {
+    const p = body.patchTripHistoryFederalHolidayMileage
+    const seq = String(p.dailyTripLegSequence ?? '').trim()
+    const id = typeof p.id === 'string' ? p.id.trim() : ''
+    const hasApprovedKey = 'federalHolidayMileage15xApproved' in p
+    let approvedVal = null
+    if (hasApprovedKey) {
+      if (
+        p.federalHolidayMileage15xApproved === null ||
+        p.federalHolidayMileage15xApproved === undefined
+      ) {
+        approvedVal = null
+      } else if (p.federalHolidayMileage15xApproved === true) {
+        approvedVal = true
+      } else if (p.federalHolidayMileage15xApproved === false) {
+        approvedVal = false
+      } else {
+        throw new Error('Invalid federalHolidayMileage15xApproved')
+      }
+    }
+    tripHistoryLedger = tripHistoryLedger.map((x) => {
+      if (!x) return x
+      const matchSeq = /^\d+$/.test(seq) && String(x.dailyTripLegSequence ?? '').trim() === seq
+      const matchId = Boolean(id) && String(x.id ?? '') === id
+      if (!matchSeq && !matchId) return x
+      const nextRow = { ...x }
+      if (hasApprovedKey) {
+        if (approvedVal === null || approvedVal === false) {
+          delete nextRow.federalHolidayMileage15xApproved
+        } else {
+          nextRow.federalHolidayMileage15xApproved = true
+        }
+      }
+      return nextRow
+    })
   } else if (body.patchTripHistoryAuditBucket && typeof body.patchTripHistoryAuditBucket === 'object') {
     const p = body.patchTripHistoryAuditBucket
     const seq = String(p.dailyTripLegSequence ?? '').trim()
