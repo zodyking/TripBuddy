@@ -95,8 +95,14 @@ const DOLLY_POLL_MS = 28
 /** Max wall time after VALIDATE DOLLY click until success or leaving dolly entry (per attempt). */
 const DOLLY_CLICK_TO_OUTCOME_MS = 1_500
 const CHECKLIST_CHECKBOX_DELAY_MS = 12
+/** Post-AGREE: FedEx dispatch summary can take several seconds to render. */
+const POST_CHECKLIST_DISPATCH_WAIT_MS = 10_000
+/** Extra idle budget after checklist before reporting dispatch_not_clicked. */
+const POST_CHECKLIST_IDLE_MS = 24_000
 const DISPATCH_CONFIRM_WAIT_MS = 2_000
 const DISPATCHED_SUCCESS_WAIT_MS = 2_000
+/** Post-AGREE settle poll — longer than generic AFTER_CLICK_MS. */
+const POST_AGREE_SETTLE_MS = 3_000
 
 /**
  * @param {import('playwright').Page} page
@@ -805,26 +811,94 @@ async function handleNewTripDetailsModal(page, log) {
 }
 
 /**
+ * Locate AGREE AND CHECK OUT using the same fallback chain as DISPATCH.
+ * @param {import('playwright').Page} page
+ */
+async function findAgreeAndCheckOutButton(page) {
+  const agreeRole = page.getByRole('button', { name: RX.agreeAndCheckOut }).first()
+  if (await agreeRole.isVisible().catch(() => false)) return agreeRole
+  const agreeBtn = buttonLikeByVisibleText(page, RX.agreeAndCheckOut).first()
+  if (await agreeBtn.isVisible().catch(() => false)) return agreeBtn
+  const agreeLink = page.getByRole('link', { name: RX.agreeAndCheckOut }).first()
+  if (await agreeLink.isVisible().catch(() => false)) return agreeLink
+  const agreeAny = page
+    .locator('a, button, [role="button"], [class*="button"], [class*="btn"]')
+    .filter({ hasText: RX.agreeAndCheckOut })
+    .first()
+  if (await agreeAny.isVisible().catch(() => false)) return agreeAny
+  const agreeText = page.getByText(RX.agreeAndCheckOut).first()
+  if (await agreeText.isVisible().catch(() => false)) return agreeText
+  return null
+}
+
+/**
+ * @param {import('playwright').Locator} el
+ */
+async function isChecklistControlChecked(el) {
+  const tag = (await el.evaluate((node) => node.tagName.toLowerCase()).catch(() => '')) || ''
+  if (tag === 'input') {
+    return await el.isChecked().catch(() => false)
+  }
+  const aria = await el.getAttribute('aria-checked').catch(() => null)
+  if (aria === 'true') return true
+  const cls = (await el.getAttribute('class').catch(() => '')) || ''
+  if (/mat-checkbox-checked|mdc-checkbox--selected|is-checked/i.test(cls)) return true
+  return false
+}
+
+/**
  * Click all unchecked checkboxes in the inspection checklist.
+ * FedEx may use native inputs, mat-checkbox, or role=checkbox.
  * @param {import('playwright').Page} page
  * @param {(type: string, message: string, extra?: object) => void} log
  */
 async function completeInspectionChecklist(page, log) {
-  const checkboxes = page.locator('input[type="checkbox"]:visible')
-  const count = await checkboxes.count()
-  let clicked = 0
+  const uncheckedSelectors = [
+    'mat-checkbox:not(.mat-checkbox-checked)',
+    '[role="checkbox"][aria-checked="false"]',
+    'input[type="checkbox"]:not(:checked)',
+  ]
 
-  for (let i = 0; i < count; i++) {
-    const checkbox = checkboxes.nth(i)
-    const isChecked = await checkbox.isChecked().catch(() => false)
-    if (!isChecked) {
-      await checkbox.click().catch(() => {})
-      clicked++
-      await page.waitForTimeout(CHECKLIST_CHECKBOX_DELAY_MS)
+  let totalClicked = 0
+  for (let pass = 0; pass < 4; pass++) {
+    let clicked = 0
+    for (const selector of uncheckedSelectors) {
+      const items = page.locator(selector)
+      const count = await items.count()
+      for (let i = 0; i < count; i++) {
+        const item = items.nth(i)
+        if (await isChecklistControlChecked(item)) continue
+        await item.click({ force: true }).catch(() => {})
+        clicked++
+        await page.waitForTimeout(CHECKLIST_CHECKBOX_DELAY_MS)
+      }
     }
+    totalClicked += clicked
+    if (clicked === 0) break
+    await page.waitForTimeout(60)
   }
 
-  log('info', `Clicked ${clicked} checkboxes in inspection checklist`)
+  log('info', `Clicked ${totalClicked} checkboxes in inspection checklist`)
+}
+
+/**
+ * Wait until AGREE AND CHECK OUT is visible and enabled (all items checked).
+ * @param {import('playwright').Page} page
+ * @param {number} maxMs
+ */
+async function waitForAgreeAndCheckOutReady(page, maxMs) {
+  const deadline = Date.now() + maxMs
+  while (Date.now() < deadline) {
+    const btn = await findAgreeAndCheckOutButton(page)
+    if (btn) {
+      const enabled = await btn.isEnabled().catch(() => true)
+      const disabled = await btn.getAttribute('disabled').catch(() => null)
+      const ariaDisabled = await btn.getAttribute('aria-disabled').catch(() => null)
+      if (enabled && !disabled && ariaDisabled !== 'true') return btn
+    }
+    await page.waitForTimeout(FAST_POLL_MS)
+  }
+  return findAgreeAndCheckOutButton(page)
 }
 
 /**
@@ -896,6 +970,8 @@ export async function runInspectCheckoutAfterGate(page, opts) {
   let dollyAttempts = 0
   let dispatchClicked = false
   let checklistDone = false
+  /** Wall clock when AGREE AND CHECK OUT was clicked (post-checklist idle budget). */
+  let checklistCompletedAt = 0
 
   const aborted = () => {
     if (signal?.aborted) throw new Error('Aborted')
@@ -1003,27 +1079,49 @@ export async function runInspectCheckoutAfterGate(page, opts) {
 
     // --- Inspection checklist screen ---
     if (await isInspectionChecklistScreen(page)) {
-      await completeInspectionChecklist(page, log)
-      await page.waitForTimeout(80)
+      if (!checklistDone) {
+        await completeInspectionChecklist(page, log)
+        await page.waitForTimeout(80)
 
-      await captureProof(page, 'Inspection Checklist', proofScreenshots, log)
-      const agreeBtn = buttonLikeByVisibleText(page, RX.agreeAndCheckOut).first()
-      if (await agreeBtn.isVisible().catch(() => false)) {
-        await agreeBtn.click()
-        checklistDone = true
-        log('info', 'Clicked AGREE AND CHECK OUT')
-        lastProgress = Date.now()
-        await waitForPostAgreeCheckOutSettle(page, AFTER_CLICK_MS)
-
-        // Wait for the dispatch summary screen to load after checklist
-        const cWait = Date.now()
-        while (Date.now() - cWait < DISPATCH_CONFIRM_WAIT_MS) {
-          aborted()
-          if (await isDispatchScreen(page)) break
-          if (await isDispatchedSuccessScreen(page)) break
-          if (await isDispatchConfirmModal(page)) break
-          await page.waitForTimeout(FAST_POLL_MS)
+        await captureProof(page, 'Inspection Checklist', proofScreenshots, log)
+        const agreeBtn = await waitForAgreeAndCheckOutReady(page, POST_CHECKLIST_DISPATCH_WAIT_MS)
+        if (agreeBtn) {
+          await agreeBtn.click()
+          checklistDone = true
+          checklistCompletedAt = Date.now()
+          log('info', 'Clicked AGREE AND CHECK OUT')
+          lastProgress = Date.now()
+          await waitForPostAgreeCheckOutSettle(page, POST_AGREE_SETTLE_MS)
+        } else {
+          log('warn', 'AGREE AND CHECK OUT not ready after completing checklist')
         }
+      } else if (checklistCompletedAt && Date.now() - checklistCompletedAt > POST_CHECKLIST_IDLE_MS) {
+        log('warn', 'Inspect & Check Out: timed out after checklist — DISPATCH button was never clicked', {
+          inspectCheckoutPhaseDone: true,
+          dispatched: false,
+        })
+        return { ok: false, reason: 'dispatch_not_clicked', proofScreenshots }
+      }
+
+      // Keep polling while FedEx transitions checklist → dispatch summary
+      const cWait = Date.now()
+      while (Date.now() - cWait < POST_CHECKLIST_DISPATCH_WAIT_MS) {
+        aborted()
+        if (await isDispatchScreen(page)) break
+        if (await isDispatchedSuccessScreen(page)) break
+        if (await isDispatchConfirmModal(page)) break
+        if (!checklistDone) {
+          const retryAgree = await waitForAgreeAndCheckOutReady(page, FAST_POLL_MS * 4)
+          if (retryAgree) {
+            await retryAgree.click()
+            checklistDone = true
+            checklistCompletedAt = Date.now()
+            log('info', 'Clicked AGREE AND CHECK OUT (retry)')
+            lastProgress = Date.now()
+            await waitForPostAgreeCheckOutSettle(page, POST_AGREE_SETTLE_MS)
+          }
+        }
+        await page.waitForTimeout(FAST_POLL_MS)
       }
       continue
     }
@@ -1433,6 +1531,19 @@ export async function runInspectCheckoutAfterGate(page, opts) {
     if (handled) continue
 
     // Idle exit — report failure if dispatch was never completed
+    if (
+      checklistDone &&
+      !dispatchClicked &&
+      checklistCompletedAt &&
+      Date.now() - checklistCompletedAt > POST_CHECKLIST_IDLE_MS
+    ) {
+      log('warn', 'Inspect & Check Out: timed out after checklist — DISPATCH button was never clicked', {
+        inspectCheckoutPhaseDone: true,
+        dispatched: false,
+      })
+      return { ok: false, reason: 'dispatch_not_clicked', proofScreenshots }
+    }
+
     if (Date.now() - lastProgress > IDLE_EXIT_MS) {
       if (checklistDone && !dispatchClicked) {
         log('warn', 'Inspect & Check Out: timed out after checklist — DISPATCH button was never clicked', {
