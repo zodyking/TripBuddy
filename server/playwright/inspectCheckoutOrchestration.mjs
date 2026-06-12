@@ -95,14 +95,14 @@ const DOLLY_POLL_MS = 28
 /** Max wall time after VALIDATE DOLLY click until success or leaving dolly entry (per attempt). */
 const DOLLY_CLICK_TO_OUTCOME_MS = 1_500
 const CHECKLIST_CHECKBOX_DELAY_MS = 12
-/** Post-AGREE: FedEx dispatch summary can take several seconds to render. */
-const POST_CHECKLIST_DISPATCH_WAIT_MS = 10_000
-/** Extra idle budget after checklist before reporting dispatch_not_clicked. */
-const POST_CHECKLIST_IDLE_MS = 24_000
+/** Post-AGREE: dispatch summary load (was 2s via DISPATCH_CONFIRM_WAIT_MS). */
+const POST_CHECKLIST_DISPATCH_WAIT_MS = 3_500
+/** Idle after AGREE before dispatch_not_clicked (was 10s general IDLE_EXIT_MS). */
+const POST_CHECKLIST_IDLE_MS = 13_000
 const DISPATCH_CONFIRM_WAIT_MS = 2_000
 const DISPATCHED_SUCCESS_WAIT_MS = 2_000
-/** Post-AGREE settle poll — longer than generic AFTER_CLICK_MS. */
-const POST_AGREE_SETTLE_MS = 3_000
+/** Post-AGREE settle poll (was 500ms AFTER_CLICK_MS). */
+const POST_AGREE_SETTLE_MS = 800
 
 /**
  * @param {import('playwright').Page} page
