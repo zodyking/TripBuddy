@@ -3,6 +3,7 @@ import {
   pauseApplyHelpersLocationPrefsFromCredentials,
   resumeApplyHelpersLocationPrefsFromCredentials,
 } from './utils/helpersLocationPrefs.js'
+import { formatTripDetailsFetchError } from './utils/tripDetailsDisplay.js'
 
 /**
  * All API calls include cookies (session auth). Use for `/api/*` only.
@@ -1001,14 +1002,15 @@ export async function fetchFedexLinehaulTrips(opts = {}) {
     parsed = { raw: text }
   }
   if (!r.ok) {
+    const rawError =
+      typeof parsed.error === 'string'
+        ? parsed.error
+        : `HTTP ${r.status}`
     return {
       ok: false,
       status: r.status,
       body: parsed.body,
-      error:
-        typeof parsed.error === 'string'
-          ? parsed.error
-          : `HTTP ${r.status}`,
+      error: formatTripDetailsFetchError(rawError, r.status) ?? rawError,
     }
   }
 
@@ -1022,11 +1024,12 @@ export async function fetchFedexLinehaulTrips(opts = {}) {
   }
 
   if (typeof parsed.error === 'string' && parsed.error.trim() !== '') {
+    const status = parsed.status ?? r.status
     return {
       ok: false,
-      status: parsed.status ?? r.status,
+      status,
       body: parsed.body,
-      error: parsed.error,
+      error: formatTripDetailsFetchError(parsed.error, status) ?? parsed.error,
     }
   }
   if (parsed.ok === false) {

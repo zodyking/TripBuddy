@@ -2,6 +2,22 @@
  * Display helpers for FedEx `GET …/trips` payload (see Agent-Files/fedex trip details api.md).
  */
 
+/** FedEx HTTP 422 on trip details — driver has two simultaneous dispatches. */
+export const DUAL_TRIPS_DETECTED_MESSAGE =
+  'Dual trips detected call dispatch to correct it say "I may be dispatched twice as I\'m not able to see the trip in tripbuddy."'
+
+/**
+ * Map trip-details fetch failures to driver-facing copy.
+ * @param {string | null | undefined} error
+ * @param {number | null | undefined} status
+ * @returns {string | null}
+ */
+export function formatTripDetailsFetchError(error, status) {
+  if (status === 422) return DUAL_TRIPS_DETECTED_MESSAGE
+  if (typeof error === 'string' && /\b422\b/.test(error)) return DUAL_TRIPS_DETECTED_MESSAGE
+  return error ?? null
+}
+
 function fmt(v) {
   if (v === null || v === undefined || v === '') return '—'
   if (typeof v === 'object') {
