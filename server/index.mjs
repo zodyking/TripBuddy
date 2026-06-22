@@ -127,6 +127,8 @@ import {
   cancelBlockRetry,
   submitBlockInspectField,
   cancelBlockInspectField,
+  submitBlockInspectConfirm,
+  cancelBlockInspectConfirm,
   cancelBlockRun,
 } from './playwright/blocks.mjs'
 import { listPresets, getPreset } from './automation-presets.mjs'
@@ -2733,6 +2735,17 @@ app.post('/api/run/retry-inspect-field', async (req, reply) => {
     return reply.code(400).send({ error: 'runId required' })
   }
   const r = submitBlockInspectField(runId, typeof value === 'string' ? value : String(value ?? ''))
+  if (!r.ok) return reply.code(400).send(r)
+  return { ok: true }
+})
+
+/** In-browser Inspect & Check Out: yes/no confirm (e.g. manual Add Dolly). */
+app.post('/api/run/retry-inspect-confirm', async (req, reply) => {
+  const { runId, confirmed } = req.body ?? {}
+  if (!runId || typeof runId !== 'string') {
+    return reply.code(400).send({ error: 'runId required' })
+  }
+  const r = submitBlockInspectConfirm(runId, confirmed === true)
   if (!r.ok) return reply.code(400).send(r)
   return { ok: true }
 })

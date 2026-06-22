@@ -381,6 +381,19 @@ export function announceInspectCheckoutCancelled() {
   })
 }
 
+/** @param {string} message */
+export function announceInspectDollyConfirm(message) {
+  const prefs = getAlertPrefs()
+  if (!prefs.inspectCheckout) {
+    pushLiveLog({ type: 'warn', message: `[Alert] inspectCheckout blocked by prefs`, ts: Date.now() })
+    return
+  }
+  const text = String(message ?? '').trim()
+  if (!text) return
+  pushLiveLog({ type: 'info', message: `[Alert] announceInspectDollyConfirm: ${text}`, ts: Date.now() })
+  enqueueAnnouncement(text, { category: 'inspectDollyConfirm', bell: true })
+}
+
 export function announceApiReconnect() {
   const prefs = getAlertPrefs()
   if (!prefs.apiReconnect) {

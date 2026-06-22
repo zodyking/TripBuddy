@@ -46,6 +46,8 @@ let currentPage = null
 let pendingBlockRetry = null
 /** Pending Inspect & Check Out field (dolly / seal / trailer) from dashboard */
 let pendingBlockInspectField = null
+/** Pending yes/no confirm during Inspect & Check Out (e.g. manual Add Dolly). */
+let pendingBlockInspectConfirm = null
 const BLOCK_RETRY_WAIT_MS = 5 * 60 * 1000
 
 /** FedEx Linehaul banner when saved dispatch location does not match driver location */
@@ -122,6 +124,7 @@ export function cancelBlockRun() {
   runAbort?.abort()
   rejectPendingBlockRetryIfAny(new Error('Block run cancelled'))
   rejectPendingBlockInspectFieldIfAny(new Error('Block run cancelled'))
+  rejectPendingBlockInspectConfirmIfAny(new Error('Block run cancelled'))
 }
 
 export function getBlockRunId() {
@@ -273,6 +276,78 @@ function rejectPendingBlockInspectFieldIfAny(reason) {
     pendingBlockInspectField.reject(reason instanceof Error ? reason : new Error(String(reason)))
   } catch { /* ignore */ }
   pendingBlockInspectField = null
+}
+
+function waitForBlockInspectConfirm(runId, signal) {
+  return new Promise((resolve, reject) => {
+    if (pendingBlockInspectConfirm) {
+      try {
+        pendingBlockInspectConfirm.reject(new Error('Superseded'))
+      } catch { /* ignore */ }
+      pendingBlockInspectConfirm = null
+    }
+    let state = null
+    const cleanup = () => {
+      if (state?.timeoutId) clearTimeout(state.timeoutId)
+      signal?.removeEventListener('abort', onAbort)
+      if (pendingBlockInspectConfirm === state) pendingBlockInspectConfirm = null
+    }
+    const onAbort = () => {
+      if (!state) return
+      cleanup()
+      reject(new Error('Aborted'))
+    }
+    state = {
+      runId,
+      timeoutId: setTimeout(() => {
+        if (pendingBlockInspectConfirm !== state) return
+        cleanup()
+        resolve(false)
+      }, BLOCK_RETRY_WAIT_MS),
+      resolve: (v) => {
+        cleanup()
+        resolve(Boolean(v))
+      },
+      reject: (e) => {
+        cleanup()
+        reject(e instanceof Error ? e : new Error(String(e)))
+      },
+    }
+    signal?.addEventListener('abort', onAbort, { once: true })
+    pendingBlockInspectConfirm = state
+  })
+}
+
+/**
+ * @param {string} runId
+ * @param {boolean} confirmed
+ */
+export function submitBlockInspectConfirm(runId, confirmed) {
+  if (!pendingBlockInspectConfirm || pendingBlockInspectConfirm.runId !== runId) {
+    return { ok: false, error: 'No pending inspect confirm for this run' }
+  }
+  pendingBlockInspectConfirm.resolve(Boolean(confirmed))
+  return { ok: true }
+}
+
+/**
+ * Treat dismiss as "No" so inspect/checkout can continue without manual dolly add.
+ * @param {string} runId
+ */
+export function cancelBlockInspectConfirm(runId) {
+  if (!pendingBlockInspectConfirm || pendingBlockInspectConfirm.runId !== runId) {
+    return { ok: false, error: 'No pending inspect confirm for this run' }
+  }
+  pendingBlockInspectConfirm.resolve(false)
+  return { ok: true }
+}
+
+function rejectPendingBlockInspectConfirmIfAny(reason) {
+  if (!pendingBlockInspectConfirm) return
+  try {
+    pendingBlockInspectConfirm.reject(reason instanceof Error ? reason : new Error(String(reason)))
+  } catch { /* ignore */ }
+  pendingBlockInspectConfirm = null
 }
 
 function makeLog(runId) {
@@ -699,6 +774,16 @@ async function executeAction(action, page, ctx) {
         })
         return waitForBlockInspectField(ctx.runId, signal)
       }
+      const waitForInspectConfirm = async ({ field, message, dollyNumber }) => {
+        log('info', message, {
+          inspectConfirmNeeded: true,
+          runId: ctx.runId,
+          field,
+          message,
+          dollyNumber,
+        })
+        return waitForBlockInspectConfirm(ctx.runId, signal)
+      }
       const mergedTripData = {
         ...buildTripDataFromAssignment(ctx.assignment),
         ...(ctx.tripData && typeof ctx.tripData === 'object' ? ctx.tripData : {}),
@@ -710,6 +795,7 @@ async function executeAction(action, page, ctx) {
         assignment: ctx.assignment,
         tripData: mergedTripData,
         waitForInspectField,
+        waitForInspectConfirm,
       })
 
       if (outcome.proofScreenshots?.length) {
@@ -1122,6 +1208,7 @@ export async function runAutomation(automation, opts = {}) {
     runAbort = null
     rejectPendingBlockRetryIfAny(new Error('Block run ended'))
     rejectPendingBlockInspectFieldIfAny(new Error('Block run ended'))
+    rejectPendingBlockInspectConfirmIfAny(new Error('Block run ended'))
     try {
       await closeContext()
     } catch {
