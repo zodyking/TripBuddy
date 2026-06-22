@@ -1157,6 +1157,16 @@ export async function postRetryInspectField(runId, value) {
   return handleJson(r)
 }
 
+/** In-browser Inspect & Check Out: yes/no confirm while automation waits. */
+export async function postRetryInspectConfirm(runId, confirmed) {
+  const r = await apiFetch('/api/run/retry-inspect-confirm', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ runId, confirmed: confirmed === true }),
+  })
+  return handleJson(r)
+}
+
 export async function postCancelRetry(runId) {
   const r = await apiFetch('/api/run/cancel-retry', {
     method: 'POST',

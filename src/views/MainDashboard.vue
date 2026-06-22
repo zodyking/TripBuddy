@@ -19,6 +19,7 @@ import {
   runAutomation,
   postRetryLocation,
   postRetryInspectField,
+  postRetryInspectConfirm,
   postCancelRetry,
   fetchFedexLinehaulLocation,
   saveLocationToDirectory,
@@ -127,6 +128,7 @@ import {
   announceCheckInNewTrip,
   announceInspectCheckoutCancelled,
   announceInspectCheckoutNewTripDetails,
+  announceInspectDollyConfirm,
   cancelAllAlerts,
 } from '../utils/alertAudioQueue.js'
 
@@ -157,6 +159,10 @@ const inspectFieldInput = ref('')
 const inspectFieldSubmitting = ref(false)
 const inspectFieldRunId = ref(null)
 const inspectFieldKeyLabel = ref('')
+const inspectDollyConfirmOpen = ref(false)
+const inspectDollyConfirmMessage = ref('')
+const inspectDollyConfirmRunId = ref(null)
+const inspectDollyConfirmSubmitting = ref(false)
 
 const destLocationModalOpen = ref(false)
 const destLocationLoading = ref(false)
@@ -1518,6 +1524,37 @@ async function openInspectFieldModal(message, runId, fieldLabel = '') {
   inspectFieldOpen.value = true
 }
 
+async function openInspectDollyConfirmModal(message, runId) {
+  inspectDollyConfirmMessage.value = message
+  if (runId) inspectDollyConfirmRunId.value = runId
+  await nextTick()
+  inspectDollyConfirmOpen.value = true
+  announceInspectDollyConfirm(message)
+}
+
+async function submitInspectDollyConfirm(confirmed) {
+  if (inspectDollyConfirmSubmitting.value) return
+  inspectDollyConfirmSubmitting.value = true
+  dismissRunErrorBanner()
+  try {
+    const rid = inspectDollyConfirmRunId.value
+    if (rid) {
+      await postRetryInspectConfirm(rid, confirmed)
+      inspectDollyConfirmOpen.value = false
+      inspectDollyConfirmMessage.value = ''
+      inspectDollyConfirmRunId.value = null
+    }
+  } catch (e) {
+    setRunErrorBanner(e instanceof Error ? e.message : String(e))
+  } finally {
+    inspectDollyConfirmSubmitting.value = false
+  }
+}
+
+function declineInspectDollyConfirm() {
+  void submitInspectDollyConfirm(false)
+}
+
 async function cancelInspectField() {
   if (inspectFieldSubmitting.value) return
   const rid = inspectFieldRunId.value
@@ -1555,6 +1592,29 @@ async function saveInspectField() {
     setRunErrorBanner(e instanceof Error ? e.message : String(e))
   } finally {
     inspectFieldSubmitting.value = false
+  }
+}
+
+function handleInspectConfirmFromLiveLog() {
+  if (!runningAutomationId.value) return
+  const start = runStartTs.value
+  if (start == null) return
+  const list = liveLogEntries.value
+  for (let i = list.length - 1; i >= 0; i--) {
+    const e = list[i]
+    if (e.ts < start) break
+    if (
+      e.inspectConfirmNeeded === true &&
+      typeof e.runId === 'string' &&
+      typeof e.message === 'string' &&
+      e.message.trim() !== ''
+    ) {
+      const key = `icf:${e.runId}:${e.ts}:${e.field != null ? String(e.field) : ''}`
+      if (streamBannerHandledKey.value === key) return
+      streamBannerHandledKey.value = key
+      void openInspectDollyConfirmModal(e.message, e.runId)
+      return
+    }
   }
 }
 
@@ -1641,6 +1701,7 @@ function handleCheckInBannerFromLiveLog() {
 watch(
   liveLogEntries,
   () => {
+    handleInspectConfirmFromLiveLog()
     handleInspectFieldFromLiveLog()
     handleCheckInBannerFromLiveLog()
   },
@@ -2386,6 +2447,41 @@ onUnmounted(() => {
               @click="confirmLateNightArriveCheckYes"
             >
               {{ lateNightArriveCheckBusy ? 'Running…' : 'Yes' }}
+            </button>
+          </div>
+        </div>
+      </div>
+    </Teleport>
+    <Teleport to="body">
+      <div
+        v-if="inspectDollyConfirmOpen"
+        class="trip-complete-backdrop late-night-arrive-check-backdrop"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="inspect-dolly-confirm-title"
+        aria-describedby="inspect-dolly-confirm-desc"
+      >
+        <div class="trip-complete-card" @click.stop>
+          <h3 id="inspect-dolly-confirm-title" class="trip-complete-title">Inspect &amp; Check Out</h3>
+          <p id="inspect-dolly-confirm-desc" class="trip-complete-body">
+            {{ inspectDollyConfirmMessage }}
+          </p>
+          <div class="trip-complete-actions">
+            <button
+              type="button"
+              class="btn tap"
+              :disabled="inspectDollyConfirmSubmitting"
+              @click="declineInspectDollyConfirm"
+            >
+              No
+            </button>
+            <button
+              type="button"
+              class="btn primary tap"
+              :disabled="inspectDollyConfirmSubmitting"
+              @click="submitInspectDollyConfirm(true)"
+            >
+              {{ inspectDollyConfirmSubmitting ? 'Submitting…' : 'Yes' }}
             </button>
           </div>
         </div>

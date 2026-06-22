@@ -24,6 +24,7 @@ import {
   buildPromptMessage,
   buildTripDataFromAssignment,
   shouldManuallyAddDollyToTrip,
+  buildAddDollyConfirmMessage,
 } from './inspectFieldResolver.mjs'
 /** @type {typeof import('../trailer-number-store.mjs').getTrailerNumberCandidates | null} */
 let _getTrailerNumberCandidates = null
@@ -618,6 +619,50 @@ async function clickAddDollyIfNeeded(page, tripData, log) {
 }
 
 /**
+ * @typedef {{ userChoice: null | 'yes' | 'no', addDone: boolean }} ManualDollyState
+ */
+
+/**
+ * Ask driver (in-app yes/no) then optionally click TripBuddy "+ Add a Dolly".
+ * @param {import('playwright').Page} page
+ * @param {import('./inspectFieldResolver.mjs').TripData} tripData
+ * @param {(type: string, message: string, extra?: object) => void} log
+ * @param {(o: { field: string, message: string, dollyNumber?: string }) => Promise<boolean>} waitForInspectConfirm
+ * @param {ManualDollyState} manualDollyState
+ * @returns {Promise<boolean>} true when dolly add step completed (added or already on screen)
+ */
+async function maybePromptAndAddDolly(page, tripData, log, waitForInspectConfirm, manualDollyState) {
+  if (!shouldManuallyAddDollyToTrip(tripData)) return false
+  if (manualDollyState.userChoice === 'no') return false
+  if (manualDollyState.addDone) return true
+
+  if (manualDollyState.userChoice === null) {
+    const dollyNumber = getDollyCandidates(tripData)[0] || ''
+    const message = buildAddDollyConfirmMessage(dollyNumber)
+    const confirmed = await waitForInspectConfirm({
+      field: 'addDolly',
+      message,
+      dollyNumber,
+    })
+    manualDollyState.userChoice = confirmed ? 'yes' : 'no'
+    log(
+      'info',
+      confirmed
+        ? 'User confirmed manual dolly add'
+        : 'User declined manual dolly add — continuing inspect/checkout',
+    )
+    if (!confirmed) {
+      manualDollyState.addDone = true
+      return false
+    }
+  }
+
+  const added = await clickAddDollyIfNeeded(page, tripData, log)
+  if (added) manualDollyState.addDone = true
+  return added
+}
+
+/**
  * Check In Successful → BEGIN INSPECTION.
  * @param {import('playwright').Page} page
  * @param {(type: string, message: string, extra?: object) => void} log
@@ -957,10 +1002,15 @@ async function captureProof(page, label, bucket, log) {
  * @param {unknown} [opts.assignment]
  * @param {import('./inspectFieldResolver.mjs').TripData} [opts.tripData]
  * @param {(o: { field: string, message: string }) => Promise<string>} opts.waitForInspectField
+ * @param {(o: { field: string, message: string, dollyNumber?: string }) => Promise<boolean>} opts.waitForInspectConfirm
  * @returns {Promise<{ ok: boolean, reason?: string, proofScreenshots?: ProofScreenshot[] }>}
  */
 export async function runInspectCheckoutAfterGate(page, opts) {
-  const { log, signal, assignment = {}, tripData = {}, waitForInspectField } = opts
+  const { log, signal, assignment = {}, tripData = {}, waitForInspectField, waitForInspectConfirm } =
+    opts
+  if (!waitForInspectConfirm) {
+    throw new Error('runInspectCheckoutAfterGate requires waitForInspectConfirm')
+  }
 
   const tripDataEffective = {
     ...buildTripDataFromAssignment(assignment),
@@ -993,7 +1043,8 @@ export async function runInspectCheckoutAfterGate(page, opts) {
   let batchSealsAttempted = false
   let lastProgress = Date.now()
   let dollyAttempts = 0
-  let manualDollyAddDone = false
+  /** @type {ManualDollyState} */
+  const manualDollyState = { userChoice: null, addDone: false }
   let dispatchClicked = false
   let checklistDone = false
 
@@ -1003,7 +1054,13 @@ export async function runInspectCheckoutAfterGate(page, opts) {
 
   await dismissInspectWarningIfPresent(page, log)
   await dismissEmptyTrailerVerifiedModalIfPresent(page, log)
-  manualDollyAddDone = await clickAddDollyIfNeeded(page, tripDataEffective, log)
+  await maybePromptAndAddDolly(
+    page,
+    tripDataEffective,
+    log,
+    waitForInspectConfirm,
+    manualDollyState,
+  )
   await clickBeginInspectionIfPresent(page, log)
 
   let mainLoopIteration = 0
@@ -1144,10 +1201,19 @@ export async function runInspectCheckoutAfterGate(page, opts) {
 
     // --- Warning / Begin (late) ---
     await dismissInspectWarningIfPresent(page, log)
-    if (!manualDollyAddDone && shouldManuallyAddDollyToTrip(tripDataEffective)) {
-      const added = await clickAddDollyIfNeeded(page, tripDataEffective, log)
+    if (!manualDollyState.addDone && shouldManuallyAddDollyToTrip(tripDataEffective)) {
+      const added = await maybePromptAndAddDolly(
+        page,
+        tripDataEffective,
+        log,
+        waitForInspectConfirm,
+        manualDollyState,
+      )
       if (added) {
-        manualDollyAddDone = true
+        lastProgress = Date.now()
+        continue
+      }
+      if (manualDollyState.userChoice === 'yes' && !manualDollyState.addDone) {
         lastProgress = Date.now()
         continue
       }

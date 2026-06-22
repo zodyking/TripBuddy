@@ -45,6 +45,18 @@ export function shouldManuallyAddDollyToTrip(tripData) {
 }
 
 /**
+ * Driver-facing copy for the in-app Add Dolly confirmation modal / TTS.
+ * @param {string} dollyNumber
+ * @returns {string}
+ */
+export function buildAddDollyConfirmMessage(dollyNumber) {
+  const n = String(dollyNumber ?? '').trim()
+  return n
+    ? `Do you want to add dolly number ${n} to the dispatch?`
+    : 'Do you want to add a dolly to the dispatch?'
+}
+
+/**
  * @param {Record<string, unknown>} tr
  * @returns {string}
  */
