@@ -32,6 +32,19 @@ export function getDollyCandidates(tripData) {
 }
 
 /**
+ * True when TripBuddy should click "+ Add a Dolly" before Begin Inspection:
+ * trip has at most one trailer and our trip details include a dolly number.
+ * @param {TripData} tripData
+ * @returns {boolean}
+ */
+export function shouldManuallyAddDollyToTrip(tripData) {
+  const trailers = tripData?.trailers
+  const trailerCount = Array.isArray(trailers) ? trailers.length : 0
+  if (trailerCount > 1) return false
+  return getDollyCandidates(tripData).length > 0
+}
+
+/**
  * @param {Record<string, unknown>} tr
  * @returns {string}
  */
