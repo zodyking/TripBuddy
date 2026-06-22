@@ -23,6 +23,7 @@ import {
   extractTrailerIndex,
   buildPromptMessage,
   buildTripDataFromAssignment,
+  shouldManuallyAddDollyToTrip,
 } from './inspectFieldResolver.mjs'
 /** @type {typeof import('../trailer-number-store.mjs').getTrailerNumberCandidates | null} */
 let _getTrailerNumberCandidates = null
@@ -43,6 +44,9 @@ const RX = {
   /** Single-trailer empty assignment dialog (Trip Summary / inspect path). */
   emptyTrailerModalBody: /assigned\s+an\s+empty\s+trailer/i,
   checkInSuccessful: /check\s+in\s+successful/i,
+  addDolly: /\+?\s*add\s+a?\s*dolly/i,
+  pickUpNewLoadAssignment: /pick\s+up\s+the\s+new\s+load\s+assignment/i,
+  dollyAddedToTrip: /dolly\s+has\s+been\s+added\s+to\s+the\s+trip/i,
   beginInspection: /begin\s+inspection/i,
   validateDolly: /validate\s+dolly/i,
   dollyValidationOk: /dolly\s+validation\s+successful/i,
@@ -76,6 +80,8 @@ const WARN_MODAL_MS = 1_800
 /** FedEx "Empty Trailer" info dialog — click VERIFIED to continue inspect/checkout. */
 const EMPTY_TRAILER_MODAL_MS = 2_000
 const BEGIN_INSPECTION_MS = 2_000
+/** Check-in success screen: wait for "+ Add a Dolly" before Begin Inspection. */
+const ADD_DOLLY_MS = 2_000
 /** Post-click bounded advance (paired with element polls, not blind multi-second sleeps). */
 const AFTER_CLICK_MS = 500
 /** No recognized progress before giving up on a screen (keeps total flow bounded). */
@@ -525,6 +531,93 @@ async function dismissEmptyTrailerVerifiedModalIfPresent(page, log) {
 }
 
 /**
+ * @param {import('playwright').Page} page
+ * @returns {Promise<import('playwright').Locator | null>}
+ */
+async function findAddDollyControl(page) {
+  const linkish = page
+    .locator('a, button, [role="button"], [role="link"]')
+    .filter({ hasText: RX.addDolly })
+    .first()
+  if (await linkish.isVisible().catch(() => false)) return linkish
+  const textHit = page.getByText(RX.addDolly).first()
+  if (await textHit.isVisible().catch(() => false)) return textHit
+  return null
+}
+
+/**
+ * @param {import('playwright').Page} page
+ */
+async function isAddDollyPromptVisible(page) {
+  return (await findAddDollyControl(page)) !== null
+}
+
+/**
+ * @param {import('playwright').Page} page
+ */
+async function isDollyManuallyAddedConfirmation(page) {
+  return await page
+    .getByText(RX.dollyAddedToTrip)
+    .first()
+    .isVisible()
+    .catch(() => false)
+}
+
+/**
+ * On Check In Successful: when trip has 0–1 trailers and app trip details include a
+ * dolly number, click "+ Add a Dolly" so TripBuddy registers the manual dolly add.
+ * @param {import('playwright').Page} page
+ * @param {import('./inspectFieldResolver.mjs').TripData} tripData
+ * @param {(type: string, message: string, extra?: object) => void} log
+ * @returns {Promise<boolean>} true if dolly was added or already confirmed
+ */
+async function clickAddDollyIfNeeded(page, tripData, log) {
+  if (!shouldManuallyAddDollyToTrip(tripData)) return false
+
+  if (await isDollyManuallyAddedConfirmation(page)) {
+    log('info', 'Dolly already added to trip (confirmation visible)')
+    return true
+  }
+
+  const deadline = Date.now() + ADD_DOLLY_MS
+  while (Date.now() < deadline) {
+    const addDolly = await findAddDollyControl(page)
+    if (!addDolly) {
+      const beginBtn = buttonLikeByVisibleText(page, RX.beginInspection).first()
+      if (await beginBtn.isVisible().catch(() => false)) return false
+      await page.waitForTimeout(45)
+      continue
+    }
+
+    await addDolly.click()
+    log('info', 'Clicked Add a Dolly (manual dispatch add)')
+    const confirmDeadline = Date.now() + ADD_DOLLY_MS
+    while (Date.now() < confirmDeadline) {
+      if (await isDollyManuallyAddedConfirmation(page)) {
+        log('info', 'Dolly added to trip confirmed')
+        await waitForPageSettle(page)
+        await page.waitForTimeout(90)
+        return true
+      }
+      const pickup = page.getByText(RX.pickUpNewLoadAssignment).first()
+      const addGone = !(await isAddDollyPromptVisible(page))
+      const beginBtn = buttonLikeByVisibleText(page, RX.beginInspection).first()
+      const hasBegin = await beginBtn.isVisible().catch(() => false)
+      if (addGone && hasBegin && (await pickup.isVisible().catch(() => false))) {
+        log('info', 'Add Dolly complete — Pick up new load assignment shown, Begin Inspection ready')
+        await waitForPageSettle(page)
+        return true
+      }
+      await page.waitForTimeout(45)
+    }
+    log('warn', 'Add Dolly clicked but confirmation not detected within timeout — continuing')
+    return true
+  }
+
+  return false
+}
+
+/**
  * Check In Successful → BEGIN INSPECTION.
  * @param {import('playwright').Page} page
  * @param {(type: string, message: string, extra?: object) => void} log
@@ -900,6 +993,7 @@ export async function runInspectCheckoutAfterGate(page, opts) {
   let batchSealsAttempted = false
   let lastProgress = Date.now()
   let dollyAttempts = 0
+  let manualDollyAddDone = false
   let dispatchClicked = false
   let checklistDone = false
 
@@ -909,6 +1003,7 @@ export async function runInspectCheckoutAfterGate(page, opts) {
 
   await dismissInspectWarningIfPresent(page, log)
   await dismissEmptyTrailerVerifiedModalIfPresent(page, log)
+  manualDollyAddDone = await clickAddDollyIfNeeded(page, tripDataEffective, log)
   await clickBeginInspectionIfPresent(page, log)
 
   let mainLoopIteration = 0
@@ -1049,6 +1144,14 @@ export async function runInspectCheckoutAfterGate(page, opts) {
 
     // --- Warning / Begin (late) ---
     await dismissInspectWarningIfPresent(page, log)
+    if (!manualDollyAddDone && shouldManuallyAddDollyToTrip(tripDataEffective)) {
+      const added = await clickAddDollyIfNeeded(page, tripDataEffective, log)
+      if (added) {
+        manualDollyAddDone = true
+        lastProgress = Date.now()
+        continue
+      }
+    }
     const beginLate = buttonLikeByVisibleText(page, RX.beginInspection).first()
     if (await beginLate.isVisible().catch(() => false)) {
       const clicked = await clickIfVisible(buttonLikeByVisibleText(page, RX.beginInspection))
