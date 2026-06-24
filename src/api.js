@@ -676,9 +676,19 @@ export async function putSmtpPrefs(body) {
   return handleJson(r)
 }
 
-/** Send a test email using saved SMTP settings. */
-export async function postSmtpTest() {
-  const r = await apiFetch('/api/settings/smtp-test', { method: 'POST' })
+/** Send a test email using saved SMTP settings. @param {{ kind?: string }} [body] */
+export async function postSmtpTest(body = {}) {
+  const r = await apiFetch('/api/settings/smtp-test', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body ?? {}),
+  })
+  return handleJson(r)
+}
+
+/** List available email template test kinds for the send-test dropdown. */
+export async function getEmailTestKinds() {
+  const r = await apiFetch('/api/settings/email-test-kinds')
   return handleJson(r)
 }
 

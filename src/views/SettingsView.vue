@@ -12,6 +12,7 @@ import {
   putGwbUpperCamYoutubeUrl,
   putSmtpPrefs,
   postSmtpTest,
+  getEmailTestKinds,
   putHelpersAutoArrivePrefs,
   deleteCredentials,
   putAssignment,
@@ -705,6 +706,17 @@ const emailWeeklySummaryCcDraft = ref('')
 const smtpBusy = ref(false)
 const smtpTestBusy = ref(false)
 const smtpMsg = ref('')
+const smtpTestKind = ref('weekly_summary')
+const smtpTestKindOptions = ref([
+  { id: 'smtp', label: 'SMTP connection test' },
+  { id: 'new_trip', label: 'New trip assigned' },
+  { id: 'preplan', label: 'New preplan assigned' },
+  { id: 'status_enroute', label: 'Trip status — en route' },
+  { id: 'dispatch_instructions', label: 'Dispatch instructions updated' },
+  { id: 'driver_mismatch', label: 'Driver / tractor location mismatch' },
+  { id: 'daily_shift', label: 'End of shift summary' },
+  { id: 'weekly_summary', label: 'Weekly mileage summary' },
+])
 
 const showEmailSmtpFields = computed(() => smtpEnabled.value)
 const showTripAlertCc = computed(
@@ -768,12 +780,26 @@ async function sendSmtpTest() {
   try {
     await putSmtpPrefs(smtpPrefsPayload())
     smtpPassDraft.value = '••••'
-    await postSmtpTest()
-    smtpMsg.value = 'Test email sent — check your inbox.'
+    const kind = smtpTestKind.value || 'smtp'
+    await postSmtpTest({ kind })
+    const label =
+      smtpTestKindOptions.value.find((o) => o.id === kind)?.label || 'Test email'
+    smtpMsg.value = `${label} sent — check your inbox.`
   } catch (e) {
     smtpMsg.value = e instanceof Error ? e.message : String(e)
   } finally {
     smtpTestBusy.value = false
+  }
+}
+
+async function loadEmailTestKinds() {
+  try {
+    const data = await getEmailTestKinds()
+    if (Array.isArray(data?.kinds) && data.kinds.length) {
+      smtpTestKindOptions.value = data.kinds
+    }
+  } catch {
+    /* keep defaults */
   }
 }
 
@@ -1804,6 +1830,7 @@ onMounted(async () => {
   unregisterRecover = registerApiRecover(reconnectLiveLogStream)
   void refreshUiBuildLabel()
   await loadCredentials()
+  void loadEmailTestKinds()
   await loadAssignmentState()
   tomtomTrafficDraft.value = trafficTomtomKeyOverride.value
   hereApiDraft.value = hereApiKeyOverride.value
@@ -2734,14 +2761,27 @@ onUnmounted(() => {
           <button type="button" class="btn primary tap" :disabled="smtpBusy" @click="saveSmtpPrefs">
             {{ smtpBusy ? 'Saving…' : 'Save' }}
           </button>
-          <button
-            type="button"
-            class="btn secondary tap"
-            :disabled="smtpTestBusy || smtpBusy || !smtpEnabled"
-            @click="sendSmtpTest"
-          >
-            {{ smtpTestBusy ? 'Sending…' : 'Send test email' }}
-          </button>
+          <div class="email-test-send-row">
+            <label class="lbl email-test-kind-lbl" for="smtp-test-kind">Test email</label>
+            <select
+              id="smtp-test-kind"
+              v-model="smtpTestKind"
+              class="inp tap email-test-kind-select"
+              :disabled="smtpTestBusy || smtpBusy || !smtpEnabled"
+            >
+              <option v-for="opt in smtpTestKindOptions" :key="opt.id" :value="opt.id">
+                {{ opt.label }}
+              </option>
+            </select>
+            <button
+              type="button"
+              class="btn secondary tap"
+              :disabled="smtpTestBusy || smtpBusy || !smtpEnabled"
+              @click="sendSmtpTest"
+            >
+              {{ smtpTestBusy ? 'Sending…' : 'Send test email' }}
+            </button>
+          </div>
         </div>
         <p v-if="smtpMsg" class="cred-msg">{{ smtpMsg }}</p>
       </SettingsSection>
@@ -3801,6 +3841,29 @@ onUnmounted(() => {
 
 .email-actions {
   margin-top: 8px;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.email-test-send-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+}
+
+.email-test-kind-lbl {
+  margin: 0;
+  font-size: 13px;
+  color: var(--color-text-secondary, #a0a0b0);
+  white-space: nowrap;
+}
+
+.email-test-kind-select {
+  flex: 1 1 220px;
+  min-width: 180px;
+  max-width: 100%;
 }
 
 .smtp-port-row {

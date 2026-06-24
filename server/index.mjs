@@ -138,7 +138,7 @@ import {
   isAnyPlaywrightRunnerBusy,
   waitForPlaywrightIdle,
 } from './playwright/run-control.mjs'
-import { sendSmtpTestEmail } from './smtp-mail.mjs'
+import { EMAIL_TEST_KINDS, sendTestEmailForKind } from './email-test-sender.mjs'
 import { startEmailScheduler } from './email-scheduler.mjs'
 import { listPresets, getPreset } from './automation-presets.mjs'
 import {
@@ -1955,12 +1955,18 @@ app.post('/api/settings/smtp-test', async (req, reply) => {
     if (typeof ak !== 'string' || !ak.trim()) {
       return reply.code(400).send({ error: 'No account in session.' })
     }
-    const r = await sendSmtpTestEmail(ak.trim())
-    return { ok: true, ...r }
+    const body = req.body && typeof req.body === 'object' ? req.body : {}
+    const kind = typeof body.kind === 'string' ? body.kind.trim() : 'smtp'
+    const r = await sendTestEmailForKind(ak.trim(), kind)
+    return { ok: true, kind, ...r }
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e)
     return reply.code(400).send({ error: msg })
   }
+})
+
+app.get('/api/settings/email-test-kinds', async () => {
+  return { kinds: EMAIL_TEST_KINDS }
 })
 
 const BB_CHAT_GUID_MAX = 512
