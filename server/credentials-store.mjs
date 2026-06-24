@@ -7,7 +7,7 @@ import { requestAsyncLocalStorage } from './request-context.mjs'
 import { getDataAccountKey, keyForUser } from './scope-kv.mjs'
 import {
   appendWorkWeekScheduleChange,
-  normalizeWorkWeekScheduleHistory,
+  sanitizeWorkWeekScheduleHistory,
 } from '../src/utils/workWeekGroup.js'
 
 const ALGO = 'aes-256-gcm'
@@ -119,11 +119,7 @@ function parseCredData(data) {
     typeof rawSem === 'number' && !Number.isNaN(rawSem)
       ? Math.max(0, Math.min(1439, Math.floor(rawSem)))
       : 1439
-  const workWeekScheduleHistory = normalizeWorkWeekScheduleHistory(
-    data.workWeekScheduleHistory,
-    workWeekStartDay,
-    workWeekEndDay,
-  )
+  const workWeekScheduleHistory = sanitizeWorkWeekScheduleHistory(data.workWeekScheduleHistory)
   return {
     username: data.username ?? null,
     passwordEnc: data.passwordEnc ?? null,
@@ -163,7 +159,7 @@ async function readFileRawForAccount(accountKey) {
     linehaulPollMinutes: null,
     workWeekStartDay: 0,
     workWeekEndDay: 6,
-    workWeekScheduleHistory: normalizeWorkWeekScheduleHistory(null, 0, 6),
+    workWeekScheduleHistory: [],
     shiftStartMins: 0,
     shiftEndMins: 1439,
     driverPhone: null,
@@ -462,15 +458,20 @@ export async function saveCredentials(body) {
 
   const prevStart = prev.workWeekStartDay ?? 0
   const prevEnd = prev.workWeekEndDay ?? 6
-  let workWeekScheduleHistory = normalizeWorkWeekScheduleHistory(
-    prev.workWeekScheduleHistory,
-    prevStart,
-    prevEnd,
-  )
+  let workWeekScheduleHistory = sanitizeWorkWeekScheduleHistory(prev.workWeekScheduleHistory)
   if (workWeekStartDay !== prevStart || workWeekEndDay !== prevEnd) {
+    const effectiveFromMs =
+      typeof body.workWeekChangeEffectiveFromMs === 'number' &&
+      Number.isFinite(body.workWeekChangeEffectiveFromMs) &&
+      body.workWeekChangeEffectiveFromMs >= 0
+        ? Math.floor(body.workWeekChangeEffectiveFromMs)
+        : undefined
     workWeekScheduleHistory = appendWorkWeekScheduleChange(workWeekScheduleHistory, {
+      effectiveFromMs,
       workWeekStartDay,
       workWeekEndDay,
+      priorWorkWeekStartDay: prevStart,
+      priorWorkWeekEndDay: prevEnd,
     })
   }
 
@@ -509,7 +510,7 @@ export async function clearCredentials() {
     linehaulPollMinutes: null,
     workWeekStartDay: 0,
     workWeekEndDay: 6,
-    workWeekScheduleHistory: normalizeWorkWeekScheduleHistory(null, 0, 6),
+    workWeekScheduleHistory: [],
     shiftStartMins: 0,
     shiftEndMins: 1439,
     driverPhone: null,

@@ -153,6 +153,7 @@ import {
   applyBlueBubblesPrefsFromCredentials,
 } from '../utils/blueBubblesPrefs.js'
 import { restartBlueBubblesBackgroundPoll } from '../utils/blueBubblesBackgroundPoll.js'
+import { workWeekChangeEffectiveFromMs } from '../utils/workWeekGroup.js'
 import {
   appGeoLat,
   appGeoLng,
@@ -518,6 +519,9 @@ const credTractor = ref('')
 /** 0=Sun..6=Sat; History groups by your rolling 7-day work week starting on this day */
 const workWeekStartDay = ref(0)
 const workWeekEndDay = ref(6)
+/** Last saved work week — used to record schedule history only when days actually change. */
+const loadedWorkWeekStartDay = ref(0)
+const loadedWorkWeekEndDay = ref(6)
 /** History calendar "shift day" — overnight (e.g. 19:00–07:00) uses the date the shift started. */
 const shiftStartTime = ref('00:00')
 const shiftEndTime = ref('23:59')
@@ -1227,11 +1231,13 @@ async function loadCredentials() {
       const ws =
         typeof credMeta.value.workWeekStartDay === 'number' ? credMeta.value.workWeekStartDay : 0
       workWeekStartDay.value = Math.min(6, Math.max(0, Math.floor(ws)))
+      loadedWorkWeekStartDay.value = workWeekStartDay.value
     }
     {
       const we =
         typeof credMeta.value.workWeekEndDay === 'number' ? credMeta.value.workWeekEndDay : 6
       workWeekEndDay.value = Math.min(6, Math.max(0, Math.floor(we)))
+      loadedWorkWeekEndDay.value = workWeekEndDay.value
     }
     {
       const mToStr = (m) => {
@@ -1345,6 +1351,9 @@ async function saveCredentials() {
     }
     const ssm = tToM(shiftStartTime.value)
     const sem = tToM(shiftEndTime.value)
+    const workWeekChanged =
+      workWeekStartDay.value !== loadedWorkWeekStartDay.value ||
+      workWeekEndDay.value !== loadedWorkWeekEndDay.value
     const body = {
       username: credUser.value,
       password: credPass.value || undefined,
@@ -1360,6 +1369,12 @@ async function saveCredentials() {
         Math.min(LINEHAUL_POLL_MAX, Math.floor(Number(credPollMinutes.value) || 0)),
       ),
     }
+    if (workWeekChanged) {
+      body.workWeekChangeEffectiveFromMs = workWeekChangeEffectiveFromMs(
+        Date.now(),
+        workWeekStartDay.value,
+      )
+    }
     if (hasBearerInput) {
       body.fedexLinehaulBearer = credLinehaulToken.value.trim()
     }
@@ -1371,7 +1386,11 @@ async function saveCredentials() {
     credLinehaulToken.value = ''
     await loadCredentials()
     await loadAssignmentState()
-    credMsg.value = 'Saved'
+    loadedWorkWeekStartDay.value = workWeekStartDay.value
+    loadedWorkWeekEndDay.value = workWeekEndDay.value
+    credMsg.value = workWeekChanged
+      ? 'Saved. Work week change applies from this week forward; older weeks are unchanged.'
+      : 'Saved'
     pushLiveLog({ type: 'info', message: 'Credentials saved', ts: Date.now() })
   } catch (e) {
     credMsg.value = e instanceof Error ? e.message : String(e)

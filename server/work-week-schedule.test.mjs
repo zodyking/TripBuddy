@@ -4,6 +4,7 @@ import {
   appendWorkWeekScheduleChange,
   normalizeWorkWeekScheduleHistory,
   resolveWorkWeekDaysForTimestamp,
+  sanitizeWorkWeekScheduleHistory,
   workWeekChangeEffectiveFromMs,
   workWeekGroupMeta,
   workWeekGroupMetaForCreds,
@@ -17,14 +18,28 @@ test('normalizeWorkWeekScheduleHistory seeds baseline at epoch', () => {
   assert.equal(h[0].workWeekEndDay, 1)
 })
 
+test('sanitizeWorkWeekScheduleHistory does not invent baseline from current settings', () => {
+  const h = sanitizeWorkWeekScheduleHistory(undefined)
+  assert.equal(h.length, 0)
+  const days = resolveWorkWeekDaysForTimestamp(Date.parse('2026-06-20T12:00:00.000Z'), {
+    workWeekStartDay: 4,
+    workWeekEndDay: 1,
+    workWeekScheduleHistory: [],
+  })
+  assert.equal(days.workWeekStartDay, 4)
+  assert.equal(days.workWeekEndDay, 1)
+})
+
 test('work week change applies from current week start forward only', () => {
   const changeAt = Date.parse('2026-06-25T15:00:00.000Z') // Wed
   const effectiveFrom = workWeekChangeEffectiveFromMs(changeAt, 4) // Thu start
-  const history = appendWorkWeekScheduleChange(
-    normalizeWorkWeekScheduleHistory(null, 0, 6),
-    { effectiveFromMs: effectiveFrom, workWeekStartDay: 4, workWeekEndDay: 1 },
-    changeAt,
-  )
+  const history = appendWorkWeekScheduleChange([], {
+    effectiveFromMs: effectiveFrom,
+    workWeekStartDay: 4,
+    workWeekEndDay: 1,
+    priorWorkWeekStartDay: 0,
+    priorWorkWeekEndDay: 6,
+  }, changeAt)
   const creds = {
     workWeekStartDay: 4,
     workWeekEndDay: 1,

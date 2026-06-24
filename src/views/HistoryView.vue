@@ -1,5 +1,6 @@
 <script setup>
-import { ref, computed, watch, onMounted, onUnmounted, nextTick, Teleport, defineAsyncComponent } from 'vue'
+import { ref, computed, watch, onMounted, onUnmounted, onActivated, nextTick, Teleport, defineAsyncComponent } from 'vue'
+import { useRoute } from 'vue-router'
 import {
   getAssignment,
   getCredentials,
@@ -52,6 +53,32 @@ import {
 } from '../utils/federalHolidayMileage.js'
 
 const HistoryPdfJsViewer = defineAsyncComponent(() => import('../components/HistoryPdfJsViewer.vue'))
+
+const route = useRoute()
+
+async function reloadWorkWeekFromCredentials(c) {
+  const creds = c ?? (await getCredentials())
+  const ws = typeof creds.workWeekStartDay === 'number' ? creds.workWeekStartDay : 0
+  const we = typeof creds.workWeekEndDay === 'number' ? creds.workWeekEndDay : 6
+  const ssm =
+    typeof creds.shiftStartMins === 'number' && !Number.isNaN(creds.shiftStartMins)
+      ? Math.max(0, Math.min(1439, Math.floor(creds.shiftStartMins)))
+      : 0
+  const sem =
+    typeof creds.shiftEndMins === 'number' && !Number.isNaN(creds.shiftEndMins)
+      ? Math.max(0, Math.min(1439, Math.floor(creds.shiftEndMins)))
+      : 1439
+  workWeekFromCred.value = {
+    workWeekStartDay: Math.min(6, Math.max(0, Math.floor(ws))),
+    workWeekEndDay: Math.min(6, Math.max(0, Math.floor(we))),
+    workWeekScheduleHistory: Array.isArray(creds.workWeekScheduleHistory)
+      ? creds.workWeekScheduleHistory
+      : [],
+    shiftStartMins: ssm,
+    shiftEndMins: sem,
+  }
+  return creds
+}
 
 /**
  * @typedef {object} LedgerEntry
@@ -855,26 +882,7 @@ async function load() {
   loading.value = true
   error.value = ''
   try {
-    const c = await getCredentials()
-    const ws = typeof c.workWeekStartDay === 'number' ? c.workWeekStartDay : 0
-    const we = typeof c.workWeekEndDay === 'number' ? c.workWeekEndDay : 6
-    const ssm =
-      typeof c.shiftStartMins === 'number' && !Number.isNaN(c.shiftStartMins)
-        ? Math.max(0, Math.min(1439, Math.floor(c.shiftStartMins)))
-        : 0
-    const sem =
-      typeof c.shiftEndMins === 'number' && !Number.isNaN(c.shiftEndMins)
-        ? Math.max(0, Math.min(1439, Math.floor(c.shiftEndMins)))
-        : 1439
-    workWeekFromCred.value = {
-      workWeekStartDay: Math.min(6, Math.max(0, Math.floor(ws))),
-      workWeekEndDay: Math.min(6, Math.max(0, Math.floor(we))),
-      workWeekScheduleHistory: Array.isArray(c.workWeekScheduleHistory)
-        ? c.workWeekScheduleHistory
-        : [],
-      shiftStartMins: ssm,
-      shiftEndMins: sem,
-    }
+    const c = await reloadWorkWeekFromCredentials()
     federalHolidayMileage15xEnabled.value = c.federalHolidayMileage15xEnabled !== false
     storedUsername.value = typeof c.username === 'string' ? c.username.trim() : ''
     pdfCredMeta.value = {
@@ -2326,6 +2334,17 @@ onMounted(() => {
   }
   void load()
 })
+
+onActivated(() => {
+  void reloadWorkWeekFromCredentials().catch(() => {})
+})
+
+watch(
+  () => route.name,
+  (name) => {
+    if (name === 'history') void reloadWorkWeekFromCredentials().catch(() => {})
+  },
+)
 
 onUnmounted(() => {
   closeWeekPdfViewer()

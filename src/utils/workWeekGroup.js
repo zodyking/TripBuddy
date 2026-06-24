@@ -116,14 +116,11 @@ export function workWeekGroupMeta(
  */
 
 /**
+ * Parse stored history without inventing a baseline from current settings.
  * @param {unknown} history
- * @param {number} [fallbackStart]
- * @param {number} [fallbackEnd]
  * @returns {WorkWeekScheduleEntry[]}
  */
-export function normalizeWorkWeekScheduleHistory(history, fallbackStart = 0, fallbackEnd = 6) {
-  const fbStart = Math.min(6, Math.max(0, Math.floor(Number(fallbackStart) || 0)))
-  const fbEnd = Math.min(6, Math.max(0, Math.floor(Number(fallbackEnd) || 6)))
+export function sanitizeWorkWeekScheduleHistory(history) {
   /** @type {WorkWeekScheduleEntry[]} */
   const list = []
   if (Array.isArray(history)) {
@@ -147,7 +144,23 @@ export function normalizeWorkWeekScheduleHistory(history, fallbackStart = 0, fal
       deduped.push(row)
     }
   }
-  if (!deduped.length || deduped[0].effectiveFromMs > 0) {
+  return deduped
+}
+
+/**
+ * @param {unknown} history
+ * @param {number} [fallbackStart]
+ * @param {number} [fallbackEnd]
+ * @returns {WorkWeekScheduleEntry[]}
+ */
+export function normalizeWorkWeekScheduleHistory(history, fallbackStart = 0, fallbackEnd = 6) {
+  const fbStart = Math.min(6, Math.max(0, Math.floor(Number(fallbackStart) || 0)))
+  const fbEnd = Math.min(6, Math.max(0, Math.floor(Number(fallbackEnd) || 6)))
+  const deduped = sanitizeWorkWeekScheduleHistory(history)
+  if (!deduped.length) {
+    return [{ effectiveFromMs: 0, workWeekStartDay: fbStart, workWeekEndDay: fbEnd }]
+  }
+  if (deduped[0].effectiveFromMs > 0) {
     deduped.unshift({ effectiveFromMs: 0, workWeekStartDay: fbStart, workWeekEndDay: fbEnd })
   }
   return deduped
@@ -173,7 +186,24 @@ export function workWeekChangeEffectiveFromMs(nowMs, newStartDay) {
 export function appendWorkWeekScheduleChange(history, entry, nowMs = Date.now()) {
   const ws = Math.min(6, Math.max(0, Math.floor(Number(entry.workWeekStartDay) || 0)))
   const we = Math.min(6, Math.max(0, Math.floor(Number(entry.workWeekEndDay) || 6)))
-  const normalized = normalizeWorkWeekScheduleHistory(history, ws, we)
+  const priorStart =
+    typeof entry.priorWorkWeekStartDay === 'number'
+      ? Math.min(6, Math.max(0, Math.floor(entry.priorWorkWeekStartDay)))
+      : ws
+  const priorEnd =
+    typeof entry.priorWorkWeekEndDay === 'number'
+      ? Math.min(6, Math.max(0, Math.floor(entry.priorWorkWeekEndDay)))
+      : we
+  let normalized = sanitizeWorkWeekScheduleHistory(history)
+  if (!normalized.length) {
+    normalized = [{ effectiveFromMs: 0, workWeekStartDay: priorStart, workWeekEndDay: priorEnd }]
+  } else if (normalized[0].effectiveFromMs > 0) {
+    normalized.unshift({
+      effectiveFromMs: 0,
+      workWeekStartDay: priorStart,
+      workWeekEndDay: priorEnd,
+    })
+  }
   const effectiveFromMs =
     typeof entry.effectiveFromMs === 'number' && Number.isFinite(entry.effectiveFromMs)
       ? entry.effectiveFromMs
@@ -204,11 +234,10 @@ export function appendWorkWeekScheduleChange(history, entry, nowMs = Date.now())
 export function resolveWorkWeekDaysForTimestamp(tsMs, creds = {}) {
   const currentStart = Math.min(6, Math.max(0, Math.floor(Number(creds.workWeekStartDay) || 0)))
   const currentEnd = Math.min(6, Math.max(0, Math.floor(Number(creds.workWeekEndDay) || 6)))
-  const history = normalizeWorkWeekScheduleHistory(
-    creds.workWeekScheduleHistory,
-    currentStart,
-    currentEnd,
-  )
+  const history = sanitizeWorkWeekScheduleHistory(creds.workWeekScheduleHistory)
+  if (!history.length) {
+    return { workWeekStartDay: currentStart, workWeekEndDay: currentEnd }
+  }
   const t = typeof tsMs === 'number' && Number.isFinite(tsMs) ? tsMs : 0
   /** @type {WorkWeekScheduleEntry | null} */
   let active = history[0] || null
