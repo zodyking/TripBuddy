@@ -218,6 +218,9 @@ export async function ensureUserProfileTable() {
     await client.query(`
       ALTER TABLE ${TABLE} ADD COLUMN IF NOT EXISTS email_last_trip_activity_ms BIGINT
     `)
+    await client.query(`
+      ALTER TABLE ${TABLE} ADD COLUMN IF NOT EXISTS email_last_monitored_trip_fp TEXT
+    `)
   } finally {
     client.release()
   }
@@ -1105,6 +1108,7 @@ function rowToSmtpPrefs(row) {
       lastDispatchNotifyFp: '',
       lastDriverMismatchMs: 0,
       lastTripActivityMs: 0,
+      lastMonitoredTripFp: '',
     }
   }
   let password = ''
@@ -1197,6 +1201,10 @@ function rowToSmtpPrefs(row) {
       Number.isFinite(row.email_last_trip_activity_ms)
         ? Math.floor(row.email_last_trip_activity_ms)
         : 0,
+    lastMonitoredTripFp:
+      typeof row.email_last_monitored_trip_fp === 'string'
+        ? row.email_last_monitored_trip_fp.trim()
+        : '',
   }
 }
 
@@ -1215,7 +1223,8 @@ export async function getSmtpPrefsForAccount(accountKey) {
             email_trip_cc, email_daily_shift_cc, email_weekly_summary_cc, email_daily_delay_mins,
             email_last_daily_shift_key, email_last_weekly_work_key, email_last_weekly_pay_key,
             email_last_trip_notify_fp, email_last_status_notify_fp, email_last_dispatch_notify_fp,
-            email_last_driver_mismatch_ms, email_last_trip_activity_ms
+            email_last_driver_mismatch_ms, email_last_trip_activity_ms,
+            email_last_monitored_trip_fp
      FROM ${TABLE} WHERE account_key = $1`,
     [ak],
   )
@@ -1260,6 +1269,9 @@ export async function patchSmtpSendStateForAccount(accountKey, patch) {
   }
   if (patch.lastTripActivityMs !== undefined) {
     add('email_last_trip_activity_ms', patch.lastTripActivityMs || null)
+  }
+  if (patch.lastMonitoredTripFp !== undefined) {
+    add('email_last_monitored_trip_fp', patch.lastMonitoredTripFp || null)
   }
   if (!sets.length) return
   await p.query(
