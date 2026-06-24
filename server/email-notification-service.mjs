@@ -18,12 +18,17 @@ import {
 import {
   buildDailyShiftSummary,
   buildWeekTotalsPdfOpts,
+  buildWeeklyTripContexts,
   weekMetaForTimestamp,
 } from './email-ledger-summary.mjs'
 import {
   computeDailyShiftEmailDecision,
   computeWeeklyEmailDecision,
 } from '../src/utils/shiftCalendar.js'
+import {
+  resolveEmailTripContextForNotification,
+  resolveActiveEmailTripContext,
+} from './email-trip-details.mjs'
 import { buildWeekMileagePdfBuffer } from './email-week-pdf.mjs'
 
 /**
@@ -53,7 +58,8 @@ export async function maybeSendEmailForInAppNotification(accountKey, payload) {
     const fp = `dispatch:${hint.slice(0, 200)}`
     if (fp && fp === prefs.lastDispatchNotifyFp) return { skipped: 'deduped' }
     return runWithCredentialAccountKey(accountKey, async () => {
-      const mail = dispatchInstructionsEmail({ hint })
+      const trip = await resolveActiveEmailTripContext(accountKey)
+      const mail = dispatchInstructionsEmail({ hint, trip })
       await sendEmailForAccount(accountKey, { ...mail, cc: ccForKind(prefs, 'trip') })
       await patchSmtpSendStateForAccount(accountKey, { lastDispatchNotifyFp: fp })
       return { ok: true }
@@ -83,7 +89,10 @@ export async function maybeSendEmailForInAppNotification(accountKey, payload) {
           ? 'En route'
           : 'Complete'
     return runWithCredentialAccountKey(accountKey, async () => {
-      const mail = tripStatusEmail({ statusLabel, fromPhase, toPhase })
+      const creds = await getCredentialsMeta()
+      const trip = await resolveEmailTripContextForNotification(accountKey, extra, event)
+      trip.driverName = creds.driverName || trip.driverName
+      const mail = tripStatusEmail({ statusLabel, fromPhase, toPhase, trip })
       await sendEmailForAccount(accountKey, { ...mail, cc: ccForKind(prefs, 'trip') })
       const patch = { lastStatusNotifyFp: fp }
       if (event === 'status_complete') {
@@ -103,7 +112,8 @@ export async function maybeSendEmailForInAppNotification(accountKey, payload) {
     const tractorLocation = formatLocation(extra.tractorLocation)
     const driverLocation = formatLocation(extra.driverLocation)
     return runWithCredentialAccountKey(accountKey, async () => {
-      const mail = driverMismatchEmail({ tractorLocation, driverLocation })
+      const trip = await resolveActiveEmailTripContext(accountKey)
+      const mail = driverMismatchEmail({ tractorLocation, driverLocation, trip })
       await sendEmailForAccount(accountKey, { ...mail, cc: ccForKind(prefs, 'trip') })
       await patchSmtpSendStateForAccount(accountKey, { lastDriverMismatchMs: Date.now() })
       return { ok: true }
@@ -129,12 +139,10 @@ async function sendTripRouteEmail(accountKey, prefs, extra, buildMail, eventKey)
 
   return runWithCredentialAccountKey(accountKey, async () => {
     const creds = await getCredentialsMeta()
-    const mail = buildMail({
-      leg,
-      origin: origin || '—',
-      destination: destination || '—',
-      driverName: creds.driverName || undefined,
-    })
+    const trip = await resolveEmailTripContextForNotification(accountKey, extra, eventKey)
+    trip.driverName = creds.driverName || trip.driverName
+    if (creds.tractorNumber) trip.tractorNumber = String(creds.tractorNumber)
+    const mail = buildMail(trip)
     await sendEmailForAccount(accountKey, { ...mail, cc: ccForKind(prefs, 'trip') })
     await patchSmtpSendStateForAccount(accountKey, { lastTripNotifyFp: fp })
     return { ok: true }
@@ -218,6 +226,10 @@ export async function sendWeeklySummaryEmail(accountKey, referenceMs) {
       ...ctx,
       groupLabelMode: 'fedexPaySchedule',
     })
+    const weekTrips = buildWeeklyTripContexts(ledger, workWeek, {
+      ...ctx,
+      groupLabelMode: 'default',
+    })
 
     const [workPdf, payPdf] = await Promise.all([
       Promise.resolve(buildWeekMileagePdfBuffer(workOpts)),
@@ -228,6 +240,9 @@ export async function sendWeeklySummaryEmail(accountKey, referenceMs) {
       weekLabel: workWeek.groupLabel,
       workWeekLabel: workWeek.groupLabel,
       payWeekLabel: payWeek.groupLabel,
+      tripCount: weekTrips.tripCount,
+      totalMiles: weekTrips.totalMiles,
+      trips: weekTrips.trips,
     })
 
     await sendEmailForAccount(accountKey, {

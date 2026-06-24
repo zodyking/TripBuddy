@@ -1,5 +1,6 @@
 import { shiftDateKeyForEventMs } from '../src/utils/shiftCalendar.js'
 import { workWeekGroupMeta, workWeekKeyForDate } from '../src/utils/workWeekGroup.js'
+import { buildEmailTripContextFromLedgerEntry } from './email-trip-details.mjs'
 
 const PAY_ROUND_BAND_MIN = 200
 const PAY_ROUND_BAND_MAX = 210
@@ -107,16 +108,13 @@ export function buildDailyShiftSummary(ledger, shiftDayKey, shift) {
     (a, b) => entryTs(b) - entryTs(a),
   )
   let totalMiles = 0
-  const rows = items.map((e) => {
+  const trips = items.map((e) => {
     const mi = entryMiles(e)
     totalMiles += mi
-    return [
-      formatWhen(entryTs(e)),
-      String(e?.dailyTripLegSequence ?? '—'),
-      entryRoute(e),
-      entryOutcome(e),
-      mi ? `${mi}` : '—',
-    ]
+    const ctx = buildEmailTripContextFromLedgerEntry(e)
+    ctx.completedAt = formatWhen(entryTs(e))
+    if (mi) ctx.miles = `${mi} mi`
+    return ctx
   })
   const d = shiftDayKey ? new Date(`${shiftDayKey}T12:00:00`) : new Date()
   const shiftLabel = d.toLocaleDateString('en-US', {
@@ -125,7 +123,28 @@ export function buildDailyShiftSummary(ledger, shiftDayKey, shift) {
     day: 'numeric',
     year: 'numeric',
   })
-  return { shiftLabel, tripCount: items.length, totalMiles, rows }
+  return { shiftLabel, tripCount: items.length, totalMiles, trips }
+}
+
+/**
+ * @param {unknown[]} ledger
+ * @param {{ key: string }} week
+ * @param {object} opts
+ */
+export function buildWeeklyTripContexts(ledger, week, opts) {
+  const items = ledgerEntriesForWeek(ledger, week, opts).sort(
+    (a, b) => entryTs(b) - entryTs(a),
+  )
+  let totalMiles = 0
+  const trips = items.map((e) => {
+    const mi = entryMiles(e)
+    totalMiles += mi
+    const ctx = buildEmailTripContextFromLedgerEntry(e)
+    ctx.completedAt = formatWhen(entryTs(e))
+    if (mi) ctx.miles = `${mi} mi`
+    return ctx
+  })
+  return { tripCount: items.length, totalMiles, trips }
 }
 
 /**

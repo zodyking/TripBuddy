@@ -8,6 +8,7 @@ const BRAND = {
   muted: '#5C5C72',
   border: '#E8E4F0',
   success: '#0D7A4E',
+  subtle: '#FAF9FC',
 }
 
 export const EMAIL_FOOTER_HTML =
@@ -50,7 +51,7 @@ export function wrapEmailHtml(opts) {
   <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:${BRAND.bg};padding:24px 12px;">
     <tr>
       <td align="center">
-        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:560px;background:${BRAND.card};border-radius:16px;overflow:hidden;box-shadow:0 8px 32px rgba(77,20,140,0.08);border:1px solid ${BRAND.border};">
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:600px;background:${BRAND.card};border-radius:16px;overflow:hidden;box-shadow:0 8px 32px rgba(77,20,140,0.08);border:1px solid ${BRAND.border};">
           <tr>
             <td style="background:linear-gradient(135deg,${BRAND.purple} 0%,${BRAND.purpleDark} 100%);padding:24px 28px;">
               <div style="font-size:13px;font-weight:600;letter-spacing:0.08em;text-transform:uppercase;color:rgba(255,255,255,0.82);">TripBuddy</div>
@@ -83,7 +84,7 @@ export function keyValueBlock(opts) {
   const rows = (opts.rows || [])
     .map(
       (r) => `<tr>
-        <td style="padding:8px 0;font-size:13px;color:${BRAND.muted};width:38%;vertical-align:top;">${escapeHtml(r.label)}</td>
+        <td style="padding:8px 0;font-size:13px;color:${BRAND.muted};width:34%;vertical-align:top;">${escapeHtml(r.label)}</td>
         <td style="padding:8px 0;font-size:15px;font-weight:600;color:${BRAND.text};vertical-align:top;">${escapeHtml(r.value)}</td>
       </tr>`,
     )
@@ -92,51 +93,129 @@ export function keyValueBlock(opts) {
 }
 
 /**
- * @param {{ headers: string[], rows: string[][] }} table
+ * @param {import('./email-trip-details.mjs').EmailTripContext} trip
+ * @param {{ compact?: boolean, showMeta?: boolean }} [opts]
  */
-export function dataTable(table) {
-  const th = (table.headers || [])
-    .map(
-      (h) =>
-        `<th align="left" style="padding:10px 12px;font-size:11px;text-transform:uppercase;letter-spacing:0.06em;color:${BRAND.muted};border-bottom:2px solid ${BRAND.border};">${escapeHtml(h)}</th>`,
-    )
-    .join('')
-  const body = (table.rows || [])
-    .map((row, i) => {
-      const bg = i % 2 === 0 ? BRAND.card : '#FAF9FC'
-      const tds = row
-        .map(
-          (c) =>
-            `<td style="padding:10px 12px;font-size:14px;color:${BRAND.text};border-bottom:1px solid ${BRAND.border};background:${bg};">${escapeHtml(c)}</td>`,
-        )
-        .join('')
-      return `<tr>${tds}</tr>`
-    })
-    .join('')
-  return `<div style="overflow-x:auto;border:1px solid ${BRAND.border};border-radius:12px;margin-top:16px;">
-    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;min-width:420px;">
-      <thead><tr>${th}</tr></thead>
-      <tbody>${body}</tbody>
-    </table>
+export function tripDetailCardHtml(trip, opts = {}) {
+  const compact = opts.compact === true
+  const showMeta = opts.showMeta !== false
+
+  const metaRows = []
+  if (showMeta) {
+    if (trip.completedAt) metaRows.push({ label: 'Completed', value: trip.completedAt })
+    if (trip.leg && trip.leg !== '—') metaRows.push({ label: 'Leg', value: trip.leg })
+    if (trip.outcome && trip.outcome !== '—') metaRows.push({ label: 'Outcome', value: trip.outcome })
+    if (trip.miles && trip.miles !== '—') metaRows.push({ label: 'Miles', value: trip.miles })
+    if (trip.driverName) metaRows.push({ label: 'Driver', value: trip.driverName })
+    if (trip.tractorNumber) metaRows.push({ label: 'Tractor', value: trip.tractorNumber })
+    if (trip.tripStatus) metaRows.push({ label: 'Trip status', value: trip.tripStatus })
+  }
+
+  const trailerBlock =
+    trip.trailers.length > 0
+      ? `<div style="margin-top:${compact ? '10' : '14'}px;">
+          <div style="font-size:11px;font-weight:700;letter-spacing:0.06em;text-transform:uppercase;color:${BRAND.muted};margin-bottom:8px;">Trailers</div>
+          ${trip.trailers
+            .map((tr) => {
+              const header = `Trailer ${tr.order}${tr.number !== '—' ? ` · #${tr.number}` : ''}${tr.size !== '—' ? ` · ${tr.size}` : ''}`
+              const badges = [tr.loadType, tr.status].filter((b) => b && b !== '—').join(' · ')
+              const details = [
+                tr.seal !== '—' ? `Seal ${tr.seal}` : '',
+                tr.weight !== '—' ? tr.weight : '',
+                tr.destination !== '—' ? `Dest ${tr.destination}` : '',
+              ]
+                .filter(Boolean)
+                .join(' · ')
+              return `<div style="padding:10px 12px;margin-bottom:8px;border-radius:10px;background:${BRAND.subtle};border:1px solid ${BRAND.border};">
+                <div style="font-size:14px;font-weight:600;color:${BRAND.text};">${escapeHtml(header)}</div>
+                ${badges ? `<div style="margin-top:4px;font-size:12px;color:${BRAND.muted};">${escapeHtml(badges)}</div>` : ''}
+                ${details ? `<div style="margin-top:4px;font-size:13px;color:${BRAND.text};">${escapeHtml(details)}</div>` : ''}
+              </div>`
+            })
+            .join('')}
+        </div>`
+      : `<div style="margin-top:10px;font-size:13px;color:${BRAND.muted};">No trailer details on file.</div>`
+
+  const dollyBlock =
+    trip.dollies.length > 0
+      ? `<div style="margin-top:${compact ? '10' : '14'}px;">
+          <div style="font-size:11px;font-weight:700;letter-spacing:0.06em;text-transform:uppercase;color:${BRAND.muted};margin-bottom:6px;">Dollies</div>
+          <div style="font-size:14px;color:${BRAND.text};font-weight:600;">${escapeHtml(trip.dollySummary)}</div>
+        </div>`
+      : ''
+
+  const instructions =
+    trip.dispatchInstructions && !compact
+      ? `<div style="margin-top:14px;padding:12px 14px;border-radius:10px;background:${BRAND.subtle};border:1px solid ${BRAND.border};">
+          <div style="font-size:11px;font-weight:700;letter-spacing:0.06em;text-transform:uppercase;color:${BRAND.muted};margin-bottom:6px;">Dispatch instructions</div>
+          <div style="font-size:14px;line-height:1.55;color:${BRAND.text};white-space:pre-wrap;">${escapeHtml(trip.dispatchInstructions)}</div>
+        </div>`
+      : ''
+
+  return `<div style="margin-top:${compact ? '12' : '16'}px;padding:${compact ? '14' : '16'}px;border-radius:12px;border:1px solid ${BRAND.border};background:${BRAND.card};">
+    <div style="font-size:11px;font-weight:700;letter-spacing:0.06em;text-transform:uppercase;color:${BRAND.muted};margin-bottom:6px;">Route</div>
+    <div style="font-size:16px;font-weight:700;line-height:1.4;color:${BRAND.text};">${escapeHtml(trip.origin)}</div>
+    <div style="margin:6px 0;font-size:13px;color:${BRAND.muted};">to</div>
+    <div style="font-size:16px;font-weight:700;line-height:1.4;color:${BRAND.text};">${escapeHtml(trip.destination)}</div>
+    ${metaRows.length ? keyValueBlock({ rows: metaRows }) : ''}
+    ${dollyBlock}
+    ${trailerBlock}
+    ${instructions}
   </div>`
 }
 
-/** @param {{ leg: string, origin: string, destination: string, driverName?: string }} trip */
+/** @param {import('./email-trip-details.mjs').EmailTripContext} trip */
+export function tripDetailPlainText(trip) {
+  const lines = [
+    `Route: ${trip.route}`,
+    `Origin: ${trip.origin}`,
+    `Destination: ${trip.destination}`,
+  ]
+  if (trip.leg && trip.leg !== '—') lines.push(`Leg: ${trip.leg}`)
+  if (trip.driverName) lines.push(`Driver: ${trip.driverName}`)
+  if (trip.tractorNumber) lines.push(`Tractor: ${trip.tractorNumber}`)
+  if (trip.outcome && trip.outcome !== '—') lines.push(`Outcome: ${trip.outcome}`)
+  if (trip.miles) lines.push(`Miles: ${trip.miles}`)
+  if (trip.completedAt) lines.push(`Completed: ${trip.completedAt}`)
+  if (trip.dollies.length) lines.push(`Dollies: ${trip.dollySummary}`)
+  for (const tr of trip.trailers) {
+    const parts = [
+      `Trailer ${tr.order}`,
+      tr.number !== '—' ? `#${tr.number}` : '',
+      tr.size !== '—' ? tr.size : '',
+      tr.loadType !== '—' ? tr.loadType : '',
+      tr.seal !== '—' ? `Seal ${tr.seal}` : '',
+      tr.weight !== '—' ? tr.weight : '',
+    ].filter(Boolean)
+    lines.push(parts.join(' · '))
+  }
+  if (trip.dispatchInstructions) {
+    lines.push('', 'Dispatch instructions:', trip.dispatchInstructions)
+  }
+  return lines.join('\n')
+}
+
+/**
+ * @param {import('./email-trip-details.mjs').EmailTripContext} trip
+ */
+function tripEmailCommon(trip) {
+  return {
+    route: trip.route,
+    bodyTrip: tripDetailCardHtml(trip),
+    textTrip: tripDetailPlainText(trip),
+  }
+}
+
+/** @param {import('./email-trip-details.mjs').EmailTripContext} trip */
 export function newTripEmail(trip) {
-  const route = `${trip.origin} → ${trip.destination}`
+  const { route, bodyTrip, textTrip } = tripEmailCommon(trip)
   const bodyHtml = `
-    <p style="margin:0 0 16px;font-size:16px;line-height:1.55;color:${BRAND.text};">
+    <p style="margin:0 0 8px;font-size:16px;line-height:1.55;color:${BRAND.text};">
       A new trip has been assigned and is ready in TripBuddy.
     </p>
-    ${keyValueBlock({
-      rows: [
-        { label: 'Route', value: route },
-        { label: 'Leg', value: trip.leg || '—' },
-        ...(trip.driverName ? [{ label: 'Driver', value: trip.driverName }] : []),
-      ],
-    })}
+    ${bodyTrip}
     <p style="margin:20px 0 0;font-size:14px;line-height:1.5;color:${BRAND.muted};">
-      Open TripBuddy on your device to review trip details, trailers, and quick actions.
+      Open TripBuddy on your device for live updates and quick actions.
     </p>`
   return {
     subject: toEmailTitleCase(`New trip: ${route}`),
@@ -145,24 +224,18 @@ export function newTripEmail(trip) {
       preheader: `New trip ${route}`,
       bodyHtml,
     }),
-    text: `New Trip Assigned\nRoute: ${route}\nLeg: ${trip.leg || '—'}`,
+    text: `New Trip Assigned\n\n${textTrip}`,
   }
 }
 
-/** @param {{ leg: string, origin: string, destination: string, driverName?: string }} trip */
+/** @param {import('./email-trip-details.mjs').EmailTripContext} trip */
 export function preplanTripEmail(trip) {
-  const route = `${trip.origin} → ${trip.destination}`
+  const { route, bodyTrip, textTrip } = tripEmailCommon(trip)
   const bodyHtml = `
-    <p style="margin:0 0 16px;font-size:16px;line-height:1.55;color:${BRAND.text};">
+    <p style="margin:0 0 8px;font-size:16px;line-height:1.55;color:${BRAND.text};">
       A new preplan trip has been assigned in TripBuddy.
     </p>
-    ${keyValueBlock({
-      rows: [
-        { label: 'Route', value: route },
-        { label: 'Leg', value: trip.leg || '—' },
-        ...(trip.driverName ? [{ label: 'Driver', value: trip.driverName }] : []),
-      ],
-    })}
+    ${bodyTrip}
     <p style="margin:20px 0 0;font-size:14px;line-height:1.5;color:${BRAND.muted};">
       Review the preplan in TripBuddy before it becomes your active trip.
     </p>`
@@ -173,14 +246,15 @@ export function preplanTripEmail(trip) {
       preheader: `Preplan ${route}`,
       bodyHtml,
     }),
-    text: `New Preplan Assigned\nRoute: ${route}\nLeg: ${trip.leg || '—'}`,
+    text: `New Preplan Assigned\n\n${textTrip}`,
   }
 }
 
-/** @param {{ statusLabel: string, fromPhase?: string, toPhase?: string }} opts */
+/** @param {{ statusLabel: string, fromPhase?: string, toPhase?: string, trip?: import('./email-trip-details.mjs').EmailTripContext | null }} opts */
 export function tripStatusEmail(opts) {
+  const tripBlock = opts.trip ? tripDetailCardHtml(opts.trip) : ''
   const bodyHtml = `
-    <p style="margin:0 0 16px;font-size:16px;line-height:1.55;color:${BRAND.text};">
+    <p style="margin:0 0 8px;font-size:16px;line-height:1.55;color:${BRAND.text};">
       Your active trip status changed to <strong>${escapeHtml(opts.statusLabel)}</strong>.
     </p>
     ${
@@ -193,39 +267,53 @@ export function tripStatusEmail(opts) {
           })
         : ''
     }
+    ${tripBlock}
     <p style="margin:20px 0 0;font-size:14px;line-height:1.5;color:${BRAND.muted};">
       Open TripBuddy for live trip details and quick actions.
     </p>`
+  const textTrip = opts.trip ? `\n\n${tripDetailPlainText(opts.trip)}` : ''
   return {
-    subject: toEmailTitleCase(`Trip status: ${opts.statusLabel}`),
+    subject: toEmailTitleCase(
+      opts.trip?.route ? `Trip status: ${opts.statusLabel} — ${opts.trip.route}` : `Trip status: ${opts.statusLabel}`,
+    ),
     html: wrapEmailHtml({
       title: `Trip status: ${opts.statusLabel}`,
       preheader: `Status ${opts.statusLabel}`,
       bodyHtml,
     }),
-    text: `Trip Status: ${opts.statusLabel}`,
+    text: `Trip Status: ${opts.statusLabel}${textTrip}`,
   }
 }
 
-/** @param {{ hint?: string }} opts */
+/** @param {{ hint?: string, trip?: import('./email-trip-details.mjs').EmailTripContext | null }} opts */
 export function dispatchInstructionsEmail(opts) {
   const hint = String(opts.hint ?? '').trim()
+  const tripBlock = opts.trip ? tripDetailCardHtml(opts.trip, { showMeta: false }) : ''
   const bodyHtml = `
-    <p style="margin:0 0 16px;font-size:16px;line-height:1.55;color:${BRAND.text};">
+    <p style="margin:0 0 8px;font-size:16px;line-height:1.55;color:${BRAND.text};">
       ${
         hint
           ? 'Dispatch instructions were updated in TripBuddy.'
           : 'Dispatch instructions were cleared in TripBuddy.'
       }
     </p>
+    ${tripBlock}
     ${
       hint
-        ? `<div style="margin:16px 0 0;padding:16px;border-radius:12px;background:#FAF9FC;border:1px solid ${BRAND.border};font-size:14px;line-height:1.55;color:${BRAND.text};white-space:pre-wrap;">${escapeHtml(hint)}</div>`
+        ? `<div style="margin:16px 0 0;padding:16px;border-radius:12px;background:${BRAND.subtle};border:1px solid ${BRAND.border};">
+            <div style="font-size:11px;font-weight:700;letter-spacing:0.06em;text-transform:uppercase;color:${BRAND.muted};margin-bottom:8px;">Updated instructions</div>
+            <div style="font-size:14px;line-height:1.55;color:${BRAND.text};white-space:pre-wrap;">${escapeHtml(hint)}</div>
+          </div>`
         : `<p style="margin:16px 0 0;font-size:14px;color:${BRAND.muted};">No dispatch instructions are currently on file.</p>`
     }`
+  const textTrip = opts.trip ? `\n\n${tripDetailPlainText(opts.trip)}` : ''
   return {
     subject: toEmailTitleCase(
-      hint ? 'Dispatch instructions updated' : 'Dispatch instructions cleared',
+      hint
+        ? opts.trip?.route
+          ? `Dispatch instructions updated — ${opts.trip.route}`
+          : 'Dispatch instructions updated'
+        : 'Dispatch instructions cleared',
     ),
     html: wrapEmailHtml({
       title: hint ? 'Dispatch instructions updated' : 'Dispatch instructions cleared',
@@ -233,43 +321,56 @@ export function dispatchInstructionsEmail(opts) {
       bodyHtml,
     }),
     text: hint
-      ? `Dispatch Instructions Updated\n\n${hint}`
-      : 'Dispatch Instructions Cleared',
+      ? `Dispatch Instructions Updated${textTrip}\n\n${hint}`
+      : `Dispatch Instructions Cleared${textTrip}`,
   }
 }
 
-/** @param {{ tractorLocation?: string, driverLocation?: string }} opts */
+/** @param {{ tractorLocation?: string, driverLocation?: string, trip?: import('./email-trip-details.mjs').EmailTripContext | null }} opts */
 export function driverMismatchEmail(opts) {
+  const tripBlock = opts.trip ? tripDetailCardHtml(opts.trip) : ''
   const bodyHtml = `
-    <p style="margin:0 0 16px;font-size:16px;line-height:1.55;color:${BRAND.text};">
+    <p style="margin:0 0 8px;font-size:16px;line-height:1.55;color:${BRAND.text};">
       TripBuddy detected that your driver and tractor locations do not match.
     </p>
     ${keyValueBlock({
       rows: [
         ...(opts.tractorLocation
-          ? [{ label: 'Tractor', value: opts.tractorLocation }]
+          ? [{ label: 'Tractor location', value: opts.tractorLocation }]
           : []),
         ...(opts.driverLocation
-          ? [{ label: 'Driver', value: opts.driverLocation }]
+          ? [{ label: 'Driver location', value: opts.driverLocation }]
           : []),
       ],
     })}
+    ${tripBlock}
     <p style="margin:20px 0 0;font-size:14px;line-height:1.5;color:${BRAND.muted};">
       Verify your assignment and location in TripBuddy when it is safe to do so.
     </p>`
+  const textTrip = opts.trip ? `\n\n${tripDetailPlainText(opts.trip)}` : ''
   return {
-    subject: toEmailTitleCase('Driver and tractor location mismatch'),
+    subject: toEmailTitleCase(
+      opts.trip?.route
+        ? `Location mismatch — ${opts.trip.route}`
+        : 'Driver and tractor location mismatch',
+    ),
     html: wrapEmailHtml({
       title: 'Location mismatch alert',
       preheader: 'Driver and tractor locations differ',
       bodyHtml,
     }),
-    text: 'Driver and Tractor Location Mismatch',
+    text: `Driver and Tractor Location Mismatch${textTrip}`,
   }
 }
 
-/** @param {{ shiftLabel: string, tripCount: number, totalMiles: number, rows: string[][] }} summary */
+/** @param {{ shiftLabel: string, tripCount: number, totalMiles: number, trips: import('./email-trip-details.mjs').EmailTripContext[] }} summary */
 export function dailyShiftEmail(summary) {
+  const tripCards = summary.trips.length
+    ? summary.trips
+        .map((t) => tripDetailCardHtml(t, { compact: true }))
+        .join('')
+    : ''
+
   const bodyHtml = `
     <p style="margin:0 0 8px;font-size:16px;line-height:1.55;color:${BRAND.text};">
       Here is your completed work for <strong>${escapeHtml(summary.shiftLabel)}</strong>.
@@ -281,13 +382,18 @@ export function dailyShiftEmail(summary) {
       ],
     })}
     ${
-      summary.rows.length
-        ? dataTable({
-            headers: ['Time', 'Leg', 'Route', 'Outcome', 'Miles'],
-            rows: summary.rows,
-          })
+      tripCards
+        ? `<div style="margin-top:20px;">
+            <div style="font-size:13px;font-weight:700;color:${BRAND.text};margin-bottom:10px;">Trip details</div>
+            ${tripCards}
+          </div>`
         : `<p style="margin:16px 0 0;font-size:14px;color:${BRAND.muted};">No completed trips recorded for this shift.</p>`
     }`
+
+  const textTrips = summary.trips.length
+    ? summary.trips.map((t, i) => `Trip ${i + 1}\n${tripDetailPlainText(t)}`).join('\n\n')
+    : 'No completed trips recorded for this shift.'
+
   return {
     subject: toEmailTitleCase(`Shift summary — ${summary.shiftLabel}`),
     html: wrapEmailHtml({
@@ -295,26 +401,51 @@ export function dailyShiftEmail(summary) {
       preheader: `${summary.tripCount} trip(s) · ${fmtMi(summary.totalMiles)} mi`,
       bodyHtml,
     }),
-    text: `Shift Summary ${summary.shiftLabel}\nTrips: ${summary.tripCount}\nMiles: ${fmtMi(summary.totalMiles)}`,
+    text: `Shift Summary ${summary.shiftLabel}\nTrips: ${summary.tripCount}\nMiles: ${fmtMi(summary.totalMiles)}\n\n${textTrips}`,
   }
 }
 
-/** @param {{ weekLabel: string, workWeekLabel: string, payWeekLabel: string }} opts */
+/** @param {{ weekLabel: string, workWeekLabel: string, payWeekLabel: string, tripCount?: number, totalMiles?: number, trips?: import('./email-trip-details.mjs').EmailTripContext[] }} opts */
 export function weeklySummaryEmail(opts) {
+  const tripCards =
+    opts.trips && opts.trips.length
+      ? opts.trips.map((t) => tripDetailCardHtml(t, { compact: true })).join('')
+      : ''
+
   const bodyHtml = `
-    <p style="margin:0 0 16px;font-size:16px;line-height:1.55;color:${BRAND.text};">
+    <p style="margin:0 0 8px;font-size:16px;line-height:1.55;color:${BRAND.text};">
       Your weekly mileage reports are attached as PDFs.
     </p>
     ${keyValueBlock({
       rows: [
         { label: 'Work week', value: opts.workWeekLabel },
         { label: 'Pay schedule week', value: opts.payWeekLabel },
+        ...(typeof opts.tripCount === 'number'
+          ? [{ label: 'Trips this week', value: String(opts.tripCount) }]
+          : []),
+        ...(typeof opts.totalMiles === 'number'
+          ? [{ label: 'Billable miles', value: fmtMi(opts.totalMiles) }]
+          : []),
       ],
     })}
+    ${
+      tripCards
+        ? `<div style="margin-top:20px;">
+            <div style="font-size:13px;font-weight:700;color:${BRAND.text};margin-bottom:10px;">Week trip details</div>
+            ${tripCards}
+          </div>`
+        : ''
+    }
     <p style="margin:20px 0 0;font-size:14px;line-height:1.5;color:${BRAND.muted};">
       Attachments: <strong>work-week-mileage.pdf</strong> and <strong>pay-schedule-mileage.pdf</strong>.
       These match the PDF exports from TripBuddy History.
     </p>`
+
+  const textTrips =
+    opts.trips && opts.trips.length
+      ? opts.trips.map((t, i) => `Trip ${i + 1}\n${tripDetailPlainText(t)}`).join('\n\n')
+      : ''
+
   return {
     subject: toEmailTitleCase(`Weekly summary — ${opts.weekLabel}`),
     html: wrapEmailHtml({
@@ -322,7 +453,7 @@ export function weeklySummaryEmail(opts) {
       preheader: opts.weekLabel,
       bodyHtml,
     }),
-    text: `Weekly Summary ${opts.weekLabel}\nWork week: ${opts.workWeekLabel}\nPay week: ${opts.payWeekLabel}`,
+    text: `Weekly Summary ${opts.weekLabel}\nWork week: ${opts.workWeekLabel}\nPay week: ${opts.payWeekLabel}${textTrips ? `\n\n${textTrips}` : ''}`,
   }
 }
 
