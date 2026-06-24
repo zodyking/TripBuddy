@@ -19,8 +19,11 @@ import {
   buildDailyShiftSummary,
   buildWeekTotalsPdfOpts,
   weekMetaForTimestamp,
-  shiftDateKeyForEventMs,
 } from './email-ledger-summary.mjs'
+import {
+  computeDailyShiftEmailDecision,
+  computeWeeklyEmailDecision,
+} from '../src/utils/shiftCalendar.js'
 import { buildWeekMileagePdfBuffer } from './email-week-pdf.mjs'
 
 /**
@@ -43,9 +46,8 @@ export async function maybeSendEmailForInAppNotification(accountKey, payload) {
 
   const extra = payload.extra && typeof payload.extra === 'object' ? payload.extra : {}
   const event = String(extra.event ?? '')
-  const type = String(payload.type ?? '')
 
-  if (type === 'assignment' || event === 'dispatch_instructions') {
+  if (event === 'dispatch_instructions') {
     if (!prefs.onDispatchInstructions) return { skipped: 'disabled' }
     const hint = String(extra.hint ?? '').trim()
     const fp = `dispatch:${hint.slice(0, 200)}`
@@ -94,11 +96,16 @@ export async function maybeSendEmailForInAppNotification(accountKey, payload) {
 
   if (event === 'driver_tractor_mismatch') {
     if (!prefs.onDriverMismatch) return { skipped: 'disabled' }
+    const cooldownMs = 30 * 60 * 1000
+    if (prefs.lastDriverMismatchMs && Date.now() - prefs.lastDriverMismatchMs < cooldownMs) {
+      return { skipped: 'deduped' }
+    }
     const tractorLocation = formatLocation(extra.tractorLocation)
     const driverLocation = formatLocation(extra.driverLocation)
     return runWithCredentialAccountKey(accountKey, async () => {
       const mail = driverMismatchEmail({ tractorLocation, driverLocation })
       await sendEmailForAccount(accountKey, { ...mail, cc: ccForKind(prefs, 'trip') })
+      await patchSmtpSendStateForAccount(accountKey, { lastDriverMismatchMs: Date.now() })
       return { ok: true }
     })
   }
@@ -249,37 +256,6 @@ export async function sendWeeklySummaryEmail(accountKey, referenceMs) {
 }
 
 /**
- * Local wall-clock parts in a timezone.
- * @param {Date} d
- * @param {string} tz
- */
-function zonedParts(d, tz) {
-  const fmt = new Intl.DateTimeFormat('en-US', {
-    timeZone: tz,
-    hour: 'numeric',
-    minute: 'numeric',
-    hour12: false,
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    weekday: 'short',
-  })
-  const parts = fmt.formatToParts(d)
-  /** @type {Record<string, string>} */
-  const m = {}
-  for (const p of parts) {
-    if (p.type !== 'literal') m[p.type] = p.value
-  }
-  const hour = Number(m.hour)
-  const minute = Number(m.minute)
-  return {
-    mins: hour * 60 + minute,
-    ymd: `${m.year}-${m.month}-${m.day}`,
-    weekday: m.weekday,
-  }
-}
-
-/**
  * @param {string} accountKey
  * @param {Date} now
  */
@@ -288,7 +264,7 @@ export async function maybeSendScheduledEmailsForAccount(accountKey, now = new D
   if (!prefs.enabled) return
 
   const tz = prefs.timezone || 'America/New_York'
-  const parts = zonedParts(now, tz)
+  const nowMs = now.getTime()
 
   return runWithCredentialAccountKey(accountKey, async () => {
     const creds = await getCredentialsMeta()
@@ -296,22 +272,31 @@ export async function maybeSendScheduledEmailsForAccount(accountKey, now = new D
     const shiftStart = creds.shiftStartMins ?? 0
     const dailyDelay = prefs.dailyDelayMins ?? 30
 
-    const dailyTrigger = shiftEnd + dailyDelay
-    if (prefs.onDailyShiftSummary && parts.mins >= dailyTrigger && parts.mins < dailyTrigger + 2) {
-      const shiftDayKey = shiftDateKeyForEventMs(now.getTime(), shiftStart, shiftEnd)
-      try {
-        await sendDailyShiftSummaryEmail(accountKey, shiftDayKey)
-      } catch (e) {
-        console.error('[email] daily shift failed', accountKey, e)
+    if (prefs.onDailyShiftSummary) {
+      const daily = computeDailyShiftEmailDecision({
+        nowMs,
+        timeZone: tz,
+        shiftStartMins: shiftStart,
+        shiftEndMins: shiftEnd,
+        dailyDelayMins: dailyDelay,
+      })
+      if (daily.shouldSend && daily.shiftDayKey) {
+        try {
+          await sendDailyShiftSummaryEmail(accountKey, daily.shiftDayKey)
+        } catch (e) {
+          console.error('[email] daily shift failed', accountKey, e)
+        }
       }
     }
 
-    if (prefs.onWeeklySummary && parts.weekday === 'Mon' && parts.mins >= 360 && parts.mins < 362) {
-      const prevWeekMs = now.getTime() - 24 * 60 * 60 * 1000
-      try {
-        await sendWeeklySummaryEmail(accountKey, prevWeekMs)
-      } catch (e) {
-        console.error('[email] weekly summary failed', accountKey, e)
+    if (prefs.onWeeklySummary) {
+      const weekly = computeWeeklyEmailDecision({ nowMs, timeZone: tz })
+      if (weekly.shouldSend) {
+        try {
+          await sendWeeklySummaryEmail(accountKey, weekly.referenceMs)
+        } catch (e) {
+          console.error('[email] weekly summary failed', accountKey, e)
+        }
       }
     }
   })

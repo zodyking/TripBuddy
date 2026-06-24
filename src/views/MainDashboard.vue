@@ -1769,7 +1769,6 @@ watch(
         linehaulTripsBody.value,
         linehaulTripsNoActive.value,
         prePlanTripSnapshot.value,
-        tripPhase.value,
       )
     }
     syncTripVoiceUnlockHint()

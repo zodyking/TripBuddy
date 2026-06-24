@@ -212,6 +212,9 @@ export async function ensureUserProfileTable() {
     await client.query(`
       ALTER TABLE ${TABLE} ADD COLUMN IF NOT EXISTS email_last_dispatch_notify_fp TEXT
     `)
+    await client.query(`
+      ALTER TABLE ${TABLE} ADD COLUMN IF NOT EXISTS email_last_driver_mismatch_ms BIGINT
+    `)
   } finally {
     client.release()
   }
@@ -1097,6 +1100,7 @@ function rowToSmtpPrefs(row) {
       lastTripNotifyFp: '',
       lastStatusNotifyFp: '',
       lastDispatchNotifyFp: '',
+      lastDriverMismatchMs: 0,
     }
   }
   let password = ''
@@ -1179,6 +1183,11 @@ function rowToSmtpPrefs(row) {
       typeof row.email_last_dispatch_notify_fp === 'string'
         ? row.email_last_dispatch_notify_fp.trim()
         : '',
+    lastDriverMismatchMs:
+      typeof row.email_last_driver_mismatch_ms === 'number' &&
+      Number.isFinite(row.email_last_driver_mismatch_ms)
+        ? Math.floor(row.email_last_driver_mismatch_ms)
+        : 0,
   }
 }
 
@@ -1196,7 +1205,8 @@ export async function getSmtpPrefsForAccount(accountKey) {
             email_on_dispatch_instructions, email_on_daily_shift, email_on_weekly_summary,
             email_trip_cc, email_daily_shift_cc, email_weekly_summary_cc, email_daily_delay_mins,
             email_last_daily_shift_key, email_last_weekly_work_key, email_last_weekly_pay_key,
-            email_last_trip_notify_fp, email_last_status_notify_fp, email_last_dispatch_notify_fp
+            email_last_trip_notify_fp, email_last_status_notify_fp, email_last_dispatch_notify_fp,
+            email_last_driver_mismatch_ms
      FROM ${TABLE} WHERE account_key = $1`,
     [ak],
   )
@@ -1235,6 +1245,9 @@ export async function patchSmtpSendStateForAccount(accountKey, patch) {
   }
   if (patch.lastDispatchNotifyFp !== undefined) {
     add('email_last_dispatch_notify_fp', patch.lastDispatchNotifyFp || null)
+  }
+  if (patch.lastDriverMismatchMs !== undefined) {
+    add('email_last_driver_mismatch_ms', patch.lastDriverMismatchMs || null)
   }
   if (!sets.length) return
   await p.query(
