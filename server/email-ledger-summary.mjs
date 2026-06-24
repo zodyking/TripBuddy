@@ -1,6 +1,6 @@
 import { shiftDateKeyForEventMs } from '../src/utils/shiftCalendar.js'
 import { workWeekGroupMeta, workWeekKeyForDate } from '../src/utils/workWeekGroup.js'
-import { buildEmailTripContextFromLedgerEntry, weeklyTripTableRow } from './email-trip-details.mjs'
+import { buildEmailTripContextFromLedgerEntry, dailyTripTableRow, weeklyTripTableRow } from './email-trip-details.mjs'
 
 const PAY_ROUND_BAND_MIN = 200
 const PAY_ROUND_BAND_MAX = 210
@@ -116,6 +116,7 @@ export function buildDailyShiftSummary(ledger, shiftDayKey, shift) {
     if (mi) ctx.miles = `${mi} mi`
     return ctx
   })
+  const tableRows = trips.map((t) => dailyTripTableRow(t))
   const d = shiftDayKey ? new Date(`${shiftDayKey}T12:00:00`) : new Date()
   const shiftLabel = d.toLocaleDateString('en-US', {
     weekday: 'long',
@@ -123,7 +124,7 @@ export function buildDailyShiftSummary(ledger, shiftDayKey, shift) {
     day: 'numeric',
     year: 'numeric',
   })
-  return { shiftLabel, tripCount: items.length, totalMiles, trips }
+  return { shiftLabel, tripCount: items.length, totalMiles, trips, tableRows }
 }
 
 /**

@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 import {
   buildEmailTripContextFromBody,
   buildEmailTripContextFromLedgerEntry,
+  emailTerminalId,
   formatTrailersSummary,
   weeklyTripTableRow,
 } from './email-trip-details.mjs'
@@ -42,12 +43,11 @@ const sampleBody = {
   ],
 }
 
-test('buildEmailTripContextFromBody includes full O/D, trailers, and dollies', () => {
+test('buildEmailTripContextFromBody uses terminal ids only in route', () => {
   const ctx = buildEmailTripContextFromBody(sampleBody)
-  assert.match(ctx.origin, /1234/)
-  assert.match(ctx.origin, /Memphis/)
-  assert.match(ctx.destination, /5678/)
-  assert.match(ctx.destination, /Nashville/)
+  assert.equal(ctx.origin, '1234')
+  assert.equal(ctx.destination, '5678')
+  assert.equal(ctx.route, '1234 → 5678')
   assert.equal(ctx.leg, '3')
   assert.equal(ctx.tractorNumber, 'T-99')
   assert.equal(ctx.trailers.length, 2)
@@ -55,6 +55,11 @@ test('buildEmailTripContextFromBody includes full O/D, trailers, and dollies', (
   assert.equal(ctx.trailers[0].seal, 'SEAL123')
   assert.match(ctx.dollySummary, /D100/)
   assert.match(ctx.dollySummary, /D200/)
+})
+
+test('emailTerminalId strips terminal names', () => {
+  assert.equal(emailTerminalId('89 · WOODBRIDGE'), '89')
+  assert.equal(emailTerminalId('3117 · BETHPAGE - HD'), '3117')
 })
 
 test('buildEmailTripContextFromLedgerEntry uses dispatch header and trip details', () => {
@@ -70,8 +75,9 @@ test('buildEmailTripContextFromLedgerEntry uses dispatch header and trip details
     tripDetails: sampleBody,
   }
   const ctx = buildEmailTripContextFromLedgerEntry(entry)
-  assert.equal(ctx.origin, '1234 · Memphis Hub')
-  assert.equal(ctx.destination, '5678 · Nashville Terminal')
+  assert.equal(ctx.origin, '1234')
+  assert.equal(ctx.destination, '5678')
+  assert.equal(ctx.route, '1234 → 5678')
   assert.equal(ctx.outcome, 'delivered')
   assert.equal(ctx.trailers.length, 2)
   assert.match(ctx.dispatchInstructions || '', /Gate 5/)
@@ -80,14 +86,15 @@ test('buildEmailTripContextFromLedgerEntry uses dispatch header and trip details
 test('trip detail plain text and html include equipment', () => {
   const ctx = buildEmailTripContextFromBody(sampleBody)
   const text = tripDetailPlainText(ctx)
-  assert.match(text, /Origin:/)
+  assert.match(text, /Route:/)
   assert.match(text, /Dollies:/)
   assert.match(text, /Trailer 1/)
   assert.match(text, /SEAL123/)
   const html = tripDetailCardHtml(ctx)
-  assert.match(html, /Memphis Hub/)
+  assert.match(html, /1234 → 5678/)
   assert.match(html, /Trailers/)
   assert.match(html, /Dollies/)
+  assert.doesNotMatch(html, /Outcome/)
 })
 
 test('buildDailyShiftSummary returns rich trip contexts', () => {
@@ -109,8 +116,10 @@ test('buildDailyShiftSummary returns rich trip contexts', () => {
   })
   assert.equal(summary.tripCount, 1)
   assert.equal(summary.trips.length, 1)
-  assert.match(summary.trips[0].origin, /111/)
+  assert.equal(summary.tableRows.length, 1)
+  assert.equal(summary.trips[0].origin, '111')
   assert.equal(summary.trips[0].trailers.length, 2)
+  assert.equal(summary.tableRows[0][2], '111 → 222')
 })
 
 test('buildWeeklyTripContexts returns table rows and tractors used', () => {
@@ -176,9 +185,11 @@ test('weeklySummaryEmail includes driver, tractors, totals, and trip table', () 
   assert.match(mail.html, /123456/)
   assert.match(mail.html, /#T-99/)
   assert.match(mail.html, /Total trips/)
+  assert.match(mail.html, /Total miles/)
   assert.match(mail.html, /210 mi/)
   assert.match(mail.html, /Work week trips/)
-  assert.match(mail.html, /Memphis Hub/)
+  assert.match(mail.html, /1234 → 5678/)
+  assert.doesNotMatch(mail.html, /Outcome/)
   assert.match(mail.text, /Dollies/)
 })
 
@@ -188,4 +199,5 @@ test('formatTrailersSummary is concise for table cells', () => {
   assert.match(summary, /T1/)
   assert.match(summary, /8123456/)
   assert.match(summary, /SEAL123/)
+  assert.equal(weeklyTripTableRow(ctx).length, 6)
 })

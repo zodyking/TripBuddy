@@ -84,12 +84,12 @@ export function keyValueBlock(opts) {
   const rows = (opts.rows || [])
     .map(
       (r) => `<tr>
-        <td style="padding:8px 0;font-size:13px;color:${BRAND.muted};width:34%;vertical-align:top;">${escapeHtml(r.label)}</td>
-        <td style="padding:8px 0;font-size:15px;font-weight:600;color:${BRAND.text};vertical-align:top;">${escapeHtml(r.value)}</td>
+        <td style="padding:5px 10px 5px 0;font-size:14px;color:${BRAND.muted};white-space:nowrap;vertical-align:top;width:1%;">${escapeHtml(r.label)}</td>
+        <td style="padding:5px 0;font-size:14px;font-weight:600;color:${BRAND.text};vertical-align:top;">${escapeHtml(r.value)}</td>
       </tr>`,
     )
     .join('')
-  return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 8px;">${rows}</table>`
+  return `<table role="presentation" cellpadding="0" cellspacing="0" style="margin:0 0 8px;border-collapse:collapse;">${rows}</table>`
 }
 
 /**
@@ -99,23 +99,23 @@ export function dataTable(table) {
   const th = (table.headers || [])
     .map(
       (h) =>
-        `<th align="left" style="padding:10px 12px;font-size:11px;text-transform:uppercase;letter-spacing:0.06em;color:${BRAND.muted};border-bottom:2px solid ${BRAND.border};">${escapeHtml(h)}</th>`,
+        `<th align="left" style="padding:8px 10px;font-size:11px;text-transform:uppercase;letter-spacing:0.06em;color:${BRAND.muted};border-bottom:2px solid ${BRAND.border};white-space:nowrap;">${escapeHtml(h)}</th>`,
     )
     .join('')
   const body = (table.rows || [])
     .map((row, i) => {
       const bg = i % 2 === 0 ? BRAND.card : BRAND.subtle
       const tds = row
-        .map(
-          (c) =>
-            `<td style="padding:10px 12px;font-size:13px;line-height:1.4;color:${BRAND.text};border-bottom:1px solid ${BRAND.border};background:${bg};vertical-align:top;">${escapeHtml(c)}</td>`,
-        )
+        .map((c, colIdx) => {
+          const nowrap = colIdx <= 2 ? 'white-space:nowrap;' : ''
+          return `<td style="padding:8px 10px;font-size:13px;line-height:1.35;color:${BRAND.text};border-bottom:1px solid ${BRAND.border};background:${bg};vertical-align:top;${nowrap}">${escapeHtml(c)}</td>`
+        })
         .join('')
       return `<tr>${tds}</tr>`
     })
     .join('')
-  return `<div style="overflow-x:auto;border:1px solid ${BRAND.border};border-radius:12px;margin-top:16px;">
-    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;min-width:520px;">
+  return `<div style="overflow-x:auto;border:1px solid ${BRAND.border};border-radius:12px;margin-top:12px;">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">
       <thead><tr>${th}</tr></thead>
       <tbody>${body}</tbody>
     </table>
@@ -134,7 +134,6 @@ export function tripDetailCardHtml(trip, opts = {}) {
   if (showMeta) {
     if (trip.completedAt) metaRows.push({ label: 'Completed', value: trip.completedAt })
     if (trip.leg && trip.leg !== '—') metaRows.push({ label: 'Leg', value: trip.leg })
-    if (trip.outcome && trip.outcome !== '—') metaRows.push({ label: 'Outcome', value: trip.outcome })
     if (trip.miles && trip.miles !== '—') metaRows.push({ label: 'Miles', value: trip.miles })
     if (trip.driverName) metaRows.push({ label: 'Driver', value: trip.driverName })
     if (trip.tractorNumber) metaRows.push({ label: 'Tractor', value: trip.tractorNumber })
@@ -184,9 +183,7 @@ export function tripDetailCardHtml(trip, opts = {}) {
 
   return `<div style="margin-top:${compact ? '12' : '16'}px;padding:${compact ? '14' : '16'}px;border-radius:12px;border:1px solid ${BRAND.border};background:${BRAND.card};">
     <div style="font-size:11px;font-weight:700;letter-spacing:0.06em;text-transform:uppercase;color:${BRAND.muted};margin-bottom:6px;">Route</div>
-    <div style="font-size:16px;font-weight:700;line-height:1.4;color:${BRAND.text};">${escapeHtml(trip.origin)}</div>
-    <div style="margin:6px 0;font-size:13px;color:${BRAND.muted};">to</div>
-    <div style="font-size:16px;font-weight:700;line-height:1.4;color:${BRAND.text};">${escapeHtml(trip.destination)}</div>
+    <div style="font-size:16px;font-weight:700;line-height:1.4;color:${BRAND.text};white-space:nowrap;">${escapeHtml(trip.route)}</div>
     ${metaRows.length ? keyValueBlock({ rows: metaRows }) : ''}
     ${dollyBlock}
     ${trailerBlock}
@@ -196,15 +193,10 @@ export function tripDetailCardHtml(trip, opts = {}) {
 
 /** @param {import('./email-trip-details.mjs').EmailTripContext} trip */
 export function tripDetailPlainText(trip) {
-  const lines = [
-    `Route: ${trip.route}`,
-    `Origin: ${trip.origin}`,
-    `Destination: ${trip.destination}`,
-  ]
+  const lines = [`Route: ${trip.route}`]
   if (trip.leg && trip.leg !== '—') lines.push(`Leg: ${trip.leg}`)
   if (trip.driverName) lines.push(`Driver: ${trip.driverName}`)
   if (trip.tractorNumber) lines.push(`Tractor: ${trip.tractorNumber}`)
-  if (trip.outcome && trip.outcome !== '—') lines.push(`Outcome: ${trip.outcome}`)
   if (trip.miles) lines.push(`Miles: ${trip.miles}`)
   if (trip.completedAt) lines.push(`Completed: ${trip.completedAt}`)
   if (trip.dollies.length) lines.push(`Dollies: ${trip.dollySummary}`)
@@ -393,13 +385,13 @@ export function driverMismatchEmail(opts) {
   }
 }
 
-/** @param {{ shiftLabel: string, tripCount: number, totalMiles: number, trips: import('./email-trip-details.mjs').EmailTripContext[] }} summary */
+import { dailyTripTableRow } from './email-trip-details.mjs'
+
+/** @param {{ shiftLabel: string, tripCount: number, totalMiles: number, trips: import('./email-trip-details.mjs').EmailTripContext[], tableRows?: string[][] }} summary */
 export function dailyShiftEmail(summary) {
-  const tripCards = summary.trips.length
-    ? summary.trips
-        .map((t) => tripDetailCardHtml(t, { compact: true }))
-        .join('')
-    : ''
+  const tableRows = summary.tableRows?.length
+    ? summary.tableRows
+    : summary.trips.map((t) => dailyTripTableRow(t))
 
   const bodyHtml = `
     <p style="margin:0 0 8px;font-size:16px;line-height:1.55;color:${BRAND.text};">
@@ -408,20 +400,28 @@ export function dailyShiftEmail(summary) {
     ${keyValueBlock({
       rows: [
         { label: 'Trips', value: String(summary.tripCount) },
-        { label: 'Billable miles', value: fmtMi(summary.totalMiles) },
+        { label: 'Miles', value: fmtMi(summary.totalMiles) },
       ],
     })}
     ${
-      tripCards
-        ? `<div style="margin-top:20px;">
-            <div style="font-size:13px;font-weight:700;color:${BRAND.text};margin-bottom:10px;">Trip details</div>
-            ${tripCards}
+      tableRows.length
+        ? `<div style="margin-top:16px;">
+            <div style="font-size:13px;font-weight:700;color:${BRAND.text};margin-bottom:8px;">Trip details</div>
+            ${dataTable({
+              headers: ['When', 'Leg', 'Route', 'Trailers', 'Dollies', 'Miles'],
+              rows: tableRows,
+            })}
           </div>`
         : `<p style="margin:16px 0 0;font-size:14px;color:${BRAND.muted};">No completed trips recorded for this shift.</p>`
     }`
 
-  const textTrips = summary.trips.length
-    ? summary.trips.map((t, i) => `Trip ${i + 1}\n${tripDetailPlainText(t)}`).join('\n\n')
+  const textTrips = tableRows.length
+    ? tableRows
+        .map(
+          (row, i) =>
+            `Trip ${i + 1}: ${row[0]} | Leg ${row[1]} | ${row[2]} | Trailers ${row[3]} | Dollies ${row[4]} | ${row[5]}`,
+        )
+        .join('\n')
     : 'No completed trips recorded for this shift.'
 
   return {
@@ -463,7 +463,7 @@ export function weeklySummaryEmail(opts) {
         { label: 'Driver ID', value: opts.driverId || '—' },
         { label: 'Tractors this week', value: tractorsLabel },
         { label: 'Total trips', value: String(opts.tripCount ?? 0) },
-        { label: 'Total billable miles', value: fmtMi(opts.totalMiles ?? 0) },
+        { label: 'Total miles', value: fmtMi(opts.totalMiles ?? 0) },
         { label: 'Work week', value: opts.workWeekLabel },
         { label: 'Pay schedule week', value: opts.payWeekLabel },
       ],
@@ -473,7 +473,7 @@ export function weeklySummaryEmail(opts) {
         ? `<div style="margin-top:20px;">
             <div style="font-size:13px;font-weight:700;color:${BRAND.text};margin-bottom:10px;">Work week trips</div>
             ${dataTable({
-              headers: ['When', 'Leg', 'Origin', 'Destination', 'Trailers', 'Dollies', 'Miles', 'Outcome'],
+              headers: ['When', 'Leg', 'Route', 'Trailers', 'Dollies', 'Miles'],
               rows: opts.tableRows,
             })}
           </div>`
@@ -489,7 +489,7 @@ export function weeklySummaryEmail(opts) {
       ? opts.tableRows
           .map(
             (row, i) =>
-              `Trip ${i + 1}: ${row[0]} | Leg ${row[1]} | ${row[2]} -> ${row[3]} | ${row[4]} | Dollies ${row[5]} | ${row[6]} | ${row[7]}`,
+              `Trip ${i + 1}: ${row[0]} | Leg ${row[1]} | ${row[2]} | ${row[3]} | Dollies ${row[4]} | ${row[5]}`,
           )
           .join('\n')
       : 'No completed trips recorded for this work week.'
@@ -509,7 +509,7 @@ export function weeklySummaryEmail(opts) {
       `Driver ID: ${opts.driverId || '—'}`,
       `Tractors: ${tractorsLabel}`,
       `Trips: ${opts.tripCount ?? 0}`,
-      `Billable miles: ${fmtMi(opts.totalMiles ?? 0)}`,
+      `Miles: ${fmtMi(opts.totalMiles ?? 0)}`,
       `Work week: ${opts.workWeekLabel}`,
       `Pay week: ${opts.payWeekLabel}`,
       '',

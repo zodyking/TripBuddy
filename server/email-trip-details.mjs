@@ -1,6 +1,7 @@
 import { readAssignmentForAccount } from './assignment-store.mjs'
 import {
   extractOriginDest,
+  extractTripOrgIds,
   buildEnhancedTrailerCards,
   buildDollySection,
   extractTripDispatchInstructions,
@@ -42,6 +43,45 @@ import {
 function clean(s) {
   const t = String(s ?? '').trim()
   return t || '—'
+}
+
+/**
+ * Email display: terminal number only (strip location name).
+ * @param {string} location
+ */
+export function emailTerminalId(location) {
+  const s = String(location ?? '').trim()
+  if (!s || s === '—') return '—'
+  const fromBody = s.match(/^(\d{1,12})\b/)
+  if (fromBody) return fromBody[1]
+  const head = s.split(/\s*[·|]\s*/)[0]?.trim()
+  if (head && /^\d+$/.test(head)) return head
+  return s
+}
+
+/** @param {string} origin @param {string} destination */
+export function formatEmailRoute(origin, destination) {
+  const o = emailTerminalId(origin)
+  const d = emailTerminalId(destination)
+  return `${o} → ${d}`
+}
+
+/**
+ * @param {unknown} body
+ * @param {string} fallbackOrigin
+ * @param {string} fallbackDestination
+ */
+function terminalIdsForEmail(body, fallbackOrigin, fallbackDestination) {
+  if (body != null && typeof body === 'object' && !Array.isArray(body)) {
+    const { originId, destinationId } = extractTripOrgIds(body)
+    if (originId && destinationId) {
+      return { origin: originId, destination: destinationId }
+    }
+  }
+  return {
+    origin: emailTerminalId(fallbackOrigin),
+    destination: emailTerminalId(fallbackDestination),
+  }
 }
 
 /** @param {unknown} body */
@@ -150,13 +190,16 @@ export function weeklyTripTableRow(trip) {
   return [
     trip.completedAt || '—',
     trip.leg || '—',
-    trip.origin || '—',
-    trip.destination || '—',
+    trip.route || formatEmailRoute(trip.origin, trip.destination),
     trailers,
     dollies,
     trip.miles || '—',
-    trip.outcome || '—',
   ]
+}
+
+/** @param {import('./email-trip-details.mjs').EmailTripContext} trip */
+export function dailyTripTableRow(trip) {
+  return weeklyTripTableRow(trip)
 }
 
 /**
@@ -165,7 +208,8 @@ export function weeklyTripTableRow(trip) {
  * @returns {EmailTripContext}
  */
 export function buildEmailTripContextFromBody(body, overrides = {}) {
-  const { origin, destination } = extractOriginDest(body)
+  const { origin: rawOrigin, destination: rawDestination } = extractOriginDest(body)
+  const ids = terminalIdsForEmail(body, rawOrigin, rawDestination)
   const leg = legFromBody(body)
   const dollies = dolliesFromBody(body)
   const trailers = trailersFromBody(body)
@@ -178,9 +222,9 @@ export function buildEmailTripContextFromBody(body, overrides = {}) {
     tripStatus = String(o.tripStatus ?? '').trim()
   }
 
-  const o = clean(overrides.origin || origin)
-  const d = clean(overrides.destination || destination)
-  const route = `${o} → ${d}`
+  const o = clean(overrides.origin ? emailTerminalId(overrides.origin) : ids.origin)
+  const d = clean(overrides.destination ? emailTerminalId(overrides.destination) : ids.destination)
+  const route = formatEmailRoute(o, d)
 
   return {
     leg: clean(overrides.leg || leg),
@@ -215,8 +259,8 @@ export function buildEmailTripContextFromLedgerEntry(entry) {
       ? entry.tripDetails
       : null
 
-  const origin = clean(dh.origin)
-  const destination = clean(dh.destination)
+  const origin = emailTerminalId(clean(dh.origin))
+  const destination = emailTerminalId(clean(dh.destination))
   const leg =
     entry && typeof entry === 'object'
       ? clean(/** @type {Record<string, unknown>} */ (entry).dailyTripLegSequence)
