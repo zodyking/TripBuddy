@@ -702,10 +702,23 @@ const emailOnWeeklySummary = ref(true)
 const emailTripCcDraft = ref('')
 const emailDailyShiftCcDraft = ref('')
 const emailWeeklySummaryCcDraft = ref('')
-const emailDailyDelayMinsDraft = ref(30)
 const smtpBusy = ref(false)
 const smtpTestBusy = ref(false)
 const smtpMsg = ref('')
+
+const showEmailSmtpFields = computed(() => smtpEnabled.value)
+const showTripAlertCc = computed(
+  () =>
+    emailOnNewTrip.value ||
+    emailOnPreplan.value ||
+    emailOnStatusChange.value ||
+    emailOnDriverMismatch.value ||
+    emailOnDispatchInstructions.value,
+)
+
+watch(smtpSecureDraft, (secure) => {
+  smtpPortDraft.value = secure ? 465 : 587
+})
 
 function smtpPrefsPayload() {
   return {
@@ -729,7 +742,6 @@ function smtpPrefsPayload() {
     tripCc: emailTripCcDraft.value,
     dailyShiftCc: emailDailyShiftCcDraft.value,
     weeklySummaryCc: emailWeeklySummaryCcDraft.value,
-    dailyDelayMins: Number(emailDailyDelayMinsDraft.value) || 30,
   }
 }
 
@@ -1269,10 +1281,6 @@ async function loadCredentials() {
     emailTripCcDraft.value = String(credMeta.value.emailTripCc ?? '')
     emailDailyShiftCcDraft.value = String(credMeta.value.emailDailyShiftCc ?? '')
     emailWeeklySummaryCcDraft.value = String(credMeta.value.emailWeeklySummaryCc ?? '')
-    emailDailyDelayMinsDraft.value =
-      typeof credMeta.value.emailDailyDelayMins === 'number'
-        ? credMeta.value.emailDailyDelayMins
-        : 30
     applyHelpersLocationPrefsFromCredentials(credMeta.value)
     applyWahaPrefsFromCredentials(credMeta.value)
     applyBlueBubblesPrefsFromCredentials(credMeta.value)
@@ -2521,97 +2529,217 @@ onUnmounted(() => {
       />
     </div>
 
-    <main v-show="settingsTab === 'email'" class="stack">
-      <SettingsSection title="Email notifications" section-id="settings-email" :collapsible="false">
-        <p class="cred-hint">
-          Configure SMTP to receive trip alerts, end-of-shift summaries, and weekly mileage PDFs.
-          Credentials are stored encrypted in your account profile.
+    <main v-show="settingsTab === 'email'" class="stack email-settings">
+      <SettingsSection title="Email" section-id="settings-email" :collapsible="false">
+        <p class="cred-hint email-intro">
+          Trip alerts and mileage reports by email. Gmail: use <code>smtp.gmail.com</code>, port
+          <code>587</code>, and an app password.
         </p>
-        <label class="toggle-row tap">
+
+        <label class="toggle-row tap email-master-toggle">
           <input v-model="smtpEnabled" type="checkbox" />
           <span>Enable email notifications</span>
         </label>
-        <div class="api-key-row">
-          <label class="lbl api-key-lbl" for="smtp-host">SMTP host</label>
-          <input id="smtp-host" v-model="smtpHostDraft" class="inp tap api-key-inp" type="text" autocomplete="off" placeholder="smtp.example.com" />
-        </div>
-        <div class="api-key-row">
-          <label class="lbl api-key-lbl" for="smtp-port">Port</label>
-          <input id="smtp-port" v-model.number="smtpPortDraft" class="inp tap api-key-inp" type="number" min="1" max="65535" />
-          <label class="toggle-row tap smtp-secure-toggle">
-            <input v-model="smtpSecureDraft" type="checkbox" />
-            <span>SSL/TLS (465)</span>
-          </label>
-        </div>
-        <div class="api-key-row">
-          <label class="lbl api-key-lbl" for="smtp-user">Username</label>
-          <input id="smtp-user" v-model="smtpUserDraft" class="inp tap api-key-inp" type="text" autocomplete="username" />
-        </div>
-        <div class="api-key-row">
-          <label class="lbl api-key-lbl" for="smtp-pass">Password</label>
-          <input id="smtp-pass" v-model="smtpPassDraft" class="inp tap api-key-inp" type="password" autocomplete="new-password" placeholder="App password" />
-        </div>
-        <div class="api-key-row">
-          <label class="lbl api-key-lbl" for="smtp-from-email">From email</label>
-          <input id="smtp-from-email" v-model="smtpFromEmailDraft" class="inp tap api-key-inp" type="email" autocomplete="off" />
-        </div>
-        <div class="api-key-row">
-          <label class="lbl api-key-lbl" for="smtp-from-name">From name</label>
-          <input id="smtp-from-name" v-model="smtpFromNameDraft" class="inp tap api-key-inp" type="text" autocomplete="off" />
-        </div>
-        <div class="api-key-row">
-          <label class="lbl api-key-lbl" for="email-notify-to">Send notifications to</label>
-          <input id="email-notify-to" v-model="emailNotifyToDraft" class="inp tap api-key-inp" type="email" autocomplete="email" placeholder="you@example.com" />
-        </div>
-        <div class="api-key-row">
-          <label class="lbl api-key-lbl" for="email-timezone">Timezone</label>
-          <input id="email-timezone" v-model="emailTimezoneDraft" class="inp tap api-key-inp" type="text" placeholder="America/New_York" />
-        </div>
 
-        <h3 class="smtp-section-heading">Trip alerts</h3>
-        <p class="cred-hint smtp-section-hint">
-          Instant emails when trips or dispatch details change. Use CC to copy alerts to a manager or dispatcher.
-        </p>
-        <div class="smtp-notify-toggles">
-          <label class="toggle-row tap"><input v-model="emailOnNewTrip" type="checkbox" /><span>New trip assigned</span></label>
-          <label class="toggle-row tap"><input v-model="emailOnPreplan" type="checkbox" /><span>Preplan assigned</span></label>
-          <label class="toggle-row tap"><input v-model="emailOnStatusChange" type="checkbox" /><span>Trip status changes (assigned, en route, complete)</span></label>
-          <label class="toggle-row tap"><input v-model="emailOnDriverMismatch" type="checkbox" /><span>Driver / tractor location mismatch</span></label>
-          <label class="toggle-row tap"><input v-model="emailOnDispatchInstructions" type="checkbox" /><span>Dispatch instructions updated</span></label>
-        </div>
-        <div class="api-key-row">
-          <label class="lbl api-key-lbl" for="email-trip-cc">Also send trip alerts to</label>
-          <input id="email-trip-cc" v-model="emailTripCcDraft" class="inp tap api-key-inp" type="text" autocomplete="email" placeholder="manager@example.com, dispatcher@example.com" />
-        </div>
-
-        <h3 class="smtp-section-heading">Scheduled reports</h3>
-        <p class="cred-hint smtp-section-hint">
-          End-of-shift and weekly PDF summaries. CC fields send copies without changing your primary inbox address.
-        </p>
-        <div class="smtp-notify-toggles">
-          <label class="toggle-row tap"><input v-model="emailOnDailyShift" type="checkbox" /><span>Daily end-of-shift summary</span></label>
-          <label class="toggle-row tap"><input v-model="emailOnWeeklySummary" type="checkbox" /><span>Weekly PDF summary (work week + pay schedule)</span></label>
-        </div>
-        <div class="api-key-row">
-          <label class="lbl api-key-lbl" for="email-daily-delay">Send daily summary</label>
-          <div class="smtp-delay-row">
-            <input id="email-daily-delay" v-model.number="emailDailyDelayMinsDraft" class="inp tap api-key-inp smtp-delay-inp" type="number" min="0" max="720" />
-            <span class="smtp-delay-suffix">minutes after shift end</span>
+        <template v-if="showEmailSmtpFields">
+          <div class="email-panel">
+            <h3 class="email-panel-title">Where to send</h3>
+            <div class="api-key-row">
+              <label class="lbl api-key-lbl" for="email-notify-to">Your email</label>
+              <input
+                id="email-notify-to"
+                v-model="emailNotifyToDraft"
+                class="inp tap api-key-inp"
+                type="email"
+                autocomplete="email"
+                placeholder="you@gmail.com"
+              />
+            </div>
+            <div class="api-key-row">
+              <label class="lbl api-key-lbl" for="email-timezone">Timezone</label>
+              <input
+                id="email-timezone"
+                v-model="emailTimezoneDraft"
+                class="inp tap api-key-inp"
+                type="text"
+                placeholder="America/New_York"
+              />
+              <p class="email-field-note">Used for daily and weekly report timing.</p>
+            </div>
           </div>
-        </div>
-        <div class="api-key-row">
-          <label class="lbl api-key-lbl" for="email-daily-cc">Also send daily summary to</label>
-          <input id="email-daily-cc" v-model="emailDailyShiftCcDraft" class="inp tap api-key-inp" type="text" autocomplete="email" placeholder="payroll@example.com" />
-        </div>
-        <div class="api-key-row">
-          <label class="lbl api-key-lbl" for="email-weekly-cc">Also send weekly PDFs to</label>
-          <input id="email-weekly-cc" v-model="emailWeeklySummaryCcDraft" class="inp tap api-key-inp" type="text" autocomplete="email" placeholder="accounting@example.com" />
-        </div>
-        <div class="modal-actions loc-retry-actions">
+
+          <div class="email-panel">
+            <h3 class="email-panel-title">Mail server (SMTP)</h3>
+            <div class="api-key-row">
+              <label class="lbl api-key-lbl" for="smtp-host">Host</label>
+              <input
+                id="smtp-host"
+                v-model="smtpHostDraft"
+                class="inp tap api-key-inp"
+                type="text"
+                autocomplete="off"
+                placeholder="smtp.gmail.com"
+              />
+            </div>
+            <div class="api-key-row smtp-port-row">
+              <label class="lbl api-key-lbl" for="smtp-port">Port</label>
+              <input
+                id="smtp-port"
+                v-model.number="smtpPortDraft"
+                class="inp tap api-key-inp smtp-port-inp"
+                type="number"
+                min="1"
+                max="65535"
+              />
+              <label class="toggle-row tap smtp-secure-toggle">
+                <input v-model="smtpSecureDraft" type="checkbox" />
+                <span>Use SSL (port 465)</span>
+              </label>
+            </div>
+            <p class="email-field-note">Gmail: port 587, SSL off. Only turn SSL on for port 465.</p>
+            <div class="api-key-row">
+              <label class="lbl api-key-lbl" for="smtp-user">Username</label>
+              <input
+                id="smtp-user"
+                v-model="smtpUserDraft"
+                class="inp tap api-key-inp"
+                type="text"
+                autocomplete="username"
+                placeholder="you@gmail.com"
+              />
+            </div>
+            <div class="api-key-row">
+              <label class="lbl api-key-lbl" for="smtp-pass">Password</label>
+              <input
+                id="smtp-pass"
+                v-model="smtpPassDraft"
+                class="inp tap api-key-inp"
+                type="password"
+                autocomplete="new-password"
+                placeholder="App password"
+              />
+            </div>
+            <div class="api-key-row">
+              <label class="lbl api-key-lbl" for="smtp-from-email">From email</label>
+              <input
+                id="smtp-from-email"
+                v-model="smtpFromEmailDraft"
+                class="inp tap api-key-inp"
+                type="email"
+                autocomplete="off"
+              />
+            </div>
+            <div class="api-key-row">
+              <label class="lbl api-key-lbl" for="smtp-from-name">From name</label>
+              <input
+                id="smtp-from-name"
+                v-model="smtpFromNameDraft"
+                class="inp tap api-key-inp"
+                type="text"
+                autocomplete="off"
+              />
+            </div>
+          </div>
+
+          <div class="email-panel">
+            <h3 class="email-panel-title">Trip alerts</h3>
+            <p class="email-field-note email-panel-lead">Sent right away when something changes.</p>
+            <div class="smtp-notify-toggles">
+              <label class="toggle-row tap">
+                <input v-model="emailOnNewTrip" type="checkbox" />
+                <span>New trip assigned</span>
+              </label>
+              <label class="toggle-row tap">
+                <input v-model="emailOnPreplan" type="checkbox" />
+                <span>Preplan assigned</span>
+              </label>
+              <label class="toggle-row tap">
+                <input v-model="emailOnStatusChange" type="checkbox" />
+                <span>Trip status updates</span>
+              </label>
+              <details class="email-more-toggles">
+                <summary class="email-more-summary tap">More trip alerts</summary>
+                <div class="smtp-notify-toggles email-more-body">
+                  <label class="toggle-row tap">
+                    <input v-model="emailOnDriverMismatch" type="checkbox" />
+                    <span>Driver and tractor locations do not match</span>
+                  </label>
+                  <label class="toggle-row tap">
+                    <input v-model="emailOnDispatchInstructions" type="checkbox" />
+                    <span>Dispatch instructions changed</span>
+                  </label>
+                </div>
+              </details>
+            </div>
+            <div v-if="showTripAlertCc" class="api-key-row">
+              <label class="lbl api-key-lbl" for="email-trip-cc">Also send trip alerts to</label>
+              <input
+                id="email-trip-cc"
+                v-model="emailTripCcDraft"
+                class="inp tap api-key-inp"
+                type="text"
+                autocomplete="email"
+                placeholder="Optional — comma-separated emails"
+              />
+            </div>
+          </div>
+
+          <div class="email-panel">
+            <h3 class="email-panel-title">Scheduled reports</h3>
+            <p class="email-field-note email-panel-lead">
+              Automatic summaries — no extra setup needed beyond your shift schedule in credentials.
+            </p>
+            <div class="smtp-notify-toggles">
+              <label class="toggle-row tap email-report-toggle">
+                <input v-model="emailOnDailyShift" type="checkbox" />
+                <span class="email-report-label">
+                  <strong>End-of-shift summary</strong>
+                  <small>After your shift ends each day</small>
+                </span>
+              </label>
+              <label class="toggle-row tap email-report-toggle">
+                <input v-model="emailOnWeeklySummary" type="checkbox" />
+                <span class="email-report-label">
+                  <strong>Weekly mileage PDFs</strong>
+                  <small>Monday mornings — work week and pay schedule</small>
+                </span>
+              </label>
+            </div>
+            <div v-if="emailOnDailyShift" class="api-key-row">
+              <label class="lbl api-key-lbl" for="email-daily-cc">Also send daily report to</label>
+              <input
+                id="email-daily-cc"
+                v-model="emailDailyShiftCcDraft"
+                class="inp tap api-key-inp"
+                type="text"
+                autocomplete="email"
+                placeholder="Optional — comma-separated emails"
+              />
+            </div>
+            <div v-if="emailOnWeeklySummary" class="api-key-row">
+              <label class="lbl api-key-lbl" for="email-weekly-cc">Also send weekly PDFs to</label>
+              <input
+                id="email-weekly-cc"
+                v-model="emailWeeklySummaryCcDraft"
+                class="inp tap api-key-inp"
+                type="text"
+                autocomplete="email"
+                placeholder="Optional — comma-separated emails"
+              />
+            </div>
+          </div>
+        </template>
+
+        <div class="modal-actions loc-retry-actions email-actions">
           <button type="button" class="btn primary tap" :disabled="smtpBusy" @click="saveSmtpPrefs">
-            {{ smtpBusy ? 'Saving…' : 'Save email settings' }}
+            {{ smtpBusy ? 'Saving…' : 'Save' }}
           </button>
-          <button type="button" class="btn secondary tap" :disabled="smtpTestBusy || smtpBusy" @click="sendSmtpTest">
+          <button
+            type="button"
+            class="btn secondary tap"
+            :disabled="smtpTestBusy || smtpBusy || !smtpEnabled"
+            @click="sendSmtpTest"
+          >
             {{ smtpTestBusy ? 'Sending…' : 'Send test email' }}
           </button>
         </div>
@@ -3588,35 +3716,102 @@ onUnmounted(() => {
   display: flex;
   flex-direction: column;
   gap: 10px;
-  margin: 12px 0 16px;
+  margin: 8px 0 12px;
 }
 
-.smtp-section-heading {
-  margin: 20px 0 6px;
-  font-size: 15px;
-  font-weight: 700;
-  color: var(--text, #1a1a2e);
+.email-settings .email-intro {
+  margin-bottom: 12px;
 }
 
-.smtp-section-hint {
+.email-settings .email-intro code {
+  font-size: 0.9em;
+}
+
+.email-master-toggle {
+  margin-bottom: 16px;
+}
+
+.email-panel {
+  margin: 16px 0;
+  padding: 14px 16px;
+  border-radius: 12px;
+  border: 1px solid var(--color-glass-border, rgba(255, 255, 255, 0.08));
+  background: var(--color-glass, rgba(22, 22, 29, 0.35));
+}
+
+.email-panel-title {
   margin: 0 0 10px;
-}
-
-.smtp-delay-row {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  flex-wrap: wrap;
-}
-
-.smtp-delay-inp {
-  width: 88px;
-  flex: 0 0 auto;
-}
-
-.smtp-delay-suffix {
   font-size: 14px;
-  color: var(--muted, #5c5c72);
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--color-text-secondary, #a8a8b8);
+}
+
+.email-panel-lead {
+  margin: -4px 0 10px;
+}
+
+.email-field-note {
+  margin: 6px 0 0;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--color-text-tertiary, #8b8b9a);
+}
+
+.email-report-toggle {
+  align-items: flex-start;
+}
+
+.email-report-label {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.email-report-label strong {
+  font-weight: 600;
+}
+
+.email-report-label small {
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--color-text-tertiary, #8b8b9a);
+}
+
+.email-more-toggles {
+  margin-top: 4px;
+}
+
+.email-more-summary {
+  font-size: 13px;
+  color: var(--color-accent-purple, #b794f6);
+  cursor: pointer;
+  list-style: none;
+}
+
+.email-more-summary::-webkit-details-marker {
+  display: none;
+}
+
+.email-more-body {
+  margin-top: 8px;
+  padding-left: 4px;
+}
+
+.email-actions {
+  margin-top: 8px;
+}
+
+.smtp-port-row {
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.smtp-port-inp {
+  width: 96px;
+  flex: 0 0 auto;
 }
 
 .smtp-secure-toggle {
