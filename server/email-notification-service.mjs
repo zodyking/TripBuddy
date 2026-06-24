@@ -29,6 +29,11 @@ import {
   resolveEmailTripContextForNotification,
   resolveActiveEmailTripContext,
 } from './email-trip-details.mjs'
+import {
+  assignmentHasIncompleteActiveTrips,
+  resolveDailyShiftSummaryDayKey,
+  DAILY_TRIP_IDLE_MINS,
+} from './email-daily-shift-logic.mjs'
 import { buildWeekMileagePdfBuffer } from './email-week-pdf.mjs'
 
 /**
@@ -183,12 +188,15 @@ export async function sendDailyShiftSummaryEmail(accountKey, shiftDayKey) {
 
   return runWithCredentialAccountKey(accountKey, async () => {
     const creds = await getCredentialsMeta()
+    const tz = prefs.timezone || 'America/New_York'
     const assignment = await readAssignmentForAccount(accountKey)
     const ledger = Array.isArray(assignment?.tripHistoryLedger) ? assignment.tripHistoryLedger : []
     const summary = buildDailyShiftSummary(ledger, shiftDayKey, {
       shiftStartMins: creds.shiftStartMins ?? 0,
       shiftEndMins: creds.shiftEndMins ?? 1439,
+      timeZone: tz,
     })
+    if (!summary.tripCount) return { skipped: 'no_trips' }
     const mail = dailyShiftEmail(summary)
     await sendEmailForAccount(accountKey, { ...mail, cc: ccForKind(prefs, 'daily') })
     await patchSmtpSendStateForAccount(accountKey, { lastDailyShiftKey: shiftDayKey })
@@ -303,18 +311,35 @@ export async function maybeSendScheduledEmailsForAccount(accountKey, now = new D
     const dailyDelay = prefs.dailyDelayMins ?? 30
 
     if (prefs.onDailyShiftSummary) {
+      const assignment = await readAssignmentForAccount(accountKey)
+      const ledger = Array.isArray(assignment?.tripHistoryLedger)
+        ? assignment.tripHistoryLedger
+        : []
+      const incomplete = assignmentHasIncompleteActiveTrips(assignment)
       const daily = computeDailyShiftEmailDecision({
         nowMs,
         timeZone: tz,
         shiftStartMins: shiftStart,
         shiftEndMins: shiftEnd,
         dailyDelayMins: dailyDelay,
+        lastTripActivityMs: prefs.lastTripActivityMs ?? 0,
+        idleMins: DAILY_TRIP_IDLE_MINS,
+        hasIncompleteTrips: incomplete,
       })
       if (daily.shouldSend && daily.shiftDayKey) {
-        try {
-          await sendDailyShiftSummaryEmail(accountKey, daily.shiftDayKey)
-        } catch (e) {
-          console.error('[email] daily shift failed', accountKey, e)
+        const targetDay = resolveDailyShiftSummaryDayKey(ledger, {
+          endedShiftDayKey: daily.shiftDayKey,
+          lastDailyShiftKey: prefs.lastDailyShiftKey || '',
+          shiftStartMins: shiftStart,
+          shiftEndMins: shiftEnd,
+          timeZone: tz,
+        })
+        if (targetDay) {
+          try {
+            await sendDailyShiftSummaryEmail(accountKey, targetDay)
+          } catch (e) {
+            console.error('[email] daily shift failed', accountKey, e)
+          }
         }
       }
     }

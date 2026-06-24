@@ -2,6 +2,7 @@ import { readKeyJson, writeKeyJson } from './kv-store.mjs'
 import { getDataAccountKey, userScopeKey, keyForUser } from './scope-kv.mjs'
 import { emitLog } from './log-bus.mjs'
 import { publishInAppForAccount } from './notification-publish.mjs'
+import { recordEmailTripActivityForAccount } from './user-profile-pg.mjs'
 
 /**
  * @returns {string}
@@ -1277,6 +1278,16 @@ export async function writeAssignment(body) {
   }
 
   await writeKeyJson(key, next)
+
+  const tripMarkedComplete =
+    typeof body.appendHiddenDailyTripLegSequence === 'string' &&
+    /^\d+$/.test(String(body.appendHiddenDailyTripLegSequence).trim())
+  if (tripMarkedComplete) {
+    const ak = getDataAccountKey()
+    if (ak) {
+      void recordEmailTripActivityForAccount(ak).catch(() => {})
+    }
+  }
 
   if (instructionsChanged) {
     const ak = getDataAccountKey()

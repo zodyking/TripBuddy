@@ -18,6 +18,10 @@ import {
   buildWeeklyTripContexts,
   weekMetaForTimestamp,
 } from './email-ledger-summary.mjs'
+import {
+  resolveDailyShiftSummaryDayKey,
+  computeLedgerDisplayDate,
+} from './email-daily-shift-logic.mjs'
 import { shiftDateKeyForEventMs } from '../src/utils/shiftCalendar.js'
 import {
   buildEmailTripContextFromBody,
@@ -209,14 +213,27 @@ export async function buildTestEmailForKind(accountKey, kind) {
     }
 
     if (kind === 'daily_shift') {
+      const prefs = await getSmtpPrefsForAccount(accountKey)
       const shiftStart = creds.shiftStartMins ?? 0
       const shiftEnd = creds.shiftEndMins ?? 1439
-      const latest = [...ledger].sort((a, b) => entryTs(b) - entryTs(a))[0]
-      const refMs = latest ? entryTs(latest) : Date.now()
-      const shiftDayKey = shiftDateKeyForEventMs(refMs, shiftStart, shiftEnd)
+      const tz = prefs.timezone || 'America/New_York'
+      const latest = [...ledger].sort(
+        (a, b) => computeLedgerDisplayDate(b) - computeLedgerDisplayDate(a),
+      )[0]
+      const refMs = latest ? computeLedgerDisplayDate(latest) : Date.now()
+      const endedKey = shiftDateKeyForEventMs(refMs, shiftStart, shiftEnd)
+      const shiftDayKey =
+        resolveDailyShiftSummaryDayKey(ledger, {
+          endedShiftDayKey: endedKey,
+          lastDailyShiftKey: '',
+          shiftStartMins: shiftStart,
+          shiftEndMins: shiftEnd,
+          timeZone: tz,
+        }) || endedKey
       const summary = buildDailyShiftSummary(ledger, shiftDayKey, {
         shiftStartMins: shiftStart,
         shiftEndMins: shiftEnd,
+        timeZone: tz,
       })
       if (!summary.tripCount) {
         throw new Error('No completed trips found for the latest shift day.')

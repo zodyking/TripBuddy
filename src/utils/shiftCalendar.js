@@ -124,7 +124,16 @@ export function shiftDateKeyForEventMsInTimezone(
 
 /**
  * Decide whether the daily shift summary should send now and which shift day to summarize.
- * @param {{ nowMs: number, timeZone: string, shiftStartMins?: number, shiftEndMins?: number, dailyDelayMins?: number }} opts
+ * @param {{
+ *   nowMs: number,
+ *   timeZone: string,
+ *   shiftStartMins?: number,
+ *   shiftEndMins?: number,
+ *   dailyDelayMins?: number,
+ *   lastTripActivityMs?: number,
+ *   idleMins?: number,
+ *   hasIncompleteTrips?: boolean,
+ * }} opts
  */
 export function computeDailyShiftEmailDecision(opts) {
   const timeZone = opts.timeZone || 'America/New_York'
@@ -137,6 +146,16 @@ export function computeDailyShiftEmailDecision(opts) {
   const triggerMins = rawTrigger % 1440
 
   if (mins < triggerMins) {
+    return { shouldSend: false, shiftDayKey: '' }
+  }
+
+  const idleMins = opts.idleMins ?? 120
+  const lastTripActivityMs = opts.lastTripActivityMs ?? 0
+  if (lastTripActivityMs > 0 && opts.nowMs - lastTripActivityMs < idleMins * 60 * 1000) {
+    return { shouldSend: false, shiftDayKey: '' }
+  }
+
+  if (opts.hasIncompleteTrips === true) {
     return { shouldSend: false, shiftDayKey: '' }
   }
 

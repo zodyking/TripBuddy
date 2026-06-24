@@ -1,6 +1,7 @@
 import { shiftDateKeyForEventMs } from '../src/utils/shiftCalendar.js'
 import { workWeekGroupMeta, workWeekKeyForDate } from '../src/utils/workWeekGroup.js'
 import { buildEmailTripContextFromLedgerEntry, dailyTripTableRow, weeklyTripTableRow } from './email-trip-details.mjs'
+import { ledgerEntriesForWorkDay, computeLedgerDisplayDate } from './email-daily-shift-logic.mjs'
 
 const PAY_ROUND_BAND_MIN = 200
 const PAY_ROUND_BAND_MAX = 210
@@ -101,18 +102,20 @@ export function ledgerEntriesForShiftDay(ledger, shiftDayKey, shift) {
 /**
  * @param {unknown[]} ledger
  * @param {string} shiftDayKey
- * @param {{ shiftStartMins: number, shiftEndMins: number }} shift
+ * @param {{ shiftStartMins: number, shiftEndMins: number, timeZone?: string }} shift
  */
 export function buildDailyShiftSummary(ledger, shiftDayKey, shift) {
-  const items = ledgerEntriesForShiftDay(ledger, shiftDayKey, shift).sort(
-    (a, b) => entryTs(b) - entryTs(a),
+  const timeZone = shift.timeZone || 'America/New_York'
+  const items = ledgerEntriesForWorkDay(ledger, shiftDayKey, shift, timeZone).sort(
+    (a, b) => computeLedgerDisplayDate(b) - computeLedgerDisplayDate(a),
   )
   let totalMiles = 0
   const trips = items.map((e) => {
     const mi = entryMiles(e)
     totalMiles += mi
     const ctx = buildEmailTripContextFromLedgerEntry(e)
-    ctx.completedAt = formatWhen(entryTs(e))
+    const ts = computeLedgerDisplayDate(e) || entryTs(e)
+    ctx.completedAt = formatWhen(ts)
     if (mi) ctx.miles = `${mi} mi`
     return ctx
   })

@@ -113,6 +113,7 @@ test('buildDailyShiftSummary returns rich trip contexts', () => {
   const summary = buildDailyShiftSummary(ledger, '2026-06-22', {
     shiftStartMins: 0,
     shiftEndMins: 1439,
+    timeZone: 'America/New_York',
   })
   assert.equal(summary.tripCount, 1)
   assert.equal(summary.trips.length, 1)
