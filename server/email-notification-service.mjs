@@ -58,7 +58,12 @@ export async function maybeSendEmailForInAppNotification(accountKey, payload) {
     const fp = `dispatch:${hint.slice(0, 200)}`
     if (fp && fp === prefs.lastDispatchNotifyFp) return { skipped: 'deduped' }
     return runWithCredentialAccountKey(accountKey, async () => {
+      const creds = await getCredentialsMeta()
       const trip = await resolveActiveEmailTripContext(accountKey)
+      if (trip) {
+        trip.driverName = creds.driverName || trip.driverName
+        if (creds.tractorNumber) trip.tractorNumber = String(creds.tractorNumber)
+      }
       const mail = dispatchInstructionsEmail({ hint, trip })
       await sendEmailForAccount(accountKey, { ...mail, cc: ccForKind(prefs, 'trip') })
       await patchSmtpSendStateForAccount(accountKey, { lastDispatchNotifyFp: fp })
@@ -92,6 +97,7 @@ export async function maybeSendEmailForInAppNotification(accountKey, payload) {
       const creds = await getCredentialsMeta()
       const trip = await resolveEmailTripContextForNotification(accountKey, extra, event)
       trip.driverName = creds.driverName || trip.driverName
+      if (creds.tractorNumber) trip.tractorNumber = String(creds.tractorNumber)
       const mail = tripStatusEmail({ statusLabel, fromPhase, toPhase, trip })
       await sendEmailForAccount(accountKey, { ...mail, cc: ccForKind(prefs, 'trip') })
       const patch = { lastStatusNotifyFp: fp }
@@ -112,7 +118,12 @@ export async function maybeSendEmailForInAppNotification(accountKey, payload) {
     const tractorLocation = formatLocation(extra.tractorLocation)
     const driverLocation = formatLocation(extra.driverLocation)
     return runWithCredentialAccountKey(accountKey, async () => {
+      const creds = await getCredentialsMeta()
       const trip = await resolveActiveEmailTripContext(accountKey)
+      if (trip) {
+        trip.driverName = creds.driverName || trip.driverName
+        if (creds.tractorNumber) trip.tractorNumber = String(creds.tractorNumber)
+      }
       const mail = driverMismatchEmail({ tractorLocation, driverLocation, trip })
       await sendEmailForAccount(accountKey, { ...mail, cc: ccForKind(prefs, 'trip') })
       await patchSmtpSendStateForAccount(accountKey, { lastDriverMismatchMs: Date.now() })
