@@ -1131,7 +1131,7 @@ export async function postRun(body) {
   return handleJson(r)
 }
 
-/** Abort the current Playwright run (same as server cancel). */
+/** Abort all Playwright runs, close the browser, and wait until idle. */
 export async function postCancelRun() {
   const r = await apiFetch('/api/run/cancel', { method: 'POST' })
   return handleJson(r)

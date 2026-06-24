@@ -131,6 +131,11 @@ import {
   cancelBlockInspectConfirm,
   cancelBlockRun,
 } from './playwright/blocks.mjs'
+import {
+  cancelAllPlaywrightRuns,
+  isAnyPlaywrightRunnerBusy,
+  waitForPlaywrightIdle,
+} from './playwright/run-control.mjs'
 import { listPresets, getPreset } from './automation-presets.mjs'
 import {
   getCheckInFlowPayload,
@@ -2700,8 +2705,9 @@ app.post('/api/run', async (req, reply) => {
 })
 
 app.post('/api/run/cancel', async () => {
-  cancelRun()
-  return { ok: true }
+  cancelAllPlaywrightRuns()
+  const idle = await waitForPlaywrightIdle()
+  return { ok: true, idle }
 })
 
 /** In-browser check-in: supply new location while POST /api/run is waiting (same Playwright session). */
@@ -2850,12 +2856,19 @@ app.post('/api/automations/:id/duplicate', async (req, reply) => {
 })
 
 app.post('/api/automations/:id/run', async (req, reply) => {
-  if (isRunnerBusy() || isBlockRunnerBusy()) {
-    return reply.code(409).send({ error: 'Runner busy' })
+  const { headless = true, slowMo = 0, tripData = {}, preempt = false } = req.body ?? {}
+  if (isAnyPlaywrightRunnerBusy()) {
+    if (!preempt) {
+      return reply.code(409).send({ error: 'Runner busy' })
+    }
+    cancelAllPlaywrightRuns()
+    const idle = await waitForPlaywrightIdle()
+    if (!idle) {
+      return reply.code(503).send({ error: 'Runner still busy after cancel' })
+    }
   }
   const auto = await getAutomation(req.params.id)
   if (!auto) return reply.code(404).send({ error: 'Automation not found' })
-  const { headless = true, slowMo = 0, tripData = {} } = req.body ?? {}
   try {
     const result = await runAutomation(auto, { headless, slowMo, tripData })
     return result
