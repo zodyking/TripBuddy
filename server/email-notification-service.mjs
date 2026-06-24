@@ -1,6 +1,6 @@
 import { runWithCredentialAccountKey } from './request-context.mjs'
 import { readAssignmentForAccount } from './assignment-store.mjs'
-import { getCredentialsMeta } from './credentials-store.mjs'
+import { getCredentialsMeta, getLinehaulDriverId } from './credentials-store.mjs'
 import {
   getSmtpPrefsForAccount,
   patchSmtpSendStateForAccount,
@@ -247,13 +247,17 @@ export async function sendWeeklySummaryEmail(accountKey, referenceMs) {
       Promise.resolve(buildWeekMileagePdfBuffer(payOpts)),
     ])
 
+    const driverId = await getLinehaulDriverId()
     const mail = weeklySummaryEmail({
       weekLabel: workWeek.groupLabel,
       workWeekLabel: workWeek.groupLabel,
       payWeekLabel: payWeek.groupLabel,
+      driverName: creds.driverName || driverBlock,
+      driverId: driverId || '—',
+      tractorsUsed: weekTrips.tractorsUsed,
       tripCount: weekTrips.tripCount,
       totalMiles: weekTrips.totalMiles,
-      trips: weekTrips.trips,
+      tableRows: weekTrips.tableRows,
     })
 
     await sendEmailForAccount(accountKey, {

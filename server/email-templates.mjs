@@ -93,6 +93,36 @@ export function keyValueBlock(opts) {
 }
 
 /**
+ * @param {{ headers: string[], rows: string[][] }} table
+ */
+export function dataTable(table) {
+  const th = (table.headers || [])
+    .map(
+      (h) =>
+        `<th align="left" style="padding:10px 12px;font-size:11px;text-transform:uppercase;letter-spacing:0.06em;color:${BRAND.muted};border-bottom:2px solid ${BRAND.border};">${escapeHtml(h)}</th>`,
+    )
+    .join('')
+  const body = (table.rows || [])
+    .map((row, i) => {
+      const bg = i % 2 === 0 ? BRAND.card : BRAND.subtle
+      const tds = row
+        .map(
+          (c) =>
+            `<td style="padding:10px 12px;font-size:13px;line-height:1.4;color:${BRAND.text};border-bottom:1px solid ${BRAND.border};background:${bg};vertical-align:top;">${escapeHtml(c)}</td>`,
+        )
+        .join('')
+      return `<tr>${tds}</tr>`
+    })
+    .join('')
+  return `<div style="overflow-x:auto;border:1px solid ${BRAND.border};border-radius:12px;margin-top:16px;">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;min-width:520px;">
+      <thead><tr>${th}</tr></thead>
+      <tbody>${body}</tbody>
+    </table>
+  </div>`
+}
+
+/**
  * @param {import('./email-trip-details.mjs').EmailTripContext} trip
  * @param {{ compact?: boolean, showMeta?: boolean }} [opts]
  */
@@ -405,55 +435,86 @@ export function dailyShiftEmail(summary) {
   }
 }
 
-/** @param {{ weekLabel: string, workWeekLabel: string, payWeekLabel: string, tripCount?: number, totalMiles?: number, trips?: import('./email-trip-details.mjs').EmailTripContext[] }} opts */
+/** @param {{
+ *   weekLabel: string,
+ *   workWeekLabel: string,
+ *   payWeekLabel: string,
+ *   driverName?: string,
+ *   driverId?: string,
+ *   tractorsUsed?: string[],
+ *   tripCount?: number,
+ *   totalMiles?: number,
+ *   tableRows?: string[][],
+ * }} opts */
 export function weeklySummaryEmail(opts) {
-  const tripCards =
-    opts.trips && opts.trips.length
-      ? opts.trips.map((t) => tripDetailCardHtml(t, { compact: true })).join('')
-      : ''
+  const tractorsLabel =
+    opts.tractorsUsed && opts.tractorsUsed.length
+      ? opts.tractorsUsed.map((t) => `#${t}`).join(', ')
+      : '—'
 
   const bodyHtml = `
     <p style="margin:0 0 8px;font-size:16px;line-height:1.55;color:${BRAND.text};">
-      Your weekly mileage reports are attached as PDFs.
+      Your weekly mileage summary for <strong>${escapeHtml(opts.workWeekLabel)}</strong>.
+      Full PDF reports are attached below.
     </p>
     ${keyValueBlock({
       rows: [
+        { label: 'Driver', value: opts.driverName || '—' },
+        { label: 'Driver ID', value: opts.driverId || '—' },
+        { label: 'Tractors this week', value: tractorsLabel },
+        { label: 'Total trips', value: String(opts.tripCount ?? 0) },
+        { label: 'Total billable miles', value: fmtMi(opts.totalMiles ?? 0) },
         { label: 'Work week', value: opts.workWeekLabel },
         { label: 'Pay schedule week', value: opts.payWeekLabel },
-        ...(typeof opts.tripCount === 'number'
-          ? [{ label: 'Trips this week', value: String(opts.tripCount) }]
-          : []),
-        ...(typeof opts.totalMiles === 'number'
-          ? [{ label: 'Billable miles', value: fmtMi(opts.totalMiles) }]
-          : []),
       ],
     })}
     ${
-      tripCards
+      opts.tableRows && opts.tableRows.length
         ? `<div style="margin-top:20px;">
-            <div style="font-size:13px;font-weight:700;color:${BRAND.text};margin-bottom:10px;">Week trip details</div>
-            ${tripCards}
+            <div style="font-size:13px;font-weight:700;color:${BRAND.text};margin-bottom:10px;">Work week trips</div>
+            ${dataTable({
+              headers: ['When', 'Leg', 'Origin', 'Destination', 'Trailers', 'Dollies', 'Miles', 'Outcome'],
+              rows: opts.tableRows,
+            })}
           </div>`
-        : ''
+        : `<p style="margin:16px 0 0;font-size:14px;color:${BRAND.muted};">No completed trips recorded for this work week.</p>`
     }
     <p style="margin:20px 0 0;font-size:14px;line-height:1.5;color:${BRAND.muted};">
       Attachments: <strong>work-week-mileage.pdf</strong> and <strong>pay-schedule-mileage.pdf</strong>.
       These match the PDF exports from TripBuddy History.
     </p>`
 
-  const textTrips =
-    opts.trips && opts.trips.length
-      ? opts.trips.map((t, i) => `Trip ${i + 1}\n${tripDetailPlainText(t)}`).join('\n\n')
-      : ''
+  const textTable =
+    opts.tableRows && opts.tableRows.length
+      ? opts.tableRows
+          .map(
+            (row, i) =>
+              `Trip ${i + 1}: ${row[0]} | Leg ${row[1]} | ${row[2]} -> ${row[3]} | ${row[4]} | Dollies ${row[5]} | ${row[6]} | ${row[7]}`,
+          )
+          .join('\n')
+      : 'No completed trips recorded for this work week.'
 
   return {
-    subject: toEmailTitleCase(`Weekly summary — ${opts.weekLabel}`),
+    subject: toEmailTitleCase(
+      `Weekly summary — ${opts.tripCount ?? 0} trip(s), ${fmtMi(opts.totalMiles ?? 0)}`,
+    ),
     html: wrapEmailHtml({
       title: 'Weekly mileage summary',
-      preheader: opts.weekLabel,
+      preheader: `${opts.tripCount ?? 0} trip(s) · ${fmtMi(opts.totalMiles ?? 0)} · ${opts.driverName || 'Driver'}`,
       bodyHtml,
     }),
-    text: `Weekly Summary ${opts.weekLabel}\nWork week: ${opts.workWeekLabel}\nPay week: ${opts.payWeekLabel}${textTrips ? `\n\n${textTrips}` : ''}`,
+    text: [
+      `Weekly Summary ${opts.weekLabel}`,
+      `Driver: ${opts.driverName || '—'}`,
+      `Driver ID: ${opts.driverId || '—'}`,
+      `Tractors: ${tractorsLabel}`,
+      `Trips: ${opts.tripCount ?? 0}`,
+      `Billable miles: ${fmtMi(opts.totalMiles ?? 0)}`,
+      `Work week: ${opts.workWeekLabel}`,
+      `Pay week: ${opts.payWeekLabel}`,
+      '',
+      textTable,
+    ].join('\n'),
   }
 }
 

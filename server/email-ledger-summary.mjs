@@ -1,6 +1,6 @@
 import { shiftDateKeyForEventMs } from '../src/utils/shiftCalendar.js'
 import { workWeekGroupMeta, workWeekKeyForDate } from '../src/utils/workWeekGroup.js'
-import { buildEmailTripContextFromLedgerEntry } from './email-trip-details.mjs'
+import { buildEmailTripContextFromLedgerEntry, weeklyTripTableRow } from './email-trip-details.mjs'
 
 const PAY_ROUND_BAND_MIN = 200
 const PAY_ROUND_BAND_MAX = 210
@@ -133,18 +133,32 @@ export function buildDailyShiftSummary(ledger, shiftDayKey, shift) {
  */
 export function buildWeeklyTripContexts(ledger, week, opts) {
   const items = ledgerEntriesForWeek(ledger, week, opts).sort(
-    (a, b) => entryTs(b) - entryTs(a),
+    (a, b) => entryTs(a) - entryTs(b),
   )
   let totalMiles = 0
+  /** @type {Set<string>} */
+  const tractorsUsed = new Set()
+  if (opts?.tractorNumber) {
+    const t = String(opts.tractorNumber).trim()
+    if (t) tractorsUsed.add(t)
+  }
   const trips = items.map((e) => {
     const mi = entryMiles(e)
     totalMiles += mi
     const ctx = buildEmailTripContextFromLedgerEntry(e)
     ctx.completedAt = formatWhen(entryTs(e))
     if (mi) ctx.miles = `${mi} mi`
+    if (ctx.tractorNumber) tractorsUsed.add(ctx.tractorNumber)
     return ctx
   })
-  return { tripCount: items.length, totalMiles, trips }
+  const tableRows = trips.map((t) => weeklyTripTableRow(t))
+  return {
+    tripCount: items.length,
+    totalMiles,
+    trips,
+    tableRows,
+    tractorsUsed: [...tractorsUsed].sort(),
+  }
 }
 
 /**

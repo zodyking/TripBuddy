@@ -3,9 +3,12 @@ import assert from 'node:assert/strict'
 import {
   buildEmailTripContextFromBody,
   buildEmailTripContextFromLedgerEntry,
+  formatTrailersSummary,
+  weeklyTripTableRow,
 } from './email-trip-details.mjs'
-import { tripDetailPlainText, tripDetailCardHtml } from './email-templates.mjs'
-import { buildDailyShiftSummary } from './email-ledger-summary.mjs'
+import { tripDetailPlainText, tripDetailCardHtml, weeklySummaryEmail } from './email-templates.mjs'
+import { buildDailyShiftSummary, buildWeeklyTripContexts } from './email-ledger-summary.mjs'
+import { workWeekGroupMeta } from '../src/utils/workWeekGroup.js'
 
 const sampleBody = {
   dailyTripLegSequence: '3',
@@ -108,4 +111,81 @@ test('buildDailyShiftSummary returns rich trip contexts', () => {
   assert.equal(summary.trips.length, 1)
   assert.match(summary.trips[0].origin, /111/)
   assert.equal(summary.trips[0].trailers.length, 2)
+})
+
+test('buildWeeklyTripContexts returns table rows and tractors used', () => {
+  const ledger = [
+    {
+      dailyTripLegSequence: '1',
+      completedAt: Date.parse('2026-06-18T10:00:00Z'),
+      dispatchHeader: {
+        origin: '111 · A',
+        destination: '222 · B',
+        historyOutcome: 'delivered',
+      },
+      tripDetails: sampleBody,
+    },
+    {
+      dailyTripLegSequence: '2',
+      completedAt: Date.parse('2026-06-19T10:00:00Z'),
+      dispatchHeader: {
+        origin: '333 · C',
+        destination: '444 · D',
+        historyOutcome: 'delivered',
+      },
+      tripDetails: { ...sampleBody, tractorNumber: 'T-88', dailyTripLegSequence: '2' },
+    },
+  ]
+  const week = workWeekGroupMeta(Date.parse('2026-06-18T10:00:00Z'), {
+    workWeekStartDay: 4,
+    workWeekEndDay: 2,
+    shiftStartMins: 0,
+    shiftEndMins: 1439,
+  })
+  assert.ok(week?.key)
+  const summary = buildWeeklyTripContexts(ledger, week, {
+    workWeekStartDay: 4,
+    workWeekEndDay: 2,
+    shiftStartMins: 0,
+    shiftEndMins: 1439,
+    tractorNumber: 'T-99',
+  })
+  assert.equal(summary.tripCount, 2)
+  assert.equal(summary.tableRows.length, 2)
+  assert.ok(summary.tractorsUsed.includes('T-99'))
+  assert.ok(summary.tractorsUsed.includes('T-88'))
+})
+
+test('weeklySummaryEmail includes driver, tractors, totals, and trip table', () => {
+  const ctx = buildEmailTripContextFromBody(sampleBody)
+  ctx.completedAt = 'Jun 18, 10:00 AM'
+  ctx.miles = '210 mi'
+  ctx.outcome = 'delivered'
+  const mail = weeklySummaryEmail({
+    weekLabel: 'Jun 18–23',
+    workWeekLabel: 'Work week — Jun 18–23',
+    payWeekLabel: 'Pay week — Jun 18–23',
+    driverName: 'Brandon King',
+    driverId: '123456',
+    tractorsUsed: ['T-99', 'T-88'],
+    tripCount: 1,
+    totalMiles: 210,
+    tableRows: [weeklyTripTableRow(ctx)],
+  })
+  assert.match(mail.html, /Brandon King/)
+  assert.match(mail.html, /123456/)
+  assert.match(mail.html, /#T-99/)
+  assert.match(mail.html, /Total trips/)
+  assert.match(mail.html, /210 mi/)
+  assert.match(mail.html, /Work week trips/)
+  assert.match(mail.html, /Memphis Hub/)
+  assert.match(mail.text, /Dollies/)
+})
+
+test('formatTrailersSummary is concise for table cells', () => {
+  const ctx = buildEmailTripContextFromBody(sampleBody)
+  const summary = formatTrailersSummary(ctx.trailers)
+  assert.match(summary, /T1/)
+  assert.match(summary, /8123456/)
+  assert.match(summary, /SEAL123/)
 })

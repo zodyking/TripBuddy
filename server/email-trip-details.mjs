@@ -127,6 +127,38 @@ function formatDollySummary(dollies) {
   return dollies.map((d) => `${d.label}: ${d.value}`).join(' · ')
 }
 
+/** @param {EmailTripTrailer[]} trailers */
+export function formatTrailersSummary(trailers) {
+  if (!trailers?.length) return '—'
+  return trailers
+    .map((tr) => {
+      const parts = [`T${tr.order}`]
+      if (tr.number !== '—') parts.push(`#${tr.number}`)
+      if (tr.seal !== '—') parts.push(`Seal ${tr.seal}`)
+      return parts.join(' ')
+    })
+    .join(' · ')
+}
+
+/**
+ * @param {import('./email-trip-details.mjs').EmailTripContext} trip
+ * @returns {string[]}
+ */
+export function weeklyTripTableRow(trip) {
+  const trailers = formatTrailersSummary(trip.trailers)
+  const dollies = trip.dollySummary && trip.dollySummary !== '—' ? trip.dollySummary : '—'
+  return [
+    trip.completedAt || '—',
+    trip.leg || '—',
+    trip.origin || '—',
+    trip.destination || '—',
+    trailers,
+    dollies,
+    trip.miles || '—',
+    trip.outcome || '—',
+  ]
+}
+
 /**
  * @param {unknown} body
  * @param {Partial<EmailTripContext>} [overrides]
