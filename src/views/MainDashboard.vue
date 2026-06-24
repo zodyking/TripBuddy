@@ -1183,6 +1183,21 @@ function notifyQuickActionInApp(message, kind = 'info') {
   })
 }
 
+function dismissInBrowserAutomationPrompts() {
+  inspectFieldOpen.value = false
+  inspectFieldMessage.value = ''
+  inspectFieldInput.value = ''
+  inspectFieldKeyLabel.value = ''
+  inspectFieldRunId.value = null
+  inspectDollyConfirmOpen.value = false
+  inspectDollyConfirmMessage.value = ''
+  inspectDollyConfirmRunId.value = null
+  locationRetryOpen.value = false
+  locationRetryFedexMessage.value = ''
+  locationRetryInput.value = ''
+  inBrowserRetryRunId.value = null
+}
+
 /**
  * @returns {Promise<{ ok: boolean, skipped?: boolean }>}
  * `skipped` means this invocation was superseded (user started another quick action) or is otherwise benign to ignore.
@@ -1191,7 +1206,8 @@ async function runQuickAction(auto) {
   quickActionRunGeneration.value += 1
   const myGen = quickActionRunGeneration.value
 
-  /* Server allows one Playwright run at a time — cancel any in-flight run (prior quick action or run started elsewhere) before this one. */
+  dismissInBrowserAutomationPrompts()
+  /* Cancel block + scenario runners, close browser, then start the newly tapped quick action. */
   try {
     await postCancelRun()
   } catch {
@@ -1232,7 +1248,7 @@ async function runQuickAction(auto) {
     }
     const legSeq = currentTripLegSeq.value
     if (legSeq) tripData.dailyTripLegSequence = String(legSeq)
-    const result = await runAutomation(auto.id, { headless: true, tripData })
+    const result = await runAutomation(auto.id, { headless: true, tripData, preempt: true })
     if (quickActionRunGeneration.value !== myGen) return { ok: false, skipped: true }
     const inspectReCheckin = result.variables?._inspectCheckoutContinue
     if (inspectReCheckin?.requiresReCheckin === true) {
