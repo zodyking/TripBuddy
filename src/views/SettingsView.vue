@@ -2713,41 +2713,50 @@ onUnmounted(() => {
             </div>
           </div>
 
-          <div class="email-panel">
+          <div class="email-panel email-panel--scheduled">
             <h3 class="email-panel-title">Scheduled reports</h3>
-            <div class="email-toggle-grid">
-              <label class="email-toggle tap">
+            <p class="email-field-note email-scheduled-note">
+              Based on your shift schedule in credentials. End-of-shift summary sends after your shift
+              ends when all trips are complete. Weekly PDFs send on your last work day, after shift ends
+              and 2 hours with no new trips.
+            </p>
+            <div class="smtp-notify-toggles email-scheduled-toggles">
+              <label class="toggle-row tap email-report-toggle">
                 <input v-model="emailOnDailyShift" type="checkbox" />
-                <span>End-of-shift summary</span>
+                <span class="email-report-label">
+                  <strong>End-of-shift summary</strong>
+                  <small>After your shift ends each day</small>
+                </span>
               </label>
-              <label class="email-toggle tap">
+              <label class="toggle-row tap email-report-toggle">
                 <input v-model="emailOnWeeklySummary" type="checkbox" />
-                <span>Weekly mileage PDFs</span>
+                <span class="email-report-label">
+                  <strong>Weekly mileage PDFs</strong>
+                  <small>Last work day of your week</small>
+                </span>
               </label>
             </div>
-            <div v-if="emailOnDailyShift || emailOnWeeklySummary" class="email-fields">
-              <div v-if="emailOnDailyShift" class="email-field">
-                <label class="email-field-label" for="email-daily-cc">CC (daily)</label>
-                <input
-                  id="email-daily-cc"
-                  v-model="emailDailyShiftCcDraft"
-                  class="inp tap"
-                  type="text"
-                  autocomplete="email"
-                  placeholder="name@example.com, other@example.com"
-                />
-              </div>
-              <div v-if="emailOnWeeklySummary" class="email-field">
-                <label class="email-field-label" for="email-weekly-cc">CC (weekly)</label>
-                <input
-                  id="email-weekly-cc"
-                  v-model="emailWeeklySummaryCcDraft"
-                  class="inp tap"
-                  type="text"
-                  autocomplete="email"
-                  placeholder="name@example.com, other@example.com"
-                />
-              </div>
+            <div v-if="emailOnDailyShift" class="api-key-row email-scheduled-cc">
+              <label class="lbl api-key-lbl" for="email-daily-cc">Also send daily report to</label>
+              <input
+                id="email-daily-cc"
+                v-model="emailDailyShiftCcDraft"
+                class="inp tap api-key-inp"
+                type="text"
+                autocomplete="email"
+                placeholder="Optional — comma-separated emails"
+              />
+            </div>
+            <div v-if="emailOnWeeklySummary" class="api-key-row email-scheduled-cc">
+              <label class="lbl api-key-lbl" for="email-weekly-cc">Also send weekly PDFs to</label>
+              <input
+                id="email-weekly-cc"
+                v-model="emailWeeklySummaryCcDraft"
+                class="inp tap api-key-inp"
+                type="text"
+                autocomplete="email"
+                placeholder="Optional — comma-separated emails"
+              />
             </div>
           </div>
         </template>
@@ -3781,6 +3790,74 @@ onUnmounted(() => {
   letter-spacing: 0.04em;
   text-transform: uppercase;
   color: var(--color-text-secondary, #a8a8b8);
+}
+
+.email-field-note {
+  margin: 0 0 12px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--color-text-tertiary, #8b8b9a);
+}
+
+.email-panel--scheduled {
+  text-align: center;
+}
+
+.email-panel--scheduled .email-panel-title {
+  text-align: center;
+}
+
+.email-scheduled-note {
+  max-width: 34rem;
+  margin-inline: auto;
+}
+
+.email-scheduled-toggles {
+  max-width: 22rem;
+  margin-inline: auto;
+  text-align: left;
+}
+
+.email-report-toggle {
+  align-items: flex-start;
+}
+
+.email-report-label {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.email-report-label strong {
+  font-weight: 600;
+}
+
+.email-report-label small {
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--color-text-tertiary, #8b8b9a);
+}
+
+.email-scheduled-cc {
+  max-width: 28rem;
+  margin-inline: auto;
+  text-align: left;
+}
+
+.email-scheduled-cc .api-key-lbl {
+  flex: 0 0 auto;
+  min-width: 9.5rem;
+}
+
+@media (max-width: 520px) {
+  .email-scheduled-cc {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .email-scheduled-cc .api-key-lbl {
+    min-width: 0;
+  }
 }
 
 .email-fields {
