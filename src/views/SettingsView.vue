@@ -693,32 +693,52 @@ const smtpFromNameDraft = ref('TripBuddy')
 const emailNotifyToDraft = ref('')
 const emailTimezoneDraft = ref('America/New_York')
 const emailOnNewTrip = ref(true)
+const emailOnPreplan = ref(true)
+const emailOnStatusChange = ref(false)
+const emailOnDriverMismatch = ref(false)
+const emailOnDispatchInstructions = ref(false)
 const emailOnDailyShift = ref(true)
 const emailOnWeeklySummary = ref(true)
+const emailTripCcDraft = ref('')
+const emailDailyShiftCcDraft = ref('')
+const emailWeeklySummaryCcDraft = ref('')
+const emailDailyDelayMinsDraft = ref(30)
 const smtpBusy = ref(false)
 const smtpTestBusy = ref(false)
 const smtpMsg = ref('')
+
+function smtpPrefsPayload() {
+  return {
+    enabled: smtpEnabled.value,
+    host: smtpHostDraft.value,
+    port: Number(smtpPortDraft.value) || 587,
+    secure: smtpSecureDraft.value,
+    user: smtpUserDraft.value,
+    password: smtpPassDraft.value || undefined,
+    fromEmail: smtpFromEmailDraft.value,
+    fromName: smtpFromNameDraft.value,
+    notifyTo: emailNotifyToDraft.value,
+    timezone: emailTimezoneDraft.value,
+    onNewTrip: emailOnNewTrip.value,
+    onPreplan: emailOnPreplan.value,
+    onStatusChange: emailOnStatusChange.value,
+    onDriverMismatch: emailOnDriverMismatch.value,
+    onDispatchInstructions: emailOnDispatchInstructions.value,
+    onDailyShiftSummary: emailOnDailyShift.value,
+    onWeeklySummary: emailOnWeeklySummary.value,
+    tripCc: emailTripCcDraft.value,
+    dailyShiftCc: emailDailyShiftCcDraft.value,
+    weeklySummaryCc: emailWeeklySummaryCcDraft.value,
+    dailyDelayMins: Number(emailDailyDelayMinsDraft.value) || 30,
+  }
+}
 
 async function saveSmtpPrefs() {
   if (!(await requireApi())) return
   smtpBusy.value = true
   smtpMsg.value = ''
   try {
-    await putSmtpPrefs({
-      enabled: smtpEnabled.value,
-      host: smtpHostDraft.value,
-      port: Number(smtpPortDraft.value) || 587,
-      secure: smtpSecureDraft.value,
-      user: smtpUserDraft.value,
-      password: smtpPassDraft.value || undefined,
-      fromEmail: smtpFromEmailDraft.value,
-      fromName: smtpFromNameDraft.value,
-      notifyTo: emailNotifyToDraft.value,
-      timezone: emailTimezoneDraft.value,
-      onNewTrip: emailOnNewTrip.value,
-      onDailyShiftSummary: emailOnDailyShift.value,
-      onWeeklySummary: emailOnWeeklySummary.value,
-    })
+    await putSmtpPrefs(smtpPrefsPayload())
     smtpPassDraft.value = ''
     smtpMsg.value = 'Email settings saved.'
     await loadCredentials()
@@ -734,21 +754,7 @@ async function sendSmtpTest() {
   smtpTestBusy.value = true
   smtpMsg.value = ''
   try {
-    await putSmtpPrefs({
-      enabled: smtpEnabled.value,
-      host: smtpHostDraft.value,
-      port: Number(smtpPortDraft.value) || 587,
-      secure: smtpSecureDraft.value,
-      user: smtpUserDraft.value,
-      password: smtpPassDraft.value || undefined,
-      fromEmail: smtpFromEmailDraft.value,
-      fromName: smtpFromNameDraft.value,
-      notifyTo: emailNotifyToDraft.value,
-      timezone: emailTimezoneDraft.value,
-      onNewTrip: emailOnNewTrip.value,
-      onDailyShiftSummary: emailOnDailyShift.value,
-      onWeeklySummary: emailOnWeeklySummary.value,
-    })
+    await putSmtpPrefs(smtpPrefsPayload())
     smtpPassDraft.value = '••••'
     await postSmtpTest()
     smtpMsg.value = 'Test email sent — check your inbox.'
@@ -1254,8 +1260,19 @@ async function loadCredentials() {
       credMeta.value.emailTimezone ?? 'America/New_York',
     )
     emailOnNewTrip.value = credMeta.value.emailOnNewTrip !== false
+    emailOnPreplan.value = credMeta.value.emailOnPreplan !== false
+    emailOnStatusChange.value = credMeta.value.emailOnStatusChange === true
+    emailOnDriverMismatch.value = credMeta.value.emailOnDriverMismatch === true
+    emailOnDispatchInstructions.value = credMeta.value.emailOnDispatchInstructions === true
     emailOnDailyShift.value = credMeta.value.emailOnDailyShift !== false
     emailOnWeeklySummary.value = credMeta.value.emailOnWeeklySummary !== false
+    emailTripCcDraft.value = String(credMeta.value.emailTripCc ?? '')
+    emailDailyShiftCcDraft.value = String(credMeta.value.emailDailyShiftCc ?? '')
+    emailWeeklySummaryCcDraft.value = String(credMeta.value.emailWeeklySummaryCc ?? '')
+    emailDailyDelayMinsDraft.value =
+      typeof credMeta.value.emailDailyDelayMins === 'number'
+        ? credMeta.value.emailDailyDelayMins
+        : 30
     applyHelpersLocationPrefsFromCredentials(credMeta.value)
     applyWahaPrefsFromCredentials(credMeta.value)
     applyBlueBubblesPrefsFromCredentials(credMeta.value)
@@ -2550,10 +2567,45 @@ onUnmounted(() => {
           <label class="lbl api-key-lbl" for="email-timezone">Timezone</label>
           <input id="email-timezone" v-model="emailTimezoneDraft" class="inp tap api-key-inp" type="text" placeholder="America/New_York" />
         </div>
+
+        <h3 class="smtp-section-heading">Trip alerts</h3>
+        <p class="cred-hint smtp-section-hint">
+          Instant emails when trips or dispatch details change. Use CC to copy alerts to a manager or dispatcher.
+        </p>
         <div class="smtp-notify-toggles">
           <label class="toggle-row tap"><input v-model="emailOnNewTrip" type="checkbox" /><span>New trip assigned</span></label>
+          <label class="toggle-row tap"><input v-model="emailOnPreplan" type="checkbox" /><span>Preplan assigned</span></label>
+          <label class="toggle-row tap"><input v-model="emailOnStatusChange" type="checkbox" /><span>Trip status changes (assigned, en route, complete)</span></label>
+          <label class="toggle-row tap"><input v-model="emailOnDriverMismatch" type="checkbox" /><span>Driver / tractor location mismatch</span></label>
+          <label class="toggle-row tap"><input v-model="emailOnDispatchInstructions" type="checkbox" /><span>Dispatch instructions updated</span></label>
+        </div>
+        <div class="api-key-row">
+          <label class="lbl api-key-lbl" for="email-trip-cc">Also send trip alerts to</label>
+          <input id="email-trip-cc" v-model="emailTripCcDraft" class="inp tap api-key-inp" type="text" autocomplete="email" placeholder="manager@example.com, dispatcher@example.com" />
+        </div>
+
+        <h3 class="smtp-section-heading">Scheduled reports</h3>
+        <p class="cred-hint smtp-section-hint">
+          End-of-shift and weekly PDF summaries. CC fields send copies without changing your primary inbox address.
+        </p>
+        <div class="smtp-notify-toggles">
           <label class="toggle-row tap"><input v-model="emailOnDailyShift" type="checkbox" /><span>Daily end-of-shift summary</span></label>
           <label class="toggle-row tap"><input v-model="emailOnWeeklySummary" type="checkbox" /><span>Weekly PDF summary (work week + pay schedule)</span></label>
+        </div>
+        <div class="api-key-row">
+          <label class="lbl api-key-lbl" for="email-daily-delay">Send daily summary</label>
+          <div class="smtp-delay-row">
+            <input id="email-daily-delay" v-model.number="emailDailyDelayMinsDraft" class="inp tap api-key-inp smtp-delay-inp" type="number" min="0" max="720" />
+            <span class="smtp-delay-suffix">minutes after shift end</span>
+          </div>
+        </div>
+        <div class="api-key-row">
+          <label class="lbl api-key-lbl" for="email-daily-cc">Also send daily summary to</label>
+          <input id="email-daily-cc" v-model="emailDailyShiftCcDraft" class="inp tap api-key-inp" type="text" autocomplete="email" placeholder="payroll@example.com" />
+        </div>
+        <div class="api-key-row">
+          <label class="lbl api-key-lbl" for="email-weekly-cc">Also send weekly PDFs to</label>
+          <input id="email-weekly-cc" v-model="emailWeeklySummaryCcDraft" class="inp tap api-key-inp" type="text" autocomplete="email" placeholder="accounting@example.com" />
         </div>
         <div class="modal-actions loc-retry-actions">
           <button type="button" class="btn primary tap" :disabled="smtpBusy" @click="saveSmtpPrefs">
@@ -3535,8 +3587,36 @@ onUnmounted(() => {
 .smtp-notify-toggles {
   display: flex;
   flex-direction: column;
-  gap: 0.15rem;
-  margin: var(--space-4, 1rem) 0;
+  gap: 10px;
+  margin: 12px 0 16px;
+}
+
+.smtp-section-heading {
+  margin: 20px 0 6px;
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text, #1a1a2e);
+}
+
+.smtp-section-hint {
+  margin: 0 0 10px;
+}
+
+.smtp-delay-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.smtp-delay-inp {
+  width: 88px;
+  flex: 0 0 auto;
+}
+
+.smtp-delay-suffix {
+  font-size: 14px;
+  color: var(--muted, #5c5c72);
 }
 
 .smtp-secure-toggle {

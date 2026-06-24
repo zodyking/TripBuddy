@@ -8,6 +8,10 @@ import {
 import { sendEmailForAccount } from './smtp-mail.mjs'
 import {
   newTripEmail,
+  preplanTripEmail,
+  tripStatusEmail,
+  dispatchInstructionsEmail,
+  driverMismatchEmail,
   dailyShiftEmail,
   weeklySummaryEmail,
 } from './email-templates.mjs'
@@ -20,37 +24,122 @@ import {
 import { buildWeekMileagePdfBuffer } from './email-week-pdf.mjs'
 
 /**
+ * @param {ReturnType<import('./user-profile-pg.mjs').getSmtpPrefsForAccount> extends Promise<infer T> ? T : never} prefs
+ * @param {'trip' | 'daily' | 'weekly'} kind
+ */
+function ccForKind(prefs, kind) {
+  if (kind === 'daily') return prefs.dailyShiftCc || undefined
+  if (kind === 'weekly') return prefs.weeklySummaryCc || undefined
+  return prefs.tripCc || undefined
+}
+
+/**
  * @param {string} accountKey
  * @param {{ type?: string, message: string, extra?: object }} payload
  */
 export async function maybeSendEmailForInAppNotification(accountKey, payload) {
   const prefs = await getSmtpPrefsForAccount(accountKey)
-  if (!prefs.enabled || !prefs.onNewTrip) return { skipped: 'disabled' }
+  if (!prefs.enabled) return { skipped: 'disabled' }
 
   const extra = payload.extra && typeof payload.extra === 'object' ? payload.extra : {}
   const event = String(extra.event ?? '')
-  if (event !== 'trip_assigned' && event !== 'preplan_assigned') {
-    return { skipped: 'not_trip_event' }
+  const type = String(payload.type ?? '')
+
+  if (type === 'assignment' || event === 'dispatch_instructions') {
+    if (!prefs.onDispatchInstructions) return { skipped: 'disabled' }
+    const hint = String(extra.hint ?? '').trim()
+    const fp = `dispatch:${hint.slice(0, 200)}`
+    if (fp && fp === prefs.lastDispatchNotifyFp) return { skipped: 'deduped' }
+    return runWithCredentialAccountKey(accountKey, async () => {
+      const mail = dispatchInstructionsEmail({ hint })
+      await sendEmailForAccount(accountKey, { ...mail, cc: ccForKind(prefs, 'trip') })
+      await patchSmtpSendStateForAccount(accountKey, { lastDispatchNotifyFp: fp })
+      return { ok: true }
+    })
   }
 
+  if (event === 'trip_assigned') {
+    if (!prefs.onNewTrip) return { skipped: 'disabled' }
+    return sendTripRouteEmail(accountKey, prefs, extra, newTripEmail, 'trip_assigned')
+  }
+
+  if (event === 'preplan_assigned') {
+    if (!prefs.onPreplan) return { skipped: 'disabled' }
+    return sendTripRouteEmail(accountKey, prefs, extra, preplanTripEmail, 'preplan_assigned')
+  }
+
+  if (event === 'status_assigned' || event === 'status_enroute' || event === 'status_complete') {
+    if (!prefs.onStatusChange) return { skipped: 'disabled' }
+    const fromPhase = String(extra.fromPhase ?? '')
+    const toPhase = String(extra.toPhase ?? '')
+    const fp = `${event}:${fromPhase}:${toPhase}`
+    if (fp && fp === prefs.lastStatusNotifyFp) return { skipped: 'deduped' }
+    const statusLabel =
+      event === 'status_assigned'
+        ? 'Assigned'
+        : event === 'status_enroute'
+          ? 'En route'
+          : 'Complete'
+    return runWithCredentialAccountKey(accountKey, async () => {
+      const mail = tripStatusEmail({ statusLabel, fromPhase, toPhase })
+      await sendEmailForAccount(accountKey, { ...mail, cc: ccForKind(prefs, 'trip') })
+      await patchSmtpSendStateForAccount(accountKey, { lastStatusNotifyFp: fp })
+      return { ok: true }
+    })
+  }
+
+  if (event === 'driver_tractor_mismatch') {
+    if (!prefs.onDriverMismatch) return { skipped: 'disabled' }
+    const tractorLocation = formatLocation(extra.tractorLocation)
+    const driverLocation = formatLocation(extra.driverLocation)
+    return runWithCredentialAccountKey(accountKey, async () => {
+      const mail = driverMismatchEmail({ tractorLocation, driverLocation })
+      await sendEmailForAccount(accountKey, { ...mail, cc: ccForKind(prefs, 'trip') })
+      return { ok: true }
+    })
+  }
+
+  return { skipped: 'not_email_event' }
+}
+
+/**
+ * @param {string} accountKey
+ * @param {object} prefs
+ * @param {object} extra
+ * @param {(trip: object) => object} buildMail
+ * @param {string} eventKey
+ */
+async function sendTripRouteEmail(accountKey, prefs, extra, buildMail, eventKey) {
   const leg = String(extra.leg ?? '').trim()
   const origin = String(extra.origin ?? '').trim()
   const destination = String(extra.destination ?? '').trim()
-  const fp = `${event}:${leg}:${origin}:${destination}`
+  const fp = `${eventKey}:${leg}:${origin}:${destination}`
   if (fp && fp === prefs.lastTripNotifyFp) return { skipped: 'deduped' }
 
   return runWithCredentialAccountKey(accountKey, async () => {
     const creds = await getCredentialsMeta()
-    const mail = newTripEmail({
+    const mail = buildMail({
       leg,
       origin: origin || '—',
       destination: destination || '—',
       driverName: creds.driverName || undefined,
     })
-    await sendEmailForAccount(accountKey, mail)
+    await sendEmailForAccount(accountKey, { ...mail, cc: ccForKind(prefs, 'trip') })
     await patchSmtpSendStateForAccount(accountKey, { lastTripNotifyFp: fp })
     return { ok: true }
   })
+}
+
+/** @param {unknown} loc */
+function formatLocation(loc) {
+  if (!loc || typeof loc !== 'object') return ''
+  const o = /** @type {Record<string, unknown>} */ (loc)
+  const lat = o.lat ?? o.latitude
+  const lng = o.lng ?? o.longitude
+  if (typeof lat === 'number' && typeof lng === 'number') {
+    return `${lat.toFixed(4)}, ${lng.toFixed(4)}`
+  }
+  return String(loc).slice(0, 80)
 }
 
 /**
@@ -71,7 +160,7 @@ export async function sendDailyShiftSummaryEmail(accountKey, shiftDayKey) {
       shiftEndMins: creds.shiftEndMins ?? 1439,
     })
     const mail = dailyShiftEmail(summary)
-    await sendEmailForAccount(accountKey, mail)
+    await sendEmailForAccount(accountKey, { ...mail, cc: ccForKind(prefs, 'daily') })
     await patchSmtpSendStateForAccount(accountKey, { lastDailyShiftKey: shiftDayKey })
     return { ok: true, tripCount: summary.tripCount }
   })
@@ -132,6 +221,7 @@ export async function sendWeeklySummaryEmail(accountKey, referenceMs) {
 
     await sendEmailForAccount(accountKey, {
       ...mail,
+      cc: ccForKind(prefs, 'weekly'),
       attachments: [
         {
           filename: 'work-week-mileage.pdf',
@@ -200,9 +290,9 @@ export async function maybeSendScheduledEmailsForAccount(accountKey, now = new D
     const creds = await getCredentialsMeta()
     const shiftEnd = creds.shiftEndMins ?? 1439
     const shiftStart = creds.shiftStartMins ?? 0
+    const dailyDelay = prefs.dailyDelayMins ?? 30
 
-    // Daily: 30 minutes after shift end, summarize the shift day that just ended
-    const dailyTrigger = shiftEnd + 30
+    const dailyTrigger = shiftEnd + dailyDelay
     if (prefs.onDailyShiftSummary && parts.mins >= dailyTrigger && parts.mins < dailyTrigger + 2) {
       const shiftDayKey = shiftDateKeyForEventMs(now.getTime(), shiftStart, shiftEnd)
       try {
@@ -212,7 +302,6 @@ export async function maybeSendScheduledEmailsForAccount(accountKey, now = new D
       }
     }
 
-    // Weekly: Monday 06:00 local — email previous work week + pay week PDFs
     if (prefs.onWeeklySummary && parts.weekday === 'Mon' && parts.mins >= 360 && parts.mins < 362) {
       const prevWeekMs = now.getTime() - 24 * 60 * 60 * 1000
       try {

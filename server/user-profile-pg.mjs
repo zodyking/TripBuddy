@@ -182,6 +182,36 @@ export async function ensureUserProfileTable() {
     await client.query(`
       ALTER TABLE ${TABLE} ADD COLUMN IF NOT EXISTS email_last_trip_notify_fp TEXT
     `)
+    await client.query(`
+      ALTER TABLE ${TABLE} ADD COLUMN IF NOT EXISTS email_on_preplan BOOLEAN
+    `)
+    await client.query(`
+      ALTER TABLE ${TABLE} ADD COLUMN IF NOT EXISTS email_on_status_change BOOLEAN
+    `)
+    await client.query(`
+      ALTER TABLE ${TABLE} ADD COLUMN IF NOT EXISTS email_on_driver_mismatch BOOLEAN
+    `)
+    await client.query(`
+      ALTER TABLE ${TABLE} ADD COLUMN IF NOT EXISTS email_on_dispatch_instructions BOOLEAN
+    `)
+    await client.query(`
+      ALTER TABLE ${TABLE} ADD COLUMN IF NOT EXISTS email_trip_cc TEXT
+    `)
+    await client.query(`
+      ALTER TABLE ${TABLE} ADD COLUMN IF NOT EXISTS email_daily_shift_cc TEXT
+    `)
+    await client.query(`
+      ALTER TABLE ${TABLE} ADD COLUMN IF NOT EXISTS email_weekly_summary_cc TEXT
+    `)
+    await client.query(`
+      ALTER TABLE ${TABLE} ADD COLUMN IF NOT EXISTS email_daily_delay_mins INTEGER
+    `)
+    await client.query(`
+      ALTER TABLE ${TABLE} ADD COLUMN IF NOT EXISTS email_last_status_notify_fp TEXT
+    `)
+    await client.query(`
+      ALTER TABLE ${TABLE} ADD COLUMN IF NOT EXISTS email_last_dispatch_notify_fp TEXT
+    `)
   } finally {
     client.release()
   }
@@ -1033,7 +1063,9 @@ export async function setBlueBubblesPrefsForAccount(accountKey, prefs) {
 const SMTP_HOST_MAX = 255
 const SMTP_USER_MAX = 255
 const SMTP_EMAIL_MAX = 320
+const SMTP_CC_MAX = 960
 const DEFAULT_EMAIL_TZ = 'America/New_York'
+const DEFAULT_DAILY_DELAY_MINS = 30
 
 function rowToSmtpPrefs(row) {
   if (!row) {
@@ -1049,12 +1081,22 @@ function rowToSmtpPrefs(row) {
       notifyTo: '',
       timezone: DEFAULT_EMAIL_TZ,
       onNewTrip: true,
+      onPreplan: true,
+      onStatusChange: false,
+      onDriverMismatch: false,
+      onDispatchInstructions: false,
       onDailyShiftSummary: true,
       onWeeklySummary: true,
+      tripCc: '',
+      dailyShiftCc: '',
+      weeklySummaryCc: '',
+      dailyDelayMins: DEFAULT_DAILY_DELAY_MINS,
       lastDailyShiftKey: '',
       lastWeeklyWorkKey: '',
       lastWeeklyPayKey: '',
       lastTripNotifyFp: '',
+      lastStatusNotifyFp: '',
+      lastDispatchNotifyFp: '',
     }
   }
   let password = ''
@@ -1093,8 +1135,26 @@ function rowToSmtpPrefs(row) {
         ? row.email_timezone.trim().slice(0, 64)
         : DEFAULT_EMAIL_TZ,
     onNewTrip: row.email_on_new_trip !== false,
+    onPreplan: row.email_on_preplan !== false,
+    onStatusChange: row.email_on_status_change === true,
+    onDriverMismatch: row.email_on_driver_mismatch === true,
+    onDispatchInstructions: row.email_on_dispatch_instructions === true,
     onDailyShiftSummary: row.email_on_daily_shift !== false,
     onWeeklySummary: row.email_on_weekly_summary !== false,
+    tripCc:
+      typeof row.email_trip_cc === 'string' ? row.email_trip_cc.trim().slice(0, SMTP_CC_MAX) : '',
+    dailyShiftCc:
+      typeof row.email_daily_shift_cc === 'string'
+        ? row.email_daily_shift_cc.trim().slice(0, SMTP_CC_MAX)
+        : '',
+    weeklySummaryCc:
+      typeof row.email_weekly_summary_cc === 'string'
+        ? row.email_weekly_summary_cc.trim().slice(0, SMTP_CC_MAX)
+        : '',
+    dailyDelayMins:
+      typeof row.email_daily_delay_mins === 'number' && Number.isFinite(row.email_daily_delay_mins)
+        ? Math.max(0, Math.min(720, Math.floor(row.email_daily_delay_mins)))
+        : DEFAULT_DAILY_DELAY_MINS,
     lastDailyShiftKey:
       typeof row.email_last_daily_shift_key === 'string'
         ? row.email_last_daily_shift_key.trim()
@@ -1111,6 +1171,14 @@ function rowToSmtpPrefs(row) {
       typeof row.email_last_trip_notify_fp === 'string'
         ? row.email_last_trip_notify_fp.trim()
         : '',
+    lastStatusNotifyFp:
+      typeof row.email_last_status_notify_fp === 'string'
+        ? row.email_last_status_notify_fp.trim()
+        : '',
+    lastDispatchNotifyFp:
+      typeof row.email_last_dispatch_notify_fp === 'string'
+        ? row.email_last_dispatch_notify_fp.trim()
+        : '',
   }
 }
 
@@ -1124,9 +1192,11 @@ export async function getSmtpPrefsForAccount(accountKey) {
   const { rows } = await p.query(
     `SELECT smtp_enabled, smtp_host, smtp_port, smtp_secure, smtp_user, smtp_password_enc,
             smtp_from_email, smtp_from_name, email_notify_to, email_timezone,
-            email_on_new_trip, email_on_daily_shift, email_on_weekly_summary,
+            email_on_new_trip, email_on_preplan, email_on_status_change, email_on_driver_mismatch,
+            email_on_dispatch_instructions, email_on_daily_shift, email_on_weekly_summary,
+            email_trip_cc, email_daily_shift_cc, email_weekly_summary_cc, email_daily_delay_mins,
             email_last_daily_shift_key, email_last_weekly_work_key, email_last_weekly_pay_key,
-            email_last_trip_notify_fp
+            email_last_trip_notify_fp, email_last_status_notify_fp, email_last_dispatch_notify_fp
      FROM ${TABLE} WHERE account_key = $1`,
     [ak],
   )
@@ -1159,6 +1229,12 @@ export async function patchSmtpSendStateForAccount(accountKey, patch) {
   }
   if (patch.lastTripNotifyFp !== undefined) {
     add('email_last_trip_notify_fp', patch.lastTripNotifyFp || null)
+  }
+  if (patch.lastStatusNotifyFp !== undefined) {
+    add('email_last_status_notify_fp', patch.lastStatusNotifyFp || null)
+  }
+  if (patch.lastDispatchNotifyFp !== undefined) {
+    add('email_last_dispatch_notify_fp', patch.lastDispatchNotifyFp || null)
   }
   if (!sets.length) return
   await p.query(
@@ -1215,19 +1291,47 @@ export async function setSmtpPrefsForAccount(accountKey, prefs) {
       : prev.timezone
   const onNewTrip =
     typeof prefs.onNewTrip === 'boolean' ? prefs.onNewTrip : prev.onNewTrip
+  const onPreplan = typeof prefs.onPreplan === 'boolean' ? prefs.onPreplan : prev.onPreplan
+  const onStatusChange =
+    typeof prefs.onStatusChange === 'boolean' ? prefs.onStatusChange : prev.onStatusChange
+  const onDriverMismatch =
+    typeof prefs.onDriverMismatch === 'boolean'
+      ? prefs.onDriverMismatch
+      : prev.onDriverMismatch
+  const onDispatchInstructions =
+    typeof prefs.onDispatchInstructions === 'boolean'
+      ? prefs.onDispatchInstructions
+      : prev.onDispatchInstructions
   const onDailyShiftSummary =
     typeof prefs.onDailyShiftSummary === 'boolean'
       ? prefs.onDailyShiftSummary
       : prev.onDailyShiftSummary
   const onWeeklySummary =
     typeof prefs.onWeeklySummary === 'boolean' ? prefs.onWeeklySummary : prev.onWeeklySummary
+  const tripCc =
+    typeof prefs.tripCc === 'string' ? prefs.tripCc.trim().slice(0, SMTP_CC_MAX) : prev.tripCc
+  const dailyShiftCc =
+    typeof prefs.dailyShiftCc === 'string'
+      ? prefs.dailyShiftCc.trim().slice(0, SMTP_CC_MAX)
+      : prev.dailyShiftCc
+  const weeklySummaryCc =
+    typeof prefs.weeklySummaryCc === 'string'
+      ? prefs.weeklySummaryCc.trim().slice(0, SMTP_CC_MAX)
+      : prev.weeklySummaryCc
+  const dailyDelayMins =
+    typeof prefs.dailyDelayMins === 'number' && Number.isFinite(prefs.dailyDelayMins)
+      ? Math.max(0, Math.min(720, Math.floor(prefs.dailyDelayMins)))
+      : prev.dailyDelayMins
 
   await p.query(
     `INSERT INTO ${TABLE} (
        account_key, smtp_enabled, smtp_host, smtp_port, smtp_secure, smtp_user, smtp_password_enc,
        smtp_from_email, smtp_from_name, email_notify_to, email_timezone,
-       email_on_new_trip, email_on_daily_shift, email_on_weekly_summary, updated_at
-     ) VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,$8,$9,$10,$11,$12,$13,$14,now())
+       email_on_new_trip, email_on_preplan, email_on_status_change, email_on_driver_mismatch,
+       email_on_dispatch_instructions, email_on_daily_shift, email_on_weekly_summary,
+       email_trip_cc, email_daily_shift_cc, email_weekly_summary_cc, email_daily_delay_mins,
+       updated_at
+     ) VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,now())
      ON CONFLICT (account_key) DO UPDATE SET
        smtp_enabled = EXCLUDED.smtp_enabled,
        smtp_host = EXCLUDED.smtp_host,
@@ -1240,8 +1344,16 @@ export async function setSmtpPrefsForAccount(accountKey, prefs) {
        email_notify_to = EXCLUDED.email_notify_to,
        email_timezone = EXCLUDED.email_timezone,
        email_on_new_trip = EXCLUDED.email_on_new_trip,
+       email_on_preplan = EXCLUDED.email_on_preplan,
+       email_on_status_change = EXCLUDED.email_on_status_change,
+       email_on_driver_mismatch = EXCLUDED.email_on_driver_mismatch,
+       email_on_dispatch_instructions = EXCLUDED.email_on_dispatch_instructions,
        email_on_daily_shift = EXCLUDED.email_on_daily_shift,
        email_on_weekly_summary = EXCLUDED.email_on_weekly_summary,
+       email_trip_cc = EXCLUDED.email_trip_cc,
+       email_daily_shift_cc = EXCLUDED.email_daily_shift_cc,
+       email_weekly_summary_cc = EXCLUDED.email_weekly_summary_cc,
+       email_daily_delay_mins = EXCLUDED.email_daily_delay_mins,
        updated_at = now()`,
     [
       ak,
@@ -1256,8 +1368,16 @@ export async function setSmtpPrefsForAccount(accountKey, prefs) {
       notifyTo || null,
       timezone || DEFAULT_EMAIL_TZ,
       onNewTrip,
+      onPreplan,
+      onStatusChange,
+      onDriverMismatch,
+      onDispatchInstructions,
       onDailyShiftSummary,
       onWeeklySummary,
+      tripCc || null,
+      dailyShiftCc || null,
+      weeklySummaryCc || null,
+      dailyDelayMins,
     ],
   )
 }

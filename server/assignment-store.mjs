@@ -1289,7 +1289,7 @@ export async function writeAssignment(body) {
             ? 'Dispatch instructions were updated'
             : 'Dispatch instructions were cleared',
           source: 'dispatch',
-          extra: { hint: n ? n.slice(0, 200) : '' },
+          extra: { event: 'dispatch_instructions', hint: n ? n.slice(0, 200) : '' },
         })
         if (!r?.item) {
           emitLog('assignment', 'Dispatch instructions updated (in-app notify skipped)', {

@@ -1,5 +1,17 @@
 import nodemailer from 'nodemailer'
 import { getSmtpPrefsForAccount } from './user-profile-pg.mjs'
+import { toEmailTitleCase } from './email-templates.mjs'
+
+/**
+ * @param {string | string[] | undefined} raw
+ * @returns {string[] | undefined}
+ */
+export function parseEmailCcList(raw) {
+  if (!raw) return undefined
+  const parts = Array.isArray(raw) ? raw : String(raw).split(/[,;]+/)
+  const list = parts.map((s) => String(s).trim()).filter(Boolean)
+  return list.length ? list : undefined
+}
 
 /**
  * @param {ReturnType<import('./user-profile-pg.mjs').getSmtpPrefsForAccount> extends Promise<infer T> ? T : never} prefs
@@ -29,7 +41,7 @@ function createTransport(prefs) {
 
 /**
  * @param {string} accountKey
- * @param {{ subject: string, html: string, text?: string, attachments?: import('nodemailer').SendMailOptions['attachments'] }} mail
+ * @param {{ subject: string, html: string, text?: string, cc?: string | string[], attachments?: import('nodemailer').SendMailOptions['attachments'] }} mail
  */
 export async function sendEmailForAccount(accountKey, mail) {
   const prefs = await getSmtpPrefsForAccount(accountKey)
@@ -37,15 +49,17 @@ export async function sendEmailForAccount(accountKey, mail) {
   const transport = createTransport(prefs)
   const fromName = prefs.fromName?.trim() || 'TripBuddy'
   const from = `"${fromName.replace(/"/g, '')}" <${prefs.fromEmail.trim()}>`
+  const cc = parseEmailCcList(mail.cc)
   await transport.sendMail({
     from,
     to: prefs.notifyTo.trim(),
+    ...(cc ? { cc } : {}),
     subject: mail.subject,
     html: mail.html,
     text: mail.text || stripHtml(mail.html),
     attachments: mail.attachments,
   })
-  return { ok: true, to: prefs.notifyTo.trim() }
+  return { ok: true, to: prefs.notifyTo.trim(), cc: cc || [] }
 }
 
 /**
@@ -61,7 +75,7 @@ export async function sendSmtpTestEmail(accountKey) {
     bodyHtml: `<p style="margin:0;font-size:16px;line-height:1.55;">Your TripBuddy SMTP settings are working. You will receive trip alerts and shift summaries at this address.</p>`,
   })
   return sendEmailForAccount(accountKey, {
-    subject: 'TripBuddy — SMTP test',
+    subject: toEmailTitleCase('TripBuddy — SMTP test'),
     html,
     text: 'TripBuddy SMTP test successful.',
   })

@@ -10,11 +10,25 @@ const BRAND = {
   success: '#0D7A4E',
 }
 
+export const EMAIL_FOOTER_HTML =
+  'TripBuddy Integration · Built by Brandon King'
+
+/**
+ * Title-case email subjects and headings; preserve ALL-CAPS tokens (airport codes, acronyms).
+ * @param {string} input
+ */
+export function toEmailTitleCase(input) {
+  return String(input ?? '').replace(/[A-Za-z][A-Za-z']*/g, (word) => {
+    if (word === word.toUpperCase() && word.length >= 2) return word
+    return word.charAt(0).toUpperCase() + word.slice(1).toLowerCase()
+  })
+}
+
 /**
  * @param {{ title: string, preheader?: string, bodyHtml: string, ctaLabel?: string, ctaHref?: string }} opts
  */
 export function wrapEmailHtml(opts) {
-  const title = escapeHtml(opts.title)
+  const title = escapeHtml(toEmailTitleCase(opts.title))
   const preheader = escapeHtml(opts.preheader || opts.title)
   const cta =
     opts.ctaLabel && opts.ctaHref
@@ -51,7 +65,7 @@ export function wrapEmailHtml(opts) {
           </tr>
           <tr>
             <td style="padding:16px 28px 24px;border-top:1px solid ${BRAND.border};font-size:12px;line-height:1.5;color:${BRAND.muted};text-align:center;">
-              Sent by TripBuddy · FedEx driver tools
+              ${escapeHtml(EMAIL_FOOTER_HTML)}
             </td>
           </tr>
         </table>
@@ -125,13 +139,132 @@ export function newTripEmail(trip) {
       Open TripBuddy on your device to review trip details, trailers, and quick actions.
     </p>`
   return {
-    subject: `New trip: ${route}`,
+    subject: toEmailTitleCase(`New trip: ${route}`),
     html: wrapEmailHtml({
       title: 'New trip assigned',
       preheader: `New trip ${route}`,
       bodyHtml,
     }),
-    text: `New trip assigned\nRoute: ${route}\nLeg: ${trip.leg || '—'}`,
+    text: `New Trip Assigned\nRoute: ${route}\nLeg: ${trip.leg || '—'}`,
+  }
+}
+
+/** @param {{ leg: string, origin: string, destination: string, driverName?: string }} trip */
+export function preplanTripEmail(trip) {
+  const route = `${trip.origin} → ${trip.destination}`
+  const bodyHtml = `
+    <p style="margin:0 0 16px;font-size:16px;line-height:1.55;color:${BRAND.text};">
+      A new preplan trip has been assigned in TripBuddy.
+    </p>
+    ${keyValueBlock({
+      rows: [
+        { label: 'Route', value: route },
+        { label: 'Leg', value: trip.leg || '—' },
+        ...(trip.driverName ? [{ label: 'Driver', value: trip.driverName }] : []),
+      ],
+    })}
+    <p style="margin:20px 0 0;font-size:14px;line-height:1.5;color:${BRAND.muted};">
+      Review the preplan in TripBuddy before it becomes your active trip.
+    </p>`
+  return {
+    subject: toEmailTitleCase(`New preplan: ${route}`),
+    html: wrapEmailHtml({
+      title: 'New preplan assigned',
+      preheader: `Preplan ${route}`,
+      bodyHtml,
+    }),
+    text: `New Preplan Assigned\nRoute: ${route}\nLeg: ${trip.leg || '—'}`,
+  }
+}
+
+/** @param {{ statusLabel: string, fromPhase?: string, toPhase?: string }} opts */
+export function tripStatusEmail(opts) {
+  const bodyHtml = `
+    <p style="margin:0 0 16px;font-size:16px;line-height:1.55;color:${BRAND.text};">
+      Your active trip status changed to <strong>${escapeHtml(opts.statusLabel)}</strong>.
+    </p>
+    ${
+      opts.fromPhase && opts.toPhase
+        ? keyValueBlock({
+            rows: [
+              { label: 'Previous', value: phaseLabel(opts.fromPhase) },
+              { label: 'Current', value: phaseLabel(opts.toPhase) },
+            ],
+          })
+        : ''
+    }
+    <p style="margin:20px 0 0;font-size:14px;line-height:1.5;color:${BRAND.muted};">
+      Open TripBuddy for live trip details and quick actions.
+    </p>`
+  return {
+    subject: toEmailTitleCase(`Trip status: ${opts.statusLabel}`),
+    html: wrapEmailHtml({
+      title: `Trip status: ${opts.statusLabel}`,
+      preheader: `Status ${opts.statusLabel}`,
+      bodyHtml,
+    }),
+    text: `Trip Status: ${opts.statusLabel}`,
+  }
+}
+
+/** @param {{ hint?: string }} opts */
+export function dispatchInstructionsEmail(opts) {
+  const hint = String(opts.hint ?? '').trim()
+  const bodyHtml = `
+    <p style="margin:0 0 16px;font-size:16px;line-height:1.55;color:${BRAND.text};">
+      ${
+        hint
+          ? 'Dispatch instructions were updated in TripBuddy.'
+          : 'Dispatch instructions were cleared in TripBuddy.'
+      }
+    </p>
+    ${
+      hint
+        ? `<div style="margin:16px 0 0;padding:16px;border-radius:12px;background:#FAF9FC;border:1px solid ${BRAND.border};font-size:14px;line-height:1.55;color:${BRAND.text};white-space:pre-wrap;">${escapeHtml(hint)}</div>`
+        : `<p style="margin:16px 0 0;font-size:14px;color:${BRAND.muted};">No dispatch instructions are currently on file.</p>`
+    }`
+  return {
+    subject: toEmailTitleCase(
+      hint ? 'Dispatch instructions updated' : 'Dispatch instructions cleared',
+    ),
+    html: wrapEmailHtml({
+      title: hint ? 'Dispatch instructions updated' : 'Dispatch instructions cleared',
+      preheader: hint ? 'New dispatch instructions' : 'Instructions cleared',
+      bodyHtml,
+    }),
+    text: hint
+      ? `Dispatch Instructions Updated\n\n${hint}`
+      : 'Dispatch Instructions Cleared',
+  }
+}
+
+/** @param {{ tractorLocation?: string, driverLocation?: string }} opts */
+export function driverMismatchEmail(opts) {
+  const bodyHtml = `
+    <p style="margin:0 0 16px;font-size:16px;line-height:1.55;color:${BRAND.text};">
+      TripBuddy detected that your driver and tractor locations do not match.
+    </p>
+    ${keyValueBlock({
+      rows: [
+        ...(opts.tractorLocation
+          ? [{ label: 'Tractor', value: opts.tractorLocation }]
+          : []),
+        ...(opts.driverLocation
+          ? [{ label: 'Driver', value: opts.driverLocation }]
+          : []),
+      ],
+    })}
+    <p style="margin:20px 0 0;font-size:14px;line-height:1.5;color:${BRAND.muted};">
+      Verify your assignment and location in TripBuddy when it is safe to do so.
+    </p>`
+  return {
+    subject: toEmailTitleCase('Driver and tractor location mismatch'),
+    html: wrapEmailHtml({
+      title: 'Location mismatch alert',
+      preheader: 'Driver and tractor locations differ',
+      bodyHtml,
+    }),
+    text: 'Driver and Tractor Location Mismatch',
   }
 }
 
@@ -156,13 +289,13 @@ export function dailyShiftEmail(summary) {
         : `<p style="margin:16px 0 0;font-size:14px;color:${BRAND.muted};">No completed trips recorded for this shift.</p>`
     }`
   return {
-    subject: `Shift summary — ${summary.shiftLabel}`,
+    subject: toEmailTitleCase(`Shift summary — ${summary.shiftLabel}`),
     html: wrapEmailHtml({
       title: 'End of shift summary',
       preheader: `${summary.tripCount} trip(s) · ${fmtMi(summary.totalMiles)} mi`,
       bodyHtml,
     }),
-    text: `Shift summary ${summary.shiftLabel}\nTrips: ${summary.tripCount}\nMiles: ${fmtMi(summary.totalMiles)}`,
+    text: `Shift Summary ${summary.shiftLabel}\nTrips: ${summary.tripCount}\nMiles: ${fmtMi(summary.totalMiles)}`,
   }
 }
 
@@ -183,14 +316,22 @@ export function weeklySummaryEmail(opts) {
       These match the PDF exports from TripBuddy History.
     </p>`
   return {
-    subject: `Weekly summary — ${opts.weekLabel}`,
+    subject: toEmailTitleCase(`Weekly summary — ${opts.weekLabel}`),
     html: wrapEmailHtml({
       title: 'Weekly mileage summary',
       preheader: opts.weekLabel,
       bodyHtml,
     }),
-    text: `Weekly summary ${opts.weekLabel}\nWork week: ${opts.workWeekLabel}\nPay week: ${opts.payWeekLabel}`,
+    text: `Weekly Summary ${opts.weekLabel}\nWork week: ${opts.workWeekLabel}\nPay week: ${opts.payWeekLabel}`,
   }
+}
+
+/** @param {string} phase */
+function phaseLabel(phase) {
+  if (phase === 'assigned') return 'Assigned'
+  if (phase === 'dispatched') return 'En route'
+  if (phase === 'none') return 'Complete'
+  return phase
 }
 
 /** @param {string} s */

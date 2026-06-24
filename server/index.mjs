@@ -1475,8 +1475,16 @@ app.get('/api/settings/credentials', async (req) => {
           emailNotifyTo: smtpPrefs.notifyTo || '',
           emailTimezone: smtpPrefs.timezone || 'America/New_York',
           emailOnNewTrip: smtpPrefs.onNewTrip,
+          emailOnPreplan: smtpPrefs.onPreplan,
+          emailOnStatusChange: smtpPrefs.onStatusChange,
+          emailOnDriverMismatch: smtpPrefs.onDriverMismatch,
+          emailOnDispatchInstructions: smtpPrefs.onDispatchInstructions,
           emailOnDailyShift: smtpPrefs.onDailyShiftSummary,
           emailOnWeeklySummary: smtpPrefs.onWeeklySummary,
+          emailTripCc: smtpPrefs.tripCc || '',
+          emailDailyShiftCc: smtpPrefs.dailyShiftCc || '',
+          emailWeeklySummaryCc: smtpPrefs.weeklySummaryCc || '',
+          emailDailyDelayMins: smtpPrefs.dailyDelayMins,
         }
       : {}),
     secretHint: process.env.FEDEX_TOOL_SECRET ? null : TOOL_SECRET_HINT,
@@ -1875,11 +1883,36 @@ app.put('/api/settings/smtp-prefs', async (req, reply) => {
     if (Object.prototype.hasOwnProperty.call(body, 'onNewTrip')) {
       prefs.onNewTrip = body.onNewTrip === true
     }
+    if (Object.prototype.hasOwnProperty.call(body, 'onPreplan')) {
+      prefs.onPreplan = body.onPreplan === true
+    }
+    if (Object.prototype.hasOwnProperty.call(body, 'onStatusChange')) {
+      prefs.onStatusChange = body.onStatusChange === true
+    }
+    if (Object.prototype.hasOwnProperty.call(body, 'onDriverMismatch')) {
+      prefs.onDriverMismatch = body.onDriverMismatch === true
+    }
+    if (Object.prototype.hasOwnProperty.call(body, 'onDispatchInstructions')) {
+      prefs.onDispatchInstructions = body.onDispatchInstructions === true
+    }
     if (Object.prototype.hasOwnProperty.call(body, 'onDailyShiftSummary')) {
       prefs.onDailyShiftSummary = body.onDailyShiftSummary === true
     }
     if (Object.prototype.hasOwnProperty.call(body, 'onWeeklySummary')) {
       prefs.onWeeklySummary = body.onWeeklySummary === true
+    }
+    if (Object.prototype.hasOwnProperty.call(body, 'tripCc')) {
+      prefs.tripCc = String(body.tripCc ?? '').trim().slice(0, 960)
+    }
+    if (Object.prototype.hasOwnProperty.call(body, 'dailyShiftCc')) {
+      prefs.dailyShiftCc = String(body.dailyShiftCc ?? '').trim().slice(0, 960)
+    }
+    if (Object.prototype.hasOwnProperty.call(body, 'weeklySummaryCc')) {
+      prefs.weeklySummaryCc = String(body.weeklySummaryCc ?? '').trim().slice(0, 960)
+    }
+    if (Object.prototype.hasOwnProperty.call(body, 'dailyDelayMins')) {
+      const d = Number(body.dailyDelayMins)
+      if (Number.isFinite(d)) prefs.dailyDelayMins = Math.max(0, Math.min(720, Math.floor(d)))
     }
     if (!Object.keys(prefs).length) {
       return reply.code(400).send({ error: 'Provide at least one SMTP field.' })
@@ -1899,8 +1932,16 @@ app.put('/api/settings/smtp-prefs', async (req, reply) => {
       emailNotifyTo: stored.notifyTo,
       emailTimezone: stored.timezone,
       emailOnNewTrip: stored.onNewTrip,
+      emailOnPreplan: stored.onPreplan,
+      emailOnStatusChange: stored.onStatusChange,
+      emailOnDriverMismatch: stored.onDriverMismatch,
+      emailOnDispatchInstructions: stored.onDispatchInstructions,
       emailOnDailyShift: stored.onDailyShiftSummary,
       emailOnWeeklySummary: stored.onWeeklySummary,
+      emailTripCc: stored.tripCc,
+      emailDailyShiftCc: stored.dailyShiftCc,
+      emailWeeklySummaryCc: stored.weeklySummaryCc,
+      emailDailyDelayMins: stored.dailyDelayMins,
     }
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e)
