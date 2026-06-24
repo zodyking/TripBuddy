@@ -83,7 +83,11 @@ export async function maybeSendEmailForInAppNotification(accountKey, payload) {
     return runWithCredentialAccountKey(accountKey, async () => {
       const mail = tripStatusEmail({ statusLabel, fromPhase, toPhase })
       await sendEmailForAccount(accountKey, { ...mail, cc: ccForKind(prefs, 'trip') })
-      await patchSmtpSendStateForAccount(accountKey, { lastStatusNotifyFp: fp })
+      const patch = { lastStatusNotifyFp: fp }
+      if (event === 'status_complete') {
+        patch.lastTripNotifyFp = ''
+      }
+      await patchSmtpSendStateForAccount(accountKey, patch)
       return { ok: true }
     })
   }

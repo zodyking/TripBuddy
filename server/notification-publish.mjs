@@ -1,4 +1,5 @@
 import { appendInAppNotification, appendInAppForLastActive } from './in-app-notifications-store.mjs'
+import { getLastActiveAccountKey } from './active-account.mjs'
 import { emitLog } from './log-bus.mjs'
 import { maybeSendEmailForInAppNotification } from './email-notification-service.mjs'
 
@@ -20,10 +21,16 @@ export async function publishInAppForAccount(accountKey, payload) {
         ts: r.item.ts,
         extra: r.item.extra,
       })
-      void maybeSendEmailForInAppNotification(accountKey, payload).catch((e) => {
-        console.error('[email] trip notification failed', e)
-      })
     }
+    void maybeSendEmailForInAppNotification(accountKey, payload)
+      .then((emailResult) => {
+        if (emailResult?.skipped && emailResult.skipped !== 'deduped') {
+          console.info('[email] notification skipped', accountKey, emailResult.skipped, payload.extra)
+        }
+      })
+      .catch((e) => {
+        console.error('[email] trip notification failed', accountKey, e)
+      })
     return r
   } catch (e) {
     console.error('[notifications] publishInAppForAccount failed:', e)
@@ -45,6 +52,12 @@ export async function publishInAppForLastActiveUser(payload) {
         read: r.item.read,
         ts: r.item.ts,
         extra: r.item.extra,
+      })
+    }
+    const ak = getLastActiveAccountKey()
+    if (ak) {
+      void maybeSendEmailForInAppNotification(ak, payload).catch((e) => {
+        console.error('[email] last-active notification failed', ak, e)
       })
     }
     return r

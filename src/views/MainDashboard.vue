@@ -1731,32 +1731,47 @@ watch(
   [() => stableTripState.value._fingerprint, linehaulTripsNoActive, prePlanTripSnapshot, linehaulLastFetchAt],
   ([newFp]) => {
     // Only process if fingerprint actually changed (or on first load)
+    const isFirstTripSeed = !_lastVoiceTriggerFingerprint
     if (newFp && newFp === _lastVoiceTriggerFingerprint) {
       return // Same data, skip TTS
     }
     _lastVoiceTriggerFingerprint = newFp || ''
 
-    seedTripVoiceFromSnapshot(
-      linehaulTripsBody.value,
-      linehaulTripsNoActive.value,
-      prePlanTripSnapshot.value,
-    )
-    seedTripInAppFromSnapshot(
-      linehaulTripsBody.value,
-      linehaulTripsNoActive.value,
-      prePlanTripSnapshot.value,
-      tripPhase.value,
-    )
-    maybeAnnounceNewTrip(
-      linehaulTripsBody.value,
-      linehaulTripsNoActive.value,
-    )
-    maybeAnnouncePrePlanTrip(prePlanTripSnapshot.value)
-    maybeNotifyNewTripInApp(
-      linehaulTripsBody.value,
-      linehaulTripsNoActive.value,
-    )
-    maybeNotifyPrePlanTripInApp(prePlanTripSnapshot.value)
+    if (isFirstTripSeed) {
+      seedTripVoiceFromSnapshot(
+        linehaulTripsBody.value,
+        linehaulTripsNoActive.value,
+        prePlanTripSnapshot.value,
+      )
+      seedTripInAppFromSnapshot(
+        linehaulTripsBody.value,
+        linehaulTripsNoActive.value,
+        prePlanTripSnapshot.value,
+        tripPhase.value,
+      )
+    } else {
+      maybeAnnounceNewTrip(
+        linehaulTripsBody.value,
+        linehaulTripsNoActive.value,
+      )
+      maybeAnnouncePrePlanTrip(prePlanTripSnapshot.value)
+      maybeNotifyNewTripInApp(
+        linehaulTripsBody.value,
+        linehaulTripsNoActive.value,
+      )
+      maybeNotifyPrePlanTripInApp(prePlanTripSnapshot.value)
+      seedTripVoiceFromSnapshot(
+        linehaulTripsBody.value,
+        linehaulTripsNoActive.value,
+        prePlanTripSnapshot.value,
+      )
+      seedTripInAppFromSnapshot(
+        linehaulTripsBody.value,
+        linehaulTripsNoActive.value,
+        prePlanTripSnapshot.value,
+        tripPhase.value,
+      )
+    }
     syncTripVoiceUnlockHint()
   },
 )
