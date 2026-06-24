@@ -25,6 +25,24 @@ export function toEmailTitleCase(input) {
   })
 }
 
+/** @param {string} [outcome] @param {string} [reason] */
+export function formatEmailOutcome(outcome, reason) {
+  const raw = String(outcome ?? '').trim()
+  if (!raw || raw === '—') return '—'
+  const label = toEmailTitleCase(raw)
+  const norm = raw.toLowerCase()
+  if (norm === 'delivered') return label
+  const why = String(reason ?? '').trim()
+  return why ? `${label} — ${why}` : label
+}
+
+/** @param {string} [value] */
+function emailDisplayValue(value) {
+  const s = String(value ?? '').trim()
+  if (!s || s === '—') return '—'
+  return toEmailTitleCase(s)
+}
+
 /**
  * @param {{ title: string, preheader?: string, bodyHtml: string, ctaLabel?: string, ctaHref?: string }} opts
  */
@@ -124,21 +142,39 @@ export function dataTable(table) {
 
 /**
  * @param {import('./email-trip-details.mjs').EmailTripContext} trip
- * @param {{ compact?: boolean, showMeta?: boolean }} [opts]
+ * @param {{ compact?: boolean, showMeta?: boolean, stackedRoute?: boolean }} [opts]
  */
 export function tripDetailCardHtml(trip, opts = {}) {
   const compact = opts.compact === true
   const showMeta = opts.showMeta !== false
+  const stackedRoute = opts.stackedRoute === true
 
   const metaRows = []
   if (showMeta) {
     if (trip.completedAt) metaRows.push({ label: 'Completed', value: trip.completedAt })
     if (trip.leg && trip.leg !== '—') metaRows.push({ label: 'Leg', value: trip.leg })
+    if (trip.outcome && trip.outcome !== '—') {
+      metaRows.push({
+        label: 'Outcome',
+        value: formatEmailOutcome(trip.outcome, trip.outcomeReason),
+      })
+    }
     if (trip.miles && trip.miles !== '—') metaRows.push({ label: 'Miles', value: trip.miles })
-    if (trip.driverName) metaRows.push({ label: 'Driver', value: trip.driverName })
+    if (trip.driverName) metaRows.push({ label: 'Driver', value: emailDisplayValue(trip.driverName) })
     if (trip.tractorNumber) metaRows.push({ label: 'Tractor', value: trip.tractorNumber })
-    if (trip.tripStatus) metaRows.push({ label: 'Trip status', value: trip.tripStatus })
+    if (trip.tripStatus) {
+      metaRows.push({ label: 'Trip status', value: emailDisplayValue(trip.tripStatus) })
+    }
   }
+
+  const originLabel = emailDisplayValue(trip.originDisplay || trip.origin)
+  const destinationLabel = emailDisplayValue(trip.destinationDisplay || trip.destination)
+
+  const routeBlock = stackedRoute
+    ? `<div style="font-size:16px;font-weight:700;line-height:1.4;color:${BRAND.text};">${escapeHtml(originLabel)}</div>
+    <div style="margin:6px 0;font-size:13px;color:${BRAND.muted};">to</div>
+    <div style="font-size:16px;font-weight:700;line-height:1.4;color:${BRAND.text};">${escapeHtml(destinationLabel)}</div>`
+    : `<div style="font-size:16px;font-weight:700;line-height:1.4;color:${BRAND.text};white-space:nowrap;">${escapeHtml(trip.route)}</div>`
 
   const trailerBlock =
     trip.trailers.length > 0
@@ -147,11 +183,13 @@ export function tripDetailCardHtml(trip, opts = {}) {
           ${trip.trailers
             .map((tr) => {
               const header = `Trailer ${tr.order}${tr.number !== '—' ? ` · #${tr.number}` : ''}${tr.size !== '—' ? ` · ${tr.size}` : ''}`
-              const badges = [tr.loadType, tr.status].filter((b) => b && b !== '—').join(' · ')
+              const badges = [emailDisplayValue(tr.loadType), emailDisplayValue(tr.status)]
+                .filter((b) => b && b !== '—')
+                .join(' · ')
               const details = [
                 tr.seal !== '—' ? `Seal ${tr.seal}` : '',
                 tr.weight !== '—' ? tr.weight : '',
-                tr.destination !== '—' ? `Dest ${tr.destination}` : '',
+                tr.destination !== '—' ? `Dest ${emailDisplayValue(tr.destination)}` : '',
               ]
                 .filter(Boolean)
                 .join(' · ')
@@ -183,7 +221,7 @@ export function tripDetailCardHtml(trip, opts = {}) {
 
   return `<div style="margin-top:${compact ? '12' : '16'}px;padding:${compact ? '14' : '16'}px;border-radius:12px;border:1px solid ${BRAND.border};background:${BRAND.card};">
     <div style="font-size:11px;font-weight:700;letter-spacing:0.06em;text-transform:uppercase;color:${BRAND.muted};margin-bottom:6px;">Route</div>
-    <div style="font-size:16px;font-weight:700;line-height:1.4;color:${BRAND.text};white-space:nowrap;">${escapeHtml(trip.route)}</div>
+    ${routeBlock}
     ${metaRows.length ? keyValueBlock({ rows: metaRows }) : ''}
     ${dollyBlock}
     ${trailerBlock}
@@ -193,11 +231,17 @@ export function tripDetailCardHtml(trip, opts = {}) {
 
 /** @param {import('./email-trip-details.mjs').EmailTripContext} trip */
 export function tripDetailPlainText(trip) {
-  const lines = [`Route: ${trip.route}`]
+  const origin = trip.originDisplay || trip.origin
+  const destination = trip.destinationDisplay || trip.destination
+  const lines = [`Route: ${origin} → ${destination}`]
   if (trip.leg && trip.leg !== '—') lines.push(`Leg: ${trip.leg}`)
+  if (trip.outcome && trip.outcome !== '—') {
+    lines.push(`Outcome: ${formatEmailOutcome(trip.outcome, trip.outcomeReason)}`)
+  }
   if (trip.driverName) lines.push(`Driver: ${trip.driverName}`)
   if (trip.tractorNumber) lines.push(`Tractor: ${trip.tractorNumber}`)
   if (trip.miles) lines.push(`Miles: ${trip.miles}`)
+  if (trip.tripStatus) lines.push(`Trip status: ${trip.tripStatus}`)
   if (trip.completedAt) lines.push(`Completed: ${trip.completedAt}`)
   if (trip.dollies.length) lines.push(`Dollies: ${trip.dollySummary}`)
   for (const tr of trip.trailers) {
@@ -389,9 +433,11 @@ import { dailyTripTableRow } from './email-trip-details.mjs'
 
 /** @param {{ shiftLabel: string, tripCount: number, totalMiles: number, trips: import('./email-trip-details.mjs').EmailTripContext[], tableRows?: string[][] }} summary */
 export function dailyShiftEmail(summary) {
-  const tableRows = summary.tableRows?.length
-    ? summary.tableRows
-    : summary.trips.map((t) => dailyTripTableRow(t))
+  const tripCards = summary.trips.length
+    ? summary.trips
+        .map((t) => tripDetailCardHtml(t, { compact: true, stackedRoute: true }))
+        .join('')
+    : ''
 
   const bodyHtml = `
     <p style="margin:0 0 8px;font-size:16px;line-height:1.55;color:${BRAND.text};">
@@ -400,28 +446,20 @@ export function dailyShiftEmail(summary) {
     ${keyValueBlock({
       rows: [
         { label: 'Trips', value: String(summary.tripCount) },
-        { label: 'Miles', value: fmtMi(summary.totalMiles) },
+        { label: 'Billable miles', value: fmtMi(summary.totalMiles) },
       ],
     })}
     ${
-      tableRows.length
-        ? `<div style="margin-top:16px;">
-            <div style="font-size:13px;font-weight:700;color:${BRAND.text};margin-bottom:8px;">Trip details</div>
-            ${dataTable({
-              headers: ['When', 'Leg', 'Route', 'Trailers', 'Dollies', 'Miles'],
-              rows: tableRows,
-            })}
+      tripCards
+        ? `<div style="margin-top:20px;">
+            <div style="font-size:13px;font-weight:700;color:${BRAND.text};margin-bottom:10px;">Trip details</div>
+            ${tripCards}
           </div>`
         : `<p style="margin:16px 0 0;font-size:14px;color:${BRAND.muted};">No completed trips recorded for this shift.</p>`
     }`
 
-  const textTrips = tableRows.length
-    ? tableRows
-        .map(
-          (row, i) =>
-            `Trip ${i + 1}: ${row[0]} | Leg ${row[1]} | ${row[2]} | Trailers ${row[3]} | Dollies ${row[4]} | ${row[5]}`,
-        )
-        .join('\n')
+  const textTrips = summary.trips.length
+    ? summary.trips.map((t, i) => `Trip ${i + 1}\n${tripDetailPlainText(t)}`).join('\n\n')
     : 'No completed trips recorded for this shift.'
 
   return {
@@ -431,7 +469,7 @@ export function dailyShiftEmail(summary) {
       preheader: `${summary.tripCount} trip(s) · ${fmtMi(summary.totalMiles)} mi`,
       bodyHtml,
     }),
-    text: `Shift Summary ${summary.shiftLabel}\nTrips: ${summary.tripCount}\nMiles: ${fmtMi(summary.totalMiles)}\n\n${textTrips}`,
+    text: `Shift Summary ${summary.shiftLabel}\nTrips: ${summary.tripCount}\nBillable miles: ${fmtMi(summary.totalMiles)}\n\n${textTrips}`,
   }
 }
 

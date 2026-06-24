@@ -25,11 +25,14 @@ import {
  *   leg: string,
  *   origin: string,
  *   destination: string,
+ *   originDisplay?: string,
+ *   destinationDisplay?: string,
  *   route: string,
  *   driverName?: string,
  *   tractorNumber?: string,
  *   tripStatus?: string,
  *   outcome?: string,
+ *   outcomeReason?: string,
  *   miles?: string,
  *   completedAt?: string,
  *   dollies: { label: string, value: string }[],
@@ -230,11 +233,14 @@ export function buildEmailTripContextFromBody(body, overrides = {}) {
     leg: clean(overrides.leg || leg),
     origin: o,
     destination: d,
+    originDisplay: overrides.originDisplay || o,
+    destinationDisplay: overrides.destinationDisplay || d,
     route,
     driverName: overrides.driverName,
     tractorNumber: overrides.tractorNumber || tractorNumber || undefined,
     tripStatus: overrides.tripStatus || tripStatus || undefined,
     outcome: overrides.outcome,
+    outcomeReason: overrides.outcomeReason,
     miles: overrides.miles,
     completedAt: overrides.completedAt,
     dollies,
@@ -261,6 +267,8 @@ export function buildEmailTripContextFromLedgerEntry(entry) {
 
   const origin = emailTerminalId(clean(dh.origin))
   const destination = emailTerminalId(clean(dh.destination))
+  const originDisplay = clean(dh.origin)
+  const destinationDisplay = clean(dh.destination)
   const leg =
     entry && typeof entry === 'object'
       ? clean(/** @type {Record<string, unknown>} */ (entry).dailyTripLegSequence)
@@ -270,7 +278,10 @@ export function buildEmailTripContextFromLedgerEntry(entry) {
     leg,
     origin,
     destination,
+    originDisplay: originDisplay !== '—' ? originDisplay : origin,
+    destinationDisplay: destinationDisplay !== '—' ? destinationDisplay : destination,
     outcome: clean(dh.historyOutcome),
+    outcomeReason: String(dh.historyOutcomeReason ?? '').trim() || undefined,
     dispatchInstructions: String(dh.instructions ?? '').trim() || undefined,
   })
 

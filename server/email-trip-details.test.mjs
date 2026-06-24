@@ -7,7 +7,7 @@ import {
   formatTrailersSummary,
   weeklyTripTableRow,
 } from './email-trip-details.mjs'
-import { tripDetailPlainText, tripDetailCardHtml, weeklySummaryEmail } from './email-templates.mjs'
+import { tripDetailPlainText, tripDetailCardHtml, weeklySummaryEmail, formatEmailOutcome, dailyShiftEmail } from './email-templates.mjs'
 import { buildDailyShiftSummary, buildWeeklyTripContexts } from './email-ledger-summary.mjs'
 import { workWeekGroupMeta } from '../src/utils/workWeekGroup.js'
 
@@ -79,22 +79,53 @@ test('buildEmailTripContextFromLedgerEntry uses dispatch header and trip details
   assert.equal(ctx.destination, '5678')
   assert.equal(ctx.route, '1234 → 5678')
   assert.equal(ctx.outcome, 'delivered')
+  assert.equal(ctx.originDisplay, '1234 · Memphis Hub')
+  assert.equal(ctx.destinationDisplay, '5678 · Nashville Terminal')
   assert.equal(ctx.trailers.length, 2)
   assert.match(ctx.dispatchInstructions || '', /Gate 5/)
 })
 
-test('trip detail plain text and html include equipment', () => {
+test('trip detail plain text and html include equipment and outcome', () => {
   const ctx = buildEmailTripContextFromBody(sampleBody)
+  ctx.outcome = 'delivered'
   const text = tripDetailPlainText(ctx)
   assert.match(text, /Route:/)
+  assert.match(text, /Outcome: Delivered/)
   assert.match(text, /Dollies:/)
   assert.match(text, /Trailer 1/)
   assert.match(text, /SEAL123/)
-  const html = tripDetailCardHtml(ctx)
-  assert.match(html, /1234 → 5678/)
+  const html = tripDetailCardHtml(ctx, { stackedRoute: true })
+  assert.match(html, /Outcome/)
+  assert.match(html, /Delivered/)
   assert.match(html, /Trailers/)
   assert.match(html, /Dollies/)
-  assert.doesNotMatch(html, /Outcome/)
+})
+
+test('formatEmailOutcome includes reason when not delivered', () => {
+  assert.equal(formatEmailOutcome('removed', 'Ingates return'), 'Removed — Ingates return')
+  assert.equal(formatEmailOutcome('delivered', 'ignored'), 'Delivered')
+})
+
+test('dailyShiftEmail uses trip cards with billable miles and outcome', () => {
+  const ctx = buildEmailTripContextFromBody(sampleBody)
+  ctx.outcome = 'removed'
+  ctx.outcomeReason = 'Ingates return'
+  ctx.completedAt = 'Jun 24, 12:01 PM'
+  ctx.miles = '61 mi'
+  ctx.originDisplay = '89 · WOODBRIDGE'
+  ctx.destinationDisplay = '3117 · BETHPAGE - HD'
+  const mail = dailyShiftEmail({
+    shiftLabel: 'Wednesday, June 24, 2026',
+    tripCount: 1,
+    totalMiles: 61,
+    trips: [ctx],
+  })
+  assert.match(mail.html, /Billable miles/)
+  assert.match(mail.html, /Trip details/)
+  assert.match(mail.html, /WOODBRIDGE/)
+  assert.match(mail.html, /Removed — Ingates return/)
+  assert.match(mail.html, /Seal SEAL123/)
+  assert.match(mail.html, /Dollies/)
 })
 
 test('buildDailyShiftSummary returns rich trip contexts', () => {
@@ -117,10 +148,9 @@ test('buildDailyShiftSummary returns rich trip contexts', () => {
   })
   assert.equal(summary.tripCount, 1)
   assert.equal(summary.trips.length, 1)
-  assert.equal(summary.tableRows.length, 1)
   assert.equal(summary.trips[0].origin, '111')
+  assert.equal(summary.trips[0].originDisplay, '111 · A')
   assert.equal(summary.trips[0].trailers.length, 2)
-  assert.equal(summary.tableRows[0][2], '111 → 222')
 })
 
 test('buildWeeklyTripContexts returns table rows and tractors used', () => {

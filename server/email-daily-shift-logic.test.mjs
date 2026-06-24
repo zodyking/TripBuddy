@@ -119,7 +119,7 @@ test('computeDailyShiftEmailDecision waits for idle and incomplete trips', () =>
   assert.equal(ready.shiftDayKey, '2026-06-22')
 })
 
-test('resolveDailyShiftSummaryDayKey picks most recent unsent work day', () => {
+test('resolveDailyShiftSummaryDayKey picks ended work day once', () => {
   const ledger = [
     { source: 'linehaul', recordedAt: Date.parse('2026-06-21T10:00:00Z') },
     { source: 'linehaul', recordedAt: Date.parse('2026-06-22T10:00:00Z') },
@@ -131,6 +131,22 @@ test('resolveDailyShiftSummaryDayKey picks most recent unsent work day', () => {
     timeZone: 'America/New_York',
   })
   assert.equal(key, '2026-06-22')
+
+  const alreadySent = resolveDailyShiftSummaryDayKey(ledger, {
+    endedShiftDayKey: '2026-06-22',
+    lastDailyShiftKey: '2026-06-22',
+    ...shift,
+    timeZone: 'America/New_York',
+  })
+  assert.equal(alreadySent, '')
+
+  const noBackfill = resolveDailyShiftSummaryDayKey(ledger, {
+    endedShiftDayKey: '2026-06-23',
+    lastDailyShiftKey: '2026-06-22',
+    ...shift,
+    timeZone: 'America/New_York',
+  })
+  assert.equal(noBackfill, '')
 })
 
 test('workShiftDayKeyForEntry uses linehaul recordedAt like History', () => {

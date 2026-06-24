@@ -327,18 +327,22 @@ export async function maybeSendScheduledEmailsForAccount(accountKey, now = new D
         hasIncompleteTrips: incomplete,
       })
       if (daily.shouldSend && daily.shiftDayKey) {
-        const targetDay = resolveDailyShiftSummaryDayKey(ledger, {
-          endedShiftDayKey: daily.shiftDayKey,
-          lastDailyShiftKey: prefs.lastDailyShiftKey || '',
-          shiftStartMins: shiftStart,
-          shiftEndMins: shiftEnd,
-          timeZone: tz,
-        })
-        if (targetDay) {
-          try {
-            await sendDailyShiftSummaryEmail(accountKey, targetDay)
-          } catch (e) {
-            console.error('[email] daily shift failed', accountKey, e)
+        if (prefs.lastDailyShiftKey === daily.shiftDayKey) {
+          // Already sent for this ended shift window — skip until the shift day key advances.
+        } else {
+          const targetDay = resolveDailyShiftSummaryDayKey(ledger, {
+            endedShiftDayKey: daily.shiftDayKey,
+            lastDailyShiftKey: prefs.lastDailyShiftKey || '',
+            shiftStartMins: shiftStart,
+            shiftEndMins: shiftEnd,
+            timeZone: tz,
+          })
+          if (targetDay) {
+            try {
+              await sendDailyShiftSummaryEmail(accountKey, targetDay)
+            } catch (e) {
+              console.error('[email] daily shift failed', accountKey, e)
+            }
           }
         }
       }

@@ -126,7 +126,7 @@ export function assignmentHasIncompleteActiveTrips(assignment) {
 }
 
 /**
- * Most recent work-week shift day with trips, not already emailed, on or before the ended shift day.
+ * Shift day to summarize when the current shift has ended — only the ended day, once per key.
  * @param {unknown[]} ledger
  * @param {{
  *   endedShiftDayKey: string,
@@ -140,30 +140,15 @@ export function resolveDailyShiftSummaryDayKey(ledger, opts) {
   const endedKey = String(opts.endedShiftDayKey ?? '').trim()
   if (!endedKey) return ''
   const lastSent = String(opts.lastDailyShiftKey ?? '').trim()
+  if (endedKey === lastSent) return ''
+
   const shift = {
     shiftStartMins: opts.shiftStartMins ?? 0,
     shiftEndMins: opts.shiftEndMins ?? 1439,
   }
   const timeZone = opts.timeZone || 'America/New_York'
-
-  /** @type {Map<string, number>} */
-  const counts = new Map()
-  if (Array.isArray(ledger)) {
-    for (const e of ledger) {
-      const dk = workShiftDayKeyForEntry(e, shift, timeZone)
-      if (!dk) continue
-      counts.set(dk, (counts.get(dk) || 0) + 1)
-    }
-  }
-
-  if (counts.get(endedKey) && endedKey !== lastSent) return endedKey
-
-  let best = ''
-  for (const [dk, n] of counts) {
-    if (n <= 0 || dk > endedKey || dk === lastSent) continue
-    if (!best || dk > best) best = dk
-  }
-  return best
+  const entries = ledgerEntriesForWorkDay(ledger, endedKey, shift, timeZone)
+  return entries.length > 0 ? endedKey : ''
 }
 
 /**
