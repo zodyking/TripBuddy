@@ -5,6 +5,10 @@ import { readKeyJson, writeKeyJson } from './kv-store.mjs'
 import { setTomtomApiKeyForAccount } from './user-profile-pg.mjs'
 import { requestAsyncLocalStorage } from './request-context.mjs'
 import { getDataAccountKey, keyForUser } from './scope-kv.mjs'
+import {
+  appendWorkWeekScheduleChange,
+  normalizeWorkWeekScheduleHistory,
+} from '../src/utils/workWeekGroup.js'
 
 const ALGO = 'aes-256-gcm'
 const SCRYPT_SALT = 'fedextool-cred-v1'
@@ -115,6 +119,11 @@ function parseCredData(data) {
     typeof rawSem === 'number' && !Number.isNaN(rawSem)
       ? Math.max(0, Math.min(1439, Math.floor(rawSem)))
       : 1439
+  const workWeekScheduleHistory = normalizeWorkWeekScheduleHistory(
+    data.workWeekScheduleHistory,
+    workWeekStartDay,
+    workWeekEndDay,
+  )
   return {
     username: data.username ?? null,
     passwordEnc: data.passwordEnc ?? null,
@@ -127,6 +136,7 @@ function parseCredData(data) {
     linehaulPollMinutes: pollM,
     workWeekStartDay,
     workWeekEndDay,
+    workWeekScheduleHistory,
     shiftStartMins,
     shiftEndMins,
     driverPhone: normalizeDriverPhoneDigits(data.driverPhone),
@@ -153,6 +163,7 @@ async function readFileRawForAccount(accountKey) {
     linehaulPollMinutes: null,
     workWeekStartDay: 0,
     workWeekEndDay: 6,
+    workWeekScheduleHistory: normalizeWorkWeekScheduleHistory(null, 0, 6),
     shiftStartMins: 0,
     shiftEndMins: 1439,
     driverPhone: null,
@@ -214,6 +225,7 @@ export async function getCredentialsMeta() {
     shiftEndMins,
     driverPhone,
     federalHolidayMileage15xEnabled,
+    workWeekScheduleHistory,
   } = await readFileRaw()
   const tn = tractorNumber?.trim() || null
   const en = employeeNumber?.trim() || null
@@ -257,6 +269,7 @@ export async function getCredentialsMeta() {
     linehaulPollMinutes: poll,
     workWeekStartDay: wws,
     workWeekEndDay: wwe,
+    workWeekScheduleHistory,
     shiftStartMins: ssm,
     shiftEndMins: sem,
     appLoginVerified: verified,
@@ -447,6 +460,20 @@ export async function saveCredentials(body) {
     federalHolidayMileage15xEnabled = body.federalHolidayMileage15xEnabled
   }
 
+  const prevStart = prev.workWeekStartDay ?? 0
+  const prevEnd = prev.workWeekEndDay ?? 6
+  let workWeekScheduleHistory = normalizeWorkWeekScheduleHistory(
+    prev.workWeekScheduleHistory,
+    prevStart,
+    prevEnd,
+  )
+  if (workWeekStartDay !== prevStart || workWeekEndDay !== prevEnd) {
+    workWeekScheduleHistory = appendWorkWeekScheduleChange(workWeekScheduleHistory, {
+      workWeekStartDay,
+      workWeekEndDay,
+    })
+  }
+
   const next = {
     username: username || null,
     passwordEnc,
@@ -457,6 +484,7 @@ export async function saveCredentials(body) {
     linehaulPollMinutes,
     workWeekStartDay,
     workWeekEndDay,
+    workWeekScheduleHistory,
     shiftStartMins,
     shiftEndMins,
     driverPhone,
@@ -481,6 +509,7 @@ export async function clearCredentials() {
     linehaulPollMinutes: null,
     workWeekStartDay: 0,
     workWeekEndDay: 6,
+    workWeekScheduleHistory: normalizeWorkWeekScheduleHistory(null, 0, 6),
     shiftStartMins: 0,
     shiftEndMins: 1439,
     driverPhone: null,

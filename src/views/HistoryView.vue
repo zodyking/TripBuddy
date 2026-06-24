@@ -33,7 +33,9 @@ import {
 import {
   localDateKey,
   monthGridForCalendarMonth,
+  resolveWorkWeekDaysForTimestamp,
   workWeekGroupMeta,
+  workWeekGroupMetaForCreds,
   workWeekInclusiveDayCount,
 } from '../utils/workWeekGroup.js'
 import { TRIP_OUTCOME_REASON_PRESETS } from '../constants/tripOutcomeReasonPresets.js'
@@ -72,9 +74,41 @@ const HistoryPdfJsViewer = defineAsyncComponent(() => import('../components/Hist
 const workWeekFromCred = ref({
   workWeekStartDay: 0,
   workWeekEndDay: 6,
+  workWeekScheduleHistory: /** @type {{ effectiveFromMs: number, workWeekStartDay: number, workWeekEndDay: number }[]} */ ([]),
   shiftStartMins: 0,
   shiftEndMins: 1439,
 })
+
+const workWeekCredSnapshot = computed(() => ({
+  workWeekStartDay: workWeekFromCred.value.workWeekStartDay,
+  workWeekEndDay: workWeekFromCred.value.workWeekEndDay,
+  workWeekScheduleHistory: workWeekFromCred.value.workWeekScheduleHistory,
+  shiftStartMins: workWeekFromCred.value.shiftStartMins,
+  shiftEndMins: workWeekFromCred.value.shiftEndMins,
+}))
+
+/** @param {number} tsMs */
+function historyGroupingOptsForTimestamp(tsMs) {
+  const sh = workWeekFromCred.value.shiftStartMins
+  const eh = workWeekFromCred.value.shiftEndMins
+  if (historyWeekViewMode.value === 'paySchedule') {
+    return {
+      workWeekStartDay: 0,
+      workWeekEndDay: 6,
+      shiftStartMins: sh,
+      shiftEndMins: eh,
+      groupLabelMode: /** @type {'fedexPaySchedule'} */ ('fedexPaySchedule'),
+    }
+  }
+  const days = resolveWorkWeekDaysForTimestamp(tsMs, workWeekCredSnapshot.value)
+  return {
+    workWeekStartDay: days.workWeekStartDay,
+    workWeekEndDay: days.workWeekEndDay,
+    shiftStartMins: sh,
+    shiftEndMins: eh,
+    groupLabelMode: /** @type {'default'} */ ('default'),
+  }
+}
 
 /** Settings: smart in-card federal-holiday 1.5× mileage approval. */
 const federalHolidayMileage15xEnabled = ref(true)
@@ -835,6 +869,9 @@ async function load() {
     workWeekFromCred.value = {
       workWeekStartDay: Math.min(6, Math.max(0, Math.floor(ws))),
       workWeekEndDay: Math.min(6, Math.max(0, Math.floor(we))),
+      workWeekScheduleHistory: Array.isArray(c.workWeekScheduleHistory)
+        ? c.workWeekScheduleHistory
+        : [],
       shiftStartMins: ssm,
       shiftEndMins: sem,
     }
@@ -1024,7 +1061,14 @@ function nextMonthFrom(y, m0) {
 function monthKeysOverlappingTripWorkWeek(e, opts) {
   const t = e.displayDate
   if (typeof t !== 'number' || !Number.isFinite(t) || t <= 0) return []
-  const meta = workWeekGroupMeta(t, opts)
+  const tripOpts =
+    historyWeekViewMode.value === 'paySchedule'
+      ? opts
+      : historyGroupingOptsForTimestamp(t)
+  const meta =
+    historyWeekViewMode.value === 'paySchedule'
+      ? workWeekGroupMeta(t, tripOpts)
+      : workWeekGroupMetaForCreds(t, workWeekCredSnapshot.value)
   if (!meta) {
     const { key } = monthKeyFromMs(t)
     return key ? [key] : []
@@ -1149,7 +1193,10 @@ const tripsByWorkWeek = computed(() => {
   for (const e of items) {
     const t = e.displayDate
     if (typeof t !== 'number' || !Number.isFinite(t) || t <= 0) continue
-    const meta = workWeekGroupMeta(t, wwOpts)
+    const meta =
+      historyWeekViewMode.value === 'paySchedule'
+        ? workWeekGroupMeta(t, wwOpts)
+        : workWeekGroupMetaForCreds(t, workWeekCredSnapshot.value)
     if (!meta) continue
     let g = map.get(meta.key)
     if (!g) {

@@ -1,5 +1,5 @@
 import { shiftDateKeyForEventMs } from '../src/utils/shiftCalendar.js'
-import { workWeekGroupMeta, workWeekKeyForDate } from '../src/utils/workWeekGroup.js'
+import { workWeekGroupMeta, workWeekGroupMetaForCreds, workWeekKeyForDate } from '../src/utils/workWeekGroup.js'
 import { buildEmailTripContextFromLedgerEntry, dailyTripTableRow, weeklyTripTableRow } from './email-trip-details.mjs'
 import { ledgerEntriesForWorkDay, computeLedgerDisplayDate } from './email-daily-shift-logic.mjs'
 
@@ -172,6 +172,13 @@ export function buildWeeklyTripContexts(ledger, week, opts) {
  */
 export function ledgerEntriesForWeek(ledger, week, opts) {
   if (!Array.isArray(ledger) || !week?.key) return []
+  const creds = {
+    workWeekStartDay: opts.workWeekStartDay ?? 0,
+    workWeekEndDay: opts.workWeekEndDay ?? 6,
+    workWeekScheduleHistory: opts.workWeekScheduleHistory,
+    shiftStartMins: opts.shiftStartMins ?? 0,
+    shiftEndMins: opts.shiftEndMins ?? 1439,
+  }
   return ledger.filter((e) => {
     const ts = entryTs(e)
     if (!ts) return false
@@ -186,12 +193,7 @@ export function ledgerEntriesForWeek(ledger, week, opts) {
       })
       return meta?.key === week.key
     }
-    const meta = workWeekGroupMeta(ts, {
-      workWeekStartDay: opts.workWeekStartDay ?? 0,
-      workWeekEndDay: opts.workWeekEndDay ?? 6,
-      shiftStartMins: opts.shiftStartMins ?? 0,
-      shiftEndMins: opts.shiftEndMins ?? 1439,
-    })
+    const meta = workWeekGroupMetaForCreds(ts, creds)
     return meta?.key === week.key
   })
 }
@@ -268,11 +270,7 @@ export function buildWeekTotalsPdfOpts(ledger, week, ctx) {
  * @param {'default' | 'fedexPaySchedule'} mode
  */
 export function weekMetaForTimestamp(tsMs, creds, mode = 'default') {
-  return workWeekGroupMeta(tsMs, {
-    workWeekStartDay: creds.workWeekStartDay ?? 0,
-    workWeekEndDay: creds.workWeekEndDay ?? 6,
-    shiftStartMins: creds.shiftStartMins ?? 0,
-    shiftEndMins: creds.shiftEndMins ?? 1439,
+  return workWeekGroupMetaForCreds(tsMs, creds, {
     groupLabelMode: mode === 'fedexPaySchedule' ? 'fedexPaySchedule' : 'default',
   })
 }

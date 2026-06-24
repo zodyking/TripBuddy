@@ -112,6 +112,148 @@ export function workWeekGroupMeta(
 }
 
 /**
+ * @typedef {{ effectiveFromMs: number, workWeekStartDay: number, workWeekEndDay: number }} WorkWeekScheduleEntry
+ */
+
+/**
+ * @param {unknown} history
+ * @param {number} [fallbackStart]
+ * @param {number} [fallbackEnd]
+ * @returns {WorkWeekScheduleEntry[]}
+ */
+export function normalizeWorkWeekScheduleHistory(history, fallbackStart = 0, fallbackEnd = 6) {
+  const fbStart = Math.min(6, Math.max(0, Math.floor(Number(fallbackStart) || 0)))
+  const fbEnd = Math.min(6, Math.max(0, Math.floor(Number(fallbackEnd) || 6)))
+  /** @type {WorkWeekScheduleEntry[]} */
+  const list = []
+  if (Array.isArray(history)) {
+    for (const row of history) {
+      if (!row || typeof row !== 'object') continue
+      const o = /** @type {Record<string, unknown>} */ (row)
+      const effectiveFromMs = Number(o.effectiveFromMs)
+      const ws = Math.min(6, Math.max(0, Math.floor(Number(o.workWeekStartDay) || 0)))
+      const we = Math.min(6, Math.max(0, Math.floor(Number(o.workWeekEndDay) || 6)))
+      if (!Number.isFinite(effectiveFromMs) || effectiveFromMs < 0) continue
+      list.push({ effectiveFromMs, workWeekStartDay: ws, workWeekEndDay: we })
+    }
+  }
+  list.sort((a, b) => a.effectiveFromMs - b.effectiveFromMs)
+  /** @type {WorkWeekScheduleEntry[]} */
+  const deduped = []
+  for (const row of list) {
+    if (deduped.length && deduped[deduped.length - 1].effectiveFromMs === row.effectiveFromMs) {
+      deduped[deduped.length - 1] = row
+    } else {
+      deduped.push(row)
+    }
+  }
+  if (!deduped.length || deduped[0].effectiveFromMs > 0) {
+    deduped.unshift({ effectiveFromMs: 0, workWeekStartDay: fbStart, workWeekEndDay: fbEnd })
+  }
+  return deduped
+}
+
+/**
+ * Start of the work week containing `nowMs` under the new start day (change applies from here forward).
+ * @param {number} nowMs
+ * @param {number} newStartDay
+ */
+export function workWeekChangeEffectiveFromMs(nowMs, newStartDay) {
+  const st = Math.min(6, Math.max(0, Math.floor(Number(newStartDay) || 0)))
+  const d = new Date(nowMs)
+  if (isNaN(d.getTime())) return 0
+  return startOfWorkWeek(d, st).getTime()
+}
+
+/**
+ * @param {WorkWeekScheduleEntry[] | unknown} history
+ * @param {WorkWeekScheduleEntry} entry
+ * @param {number} [nowMs]
+ */
+export function appendWorkWeekScheduleChange(history, entry, nowMs = Date.now()) {
+  const ws = Math.min(6, Math.max(0, Math.floor(Number(entry.workWeekStartDay) || 0)))
+  const we = Math.min(6, Math.max(0, Math.floor(Number(entry.workWeekEndDay) || 6)))
+  const normalized = normalizeWorkWeekScheduleHistory(history, ws, we)
+  const effectiveFromMs =
+    typeof entry.effectiveFromMs === 'number' && Number.isFinite(entry.effectiveFromMs)
+      ? entry.effectiveFromMs
+      : workWeekChangeEffectiveFromMs(nowMs, ws)
+  const last = normalized[normalized.length - 1]
+  if (
+    last &&
+    last.workWeekStartDay === ws &&
+    last.workWeekEndDay === we &&
+    last.effectiveFromMs === effectiveFromMs
+  ) {
+    return normalized
+  }
+  const kept = normalized.filter((row) => row.effectiveFromMs < effectiveFromMs)
+  kept.push({ effectiveFromMs, workWeekStartDay: ws, workWeekEndDay: we })
+  return kept
+}
+
+/**
+ * Work-week DOW config that was in effect when a trip occurred.
+ * @param {number} tsMs
+ * @param {{
+ *   workWeekStartDay?: number,
+ *   workWeekEndDay?: number,
+ *   workWeekScheduleHistory?: WorkWeekScheduleEntry[] | unknown,
+ * }} creds
+ */
+export function resolveWorkWeekDaysForTimestamp(tsMs, creds = {}) {
+  const currentStart = Math.min(6, Math.max(0, Math.floor(Number(creds.workWeekStartDay) || 0)))
+  const currentEnd = Math.min(6, Math.max(0, Math.floor(Number(creds.workWeekEndDay) || 6)))
+  const history = normalizeWorkWeekScheduleHistory(
+    creds.workWeekScheduleHistory,
+    currentStart,
+    currentEnd,
+  )
+  const t = typeof tsMs === 'number' && Number.isFinite(tsMs) ? tsMs : 0
+  /** @type {WorkWeekScheduleEntry | null} */
+  let active = history[0] || null
+  for (const row of history) {
+    if (row.effectiveFromMs <= t) active = row
+    else break
+  }
+  return {
+    workWeekStartDay: active?.workWeekStartDay ?? currentStart,
+    workWeekEndDay: active?.workWeekEndDay ?? currentEnd,
+  }
+}
+
+/**
+ * @param {number} tsMs
+ * @param {{
+ *   workWeekStartDay?: number,
+ *   workWeekEndDay?: number,
+ *   workWeekScheduleHistory?: WorkWeekScheduleEntry[] | unknown,
+ *   shiftStartMins?: number,
+ *   shiftEndMins?: number,
+ * }} creds
+ * @param {{ groupLabelMode?: 'default' | 'fedexPaySchedule' }} [extra]
+ */
+export function workWeekGroupMetaForCreds(tsMs, creds, extra = {}) {
+  if (extra.groupLabelMode === 'fedexPaySchedule') {
+    return workWeekGroupMeta(tsMs, {
+      workWeekStartDay: 0,
+      workWeekEndDay: 6,
+      shiftStartMins: creds.shiftStartMins ?? 0,
+      shiftEndMins: creds.shiftEndMins ?? 1439,
+      groupLabelMode: 'fedexPaySchedule',
+    })
+  }
+  const days = resolveWorkWeekDaysForTimestamp(tsMs, creds)
+  return workWeekGroupMeta(tsMs, {
+    workWeekStartDay: days.workWeekStartDay,
+    workWeekEndDay: days.workWeekEndDay,
+    shiftStartMins: creds.shiftStartMins ?? 0,
+    shiftEndMins: creds.shiftEndMins ?? 1439,
+    groupLabelMode: 'default',
+  })
+}
+
+/**
  * @param {number} tsMs
  * @param {{ workWeekStartDay: number, workWeekEndDay: number, shiftStartMins?: number, shiftEndMins?: number }} [opts]
  */

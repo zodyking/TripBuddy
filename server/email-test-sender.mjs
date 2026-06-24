@@ -256,6 +256,7 @@ export async function buildTestEmailForKind(accountKey, kind) {
       const ctx = {
         workWeekStartDay: creds.workWeekStartDay ?? 0,
         workWeekEndDay: creds.workWeekEndDay ?? 6,
+        workWeekScheduleHistory: creds.workWeekScheduleHistory,
         shiftStartMins: creds.shiftStartMins ?? 0,
         shiftEndMins: creds.shiftEndMins ?? 1439,
         driverBlock,
