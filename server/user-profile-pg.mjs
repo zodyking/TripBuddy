@@ -131,6 +131,57 @@ export async function ensureUserProfileTable() {
     await client.query(`
       ALTER TABLE ${TABLE} ADD COLUMN IF NOT EXISTS bluebubbles_contact_rules JSONB
     `)
+    await client.query(`
+      ALTER TABLE ${TABLE} ADD COLUMN IF NOT EXISTS smtp_enabled BOOLEAN
+    `)
+    await client.query(`
+      ALTER TABLE ${TABLE} ADD COLUMN IF NOT EXISTS smtp_host TEXT
+    `)
+    await client.query(`
+      ALTER TABLE ${TABLE} ADD COLUMN IF NOT EXISTS smtp_port INTEGER
+    `)
+    await client.query(`
+      ALTER TABLE ${TABLE} ADD COLUMN IF NOT EXISTS smtp_secure BOOLEAN
+    `)
+    await client.query(`
+      ALTER TABLE ${TABLE} ADD COLUMN IF NOT EXISTS smtp_user TEXT
+    `)
+    await client.query(`
+      ALTER TABLE ${TABLE} ADD COLUMN IF NOT EXISTS smtp_password_enc JSONB
+    `)
+    await client.query(`
+      ALTER TABLE ${TABLE} ADD COLUMN IF NOT EXISTS smtp_from_email TEXT
+    `)
+    await client.query(`
+      ALTER TABLE ${TABLE} ADD COLUMN IF NOT EXISTS smtp_from_name TEXT
+    `)
+    await client.query(`
+      ALTER TABLE ${TABLE} ADD COLUMN IF NOT EXISTS email_notify_to TEXT
+    `)
+    await client.query(`
+      ALTER TABLE ${TABLE} ADD COLUMN IF NOT EXISTS email_timezone TEXT
+    `)
+    await client.query(`
+      ALTER TABLE ${TABLE} ADD COLUMN IF NOT EXISTS email_on_new_trip BOOLEAN
+    `)
+    await client.query(`
+      ALTER TABLE ${TABLE} ADD COLUMN IF NOT EXISTS email_on_daily_shift BOOLEAN
+    `)
+    await client.query(`
+      ALTER TABLE ${TABLE} ADD COLUMN IF NOT EXISTS email_on_weekly_summary BOOLEAN
+    `)
+    await client.query(`
+      ALTER TABLE ${TABLE} ADD COLUMN IF NOT EXISTS email_last_daily_shift_key TEXT
+    `)
+    await client.query(`
+      ALTER TABLE ${TABLE} ADD COLUMN IF NOT EXISTS email_last_weekly_work_key TEXT
+    `)
+    await client.query(`
+      ALTER TABLE ${TABLE} ADD COLUMN IF NOT EXISTS email_last_weekly_pay_key TEXT
+    `)
+    await client.query(`
+      ALTER TABLE ${TABLE} ADD COLUMN IF NOT EXISTS email_last_trip_notify_fp TEXT
+    `)
   } finally {
     client.release()
   }
@@ -977,4 +1028,247 @@ export async function setBlueBubblesPrefsForAccount(accountKey, prefs) {
       )
     }
   }
+}
+
+const SMTP_HOST_MAX = 255
+const SMTP_USER_MAX = 255
+const SMTP_EMAIL_MAX = 320
+const DEFAULT_EMAIL_TZ = 'America/New_York'
+
+function rowToSmtpPrefs(row) {
+  if (!row) {
+    return {
+      enabled: false,
+      host: '',
+      port: 587,
+      secure: false,
+      user: '',
+      password: '',
+      fromEmail: '',
+      fromName: 'TripBuddy',
+      notifyTo: '',
+      timezone: DEFAULT_EMAIL_TZ,
+      onNewTrip: true,
+      onDailyShiftSummary: true,
+      onWeeklySummary: true,
+      lastDailyShiftKey: '',
+      lastWeeklyWorkKey: '',
+      lastWeeklyPayKey: '',
+      lastTripNotifyFp: '',
+    }
+  }
+  let password = ''
+  const enc = row.smtp_password_enc
+  if (enc && typeof enc === 'object') {
+    try {
+      password = decryptString(enc).trim()
+    } catch {
+      password = ''
+    }
+  }
+  return {
+    enabled: row.smtp_enabled === true,
+    host: typeof row.smtp_host === 'string' ? row.smtp_host.trim().slice(0, SMTP_HOST_MAX) : '',
+    port:
+      typeof row.smtp_port === 'number' && Number.isFinite(row.smtp_port)
+        ? Math.max(1, Math.min(65535, Math.floor(row.smtp_port)))
+        : 587,
+    secure: row.smtp_secure === true,
+    user: typeof row.smtp_user === 'string' ? row.smtp_user.trim().slice(0, SMTP_USER_MAX) : '',
+    password,
+    fromEmail:
+      typeof row.smtp_from_email === 'string'
+        ? row.smtp_from_email.trim().slice(0, SMTP_EMAIL_MAX)
+        : '',
+    fromName:
+      typeof row.smtp_from_name === 'string' && row.smtp_from_name.trim()
+        ? row.smtp_from_name.trim().slice(0, 120)
+        : 'TripBuddy',
+    notifyTo:
+      typeof row.email_notify_to === 'string'
+        ? row.email_notify_to.trim().slice(0, SMTP_EMAIL_MAX)
+        : '',
+    timezone:
+      typeof row.email_timezone === 'string' && row.email_timezone.trim()
+        ? row.email_timezone.trim().slice(0, 64)
+        : DEFAULT_EMAIL_TZ,
+    onNewTrip: row.email_on_new_trip !== false,
+    onDailyShiftSummary: row.email_on_daily_shift !== false,
+    onWeeklySummary: row.email_on_weekly_summary !== false,
+    lastDailyShiftKey:
+      typeof row.email_last_daily_shift_key === 'string'
+        ? row.email_last_daily_shift_key.trim()
+        : '',
+    lastWeeklyWorkKey:
+      typeof row.email_last_weekly_work_key === 'string'
+        ? row.email_last_weekly_work_key.trim()
+        : '',
+    lastWeeklyPayKey:
+      typeof row.email_last_weekly_pay_key === 'string'
+        ? row.email_last_weekly_pay_key.trim()
+        : '',
+    lastTripNotifyFp:
+      typeof row.email_last_trip_notify_fp === 'string'
+        ? row.email_last_trip_notify_fp.trim()
+        : '',
+  }
+}
+
+/** @param {string} accountKey */
+export async function getSmtpPrefsForAccount(accountKey) {
+  const ak = String(accountKey || '').trim()
+  if (!ak) return rowToSmtpPrefs(null)
+  const p = await getPostgresPool()
+  if (!p) return rowToSmtpPrefs(null)
+  await ensureUserProfileTable()
+  const { rows } = await p.query(
+    `SELECT smtp_enabled, smtp_host, smtp_port, smtp_secure, smtp_user, smtp_password_enc,
+            smtp_from_email, smtp_from_name, email_notify_to, email_timezone,
+            email_on_new_trip, email_on_daily_shift, email_on_weekly_summary,
+            email_last_daily_shift_key, email_last_weekly_work_key, email_last_weekly_pay_key,
+            email_last_trip_notify_fp
+     FROM ${TABLE} WHERE account_key = $1`,
+    [ak],
+  )
+  return rowToSmtpPrefs(rows[0])
+}
+
+/** @param {string} accountKey @param {object} patch */
+export async function patchSmtpSendStateForAccount(accountKey, patch) {
+  const ak = String(accountKey || '').trim()
+  if (!ak) return
+  const p = await getPostgresPool()
+  if (!p) return
+  await ensureUserProfileTable()
+  const sets = []
+  const vals = [ak]
+  let i = 2
+  const add = (col, val) => {
+    sets.push(`${col} = $${i}`)
+    vals.push(val)
+    i += 1
+  }
+  if (patch.lastDailyShiftKey !== undefined) {
+    add('email_last_daily_shift_key', patch.lastDailyShiftKey || null)
+  }
+  if (patch.lastWeeklyWorkKey !== undefined) {
+    add('email_last_weekly_work_key', patch.lastWeeklyWorkKey || null)
+  }
+  if (patch.lastWeeklyPayKey !== undefined) {
+    add('email_last_weekly_pay_key', patch.lastWeeklyPayKey || null)
+  }
+  if (patch.lastTripNotifyFp !== undefined) {
+    add('email_last_trip_notify_fp', patch.lastTripNotifyFp || null)
+  }
+  if (!sets.length) return
+  await p.query(
+    `INSERT INTO ${TABLE} (account_key, updated_at) VALUES ($1, now())
+     ON CONFLICT (account_key) DO UPDATE SET ${sets.join(', ')}, updated_at = now()`,
+    vals,
+  )
+}
+
+/** @param {string} accountKey @param {object} prefs */
+export async function setSmtpPrefsForAccount(accountKey, prefs) {
+  const ak = String(accountKey || '').trim()
+  if (!ak) throw new Error('account_key required')
+  const p = await getPostgresPool()
+  if (!p) throw new Error('Database not available')
+  await ensureUserProfileTable()
+  const prev = await getSmtpPrefsForAccount(ak)
+
+  const enabled = typeof prefs.enabled === 'boolean' ? prefs.enabled : prev.enabled
+  const host =
+    typeof prefs.host === 'string' ? prefs.host.trim().slice(0, SMTP_HOST_MAX) : prev.host
+  const port =
+    typeof prefs.port === 'number' && Number.isFinite(prefs.port)
+      ? Math.max(1, Math.min(65535, Math.floor(prefs.port)))
+      : prev.port
+  const secure = typeof prefs.secure === 'boolean' ? prefs.secure : prev.secure
+  const user =
+    typeof prefs.user === 'string' ? prefs.user.trim().slice(0, SMTP_USER_MAX) : prev.user
+  let passwordEnc = null
+  if (typeof prefs.password === 'string' && prefs.password.trim()) {
+    passwordEnc = encryptString(prefs.password.trim())
+  } else if (prev.password) {
+    const { rows } = await p.query(
+      `SELECT smtp_password_enc FROM ${TABLE} WHERE account_key = $1`,
+      [ak],
+    )
+    passwordEnc = rows[0]?.smtp_password_enc ?? null
+  }
+  const fromEmail =
+    typeof prefs.fromEmail === 'string'
+      ? prefs.fromEmail.trim().slice(0, SMTP_EMAIL_MAX)
+      : prev.fromEmail
+  const fromName =
+    typeof prefs.fromName === 'string' && prefs.fromName.trim()
+      ? prefs.fromName.trim().slice(0, 120)
+      : prev.fromName
+  const notifyTo =
+    typeof prefs.notifyTo === 'string'
+      ? prefs.notifyTo.trim().slice(0, SMTP_EMAIL_MAX)
+      : prev.notifyTo
+  const timezone =
+    typeof prefs.timezone === 'string' && prefs.timezone.trim()
+      ? prefs.timezone.trim().slice(0, 64)
+      : prev.timezone
+  const onNewTrip =
+    typeof prefs.onNewTrip === 'boolean' ? prefs.onNewTrip : prev.onNewTrip
+  const onDailyShiftSummary =
+    typeof prefs.onDailyShiftSummary === 'boolean'
+      ? prefs.onDailyShiftSummary
+      : prev.onDailyShiftSummary
+  const onWeeklySummary =
+    typeof prefs.onWeeklySummary === 'boolean' ? prefs.onWeeklySummary : prev.onWeeklySummary
+
+  await p.query(
+    `INSERT INTO ${TABLE} (
+       account_key, smtp_enabled, smtp_host, smtp_port, smtp_secure, smtp_user, smtp_password_enc,
+       smtp_from_email, smtp_from_name, email_notify_to, email_timezone,
+       email_on_new_trip, email_on_daily_shift, email_on_weekly_summary, updated_at
+     ) VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,$8,$9,$10,$11,$12,$13,$14,now())
+     ON CONFLICT (account_key) DO UPDATE SET
+       smtp_enabled = EXCLUDED.smtp_enabled,
+       smtp_host = EXCLUDED.smtp_host,
+       smtp_port = EXCLUDED.smtp_port,
+       smtp_secure = EXCLUDED.smtp_secure,
+       smtp_user = EXCLUDED.smtp_user,
+       smtp_password_enc = COALESCE(EXCLUDED.smtp_password_enc, ${TABLE}.smtp_password_enc),
+       smtp_from_email = EXCLUDED.smtp_from_email,
+       smtp_from_name = EXCLUDED.smtp_from_name,
+       email_notify_to = EXCLUDED.email_notify_to,
+       email_timezone = EXCLUDED.email_timezone,
+       email_on_new_trip = EXCLUDED.email_on_new_trip,
+       email_on_daily_shift = EXCLUDED.email_on_daily_shift,
+       email_on_weekly_summary = EXCLUDED.email_on_weekly_summary,
+       updated_at = now()`,
+    [
+      ak,
+      enabled,
+      host || null,
+      port,
+      secure,
+      user || null,
+      passwordEnc ? JSON.stringify(passwordEnc) : null,
+      fromEmail || null,
+      fromName || null,
+      notifyTo || null,
+      timezone || DEFAULT_EMAIL_TZ,
+      onNewTrip,
+      onDailyShiftSummary,
+      onWeeklySummary,
+    ],
+  )
+}
+
+/** @returns {Promise<string[]>} */
+export async function listAccountKeysWithSmtpEnabled() {
+  const p = await getPostgresPool()
+  if (!p) return []
+  await ensureUserProfileTable()
+  const { rows } = await p.query(
+    `SELECT account_key FROM ${TABLE} WHERE smtp_enabled = true AND email_notify_to IS NOT NULL AND trim(email_notify_to) <> ''`,
+  )
+  return rows.map((r) => String(r.account_key || '').trim()).filter(Boolean)
 }
