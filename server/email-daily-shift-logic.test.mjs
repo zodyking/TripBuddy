@@ -5,6 +5,7 @@ import {
   computeLedgerDisplayDate,
   ledgerEntriesForWorkDay,
   resolveDailyShiftSummaryDayKey,
+  resolveLatestLedgerWorkDayKey,
   workShiftDayKeyForEntry,
 } from './email-daily-shift-logic.mjs'
 import { computeDailyShiftEmailDecision } from '../src/utils/shiftCalendar.js'
@@ -77,6 +78,22 @@ test('buildDailyShiftSummary includes removed trips for work day', () => {
   })
   assert.equal(summary.tripCount, 2)
   assert.equal(summary.tableRows.length, 2)
+})
+
+test('resolveLatestLedgerWorkDayKey uses timezone-aware work day like History', () => {
+  const ledger = [
+    {
+      source: 'linehaul',
+      recordedAt: Date.parse('2026-06-24T14:00:00.000Z'),
+      dailyTripLegSequence: '1',
+      dispatchHeader: { historyOutcome: 'delivered' },
+    },
+  ]
+  const shift = { shiftStartMins: 0, shiftEndMins: 1439 }
+  const key = resolveLatestLedgerWorkDayKey(ledger, shift, 'America/New_York')
+  assert.equal(key, '2026-06-24')
+  const items = ledgerEntriesForWorkDay(ledger, key, shift, 'America/New_York')
+  assert.equal(items.length, 1)
 })
 
 test('computeDailyShiftEmailDecision waits for idle and incomplete trips', () => {

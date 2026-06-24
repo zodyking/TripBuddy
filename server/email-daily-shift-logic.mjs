@@ -152,6 +152,29 @@ export function resolveDailyShiftSummaryDayKey(ledger, opts) {
 }
 
 /**
+ * Most recent work-week shift day that has ledger trips (matches History grouping).
+ * @param {unknown[]} ledger
+ * @param {{ shiftStartMins: number, shiftEndMins: number }} shift
+ * @param {string} timeZone
+ */
+export function resolveLatestLedgerWorkDayKey(ledger, shift, timeZone) {
+  if (!Array.isArray(ledger) || !ledger.length) return ''
+  let bestKey = ''
+  let bestTs = 0
+  for (const e of ledger) {
+    const ts = computeLedgerDisplayDate(e)
+    if (!ts) continue
+    const key = workShiftDayKeyForEntry(e, shift, timeZone)
+    if (!key) continue
+    if (ts >= bestTs) {
+      bestTs = ts
+      bestKey = key
+    }
+  }
+  return bestKey
+}
+
+/**
  * @param {number} nowMs
  * @param {string} timeZone
  * @param {number} shiftEndMins
