@@ -151,32 +151,90 @@ export function computeDailyShiftEmailDecision(opts) {
 }
 
 /**
- * @param {{ nowMs: number, timeZone: string }} opts
+ * @param {Date} date
+ * @param {string} [timeZone]
+ * @returns {number} 0=Sun .. 6=Sat
+ */
+export function zonedWeekdayIndex(date, timeZone = 'UTC') {
+  const fmt = new Intl.DateTimeFormat('en-US', { timeZone, weekday: 'short' })
+  const wd = fmt.format(date)
+  /** @type {Record<string, number>} */
+  const map = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 }
+  return map[wd] ?? 0
+}
+
+const WEEKLY_TRIP_IDLE_MINS = 120
+
+/**
+ * True when local time is on the last work-week day (or the morning after for overnight shifts)
+ * and the shift has ended.
+ */
+export function isWeeklySendWindowReady(
+  nowMs,
+  timeZone,
+  workWeekEndDay,
+  shiftStartMins = 0,
+  shiftEndMins = 1439,
+) {
+  const endDay = Math.min(6, Math.max(0, Math.floor(workWeekEndDay ?? 6)))
+  const shiftStart = Math.max(0, Math.min(1439, Math.floor(shiftStartMins ?? 0)))
+  const shiftEnd = Math.max(0, Math.min(1439, Math.floor(shiftEndMins ?? 1439)))
+  const d = new Date(nowMs)
+  const dow = zonedWeekdayIndex(d, timeZone)
+  const mins = zonedMinutesFromMidnight(d, timeZone)
+  const overnight = shiftStart > shiftEnd
+
+  if (!overnight) {
+    if (dow !== endDay) return false
+    return mins >= shiftEnd
+  }
+
+  const morningAfter = (endDay + 1) % 7
+  if (dow === endDay) return false
+  if (dow === morningAfter) return mins >= shiftEnd
+  return false
+}
+
+/**
+ * Weekly PDFs send on the last day of the user's work week, after shift end,
+ * once there has been no new trip for 2 hours.
+ * @param {{
+ *   nowMs: number,
+ *   timeZone: string,
+ *   workWeekEndDay?: number,
+ *   shiftStartMins?: number,
+ *   shiftEndMins?: number,
+ *   lastTripActivityMs?: number,
+ *   idleMins?: number,
+ * }} opts
  */
 export function computeWeeklyEmailDecision(opts) {
   const timeZone = opts.timeZone || 'America/New_York'
-  const fmt = new Intl.DateTimeFormat('en-US', {
-    timeZone,
-    weekday: 'short',
-    hour: 'numeric',
-    minute: 'numeric',
-    hour12: false,
-  })
-  const parts = fmt.formatToParts(new Date(opts.nowMs))
-  /** @type {Record<string, string>} */
-  const m = {}
-  for (const p of parts) {
-    if (p.type !== 'literal') m[p.type] = p.value
+  const workWeekEndDay = opts.workWeekEndDay ?? 6
+  const shiftStartMins = opts.shiftStartMins ?? 0
+  const shiftEndMins = opts.shiftEndMins ?? 1439
+  const idleMins = opts.idleMins ?? WEEKLY_TRIP_IDLE_MINS
+  const lastTripActivityMs = opts.lastTripActivityMs ?? 0
+  const nowMs = opts.nowMs
+
+  if (
+    !isWeeklySendWindowReady(
+      nowMs,
+      timeZone,
+      workWeekEndDay,
+      shiftStartMins,
+      shiftEndMins,
+    )
+  ) {
+    return { shouldSend: false, referenceMs: 0 }
   }
-  const weekday = m.weekday
-  const hour = Number(m.hour)
-  const minute = Number(m.minute)
-  const mins = hour * 60 + minute
-  const shouldSend = weekday === 'Mon' && mins >= 360 && mins < 420
-  return {
-    shouldSend,
-    referenceMs: shouldSend ? opts.nowMs - 24 * 60 * 60 * 1000 : 0,
+
+  const idleMs = idleMins * 60 * 1000
+  if (lastTripActivityMs > 0 && nowMs - lastTripActivityMs < idleMs) {
+    return { shouldSend: false, referenceMs: 0 }
   }
+
+  return { shouldSend: true, referenceMs: nowMs }
 }
 
 /**

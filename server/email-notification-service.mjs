@@ -290,7 +290,14 @@ export async function maybeSendScheduledEmailsForAccount(accountKey, now = new D
     }
 
     if (prefs.onWeeklySummary) {
-      const weekly = computeWeeklyEmailDecision({ nowMs, timeZone: tz })
+      const weekly = computeWeeklyEmailDecision({
+        nowMs,
+        timeZone: tz,
+        workWeekEndDay: creds.workWeekEndDay ?? 6,
+        shiftStartMins: shiftStart,
+        shiftEndMins: shiftEnd,
+        lastTripActivityMs: prefs.lastTripActivityMs ?? 0,
+      })
       if (weekly.shouldSend) {
         try {
           await sendWeeklySummaryEmail(accountKey, weekly.referenceMs)

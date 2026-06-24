@@ -1,7 +1,16 @@
 import { appendInAppNotification, appendInAppForLastActive } from './in-app-notifications-store.mjs'
 import { getLastActiveAccountKey } from './active-account.mjs'
+import { recordEmailTripActivityForAccount } from './user-profile-pg.mjs'
 import { emitLog } from './log-bus.mjs'
 import { maybeSendEmailForInAppNotification } from './email-notification-service.mjs'
+
+/** @param {string} accountKey @param {object} [extra] */
+function maybeRecordTripActivity(accountKey, extra) {
+  const event = String(extra?.event ?? '')
+  if (event === 'trip_assigned' || event === 'preplan_assigned') {
+    void recordEmailTripActivityForAccount(accountKey)
+  }
+}
 
 /**
  * Persist + emit one in-app notification (KV inbox + SSE via logBus `inapp`).
@@ -22,6 +31,7 @@ export async function publishInAppForAccount(accountKey, payload) {
         extra: r.item.extra,
       })
     }
+    maybeRecordTripActivity(accountKey, payload.extra)
     void maybeSendEmailForInAppNotification(accountKey, payload)
       .then((emailResult) => {
         if (emailResult?.skipped && emailResult.skipped !== 'deduped') {
@@ -56,6 +66,7 @@ export async function publishInAppForLastActiveUser(payload) {
     }
     const ak = getLastActiveAccountKey()
     if (ak) {
+      maybeRecordTripActivity(ak, payload.extra)
       void maybeSendEmailForInAppNotification(ak, payload).catch((e) => {
         console.error('[email] last-active notification failed', ak, e)
       })

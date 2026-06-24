@@ -2701,7 +2701,7 @@ onUnmounted(() => {
                 <input v-model="emailOnWeeklySummary" type="checkbox" />
                 <span class="email-report-label">
                   <strong>Weekly mileage PDFs</strong>
-                  <small>Monday mornings — work week and pay schedule</small>
+                  <small>Last day of your work week, after shift ends and 2 hours with no new trips</small>
                 </span>
               </label>
             </div>
