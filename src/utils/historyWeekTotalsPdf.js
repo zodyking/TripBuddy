@@ -930,3 +930,12 @@ export async function getHistoryWeekTotalsPdfBlob(opts) {
   const { doc, fileName } = await buildWeekTotalsJsPdf(opts)
   return { blob: doc.output('blob'), filename: fileName }
 }
+
+/**
+ * Node/server: PDF as Buffer for email attachments.
+ * @param {WeekTotalsPdfOpts} opts
+ */
+export async function getHistoryWeekTotalsPdfBuffer(opts) {
+  const { doc, fileName } = await buildWeekTotalsJsPdf(opts)
+  return { buffer: Buffer.from(doc.output('arraybuffer')), filename: fileName }
+}

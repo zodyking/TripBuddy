@@ -10,6 +10,8 @@ import {
   putNy511ApiKey,
   putOpenrouterApiKey,
   putGwbUpperCamYoutubeUrl,
+  putSmtpPrefs,
+  postSmtpTest,
   putHelpersAutoArrivePrefs,
   deleteCredentials,
   putAssignment,
@@ -165,7 +167,7 @@ const SECRET_SAVED_MASK = '••••••••••••••••'
 const router = useRouter()
 const route = useRoute()
 
-/** @type {import('vue').Ref<'general' | 'automation' | 'audio' | 'security' | 'directory' | 'traffic' | 'helpers' | 'whatsapp' | 'imessage'>} */
+/** @type {import('vue').Ref<'general' | 'automation' | 'audio' | 'email' | 'security' | 'directory' | 'traffic' | 'helpers' | 'whatsapp' | 'imessage'>} */
 const settingsTab = ref('general')
 const settingsTabsEl = ref(/** @type {HTMLElement | null} */ (null))
 const signOutBusy = ref(false)
@@ -680,6 +682,83 @@ const gwbUpperCamYoutubeDraft = ref('')
 const gwbUpperCamYoutubeMsg = ref('')
 const gwbUpperCamYoutubeBusy = ref(false)
 
+const smtpEnabled = ref(false)
+const smtpHostDraft = ref('')
+const smtpPortDraft = ref(587)
+const smtpSecureDraft = ref(false)
+const smtpUserDraft = ref('')
+const smtpPassDraft = ref('')
+const smtpFromEmailDraft = ref('')
+const smtpFromNameDraft = ref('TripBuddy')
+const emailNotifyToDraft = ref('')
+const emailTimezoneDraft = ref('America/New_York')
+const emailOnNewTrip = ref(true)
+const emailOnDailyShift = ref(true)
+const emailOnWeeklySummary = ref(true)
+const smtpBusy = ref(false)
+const smtpTestBusy = ref(false)
+const smtpMsg = ref('')
+
+async function saveSmtpPrefs() {
+  if (!(await requireApi())) return
+  smtpBusy.value = true
+  smtpMsg.value = ''
+  try {
+    await putSmtpPrefs({
+      enabled: smtpEnabled.value,
+      host: smtpHostDraft.value,
+      port: Number(smtpPortDraft.value) || 587,
+      secure: smtpSecureDraft.value,
+      user: smtpUserDraft.value,
+      password: smtpPassDraft.value || undefined,
+      fromEmail: smtpFromEmailDraft.value,
+      fromName: smtpFromNameDraft.value,
+      notifyTo: emailNotifyToDraft.value,
+      timezone: emailTimezoneDraft.value,
+      onNewTrip: emailOnNewTrip.value,
+      onDailyShiftSummary: emailOnDailyShift.value,
+      onWeeklySummary: emailOnWeeklySummary.value,
+    })
+    smtpPassDraft.value = ''
+    smtpMsg.value = 'Email settings saved.'
+    await loadCredentials()
+  } catch (e) {
+    smtpMsg.value = e instanceof Error ? e.message : String(e)
+  } finally {
+    smtpBusy.value = false
+  }
+}
+
+async function sendSmtpTest() {
+  if (!(await requireApi())) return
+  smtpTestBusy.value = true
+  smtpMsg.value = ''
+  try {
+    await putSmtpPrefs({
+      enabled: smtpEnabled.value,
+      host: smtpHostDraft.value,
+      port: Number(smtpPortDraft.value) || 587,
+      secure: smtpSecureDraft.value,
+      user: smtpUserDraft.value,
+      password: smtpPassDraft.value || undefined,
+      fromEmail: smtpFromEmailDraft.value,
+      fromName: smtpFromNameDraft.value,
+      notifyTo: emailNotifyToDraft.value,
+      timezone: emailTimezoneDraft.value,
+      onNewTrip: emailOnNewTrip.value,
+      onDailyShiftSummary: emailOnDailyShift.value,
+      onWeeklySummary: emailOnWeeklySummary.value,
+    })
+    smtpPassDraft.value = '••••'
+    await postSmtpTest()
+    smtpMsg.value = 'Test email sent — check your inbox.'
+  } catch (e) {
+    smtpMsg.value = e instanceof Error ? e.message : String(e)
+  } finally {
+    smtpTestBusy.value = false
+  }
+}
+
 async function saveGwbUpperCamYoutubeUrl() {
   if (!(await requireApi())) return
   gwbUpperCamYoutubeBusy.value = true
@@ -1160,6 +1239,23 @@ async function loadCredentials() {
       typeof credMeta.value.gwbUpperCamYoutubeUrl === 'string'
         ? credMeta.value.gwbUpperCamYoutubeUrl
         : ''
+    smtpEnabled.value = credMeta.value.smtpEnabled === true
+    smtpHostDraft.value = String(credMeta.value.smtpHost ?? '')
+    smtpPortDraft.value =
+      typeof credMeta.value.smtpPort === 'number' ? credMeta.value.smtpPort : 587
+    smtpSecureDraft.value = credMeta.value.smtpSecure === true
+    smtpUserDraft.value = String(credMeta.value.smtpUser ?? '')
+    smtpPassDraft.value =
+      credMeta.value.smtpPassword === '••••' ? '••••' : ''
+    smtpFromEmailDraft.value = String(credMeta.value.smtpFromEmail ?? '')
+    smtpFromNameDraft.value = String(credMeta.value.smtpFromName ?? 'TripBuddy')
+    emailNotifyToDraft.value = String(credMeta.value.emailNotifyTo ?? '')
+    emailTimezoneDraft.value = String(
+      credMeta.value.emailTimezone ?? 'America/New_York',
+    )
+    emailOnNewTrip.value = credMeta.value.emailOnNewTrip !== false
+    emailOnDailyShift.value = credMeta.value.emailOnDailyShift !== false
+    emailOnWeeklySummary.value = credMeta.value.emailOnWeeklySummary !== false
     applyHelpersLocationPrefsFromCredentials(credMeta.value)
     applyWahaPrefsFromCredentials(credMeta.value)
     applyBlueBubblesPrefsFromCredentials(credMeta.value)
@@ -1784,6 +1880,16 @@ onUnmounted(() => {
         type="button"
         class="tab-btn tap"
         role="tab"
+        :aria-selected="settingsTab === 'email'"
+        :class="{ active: settingsTab === 'email' }"
+        @click="settingsTab = 'email'"
+      >
+        Email
+      </button>
+      <button
+        type="button"
+        class="tab-btn tap"
+        role="tab"
         :aria-selected="settingsTab === 'security'"
         :class="{ active: settingsTab === 'security' }"
         @click="settingsTab = 'security'"
@@ -2397,6 +2503,69 @@ onUnmounted(() => {
         @edit="openAutomationEditor"
       />
     </div>
+
+    <main v-show="settingsTab === 'email'" class="stack">
+      <SettingsSection title="Email notifications" section-id="settings-email" :collapsible="false">
+        <p class="cred-hint">
+          Configure SMTP to receive trip alerts, end-of-shift summaries, and weekly mileage PDFs.
+          Credentials are stored encrypted in your account profile.
+        </p>
+        <label class="toggle-row tap">
+          <input v-model="smtpEnabled" type="checkbox" />
+          <span>Enable email notifications</span>
+        </label>
+        <div class="api-key-row">
+          <label class="lbl api-key-lbl" for="smtp-host">SMTP host</label>
+          <input id="smtp-host" v-model="smtpHostDraft" class="inp tap api-key-inp" type="text" autocomplete="off" placeholder="smtp.example.com" />
+        </div>
+        <div class="api-key-row">
+          <label class="lbl api-key-lbl" for="smtp-port">Port</label>
+          <input id="smtp-port" v-model.number="smtpPortDraft" class="inp tap api-key-inp" type="number" min="1" max="65535" />
+          <label class="toggle-row tap smtp-secure-toggle">
+            <input v-model="smtpSecureDraft" type="checkbox" />
+            <span>SSL/TLS (465)</span>
+          </label>
+        </div>
+        <div class="api-key-row">
+          <label class="lbl api-key-lbl" for="smtp-user">Username</label>
+          <input id="smtp-user" v-model="smtpUserDraft" class="inp tap api-key-inp" type="text" autocomplete="username" />
+        </div>
+        <div class="api-key-row">
+          <label class="lbl api-key-lbl" for="smtp-pass">Password</label>
+          <input id="smtp-pass" v-model="smtpPassDraft" class="inp tap api-key-inp" type="password" autocomplete="new-password" placeholder="App password" />
+        </div>
+        <div class="api-key-row">
+          <label class="lbl api-key-lbl" for="smtp-from-email">From email</label>
+          <input id="smtp-from-email" v-model="smtpFromEmailDraft" class="inp tap api-key-inp" type="email" autocomplete="off" />
+        </div>
+        <div class="api-key-row">
+          <label class="lbl api-key-lbl" for="smtp-from-name">From name</label>
+          <input id="smtp-from-name" v-model="smtpFromNameDraft" class="inp tap api-key-inp" type="text" autocomplete="off" />
+        </div>
+        <div class="api-key-row">
+          <label class="lbl api-key-lbl" for="email-notify-to">Send notifications to</label>
+          <input id="email-notify-to" v-model="emailNotifyToDraft" class="inp tap api-key-inp" type="email" autocomplete="email" placeholder="you@example.com" />
+        </div>
+        <div class="api-key-row">
+          <label class="lbl api-key-lbl" for="email-timezone">Timezone</label>
+          <input id="email-timezone" v-model="emailTimezoneDraft" class="inp tap api-key-inp" type="text" placeholder="America/New_York" />
+        </div>
+        <div class="smtp-notify-toggles">
+          <label class="toggle-row tap"><input v-model="emailOnNewTrip" type="checkbox" /><span>New trip assigned</span></label>
+          <label class="toggle-row tap"><input v-model="emailOnDailyShift" type="checkbox" /><span>Daily end-of-shift summary</span></label>
+          <label class="toggle-row tap"><input v-model="emailOnWeeklySummary" type="checkbox" /><span>Weekly PDF summary (work week + pay schedule)</span></label>
+        </div>
+        <div class="modal-actions loc-retry-actions">
+          <button type="button" class="btn primary tap" :disabled="smtpBusy" @click="saveSmtpPrefs">
+            {{ smtpBusy ? 'Saving…' : 'Save email settings' }}
+          </button>
+          <button type="button" class="btn secondary tap" :disabled="smtpTestBusy || smtpBusy" @click="sendSmtpTest">
+            {{ smtpTestBusy ? 'Sending…' : 'Send test email' }}
+          </button>
+        </div>
+        <p v-if="smtpMsg" class="cred-msg">{{ smtpMsg }}</p>
+      </SettingsSection>
+    </main>
 
     <main v-show="settingsTab === 'audio'" class="stack audio-panel">
       <SettingsSection title="Audio Alerts" :collapsible="false">
@@ -3361,6 +3530,18 @@ onUnmounted(() => {
 .toggle-row input {
   margin-top: 0.2rem;
   flex-shrink: 0;
+}
+
+.smtp-notify-toggles {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  margin: var(--space-4, 1rem) 0;
+}
+
+.smtp-secure-toggle {
+  margin-bottom: 0;
+  white-space: nowrap;
 }
 
 .geo-fence-toolbar {

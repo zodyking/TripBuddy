@@ -1,5 +1,6 @@
 import { appendInAppNotification, appendInAppForLastActive } from './in-app-notifications-store.mjs'
 import { emitLog } from './log-bus.mjs'
+import { maybeSendEmailForInAppNotification } from './email-notification-service.mjs'
 
 /**
  * Persist + emit one in-app notification (KV inbox + SSE via logBus `inapp`).
@@ -18,6 +19,9 @@ export async function publishInAppForAccount(accountKey, payload) {
         read: r.item.read,
         ts: r.item.ts,
         extra: r.item.extra,
+      })
+      void maybeSendEmailForInAppNotification(accountKey, payload).catch((e) => {
+        console.error('[email] trip notification failed', e)
       })
     }
     return r

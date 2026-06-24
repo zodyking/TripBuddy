@@ -33,6 +33,8 @@ import {
   getBlueBubblesPrefsForAccount,
   setBlueBubblesPrefsForAccount,
   resolveBlueBubblesWebhookAccount,
+  getSmtpPrefsForAccount,
+  setSmtpPrefsForAccount,
 } from './user-profile-pg.mjs'
 import { sanitizeTomtomApiKey } from './tomtom-key.mjs'
 import { sanitizeHereApiKey } from './here-traffic-api.mjs'
@@ -136,6 +138,8 @@ import {
   isAnyPlaywrightRunnerBusy,
   waitForPlaywrightIdle,
 } from './playwright/run-control.mjs'
+import { sendSmtpTestEmail } from './smtp-mail.mjs'
+import { startEmailScheduler } from './email-scheduler.mjs'
 import { listPresets, getPreset } from './automation-presets.mjs'
 import {
   getCheckInFlowPayload,
@@ -1411,12 +1415,15 @@ app.get('/api/settings/credentials', async (req) => {
   let wahaPrefs = null
   /** @type {Awaited<ReturnType<typeof getBlueBubblesPrefsForAccount>> | null} */
   let blueBubblesPrefs = null
+  /** @type {Awaited<ReturnType<typeof getSmtpPrefsForAccount>> | null} */
+  let smtpPrefs = null
   if (typeof ak === 'string' && ak.trim()) {
     const akTrim = ak.trim()
     gwbUpperCamYoutubeUrl = (await getGwbUpperCamYoutubeUrlForAccount(akTrim)) || ''
     helpersAutoArrivePrefs = await getHelpersAutoArrivePrefsForAccount(akTrim)
     wahaPrefs = await getWahaPrefsForAccount(akTrim)
     blueBubblesPrefs = await getBlueBubblesPrefsForAccount(akTrim)
+    smtpPrefs = await getSmtpPrefsForAccount(akTrim)
   }
   return {
     ...meta,
@@ -1453,6 +1460,23 @@ app.get('/api/settings/credentials', async (req) => {
           blueBubblesAutoReplyEnabled: blueBubblesPrefs.autoReplyEnabled,
           blueBubblesWebhookToken: blueBubblesPrefs.webhookToken || '',
           blueBubblesContactRules: blueBubblesPrefs.contactRules || [],
+        }
+      : {}),
+    ...(smtpPrefs
+      ? {
+          smtpEnabled: smtpPrefs.enabled,
+          smtpHost: smtpPrefs.host || '',
+          smtpPort: smtpPrefs.port,
+          smtpSecure: smtpPrefs.secure,
+          smtpUser: smtpPrefs.user || '',
+          smtpPassword: smtpPrefs.password ? '••••' : '',
+          smtpFromEmail: smtpPrefs.fromEmail || '',
+          smtpFromName: smtpPrefs.fromName || 'TripBuddy',
+          emailNotifyTo: smtpPrefs.notifyTo || '',
+          emailTimezone: smtpPrefs.timezone || 'America/New_York',
+          emailOnNewTrip: smtpPrefs.onNewTrip,
+          emailOnDailyShift: smtpPrefs.onDailyShiftSummary,
+          emailOnWeeklySummary: smtpPrefs.onWeeklySummary,
         }
       : {}),
     secretHint: process.env.FEDEX_TOOL_SECRET ? null : TOOL_SECRET_HINT,
@@ -1805,6 +1829,93 @@ app.put('/api/settings/waha-prefs', async (req, reply) => {
       wahaUrl: stored.wahaUrl || '',
       wahaApiKey: stored.wahaApiKey ? '••••' : '',
     }
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e)
+    return reply.code(400).send({ error: msg })
+  }
+})
+
+app.put('/api/settings/smtp-prefs', async (req, reply) => {
+  try {
+    const ak = req.credentialAccountKey
+    if (typeof ak !== 'string' || !ak.trim()) {
+      return reply.code(400).send({ error: 'No account in session.' })
+    }
+    const body = req.body ?? {}
+    /** @type {Record<string, unknown>} */
+    const prefs = {}
+    if (Object.prototype.hasOwnProperty.call(body, 'enabled')) prefs.enabled = body.enabled === true
+    if (Object.prototype.hasOwnProperty.call(body, 'host')) {
+      prefs.host = String(body.host ?? '').trim().slice(0, 255)
+    }
+    if (Object.prototype.hasOwnProperty.call(body, 'port')) {
+      const p = Number(body.port)
+      if (Number.isFinite(p)) prefs.port = Math.max(1, Math.min(65535, Math.floor(p)))
+    }
+    if (Object.prototype.hasOwnProperty.call(body, 'secure')) prefs.secure = body.secure === true
+    if (Object.prototype.hasOwnProperty.call(body, 'user')) {
+      prefs.user = String(body.user ?? '').trim().slice(0, 255)
+    }
+    if (Object.prototype.hasOwnProperty.call(body, 'password')) {
+      const pw = String(body.password ?? '').trim()
+      if (pw && pw !== '••••') prefs.password = pw
+    }
+    if (Object.prototype.hasOwnProperty.call(body, 'fromEmail')) {
+      prefs.fromEmail = String(body.fromEmail ?? '').trim().slice(0, 320)
+    }
+    if (Object.prototype.hasOwnProperty.call(body, 'fromName')) {
+      prefs.fromName = String(body.fromName ?? '').trim().slice(0, 120)
+    }
+    if (Object.prototype.hasOwnProperty.call(body, 'notifyTo')) {
+      prefs.notifyTo = String(body.notifyTo ?? '').trim().slice(0, 320)
+    }
+    if (Object.prototype.hasOwnProperty.call(body, 'timezone')) {
+      prefs.timezone = String(body.timezone ?? '').trim().slice(0, 64)
+    }
+    if (Object.prototype.hasOwnProperty.call(body, 'onNewTrip')) {
+      prefs.onNewTrip = body.onNewTrip === true
+    }
+    if (Object.prototype.hasOwnProperty.call(body, 'onDailyShiftSummary')) {
+      prefs.onDailyShiftSummary = body.onDailyShiftSummary === true
+    }
+    if (Object.prototype.hasOwnProperty.call(body, 'onWeeklySummary')) {
+      prefs.onWeeklySummary = body.onWeeklySummary === true
+    }
+    if (!Object.keys(prefs).length) {
+      return reply.code(400).send({ error: 'Provide at least one SMTP field.' })
+    }
+    await setSmtpPrefsForAccount(ak.trim(), prefs)
+    const stored = await getSmtpPrefsForAccount(ak.trim())
+    return {
+      ok: true,
+      smtpEnabled: stored.enabled,
+      smtpHost: stored.host,
+      smtpPort: stored.port,
+      smtpSecure: stored.secure,
+      smtpUser: stored.user,
+      smtpPassword: stored.password ? '••••' : '',
+      smtpFromEmail: stored.fromEmail,
+      smtpFromName: stored.fromName,
+      emailNotifyTo: stored.notifyTo,
+      emailTimezone: stored.timezone,
+      emailOnNewTrip: stored.onNewTrip,
+      emailOnDailyShift: stored.onDailyShiftSummary,
+      emailOnWeeklySummary: stored.onWeeklySummary,
+    }
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e)
+    return reply.code(400).send({ error: msg })
+  }
+})
+
+app.post('/api/settings/smtp-test', async (req, reply) => {
+  try {
+    const ak = req.credentialAccountKey
+    if (typeof ak !== 'string' || !ak.trim()) {
+      return reply.code(400).send({ error: 'No account in session.' })
+    }
+    const r = await sendSmtpTestEmail(ak.trim())
+    return { ok: true, ...r }
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e)
     return reply.code(400).send({ error: msg })
@@ -3023,6 +3134,7 @@ try {
   console.log(`FedEx tool API listening on ${url}`)
   emitLog('info', `FedEx tool API listening on ${url}`)
   startDirectoryGeocodeBackground()
+  startEmailScheduler()
 } catch (e) {
   console.error(e)
   process.exit(1)

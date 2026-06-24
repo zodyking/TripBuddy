@@ -666,6 +666,22 @@ export async function putGwbUpperCamYoutubeUrl(body) {
   return handleJson(r)
 }
 
+/** SMTP + email notification preferences (PostgreSQL, per account). */
+export async function putSmtpPrefs(body) {
+  const r = await apiFetch('/api/settings/smtp-prefs', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body ?? {}),
+  })
+  return handleJson(r)
+}
+
+/** Send a test email using saved SMTP settings. */
+export async function postSmtpTest() {
+  const r = await apiFetch('/api/settings/smtp-test', { method: 'POST' })
+  return handleJson(r)
+}
+
 /**
  * Persist Helpers proximity auto arrive + trigger radius (PostgreSQL, per account).
  * @param {{ enabled: boolean, radiusNm: number }} body
