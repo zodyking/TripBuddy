@@ -459,7 +459,9 @@ export async function saveCredentials(body) {
   const prevStart = prev.workWeekStartDay ?? 0
   const prevEnd = prev.workWeekEndDay ?? 6
   let workWeekScheduleHistory = sanitizeWorkWeekScheduleHistory(prev.workWeekScheduleHistory)
-  if (workWeekStartDay !== prevStart || workWeekEndDay !== prevEnd) {
+  const retroApply = body.workWeekRetroactiveApply === true
+  const scheduleDaysChanged = workWeekStartDay !== prevStart || workWeekEndDay !== prevEnd
+  if (scheduleDaysChanged || retroApply) {
     const effectiveFromMs =
       typeof body.workWeekChangeEffectiveFromMs === 'number' &&
       Number.isFinite(body.workWeekChangeEffectiveFromMs) &&

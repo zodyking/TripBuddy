@@ -4,6 +4,7 @@ import { useRoute } from 'vue-router'
 import {
   getAssignment,
   getCredentials,
+  putCredentials,
   patchTripHistoryOutcome,
   patchTripHistoryAuditBucket,
   patchTripHistoryFederalHolidayMileage,
@@ -38,6 +39,7 @@ import {
   workWeekGroupMeta,
   workWeekGroupMetaForCreds,
   workWeekInclusiveDayCount,
+  workWeekDowLabel,
 } from '../utils/workWeekGroup.js'
 import { TRIP_OUTCOME_REASON_PRESETS } from '../constants/tripOutcomeReasonPresets.js'
 import { shiftDateKeyForEventMs } from '../utils/shiftCalendar.js'
@@ -295,6 +297,24 @@ const manualTripBusy = ref(false)
 const manualTripError = ref('')
 
 const auditDayModalOpen = ref(false)
+
+const weekScheduleModalOpen = ref(false)
+const weekScheduleBusy = ref(false)
+const weekScheduleError = ref('')
+/** @type {import('vue').Ref<{ key: string, groupLabel: string, weekStartMs: number } | null>} */
+const weekScheduleTarget = ref(null)
+const weekScheduleStartDay = ref(0)
+const weekScheduleEndDay = ref(6)
+
+const WEEK_DAY_OPTIONS = [
+  { v: 0, label: 'Sunday' },
+  { v: 1, label: 'Monday' },
+  { v: 2, label: 'Tuesday' },
+  { v: 3, label: 'Wednesday' },
+  { v: 4, label: 'Thursday' },
+  { v: 5, label: 'Friday' },
+  { v: 6, label: 'Saturday' },
+]
 /** @type {import('vue').Ref<LedgerEntry | null>} */
 const auditDayTarget = ref(null)
 const auditDayDateStr = ref('')
@@ -2238,6 +2258,44 @@ function closeAuditDayModal() {
   auditDayError.value = ''
 }
 
+/**
+ * @param {{ key: string, groupLabel: string, weekStartMs: number }} wg
+ */
+function openWeekScheduleModal(wg) {
+  weekScheduleTarget.value = wg
+  weekScheduleStartDay.value = workWeekFromCred.value.workWeekStartDay
+  weekScheduleEndDay.value = workWeekFromCred.value.workWeekEndDay
+  weekScheduleError.value = ''
+  weekScheduleModalOpen.value = true
+}
+
+function closeWeekScheduleModal() {
+  weekScheduleModalOpen.value = false
+  weekScheduleTarget.value = null
+  weekScheduleError.value = ''
+}
+
+async function confirmWeekScheduleModal() {
+  const wg = weekScheduleTarget.value
+  if (!wg || weekScheduleBusy.value) return
+  weekScheduleBusy.value = true
+  weekScheduleError.value = ''
+  try {
+    await putCredentials({
+      workWeekStartDay: weekScheduleStartDay.value,
+      workWeekEndDay: weekScheduleEndDay.value,
+      workWeekChangeEffectiveFromMs: wg.weekStartMs,
+      workWeekRetroactiveApply: true,
+    })
+    await reloadWorkWeekFromCredentials()
+    closeWeekScheduleModal()
+  } catch (e) {
+    weekScheduleError.value = e instanceof Error ? e.message : String(e)
+  } finally {
+    weekScheduleBusy.value = false
+  }
+}
+
 async function submitAuditDayMove() {
   const row = auditDayTarget.value
   if (!row) return
@@ -2508,6 +2566,15 @@ onUnmounted(() => {
               <div class="history-ww-head-row">
                 <h3 class="history-ww-title">{{ wg.groupLabel }}</h3>
                 <div class="history-head-metrics">
+                  <button
+                    v-if="historyWeekViewMode === 'workWeek'"
+                    type="button"
+                    class="history-week-pdf-btn tap"
+                    title="Set work week schedule (start/end days) from this week forward"
+                    @click.stop="openWeekScheduleModal(wg)"
+                  >
+                    Schedule
+                  </button>
                   <button
                     type="button"
                     class="history-week-pdf-btn tap"
@@ -3077,6 +3144,68 @@ onUnmounted(() => {
               @click="confirmOutcomeReasonModal"
             >
               Save
+            </button>
+          </div>
+        </div>
+      </div>
+    </Teleport>
+
+    <Teleport to="body">
+      <div
+        v-if="weekScheduleModalOpen && weekScheduleTarget"
+        class="delete-modal-overlay"
+        @click.self="closeWeekScheduleModal"
+      >
+        <div
+          class="delete-modal"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="week-schedule-modal-title"
+        >
+          <h2 id="week-schedule-modal-title" class="delete-modal-title">Work week schedule</h2>
+          <p class="delete-modal-desc">
+            Apply a work week schedule starting from
+            <strong>{{ weekScheduleTarget.groupLabel }}</strong>.
+            This week and every later week will regroup using these days. Earlier weeks keep their prior schedule.
+          </p>
+          <div class="work-week-row work-week-row--modal">
+            <label class="history-modal-field">
+              <span class="history-modal-label">Week starts</span>
+              <select v-model.number="weekScheduleStartDay" class="delete-modal-input tap">
+                <option v-for="o in WEEK_DAY_OPTIONS" :key="`wsm-${o.v}`" :value="o.v">
+                  {{ o.label }}
+                </option>
+              </select>
+            </label>
+            <label class="history-modal-field">
+              <span class="history-modal-label">Week ends</span>
+              <select v-model.number="weekScheduleEndDay" class="delete-modal-input tap">
+                <option v-for="o in WEEK_DAY_OPTIONS" :key="`wem-${o.v}`" :value="o.v">
+                  {{ o.label }}
+                </option>
+              </select>
+            </label>
+          </div>
+          <p class="delete-modal-desc">
+            Preview: <strong>{{ workWeekDowLabel(weekScheduleStartDay, weekScheduleEndDay) }}</strong>
+          </p>
+          <p v-if="weekScheduleError" class="delete-modal-error">{{ weekScheduleError }}</p>
+          <div class="delete-modal-actions">
+            <button
+              type="button"
+              class="delete-modal-btn delete-modal-btn--cancel"
+              :disabled="weekScheduleBusy"
+              @click="closeWeekScheduleModal"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              class="delete-modal-btn delete-modal-btn--confirm"
+              :disabled="weekScheduleBusy"
+              @click="confirmWeekScheduleModal"
+            >
+              {{ weekScheduleBusy ? 'Saving…' : 'Apply from this week' }}
             </button>
           </div>
         </div>
@@ -3755,6 +3884,17 @@ onUnmounted(() => {
 .history-week-pdf-btn:disabled {
   opacity: 0.55;
   cursor: wait;
+}
+
+.work-week-row--modal {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  margin: 12px 0;
+}
+
+.work-week-retro {
+  margin-top: 8px;
 }
 
 .history-mile-pill {

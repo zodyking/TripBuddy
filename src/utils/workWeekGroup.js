@@ -36,7 +36,7 @@ function startOfWorkWeek(d, startDay) {
  * @param {number} endDay
  * @returns {string}
  */
-function workWeekDowLabel(startDay, endDay) {
+export function workWeekDowLabel(startDay, endDay) {
   const a = dayMod(startDay)
   const b = dayMod(endDay)
   if (a === b) return DAY[a]
@@ -176,6 +176,17 @@ export function workWeekChangeEffectiveFromMs(nowMs, newStartDay) {
   const d = new Date(nowMs)
   if (isNaN(d.getTime())) return 0
   return startOfWorkWeek(d, st).getTime()
+}
+
+/**
+ * Work-week block start (local midnight) containing `anchorMs` when weeks begin on `startDay`.
+ * @param {number} anchorMs
+ * @param {number} startDay
+ */
+export function workWeekStartMsForAnchorDate(anchorMs, startDay) {
+  const d = new Date(anchorMs)
+  if (isNaN(d.getTime())) return 0
+  return startOfWorkWeek(d, Math.min(6, Math.max(0, Math.floor(Number(startDay) || 0)))).getTime()
 }
 
 /**

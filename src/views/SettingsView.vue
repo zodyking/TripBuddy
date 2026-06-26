@@ -153,7 +153,7 @@ import {
   applyBlueBubblesPrefsFromCredentials,
 } from '../utils/blueBubblesPrefs.js'
 import { restartBlueBubblesBackgroundPoll } from '../utils/blueBubblesBackgroundPoll.js'
-import { workWeekChangeEffectiveFromMs } from '../utils/workWeekGroup.js'
+import { workWeekChangeEffectiveFromMs, workWeekStartMsForAnchorDate } from '../utils/workWeekGroup.js'
 import {
   appGeoLat,
   appGeoLng,
@@ -522,6 +522,8 @@ const workWeekEndDay = ref(6)
 /** Last saved work week — used to record schedule history only when days actually change. */
 const loadedWorkWeekStartDay = ref(0)
 const loadedWorkWeekEndDay = ref(6)
+/** When changing work week, optionally backdate when the new schedule began. */
+const workWeekRetroactiveDate = ref('')
 /** History calendar "shift day" — overnight (e.g. 19:00–07:00) uses the date the shift started. */
 const shiftStartTime = ref('00:00')
 const shiftEndTime = ref('23:59')
@@ -1370,10 +1372,20 @@ async function saveCredentials() {
       ),
     }
     if (workWeekChanged) {
-      body.workWeekChangeEffectiveFromMs = workWeekChangeEffectiveFromMs(
-        Date.now(),
-        workWeekStartDay.value,
-      )
+      const retroDate = String(workWeekRetroactiveDate.value ?? '').trim()
+      if (retroDate && /^\d{4}-\d{2}-\d{2}$/.test(retroDate)) {
+        const anchor = Date.parse(`${retroDate}T12:00:00`)
+        body.workWeekChangeEffectiveFromMs = workWeekStartMsForAnchorDate(
+          anchor,
+          workWeekStartDay.value,
+        )
+        body.workWeekRetroactiveApply = true
+      } else {
+        body.workWeekChangeEffectiveFromMs = workWeekChangeEffectiveFromMs(
+          Date.now(),
+          workWeekStartDay.value,
+        )
+      }
     }
     if (hasBearerInput) {
       body.fedexLinehaulBearer = credLinehaulToken.value.trim()
@@ -1388,8 +1400,12 @@ async function saveCredentials() {
     await loadAssignmentState()
     loadedWorkWeekStartDay.value = workWeekStartDay.value
     loadedWorkWeekEndDay.value = workWeekEndDay.value
+    const usedRetroDate = Boolean(String(workWeekRetroactiveDate.value ?? '').trim())
+    workWeekRetroactiveDate.value = ''
     credMsg.value = workWeekChanged
-      ? 'Saved. Work week change applies from this week forward; older weeks are unchanged.'
+      ? usedRetroDate
+        ? 'Saved. Work week schedule recalculated from the date you picked forward.'
+        : 'Saved. Work week change applies from this week forward; older weeks are unchanged.'
       : 'Saved'
     pushLiveLog({ type: 'info', message: 'Credentials saved', ts: Date.now() })
   } catch (e) {
@@ -2080,8 +2096,21 @@ onUnmounted(() => {
           </div>
         </div>
         <p class="cred-hint">
-          The end day is the <strong>last calendar day</strong> in each work block (e.g. Thu–Mon = Thu through Mon, five days).
+          The end day is the <strong>last calendar day</strong> in each work block (e.g. Thu–Tue = Thu through Tue, six days).
         </p>
+        <div v-if="workWeekStartDay !== loadedWorkWeekStartDay || workWeekEndDay !== loadedWorkWeekEndDay" class="work-week-retro">
+          <label class="lbl" for="work-week-retro-date">Schedule starts (optional)</label>
+          <input
+            id="work-week-retro-date"
+            v-model="workWeekRetroactiveDate"
+            class="inp tap"
+            type="date"
+          />
+          <p class="cred-hint">
+            Pick the <strong>first day of the work week</strong> when this schedule began (e.g. a Thursday for Thu–Tue).
+            History and pay totals from that week forward will regroup. Leave blank to apply from the current week only.
+          </p>
+        </div>
         <div class="history-federal-holiday-setting">
           <div class="history-federal-holiday-setting__head">
             <label class="lbl history-federal-holiday-setting__title" for="federal-holiday-mileage-switch">

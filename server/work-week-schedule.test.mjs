@@ -6,6 +6,7 @@ import {
   resolveWorkWeekDaysForTimestamp,
   sanitizeWorkWeekScheduleHistory,
   workWeekChangeEffectiveFromMs,
+  workWeekStartMsForAnchorDate,
   workWeekGroupMeta,
   workWeekGroupMetaForCreds,
 } from '../src/utils/workWeekGroup.js'
@@ -28,6 +29,42 @@ test('sanitizeWorkWeekScheduleHistory does not invent baseline from current sett
   })
   assert.equal(days.workWeekStartDay, 4)
   assert.equal(days.workWeekEndDay, 1)
+})
+
+test('retroactive work week apply can backdate schedule change', () => {
+  const jun18WeekStart = Date.parse('2026-06-18T12:00:00.000Z') // Thu
+  const history = appendWorkWeekScheduleChange([], {
+    effectiveFromMs: workWeekChangeEffectiveFromMs(Date.parse('2026-06-25T15:00:00.000Z'), 4),
+    workWeekStartDay: 4,
+    workWeekEndDay: 2,
+    priorWorkWeekStartDay: 0,
+    priorWorkWeekEndDay: 6,
+  }, Date.parse('2026-06-25T15:00:00.000Z'))
+  const backdated = appendWorkWeekScheduleChange(history, {
+    effectiveFromMs: workWeekStartMsForAnchorDate(jun18WeekStart, 4),
+    workWeekStartDay: 4,
+    workWeekEndDay: 2,
+    priorWorkWeekStartDay: 4,
+    priorWorkWeekEndDay: 2,
+  })
+  const creds = {
+    workWeekStartDay: 4,
+    workWeekEndDay: 2,
+    workWeekScheduleHistory: backdated,
+    shiftStartMins: 0,
+    shiftEndMins: 1439,
+  }
+  const before = Date.parse('2026-06-11T12:00:00.000Z')
+  const during = Date.parse('2026-06-20T12:00:00.000Z')
+  const after = Date.parse('2026-06-26T12:00:00.000Z')
+  assert.equal(resolveWorkWeekDaysForTimestamp(before, creds).workWeekStartDay, 0)
+  assert.equal(resolveWorkWeekDaysForTimestamp(during, creds).workWeekStartDay, 4)
+  assert.equal(resolveWorkWeekDaysForTimestamp(after, creds).workWeekStartDay, 4)
+  const duringMeta = workWeekGroupMetaForCreds(during, creds)
+  const sameWeek = workWeekGroupMetaForCreds(Date.parse('2026-06-22T12:00:00.000Z'), creds)
+  assert.equal(duringMeta?.key, 'ww-2026-06-18')
+  assert.equal(sameWeek?.key, duringMeta?.key)
+  assert.equal(resolveWorkWeekDaysForTimestamp(after, creds).workWeekEndDay, 2)
 })
 
 test('work week change applies from current week start forward only', () => {
