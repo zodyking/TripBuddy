@@ -1,6 +1,5 @@
 import { jsPDF } from 'jspdf'
 import autoTable from 'jspdf-autotable'
-import { renderPdfPageToJpegDataUrl } from './renderPdfPageToJpegDataUrl.js'
 
 /** @param {string} s */
 function ascii(s) {
@@ -771,6 +770,7 @@ async function buildWeekTotalsJsPdf(opts) {
    * @param {ProofTripAppendix[]} proofTrips
    */
   async function drawAppendix(doc, proofTrips) {
+    const { renderPdfPageToJpegDataUrl } = await import('./renderPdfPageToJpegDataUrl.js')
     const W = doc.internal.pageSize.getWidth()
     const H = doc.internal.pageSize.getHeight()
     const IW = W - MX * 2

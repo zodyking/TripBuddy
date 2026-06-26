@@ -100,7 +100,7 @@ test('trip detail plain text and html include equipment and outcome', () => {
   assert.match(html, /Outcome/)
   assert.match(html, /Delivered/)
   assert.match(html, /Trailers/)
-  assert.match(html, /Dollies/)
+  assert.match(html, /Dolly Number1/)
 })
 
 test('formatEmailOutcome includes reason when not delivered', () => {
@@ -124,10 +124,11 @@ test('dailyShiftEmail uses trip cards with billable miles and outcome', () => {
   })
   assert.match(mail.html, /Billable miles/)
   assert.match(mail.html, /Trip details/)
-  assert.match(mail.html, /WOODBRIDGE/)
+  assert.match(mail.html, /1234 → 5678/)
   assert.match(mail.html, /Removed — Ingates return/)
   assert.match(mail.html, /Seal SEAL123/)
-  assert.match(mail.html, /Dollies/)
+  assert.match(mail.html, /Dolly Number1/)
+  assert.doesNotMatch(mail.html, /20ft|53ft/)
 })
 
 test('buildDailyShiftSummary returns rich trip contexts', () => {
@@ -198,7 +199,7 @@ test('buildWeeklyTripContexts returns table rows and tractors used', () => {
   assert.ok(summary.tractorsUsed.includes('T-88'))
 })
 
-test('weeklySummaryEmail includes driver, tractors, totals, and trip table', () => {
+test('weeklySummaryEmail includes driver, tractors, totals, and trip cards', () => {
   const ctx = buildEmailTripContextFromBody(sampleBody)
   ctx.completedAt = 'Jun 18, 10:00 AM'
   ctx.miles = '210 mi'
@@ -212,7 +213,7 @@ test('weeklySummaryEmail includes driver, tractors, totals, and trip table', () 
     tractorsUsed: ['T-99', 'T-88'],
     tripCount: 1,
     totalMiles: 210,
-    tableRows: [weeklyTripTableRow(ctx)],
+    trips: [ctx],
   })
   assert.match(mail.html, /Brandon King/)
   assert.match(mail.html, /123456/)
@@ -222,7 +223,8 @@ test('weeklySummaryEmail includes driver, tractors, totals, and trip table', () 
   assert.match(mail.html, /210 mi/)
   assert.match(mail.html, /Work week trips/)
   assert.match(mail.html, /1234 → 5678/)
-  assert.doesNotMatch(mail.html, /Outcome/)
+  assert.match(mail.html, /Trailers/)
+  assert.doesNotMatch(mail.html, /20ft|53ft/)
   assert.match(mail.text, /Dollies/)
 })
 

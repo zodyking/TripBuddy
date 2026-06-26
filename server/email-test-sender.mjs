@@ -26,7 +26,7 @@ import {
   buildEmailTripContextFromLedgerEntry,
   resolveActiveEmailTripContext,
 } from './email-trip-details.mjs'
-import { buildWeekMileagePdfBuffer } from './email-week-pdf.mjs'
+import { getHistoryWeekTotalsPdfBuffer } from '../src/utils/historyWeekTotalsPdf.js'
 
 /** @typedef {(typeof EMAIL_TEST_KINDS)[number]['id']} EmailTestKind */
 
@@ -266,8 +266,8 @@ export async function buildTestEmailForKind(accountKey, kind) {
         groupLabelMode: 'fedexPaySchedule',
       })
       const [workPdf, payPdf] = await Promise.all([
-        Promise.resolve(buildWeekMileagePdfBuffer(workOpts)),
-        Promise.resolve(buildWeekMileagePdfBuffer(payOpts)),
+        getHistoryWeekTotalsPdfBuffer(workOpts),
+        getHistoryWeekTotalsPdfBuffer(payOpts),
       ])
       const driverId = await getLinehaulDriverId()
       const mail = markTestMail(
@@ -280,7 +280,7 @@ export async function buildTestEmailForKind(accountKey, kind) {
           tractorsUsed: weekTrips.tractorsUsed,
           tripCount: weekTrips.tripCount,
           totalMiles: weekTrips.totalMiles,
-          tableRows: weekTrips.tableRows,
+          trips: weekTrips.trips,
         }),
       )
       return {

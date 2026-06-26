@@ -2,6 +2,11 @@ import { shiftDateKeyForEventMs } from '../src/utils/shiftCalendar.js'
 import { workWeekGroupMeta, workWeekGroupMetaForCreds, workWeekKeyForDate } from '../src/utils/workWeekGroup.js'
 import { buildEmailTripContextFromLedgerEntry, dailyTripTableRow, weeklyTripTableRow } from './email-trip-details.mjs'
 import { ledgerEntriesForWorkDay, computeLedgerDisplayDate } from './email-daily-shift-logic.mjs'
+import { formatTripEquipmentPdfBlock } from '../src/utils/tripDetailsDisplay.js'
+import {
+  billableMilesWithFederalHoliday,
+  FEDERAL_HOLIDAY_PDF_NOTE,
+} from '../src/utils/federalHolidayMileage.js'
 
 const PAY_ROUND_BAND_MIN = 200
 const PAY_ROUND_BAND_MAX = 210
@@ -46,7 +51,197 @@ function billableMiles(paidMi) {
  * @param {unknown} e
  */
 function entryMiles(e) {
-  return billableMiles(tripPaidMiles(e))
+  const paid = tripPaidMiles(e)
+  const base = billableMiles(paid)
+  const approved =
+    e && typeof e === 'object'
+      ? /** @type {Record<string, unknown>} */ (e).federalHolidayMileage15xApproved === true
+      : false
+  return billableMilesWithFederalHoliday(base, approved)
+}
+
+/** @param {unknown} v */
+function leadingLocationId(v) {
+  const s = String(v ?? '').trim()
+  const m = s.match(/^\s*(\d+)/)
+  return m ? m[1] : ''
+}
+
+/** @param {unknown} e */
+function ledgerAssignedAtMs(e) {
+  if (!e || typeof e !== 'object') return null
+  const o = /** @type {Record<string, unknown>} */ (e)
+  const ra =
+    typeof o.recordedAt === 'number' && Number.isFinite(o.recordedAt) && o.recordedAt > 0
+      ? o.recordedAt
+      : null
+  if (ra != null) return ra
+  const le =
+    typeof o.ledgerEventMs === 'number' && Number.isFinite(o.ledgerEventMs) && o.ledgerEventMs > 0
+      ? o.ledgerEventMs
+      : null
+  return le
+}
+
+/** @param {unknown} e */
+function ledgerDispatchedAtMsForPay(e) {
+  if (!e || typeof e !== 'object') return null
+  const o = /** @type {Record<string, unknown>} */ (e)
+  const d = o.dispatchedAtMs
+  if (!(typeof d === 'number' && Number.isFinite(d) && d > 0)) return null
+  const rec =
+    typeof o.recordedAt === 'number' && Number.isFinite(o.recordedAt) && o.recordedAt > 0
+      ? o.recordedAt
+      : null
+  if (rec != null && d <= rec) return null
+  return d
+}
+
+/** @param {unknown} e */
+function ledgerArrivedAtMs(e) {
+  if (!e || typeof e !== 'object') return null
+  const o = /** @type {Record<string, unknown>} */ (e)
+  const td =
+    o.tripDetails && typeof o.tripDetails === 'object'
+      ? /** @type {Record<string, unknown>} */ (o.tripDetails)
+      : {}
+  const appMs = td.appCapturedTripArrivalAtMs
+  if (typeof appMs === 'number' && Number.isFinite(appMs) && appMs > 0) return appMs
+  const touched =
+    typeof o.outcomeTouchedAt === 'number' &&
+    Number.isFinite(o.outcomeTouchedAt) &&
+    o.outcomeTouchedAt > 0
+  if (!touched) return null
+  const dh = o.dispatchHeader
+  if (!dh || typeof dh !== 'object') return null
+  const hdr = /** @type {Record<string, unknown>} */ (dh)
+  const out = String(hdr.historyOutcome ?? '')
+    .trim()
+    .toLowerCase()
+  if (out !== 'delivered') return null
+  const at = hdr.historyOutcomeAt
+  return typeof at === 'number' && Number.isFinite(at) && at > 0 ? at : null
+}
+
+/** @param {number | null | undefined} ms */
+function formatPayClockOrNa(ms) {
+  if (typeof ms !== 'number' || !Number.isFinite(ms) || ms <= 0) return 'n/a'
+  const d = new Date(ms)
+  if (isNaN(d.getTime())) return 'n/a'
+  return d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })
+}
+
+/** @param {unknown} e */
+function tripPdfDispatchColumns(e) {
+  const ts = entryTs(e)
+  const seq =
+    e && typeof e === 'object'
+      ? String(/** @type {Record<string, unknown>} */ (e).dailyTripLegSequence ?? '').trim()
+      : ''
+  const legLabel = /^\d+$/.test(seq) ? seq : '-'
+  if (!ts) {
+    return { weekday: '-', dispatchDate: '-', dispatchTime: '-', legLabel }
+  }
+  const d = new Date(ts)
+  if (isNaN(d.getTime())) {
+    return { weekday: '-', dispatchDate: '-', dispatchTime: '-', legLabel }
+  }
+  return {
+    weekday: d.toLocaleDateString(undefined, { weekday: 'long' }),
+    dispatchDate: d.toLocaleDateString(undefined, {
+      month: 'numeric',
+      day: 'numeric',
+      year: 'numeric',
+    }),
+    dispatchTime: d.toLocaleTimeString(undefined, {
+      hour: 'numeric',
+      minute: '2-digit',
+    }),
+    legLabel,
+  }
+}
+
+/** @param {unknown} e */
+function tripPdfTractor(e) {
+  if (!e || typeof e !== 'object') return '-'
+  const td =
+    /** @type {Record<string, unknown>} */ (e).tripDetails &&
+    typeof /** @type {Record<string, unknown>} */ (e).tripDetails === 'object'
+      ? /** @type {Record<string, unknown>} */ (/** @type {Record<string, unknown>} */ (e).tripDetails)
+      : {}
+  const t = td.tractorNumber
+  const s = t != null ? String(t).trim() : ''
+  return s || '-'
+}
+
+/** @param {unknown} e */
+function outcomePdfReasonLine(e) {
+  if (!e || typeof e !== 'object') return ''
+  const o = /** @type {Record<string, unknown>} */ (e)
+  const raw =
+    (typeof o.outcome === 'string' ? o.outcome.trim().toLowerCase() : '') ||
+    (o.dispatchHeader &&
+    typeof o.dispatchHeader === 'object' &&
+    typeof /** @type {Record<string, unknown>} */ (o.dispatchHeader).historyOutcome === 'string'
+      ? String(/** @type {Record<string, unknown>} */ (o.dispatchHeader).historyOutcome)
+          .trim()
+          .toLowerCase()
+      : '')
+  if (raw !== 'rejected' && raw !== 'removed') return ''
+  const dh = o.dispatchHeader
+  if (!dh || typeof dh !== 'object') return ''
+  return String(/** @type {Record<string, unknown>} */ (dh).historyOutcomeReason ?? '').trim()
+}
+
+/** @param {unknown} e */
+function federalHolidayPdfNoteForEntry(e) {
+  if (!e || typeof e !== 'object') return ''
+  return /** @type {Record<string, unknown>} */ (e).federalHolidayMileage15xApproved === true
+    ? FEDERAL_HOLIDAY_PDF_NOTE
+    : ''
+}
+
+/** @param {unknown} e @param {number} mi */
+function buildPdfRowFromLedgerEntry(e, mi) {
+  const dispatchCols = tripPdfDispatchColumns(e)
+  const originId = leadingLocationId(
+    e && typeof e === 'object' ? /** @type {Record<string, unknown>} */ (e).dispatchHeader?.origin : '',
+  ) || '-'
+  const destId = leadingLocationId(
+    e && typeof e === 'object'
+      ? /** @type {Record<string, unknown>} */ (e).dispatchHeader?.destination
+      : '',
+  ) || '-'
+  const td =
+    e && typeof e === 'object' && e.tripDetails && typeof e.tripDetails === 'object'
+      ? e.tripDetails
+      : {}
+  const paid = tripPaidMiles(e)
+  const base = paid ?? 0
+  return {
+    od: `${originId} → ${destId}`,
+    when: formatWhen(entryTs(e)),
+    billableMi: mi,
+    rounded: base >= PAY_ROUND_BAND_MIN && base <= PAY_ROUND_BAND_MAX,
+    originId,
+    destId,
+    routeOd: `${originId} → ${destId}`,
+    weekday: dispatchCols.weekday,
+    dispatchDate: dispatchCols.dispatchDate,
+    dispatchTime: dispatchCols.dispatchTime,
+    assignedTime: formatPayClockOrNa(ledgerAssignedAtMs(e)),
+    dispatchedTime: formatPayClockOrNa(ledgerDispatchedAtMsForPay(e)),
+    arrivedTime: formatPayClockOrNa(ledgerArrivedAtMs(e)),
+    legLabel: dispatchCols.legLabel,
+    tractorNumber: tripPdfTractor(e),
+    equipmentBlock: formatTripEquipmentPdfBlock(td),
+    outcomeReasonRight: outcomePdfReasonLine(e),
+    pdfNotesRight: federalHolidayPdfNoteForEntry(e),
+    dailyTripLegSequence:
+      e && typeof e === 'object'
+        ? String(/** @type {Record<string, unknown>} */ (e).dailyTripLegSequence ?? '')
+        : '',
+  }
 }
 
 /**
@@ -220,27 +415,11 @@ export function buildWeekTotalsPdfOpts(ledger, week, ctx) {
     const d = new Date(week.weekStartMs + i * 24 * 60 * 60 * 1000)
     const dk = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
     const list = (byDay.get(dk) || []).sort((a, b) => entryTs(b) - entryTs(a))
+    const rows = list.map((e) => buildPdfRowFromLedgerEntry(e, entryMiles(e)))
     let daySum = 0
-    const rows = list.map((e) => {
-      const mi = entryMiles(e)
-      daySum += mi
-      const ts = entryTs(e)
-      const dt = new Date(ts)
-      return {
-        od: entryRoute(e),
-        when: formatWhen(ts),
-        billableMi: mi,
-        rounded: mi >= PAY_ROUND_BAND_MIN && mi <= PAY_ROUND_BAND_MAX,
-        originId: '—',
-        destId: '—',
-        weekday: dt.toLocaleDateString('en-US', { weekday: 'long' }),
-        dispatchDate: dt.toLocaleDateString('en-US', { month: 'numeric', day: 'numeric', year: '2-digit' }),
-        dispatchTime: dt.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }),
-        legLabel: String(e?.dailyTripLegSequence ?? '—'),
-        tractorNumber: ctx.tractorNumber || '—',
-        dailyTripLegSequence: String(e?.dailyTripLegSequence ?? ''),
-      }
-    })
+    for (const row of rows) {
+      daySum += row.billableMi
+    }
     sumBillable += daySum
     days.push({
       dayLabel: d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' }),
@@ -250,7 +429,7 @@ export function buildWeekTotalsPdfOpts(ledger, week, ctx) {
   }
   const isPay = ctx.groupLabelMode === 'fedexPaySchedule'
   return {
-    documentTitle: isPay ? 'FedEx Pay Week Mileage' : 'Work Week Mileage',
+    documentTitle: isPay ? 'FedEx Pay Week Mileage' : 'Weekly Mileage',
     driverBlock: ctx.driverBlock || 'Driver',
     truckBlock: ctx.truckBlock || 'Tractor —',
     weekRangeLabel: week.groupLabel,

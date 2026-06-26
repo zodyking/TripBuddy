@@ -142,12 +142,11 @@ export function dataTable(table) {
 
 /**
  * @param {import('./email-trip-details.mjs').EmailTripContext} trip
- * @param {{ compact?: boolean, showMeta?: boolean, stackedRoute?: boolean }} [opts]
+ * @param {{ compact?: boolean, showMeta?: boolean }} [opts]
  */
 export function tripDetailCardHtml(trip, opts = {}) {
   const compact = opts.compact === true
   const showMeta = opts.showMeta !== false
-  const stackedRoute = opts.stackedRoute === true
 
   const metaRows = []
   if (showMeta) {
@@ -169,47 +168,17 @@ export function tripDetailCardHtml(trip, opts = {}) {
 
   const originLabel = emailDisplayValue(trip.originDisplay || trip.origin)
   const destinationLabel = emailDisplayValue(trip.destinationDisplay || trip.destination)
+  const routeLine =
+    trip.route && trip.route !== '— → —'
+      ? trip.route
+      : `${originLabel} → ${destinationLabel}`
 
-  const routeBlock = stackedRoute
-    ? `<div style="font-size:16px;font-weight:700;line-height:1.4;color:${BRAND.text};">${escapeHtml(originLabel)}</div>
-    <div style="margin:6px 0;font-size:13px;color:${BRAND.muted};">to</div>
-    <div style="font-size:16px;font-weight:700;line-height:1.4;color:${BRAND.text};">${escapeHtml(destinationLabel)}</div>`
-    : `<div style="font-size:16px;font-weight:700;line-height:1.4;color:${BRAND.text};white-space:nowrap;">${escapeHtml(trip.route)}</div>`
+  const routeBlock = `<div style="text-align:center;margin-bottom:${compact ? '10' : '14'}px;">
+    <div style="font-size:11px;font-weight:700;letter-spacing:0.06em;text-transform:uppercase;color:${BRAND.muted};margin-bottom:6px;">Route</div>
+    <div style="font-size:16px;font-weight:700;line-height:1.4;color:${BRAND.text};">${escapeHtml(routeLine)}</div>
+  </div>`
 
-  const trailerBlock =
-    trip.trailers.length > 0
-      ? `<div style="margin-top:${compact ? '10' : '14'}px;">
-          <div style="font-size:11px;font-weight:700;letter-spacing:0.06em;text-transform:uppercase;color:${BRAND.muted};margin-bottom:8px;">Trailers</div>
-          ${trip.trailers
-            .map((tr) => {
-              const header = `Trailer ${tr.order}${tr.number !== '—' ? ` · #${tr.number}` : ''}${tr.size !== '—' ? ` · ${tr.size}` : ''}`
-              const badges = [emailDisplayValue(tr.loadType), emailDisplayValue(tr.status)]
-                .filter((b) => b && b !== '—')
-                .join(' · ')
-              const details = [
-                tr.seal !== '—' ? `Seal ${tr.seal}` : '',
-                tr.weight !== '—' ? tr.weight : '',
-                tr.destination !== '—' ? `Dest ${emailDisplayValue(tr.destination)}` : '',
-              ]
-                .filter(Boolean)
-                .join(' · ')
-              return `<div style="padding:10px 12px;margin-bottom:8px;border-radius:10px;background:${BRAND.subtle};border:1px solid ${BRAND.border};">
-                <div style="font-size:14px;font-weight:600;color:${BRAND.text};">${escapeHtml(header)}</div>
-                ${badges ? `<div style="margin-top:4px;font-size:12px;color:${BRAND.muted};">${escapeHtml(badges)}</div>` : ''}
-                ${details ? `<div style="margin-top:4px;font-size:13px;color:${BRAND.text};">${escapeHtml(details)}</div>` : ''}
-              </div>`
-            })
-            .join('')}
-        </div>`
-      : `<div style="margin-top:10px;font-size:13px;color:${BRAND.muted};">No trailer details on file.</div>`
-
-  const dollyBlock =
-    trip.dollies.length > 0
-      ? `<div style="margin-top:${compact ? '10' : '14'}px;">
-          <div style="font-size:11px;font-weight:700;letter-spacing:0.06em;text-transform:uppercase;color:${BRAND.muted};margin-bottom:6px;">Dollies</div>
-          <div style="font-size:14px;color:${BRAND.text};font-weight:600;">${escapeHtml(trip.dollySummary)}</div>
-        </div>`
-      : ''
+  const trailerBlock = buildTrailerDollyEmailBlock(trip, compact)
 
   const instructions =
     trip.dispatchInstructions && !compact
@@ -220,13 +189,89 @@ export function tripDetailCardHtml(trip, opts = {}) {
       : ''
 
   return `<div style="margin-top:${compact ? '12' : '16'}px;padding:${compact ? '14' : '16'}px;border-radius:12px;border:1px solid ${BRAND.border};background:${BRAND.card};">
-    <div style="font-size:11px;font-weight:700;letter-spacing:0.06em;text-transform:uppercase;color:${BRAND.muted};margin-bottom:6px;">Route</div>
     ${routeBlock}
     ${metaRows.length ? keyValueBlock({ rows: metaRows }) : ''}
-    ${dollyBlock}
     ${trailerBlock}
     ${instructions}
   </div>`
+}
+
+/** @param {import('./email-trip-details.mjs').EmailTripTrailer} tr */
+function trailerIsLoaded(tr) {
+  const load = String(tr.loadType ?? '').trim()
+  if (load && !/^empty$/i.test(load)) return true
+  const w = String(tr.weight ?? '').trim()
+  if (!w || w === '—') return false
+  return !/^0(\s*lbs?)?$/i.test(w)
+}
+
+/** @param {import('./email-trip-details.mjs').EmailTripTrailer} tr */
+function renderTrailerEmailBlock(tr) {
+  const header = `Trailer ${tr.order}${tr.number !== '—' ? ` · #${tr.number}` : ''}`
+  const statusBits = [emailDisplayValue(tr.loadType), emailDisplayValue(tr.status)]
+    .filter((b) => b && b !== '—')
+    .join(' · ')
+  const detailLines = []
+  if (tr.seal !== '—') {
+    detailLines.push(
+      `<div style="margin-top:4px;padding-left:14px;font-size:13px;color:${BRAND.text};">Seal ${escapeHtml(tr.seal)}</div>`,
+    )
+  }
+  if (trailerIsLoaded(tr) && tr.weight !== '—') {
+    detailLines.push(
+      `<div style="margin-top:2px;padding-left:14px;font-size:13px;color:${BRAND.muted};">${escapeHtml(tr.weight)}</div>`,
+    )
+  } else if (statusBits) {
+    detailLines.push(
+      `<div style="margin-top:4px;font-size:12px;color:${BRAND.muted};">${escapeHtml(statusBits)}</div>`,
+    )
+  }
+  return `<div style="padding:10px 12px;margin-bottom:8px;border-radius:10px;background:${BRAND.subtle};border:1px solid ${BRAND.border};">
+    <div style="font-size:14px;font-weight:600;color:${BRAND.text};">${escapeHtml(header)}</div>
+    ${detailLines.join('')}
+  </div>`
+}
+
+/** @param {import('./email-trip-details.mjs').EmailTripContext} trip */
+function renderDollyEmailLines(trip) {
+  if (!trip.dollies?.length) return ''
+  const numberRows = trip.dollies.filter((d) => /dolly\s*number/i.test(d.label))
+  const rows = numberRows.length ? numberRows : trip.dollies
+  return rows
+    .map(
+      (d) =>
+        `<div style="padding:8px 12px;margin:8px 0;font-size:14px;font-weight:600;color:${BRAND.text};">${escapeHtml(emailDisplayValue(d.label))}: ${escapeHtml(d.value)}</div>`,
+    )
+    .join('')
+}
+
+/**
+ * @param {import('./email-trip-details.mjs').EmailTripContext} trip
+ * @param {boolean} compact
+ */
+function buildTrailerDollyEmailBlock(trip, compact) {
+  if (!trip.trailers.length && !trip.dollies.length) {
+    return `<div style="margin-top:10px;font-size:13px;color:${BRAND.muted};">No trailer details on file.</div>`
+  }
+
+  const marginTop = compact ? '10' : '14'
+  const parts = [
+    `<div style="margin-top:${marginTop}px;">
+      <div style="font-size:11px;font-weight:700;letter-spacing:0.06em;text-transform:uppercase;color:${BRAND.muted};margin-bottom:8px;">Trailers</div>`,
+  ]
+
+  const trailers = [...trip.trailers].sort((a, b) => Number(a.order) - Number(b.order))
+  trailers.forEach((tr, index) => {
+    parts.push(renderTrailerEmailBlock(tr))
+    const isFirstTrailer = index === 0
+    const hasSecondTrailer = trailers.length > 1
+    if (isFirstTrailer && trip.dollies.length && (hasSecondTrailer || trailers.length === 1)) {
+      parts.push(renderDollyEmailLines(trip))
+    }
+  })
+
+  parts.push('</div>')
+  return parts.join('')
 }
 
 /** @param {import('./email-trip-details.mjs').EmailTripContext} trip */
@@ -248,12 +293,16 @@ export function tripDetailPlainText(trip) {
     const parts = [
       `Trailer ${tr.order}`,
       tr.number !== '—' ? `#${tr.number}` : '',
-      tr.size !== '—' ? tr.size : '',
       tr.loadType !== '—' ? tr.loadType : '',
       tr.seal !== '—' ? `Seal ${tr.seal}` : '',
-      tr.weight !== '—' ? tr.weight : '',
-    ].filter(Boolean)
-    lines.push(parts.join(' · '))
+    ]
+    if (trailerIsLoaded(tr) && tr.weight !== '—') parts.push(tr.weight)
+    lines.push(parts.filter(Boolean).join(' · '))
+  }
+  if (trip.dollies.length) {
+    for (const d of trip.dollies) {
+      lines.push(`${d.label}: ${d.value}`)
+    }
   }
   if (trip.dispatchInstructions) {
     lines.push('', 'Dispatch instructions:', trip.dispatchInstructions)
@@ -434,9 +483,7 @@ import { dailyTripTableRow } from './email-trip-details.mjs'
 /** @param {{ shiftLabel: string, tripCount: number, totalMiles: number, trips: import('./email-trip-details.mjs').EmailTripContext[], tableRows?: string[][] }} summary */
 export function dailyShiftEmail(summary) {
   const tripCards = summary.trips.length
-    ? summary.trips
-        .map((t) => tripDetailCardHtml(t, { compact: true, stackedRoute: true }))
-        .join('')
+    ? summary.trips.map((t) => tripDetailCardHtml(t, { compact: true })).join('')
     : ''
 
   const bodyHtml = `
@@ -482,13 +529,17 @@ export function dailyShiftEmail(summary) {
  *   tractorsUsed?: string[],
  *   tripCount?: number,
  *   totalMiles?: number,
- *   tableRows?: string[][],
+ *   trips?: import('./email-trip-details.mjs').EmailTripContext[],
  * }} opts */
 export function weeklySummaryEmail(opts) {
   const tractorsLabel =
     opts.tractorsUsed && opts.tractorsUsed.length
       ? opts.tractorsUsed.map((t) => `#${t}`).join(', ')
       : '—'
+
+  const tripCards = opts.trips?.length
+    ? opts.trips.map((t) => tripDetailCardHtml(t, { compact: true })).join('')
+    : ''
 
   const bodyHtml = `
     <p style="margin:0 0 8px;font-size:16px;line-height:1.55;color:${BRAND.text};">
@@ -507,13 +558,10 @@ export function weeklySummaryEmail(opts) {
       ],
     })}
     ${
-      opts.tableRows && opts.tableRows.length
+      tripCards
         ? `<div style="margin-top:20px;">
             <div style="font-size:13px;font-weight:700;color:${BRAND.text};margin-bottom:10px;">Work week trips</div>
-            ${dataTable({
-              headers: ['When', 'Leg', 'Route', 'Trailers', 'Dollies', 'Miles'],
-              rows: opts.tableRows,
-            })}
+            ${tripCards}
           </div>`
         : `<p style="margin:16px 0 0;font-size:14px;color:${BRAND.muted};">No completed trips recorded for this work week.</p>`
     }
@@ -522,15 +570,9 @@ export function weeklySummaryEmail(opts) {
       These match the PDF exports from TripBuddy History.
     </p>`
 
-  const textTable =
-    opts.tableRows && opts.tableRows.length
-      ? opts.tableRows
-          .map(
-            (row, i) =>
-              `Trip ${i + 1}: ${row[0]} | Leg ${row[1]} | ${row[2]} | ${row[3]} | Dollies ${row[4]} | ${row[5]}`,
-          )
-          .join('\n')
-      : 'No completed trips recorded for this work week.'
+  const textTrips = opts.trips?.length
+    ? opts.trips.map((t, i) => `Trip ${i + 1}\n${tripDetailPlainText(t)}`).join('\n\n')
+    : 'No completed trips recorded for this work week.'
 
   return {
     subject: toEmailTitleCase(
@@ -551,7 +593,7 @@ export function weeklySummaryEmail(opts) {
       `Work week: ${opts.workWeekLabel}`,
       `Pay week: ${opts.payWeekLabel}`,
       '',
-      textTable,
+      textTrips,
     ].join('\n'),
   }
 }

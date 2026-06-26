@@ -34,7 +34,7 @@ import {
   resolveDailyShiftSummaryDayKey,
   DAILY_TRIP_IDLE_MINS,
 } from './email-daily-shift-logic.mjs'
-import { buildWeekMileagePdfBuffer } from './email-week-pdf.mjs'
+import { getHistoryWeekTotalsPdfBuffer } from '../src/utils/historyWeekTotalsPdf.js'
 
 /**
  * @param {ReturnType<import('./user-profile-pg.mjs').getSmtpPrefsForAccount> extends Promise<infer T> ? T : never} prefs
@@ -252,8 +252,8 @@ export async function sendWeeklySummaryEmail(accountKey, referenceMs) {
     })
 
     const [workPdf, payPdf] = await Promise.all([
-      Promise.resolve(buildWeekMileagePdfBuffer(workOpts)),
-      Promise.resolve(buildWeekMileagePdfBuffer(payOpts)),
+      getHistoryWeekTotalsPdfBuffer(workOpts),
+      getHistoryWeekTotalsPdfBuffer(payOpts),
     ])
 
     const driverId = await getLinehaulDriverId()
@@ -266,7 +266,7 @@ export async function sendWeeklySummaryEmail(accountKey, referenceMs) {
       tractorsUsed: weekTrips.tractorsUsed,
       tripCount: weekTrips.tripCount,
       totalMiles: weekTrips.totalMiles,
-      tableRows: weekTrips.tableRows,
+      trips: weekTrips.trips,
     })
 
     await sendEmailForAccount(accountKey, {
