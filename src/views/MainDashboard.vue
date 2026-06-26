@@ -1788,7 +1788,7 @@ watch(tripPhase, (newPhase, oldPhase) => {
   tripPhaseVoiceTimer = setTimeout(() => {
     tripPhaseVoiceTimer = null
     syncTripPhaseVoiceStable(newPhase)
-    syncTripPhaseInAppStable(newPhase)
+    syncTripPhaseInAppStable(newPhase, tripDetailsBodyForSlide.value)
   }, 850)
 
   if (newPhase === 'none' && oldPhase !== 'none') {

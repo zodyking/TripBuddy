@@ -17,6 +17,33 @@ function legSeqKey(body) {
   return /^\d+$/.test(t) ? t : ''
 }
 
+/** @param {unknown} body */
+function tripBodyForNotifyExtra(body) {
+  if (body == null || typeof body !== 'object' || Array.isArray(body)) return undefined
+  const o = /** @type {Record<string, unknown>} */ (body)
+  /** @type {Record<string, unknown>} */
+  const slim = {
+    dailyTripLegSequence: o.dailyTripLegSequence,
+    tripStatus: o.tripStatus,
+    currentLocationNumber: o.currentLocationNumber,
+    currentLocationName: o.currentLocationName,
+    tripDestNumber: o.tripDestNumber,
+    tripDest: o.tripDest,
+    tractorNumber: o.tractorNumber,
+    dollyNumber1: o.dollyNumber1,
+    dollyNumber2: o.dollyNumber2,
+    dollyEquipmentSequence1: o.dollyEquipmentSequence1,
+    dollyEquipmentSequence2: o.dollyEquipmentSequence2,
+    trailers: o.trailers,
+  }
+  const entries = Object.entries(slim).filter(([, v]) => {
+    if (v == null || v === '') return false
+    if (Array.isArray(v) && !v.length) return false
+    return true
+  })
+  return entries.length ? Object.fromEntries(entries) : undefined
+}
+
 let lastTripFingerprint = ''
 let lastPrePlanFingerprint = ''
 let lastStablePhase = ''
@@ -100,8 +127,9 @@ export function seedTripPhaseInAppTracking(phase) {
 /**
  * Call after debouncing tripPhase (~850ms stable).
  * @param {'none' | 'assigned' | 'dispatched'} phase
+ * @param {unknown} [tripBody] Trip details shown on Home (stable state or live body)
  */
-export function syncTripPhaseInAppStable(phase) {
+export function syncTripPhaseInAppStable(phase, tripBody) {
   if (typeof window === 'undefined') return
   const p = phase || 'none'
   if (p === lastStablePhase) return
@@ -123,11 +151,29 @@ export function syncTripPhaseInAppStable(phase) {
   }
   if (!message) return
 
+  const leg = tripBody ? legSeqKey(tripBody) : ''
+  let origin = ''
+  let destination = ''
+  if (tripBody && hasTripOriginAndDestination(tripBody)) {
+    const od = extractOriginDest(tripBody)
+    origin = od.origin
+    destination = od.destination
+  }
+  const tripBodyExtra = tripBodyForNotifyExtra(tripBody)
+
   void publishTripNotification({
     type: 'trip',
     message,
     source: 'linehaul',
-    extra: { event, fromPhase: prev, toPhase: p },
+    extra: {
+      event,
+      fromPhase: prev,
+      toPhase: p,
+      leg,
+      origin,
+      destination,
+      tripBody: tripBodyExtra,
+    },
   })
 }
 

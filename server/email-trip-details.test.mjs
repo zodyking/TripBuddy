@@ -6,6 +6,8 @@ import {
   emailTerminalId,
   formatTrailersSummary,
   weeklyTripTableRow,
+  pickTripBodyFromAssignment,
+  resolveEmailTripContextFromAssignment,
 } from './email-trip-details.mjs'
 import { tripDetailPlainText, tripDetailCardHtml, weeklySummaryEmail, formatEmailOutcome, dailyShiftEmail } from './email-templates.mjs'
 import { buildDailyShiftSummary, buildWeeklyTripContexts } from './email-ledger-summary.mjs'
@@ -231,4 +233,63 @@ test('formatTrailersSummary is concise for table cells', () => {
   assert.match(summary, /8123456/)
   assert.match(summary, /SEAL123/)
   assert.equal(weeklyTripTableRow(ctx).length, 6)
+})
+
+test('pickTripBodyFromAssignment prefers cached snapshot when active snapshot is empty', () => {
+  const assignment = {
+    persistedLinehaulTripSnapshot: null,
+    persistedCachedTripSnapshot: sampleBody,
+  }
+  const body = pickTripBodyFromAssignment(assignment, 'active')
+  assert.equal(body, sampleBody)
+})
+
+test('resolveEmailTripContextFromAssignment falls back to ledger for status_complete', () => {
+  const assignment = {
+    persistedLinehaulTripSnapshot: null,
+    persistedCachedTripSnapshot: null,
+    tripHistoryLedger: [
+      {
+        dailyTripLegSequence: '3',
+        completedAt: Date.parse('2026-06-22T18:30:00Z'),
+        dispatchHeader: {
+          origin: '1234 · Memphis Hub',
+          destination: '5678 · Nashville Terminal',
+          historyOutcome: 'delivered',
+        },
+        tripDetails: sampleBody,
+      },
+    ],
+  }
+  const ctx = resolveEmailTripContextFromAssignment(
+    assignment,
+    { event: 'status_complete', fromPhase: 'dispatched', toPhase: 'none' },
+    'status_complete',
+  )
+  assert.equal(ctx.origin, '1234')
+  assert.equal(ctx.destination, '5678')
+  assert.equal(ctx.trailers.length, 2)
+  assert.equal(ctx.outcome, 'delivered')
+})
+
+test('resolveEmailTripContextFromAssignment uses client tripBody extra', () => {
+  const assignment = {
+    persistedLinehaulTripSnapshot: null,
+    persistedCachedTripSnapshot: null,
+    tripHistoryLedger: [],
+  }
+  const ctx = resolveEmailTripContextFromAssignment(
+    assignment,
+    {
+      event: 'status_complete',
+      leg: '3',
+      origin: '1234 · Memphis Hub',
+      destination: '5678 · Nashville Terminal',
+      tripBody: sampleBody,
+    },
+    'status_complete',
+  )
+  assert.equal(ctx.route, '1234 → 5678')
+  assert.equal(ctx.trailers.length, 2)
+  assert.match(ctx.dollySummary, /D100/)
 })

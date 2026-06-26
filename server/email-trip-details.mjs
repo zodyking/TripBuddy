@@ -313,43 +313,154 @@ export function buildEmailTripContextFromLedgerEntry(entry) {
   return ctx
 }
 
-/**
- * @param {object | null | undefined} assignment
- * @param {'active' | 'preplan'} kind
- */
-function snapshotForKind(assignment, kind) {
-  if (!assignment || typeof assignment !== 'object') return null
-  const a = /** @type {Record<string, unknown>} */ (assignment)
-  if (kind === 'preplan') return a.persistedPrePlanTripSnapshot ?? null
-  return a.persistedLinehaulTripSnapshot ?? null
+/** @param {EmailTripContext} ctx */
+function tripContextIsSparse(ctx) {
+  const noRoute =
+    (!ctx.origin || ctx.origin === '—') && (!ctx.destination || ctx.destination === '—')
+  const noTrailers = !ctx.trailers?.length
+  return noRoute && noTrailers
 }
 
 /**
- * @param {string} accountKey
+ * @param {object | null | undefined} assignment
+ * @param {'active' | 'preplan'} kind
+ * @param {string} [preferredLeg]
+ * @returns {unknown}
+ */
+export function pickTripBodyFromAssignment(assignment, kind, preferredLeg = '') {
+  if (!assignment || typeof assignment !== 'object') return null
+  const a = /** @type {Record<string, unknown>} */ (assignment)
+  /** @type {unknown[]} */
+  const candidates = []
+  if (kind === 'preplan') {
+    if (a.persistedPrePlanTripSnapshot) candidates.push(a.persistedPrePlanTripSnapshot)
+  } else {
+    if (a.persistedLinehaulTripSnapshot) candidates.push(a.persistedLinehaulTripSnapshot)
+    if (a.persistedCachedTripSnapshot) candidates.push(a.persistedCachedTripSnapshot)
+  }
+
+  const wantLeg = String(preferredLeg ?? '').trim()
+  if (wantLeg && /^\d+$/.test(wantLeg)) {
+    for (const candidate of candidates) {
+      if (legFromBody(candidate) === wantLeg) return candidate
+    }
+  }
+
+  for (const candidate of candidates) {
+    if (!tripContextIsSparse(buildEmailTripContextFromBody(candidate))) return candidate
+  }
+  return candidates[0] ?? null
+}
+
+/**
+ * @param {object | null | undefined} assignment
+ * @param {string} [leg]
+ */
+function latestLedgerEntryForLeg(assignment, leg = '') {
+  const ledger = Array.isArray(assignment?.tripHistoryLedger)
+    ? assignment.tripHistoryLedger
+    : []
+  const wantLeg = String(leg ?? '').trim()
+  if (wantLeg && /^\d+$/.test(wantLeg)) {
+    /** @type {unknown} */
+    let best = null
+    let bestTs = 0
+    for (const entry of ledger) {
+      if (!entry || typeof entry !== 'object') continue
+      const seq = String(/** @type {Record<string, unknown>} */ (entry).dailyTripLegSequence ?? '').trim()
+      if (seq !== wantLeg) continue
+      const ts = Number(
+        /** @type {Record<string, unknown>} */ (entry).completedAt ??
+          /** @type {Record<string, unknown>} */ (entry).recordedAt ??
+          0,
+      )
+      if (Number.isFinite(ts) && ts >= bestTs) {
+        bestTs = ts
+        best = entry
+      }
+    }
+    if (best) return best
+  }
+
+  /** @type {unknown} */
+  let latest = null
+  let latestTs = 0
+  for (const entry of ledger) {
+    if (!entry || typeof entry !== 'object') continue
+    const ts = Number(
+      /** @type {Record<string, unknown>} */ (entry).completedAt ??
+        /** @type {Record<string, unknown>} */ (entry).recordedAt ??
+        0,
+    )
+    if (Number.isFinite(ts) && ts >= latestTs) {
+      latestTs = ts
+      latest = entry
+    }
+  }
+  return latest
+}
+
+/** @param {EmailTripContext} primary @param {EmailTripContext} fallback */
+function mergeEmailTripContext(primary, fallback) {
+  const merged = { ...fallback, ...primary }
+  if (!primary.leg || primary.leg === '—') merged.leg = fallback.leg
+  if (!primary.origin || primary.origin === '—') merged.origin = fallback.origin
+  if (!primary.destination || primary.destination === '—') {
+    merged.destination = fallback.destination
+  }
+  if (!primary.route || primary.route === '— → —') merged.route = fallback.route
+  if (!primary.trailers?.length) merged.trailers = fallback.trailers
+  if (!primary.dollies?.length) {
+    merged.dollies = fallback.dollies
+    merged.dollySummary = fallback.dollySummary
+  }
+  if (!primary.outcome) merged.outcome = fallback.outcome
+  if (!primary.outcomeReason) merged.outcomeReason = fallback.outcomeReason
+  if (!primary.miles) merged.miles = fallback.miles
+  if (!primary.completedAt) merged.completedAt = fallback.completedAt
+  if (!primary.dispatchInstructions) merged.dispatchInstructions = fallback.dispatchInstructions
+  if (!primary.tripStatus) merged.tripStatus = fallback.tripStatus
+  if (!primary.tractorNumber) merged.tractorNumber = fallback.tractorNumber
+  if (!primary.originDisplay || primary.originDisplay === '—') {
+    merged.originDisplay = fallback.originDisplay
+  }
+  if (!primary.destinationDisplay || primary.destinationDisplay === '—') {
+    merged.destinationDisplay = fallback.destinationDisplay
+  }
+  return merged
+}
+
+/**
+ * @param {object | null | undefined} assignment
  * @param {object} extra Notification extra payload
  * @param {string} [eventKey]
- * @returns {Promise<EmailTripContext>}
+ * @returns {EmailTripContext}
  */
-export async function resolveEmailTripContextForNotification(accountKey, extra, eventKey = '') {
+export function resolveEmailTripContextFromAssignment(assignment, extra, eventKey = '') {
   const leg = String(extra.leg ?? '').trim()
   const origin = String(extra.origin ?? '').trim()
   const destination = String(extra.destination ?? '').trim()
+  const tripBodyExtra =
+    extra.tripBody && typeof extra.tripBody === 'object' && !Array.isArray(extra.tripBody)
+      ? extra.tripBody
+      : null
 
   const kind = eventKey === 'preplan_assigned' ? 'preplan' : 'active'
-  const assignment = await readAssignmentForAccount(accountKey)
-  const body = snapshotForKind(assignment, kind)
+  const body = tripBodyExtra || pickTripBodyFromAssignment(assignment, kind, leg) || null
 
-  const ctx = body
-    ? buildEmailTripContextFromBody(body, {
-        leg: leg || undefined,
-        origin: origin || undefined,
-        destination: destination || undefined,
-      })
-    : buildEmailTripContextFromBody(null, {
-        leg: leg || '—',
-        origin: origin || '—',
-        destination: destination || '—',
-      })
+  let ctx = buildEmailTripContextFromBody(body, {
+    leg: leg || undefined,
+    origin: origin || undefined,
+    destination: destination || undefined,
+  })
+
+  if (tripContextIsSparse(ctx)) {
+    const wantLeg = leg || legFromBody(body) || (ctx.leg !== '—' ? ctx.leg : '')
+    const ledgerEntry = latestLedgerEntryForLeg(assignment, wantLeg)
+    if (ledgerEntry) {
+      ctx = mergeEmailTripContext(ctx, buildEmailTripContextFromLedgerEntry(ledgerEntry))
+    }
+  }
 
   if (!ctx.leg || ctx.leg === '—') {
     const fromSnap = legFromBody(body)
@@ -361,11 +472,25 @@ export async function resolveEmailTripContextForNotification(accountKey, extra, 
 
 /**
  * @param {string} accountKey
+ * @param {object} extra Notification extra payload
+ * @param {string} [eventKey]
+ * @returns {Promise<EmailTripContext>}
+ */
+export async function resolveEmailTripContextForNotification(accountKey, extra, eventKey = '') {
+  const assignment = await readAssignmentForAccount(accountKey)
+  return resolveEmailTripContextFromAssignment(assignment, extra, eventKey)
+}
+
+/**
+ * @param {string} accountKey
  * @returns {Promise<EmailTripContext | null>}
  */
 export async function resolveActiveEmailTripContext(accountKey) {
   const assignment = await readAssignmentForAccount(accountKey)
-  const body = snapshotForKind(assignment, 'active')
-  if (!body) return null
+  const body = pickTripBodyFromAssignment(assignment, 'active')
+  if (!body) {
+    const entry = latestLedgerEntryForLeg(assignment)
+    return entry ? buildEmailTripContextFromLedgerEntry(entry) : null
+  }
   return buildEmailTripContextFromBody(body)
 }
