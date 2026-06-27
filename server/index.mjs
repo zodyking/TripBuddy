@@ -457,10 +457,15 @@ app.post('/api/auth/login', async (req, reply) => {
   }
 
   if (body.deviceConsent !== true) {
-    return reply.code(400).send({
-      ok: false,
-      error: 'Device information consent is required to sign in.',
-    })
+    const dev = body.device
+    const hasDevice =
+      dev && typeof dev === 'object' && String(/** @type {any} */ (dev).deviceId ?? '').trim()
+    if (!hasDevice) {
+      return reply.code(400).send({
+        ok: false,
+        error: 'Device information consent is required to sign in.',
+      })
+    }
   }
 
   let devicePayload

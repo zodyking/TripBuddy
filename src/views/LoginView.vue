@@ -33,7 +33,6 @@ const username = ref('')
 const password = ref('')
 const submitting = ref(false)
 const errorMsg = ref('')
-const ackDeviceDataConsent = ref(false)
 
 /** @type {import('vue').Ref<Array<{ sessionId: string, deviceId: string | null, name: string, os: string, formFactor: string, browser: string }>>} */
 const sessionLimitDevices = ref([])
@@ -278,10 +277,6 @@ async function onSubmit() {
     errorMsg.value = 'Enter username and password.'
     return
   }
-  if (!ackDeviceDataConsent.value) {
-    errorMsg.value = 'Consent to device information collection is required to sign in.'
-    return
-  }
   submitting.value = true
   try {
     await finishLogin()
@@ -321,6 +316,7 @@ async function onSubmit() {
             </h2>
             <p id="login-access-desc" class="login-access-lead">
               IP and approximate location may be recorded. Continue requests browser location.
+              Signing in also records device type, OS, and browser for session management.
             </p>
             <ul class="login-access-list" role="list">
               <li class="login-access-item">
@@ -483,25 +479,17 @@ async function onSubmit() {
             />
           </label>
 
-          <label class="login-access-label login-device-consent tap">
-            <input
-              v-model="ackDeviceDataConsent"
-              type="checkbox"
-              class="login-access-cb"
-              :disabled="submitting || !accessAcknowledged"
-            />
-            <span>
-              I consent to collection of device information (device name, OS, mobile/desktop, and
-              browser) for session management and security.
-            </span>
-          </label>
+          <p class="login-device-note">
+            By tapping Continue, you agree we may collect device information (name, OS,
+            mobile/desktop, browser) for session management and security.
+          </p>
 
           <p v-if="errorMsg" class="login-err" role="alert">{{ errorMsg }}</p>
 
           <button
             type="submit"
             class="login-submit tap"
-            :disabled="submitting || !accessAcknowledged || !ackDeviceDataConsent"
+            :disabled="submitting || !accessAcknowledged"
           >
             <span v-if="submitting" class="login-submit-inner">
               <span class="login-spinner" aria-hidden="true" />
@@ -679,10 +667,12 @@ async function onSubmit() {
   margin: 0;
 }
 
-.login-device-consent {
+.login-device-note {
+  margin: 0;
   text-align: left;
-  color: var(--color-text-secondary, #a8a8b8);
   font-size: var(--text-xs, 0.6875rem);
+  line-height: 1.45;
+  color: var(--color-text-tertiary, #6e6e7e);
 }
 
 .login-note {
