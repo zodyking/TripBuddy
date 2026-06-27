@@ -41,6 +41,9 @@ RUN npm install
 # Back to app root
 WORKDIR /app
 
+# Shared `/app/src` modules import npm packages (jspdf, etc.) installed under `server/`.
+RUN ln -s /app/server/node_modules /app/node_modules
+
 # Copy built UI from stage 1
 COPY --from=ui /app/dist ./dist
 
