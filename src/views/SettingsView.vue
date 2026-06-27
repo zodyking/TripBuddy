@@ -43,6 +43,12 @@ import {
 } from '../utils/directoryLocationTypes.js'
 import { parseCsvRecords } from '../utils/csvParse.js'
 import {
+  exportTripHistoryToCsv,
+  parseTripHistoryFromCsv,
+  mergeTripHistoryLedgers,
+  tripHistoryCsvPreviewRows,
+} from '../utils/tripHistoryCsv.js'
+import {
   refreshLinehaulApis,
   computeLinehaulReferenceId,
   linehaulDriverIdFromCredMeta,
@@ -1843,6 +1849,130 @@ function clearCsvImport() {
   csvImportError.value = ''
 }
 
+// Trip history CSV export / import
+// ---------------------------------------------------------------------------
+
+const tripHistoryExportBusy = ref(false)
+const tripHistoryExportMsg = ref('')
+const tripHistoryExportError = ref('')
+const tripHistoryImportFile = ref(null)
+const tripHistoryImportBusy = ref(false)
+const tripHistoryImportMsg = ref('')
+const tripHistoryImportError = ref('')
+/** @type {import('vue').Ref<'merge' | 'replace'>} */
+const tripHistoryImportMode = ref('merge')
+/** @type {import('vue').Ref<{ total: number, importable: number, errors: string[], preview: Array<{ id: string, leg: string, origin: string, destination: string }> } | null>} */
+const tripHistoryImportPreview = ref(null)
+
+async function exportTripHistoryCsv() {
+  if (tripHistoryExportBusy.value) return
+  tripHistoryExportBusy.value = true
+  tripHistoryExportMsg.value = ''
+  tripHistoryExportError.value = ''
+  try {
+    const a = await getAssignment()
+    const ledger = Array.isArray(a?.tripHistoryLedger) ? a.tripHistoryLedger : []
+    const csv = exportTripHistoryToCsv(ledger)
+    const stamp = new Date().toISOString().slice(0, 10)
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' })
+    const url = URL.createObjectURL(blob)
+    const el = document.createElement('a')
+    el.href = url
+    el.download = `tripbuddy-trip-history-${stamp}.csv`
+    document.body.appendChild(el)
+    el.click()
+    el.remove()
+    URL.revokeObjectURL(url)
+    tripHistoryExportMsg.value = `Exported ${ledger.length} trip${ledger.length === 1 ? '' : 's'} to CSV.`
+  } catch (e) {
+    tripHistoryExportError.value = e instanceof Error ? e.message : String(e)
+  } finally {
+    tripHistoryExportBusy.value = false
+  }
+}
+
+function onTripHistoryCsvSelected(event) {
+  tripHistoryImportMsg.value = ''
+  tripHistoryImportError.value = ''
+  tripHistoryImportPreview.value = null
+  const file = event.target?.files?.[0]
+  if (!file) {
+    tripHistoryImportFile.value = null
+    return
+  }
+  tripHistoryImportFile.value = file
+  const reader = new FileReader()
+  reader.onload = (e) => {
+    try {
+      const text = e.target?.result
+      if (typeof text !== 'string') throw new Error('Failed to read file')
+      const { entries, errors, totalRows } = parseTripHistoryFromCsv(text)
+      tripHistoryImportPreview.value = {
+        total: totalRows,
+        importable: entries.length,
+        errors: errors.slice(0, 8),
+        preview: tripHistoryCsvPreviewRows(entries),
+      }
+      if (entries.length === 0 && errors.length > 0) {
+        tripHistoryImportError.value = errors[0]
+      }
+    } catch (err) {
+      tripHistoryImportError.value = err instanceof Error ? err.message : String(err)
+      tripHistoryImportPreview.value = null
+    }
+  }
+  reader.onerror = () => {
+    tripHistoryImportError.value = 'Failed to read CSV file'
+    tripHistoryImportPreview.value = null
+  }
+  reader.readAsText(file)
+}
+
+async function importTripHistoryCsv() {
+  if (!tripHistoryImportFile.value || tripHistoryImportBusy.value) return
+  tripHistoryImportBusy.value = true
+  tripHistoryImportMsg.value = ''
+  tripHistoryImportError.value = ''
+  try {
+    const text = await tripHistoryImportFile.value.text()
+    const { entries, errors } = parseTripHistoryFromCsv(text)
+    if (entries.length === 0) {
+      tripHistoryImportError.value =
+        errors[0] || 'No valid trip rows found (each row needs an id or leg number)'
+      return
+    }
+    if (errors.length > 0 && tripHistoryImportMode.value === 'replace') {
+      tripHistoryImportError.value = `Fix ${errors.length} row error(s) before replace import`
+      return
+    }
+    const a = await getAssignment()
+    const existing = Array.isArray(a?.tripHistoryLedger) ? a.tripHistoryLedger : []
+    const nextLedger =
+      tripHistoryImportMode.value === 'replace'
+        ? entries
+        : mergeTripHistoryLedgers(existing, entries)
+    await putAssignment({ tripHistoryLedger: nextLedger })
+    const skippedNote = errors.length > 0 ? ` (${errors.length} row(s) skipped)` : ''
+    tripHistoryImportMsg.value =
+      tripHistoryImportMode.value === 'replace'
+        ? `Replaced trip history with ${entries.length} trip${entries.length === 1 ? '' : 's'}.${skippedNote}`
+        : `Imported ${entries.length} trip${entries.length === 1 ? '' : 's'} (merged by id). History now has ${nextLedger.length} trip${nextLedger.length === 1 ? '' : 's'}.${skippedNote}`
+    tripHistoryImportFile.value = null
+    tripHistoryImportPreview.value = null
+  } catch (e) {
+    tripHistoryImportError.value = e instanceof Error ? e.message : String(e)
+  } finally {
+    tripHistoryImportBusy.value = false
+  }
+}
+
+function clearTripHistoryCsvImport() {
+  tripHistoryImportFile.value = null
+  tripHistoryImportPreview.value = null
+  tripHistoryImportMsg.value = ''
+  tripHistoryImportError.value = ''
+}
+
 function applySettingsRouteFragment() {
   const raw = typeof route.hash === 'string' ? route.hash.replace(/^#/, '').trim() : ''
   if (raw !== 'tomtom' && raw !== 'here' && raw !== 'api-quota') return
@@ -2135,6 +2265,7 @@ onUnmounted(() => {
             apply.
           </p>
         </div>
+
         <label class="lbl">Phone number</label>
         <input
           :value="phoneDisplay"
@@ -2234,6 +2365,97 @@ onUnmounted(() => {
             <button type="button" class="btn tap" @click="clearCredentials">Clear</button>
           </div>
           <ApiStatusBadge />
+        </div>
+      </SettingsSection>
+
+      <SettingsSection title="Trip history backup (CSV)">
+        <p class="cred-hint">
+          Export your full trip history ledger for backup or editing. Each row includes every stored
+          field — timestamps, outcomes, audit buckets, and complete
+          <code>dispatchHeader</code> / <code>tripDetails</code> JSON (trailers, dollies, mileage,
+          tractor, seals, etc.). Re-import to merge by trip id or replace the entire history.
+        </p>
+        <p v-if="tripHistoryExportError" class="cred-msg cred-msg--error">{{ tripHistoryExportError }}</p>
+        <p v-else-if="tripHistoryExportMsg" class="cred-msg">{{ tripHistoryExportMsg }}</p>
+        <button
+          type="button"
+          class="btn secondary tap"
+          :disabled="tripHistoryExportBusy"
+          @click="exportTripHistoryCsv"
+        >
+          {{ tripHistoryExportBusy ? 'Preparing export…' : 'Export trip history CSV' }}
+        </button>
+
+        <div class="csv-import-area trip-history-csv-import">
+          <p class="cred-hint trip-history-import-heading">Import trip history</p>
+          <div class="trip-history-import-mode">
+            <label class="trip-history-import-mode-opt">
+              <input v-model="tripHistoryImportMode" type="radio" value="merge" />
+              Merge — update matching ids, keep other trips
+            </label>
+            <label class="trip-history-import-mode-opt">
+              <input v-model="tripHistoryImportMode" type="radio" value="replace" />
+              Replace — use only trips from this file
+            </label>
+          </div>
+          <label class="csv-file-label">
+            <input
+              type="file"
+              accept=".csv,text/csv"
+              class="csv-file-input"
+              @change="onTripHistoryCsvSelected"
+            />
+            <span class="btn secondary tap">{{
+              tripHistoryImportFile ? 'Change file' : 'Select trip history CSV'
+            }}</span>
+          </label>
+          <p v-if="tripHistoryImportFile" class="csv-file-name">{{ tripHistoryImportFile.name }}</p>
+          <div v-if="tripHistoryImportPreview" class="csv-preview">
+            <p class="csv-preview-summary">
+              <strong>{{ tripHistoryImportPreview.importable }}</strong> of
+              {{ tripHistoryImportPreview.total }} data rows will be imported
+              <span v-if="tripHistoryImportPreview.errors.length" class="csv-preview-skip-note">
+                ({{ tripHistoryImportPreview.errors.length }} row error(s) shown below)
+              </span>
+            </p>
+            <ul
+              v-if="tripHistoryImportPreview.errors.length"
+              class="trip-history-import-errors"
+            >
+              <li v-for="(err, i) in tripHistoryImportPreview.errors" :key="i">{{ err }}</li>
+            </ul>
+            <p v-if="tripHistoryImportPreview.preview.length" class="csv-preview-label">
+              Preview (first 5):
+            </p>
+            <ul v-if="tripHistoryImportPreview.preview.length" class="csv-preview-list">
+              <li v-for="item in tripHistoryImportPreview.preview" :key="item.id">
+                <strong>{{ item.leg || item.id }}</strong>
+                <span v-if="item.origin || item.destination">
+                  — {{ item.origin }} → {{ item.destination }}
+                </span>
+              </li>
+            </ul>
+          </div>
+          <p v-if="tripHistoryImportError" class="csv-import-error">{{ tripHistoryImportError }}</p>
+          <p v-if="tripHistoryImportMsg" class="csv-import-msg">{{ tripHistoryImportMsg }}</p>
+          <div v-if="tripHistoryImportFile && tripHistoryImportPreview" class="csv-import-actions">
+            <button
+              type="button"
+              class="btn tap"
+              :disabled="tripHistoryImportBusy || !tripHistoryImportPreview?.importable"
+              @click="importTripHistoryCsv"
+            >
+              {{ tripHistoryImportBusy ? 'Importing…' : 'Import trip history' }}
+            </button>
+            <button
+              type="button"
+              class="btn ghost tap"
+              :disabled="tripHistoryImportBusy"
+              @click="clearTripHistoryCsvImport"
+            >
+              Clear
+            </button>
+          </div>
         </div>
       </SettingsSection>
 
@@ -4937,6 +5159,40 @@ code {
   flex-wrap: wrap;
   gap: var(--space-2, 0.5rem);
   margin-top: var(--space-2, 0.5rem);
+}
+
+.trip-history-csv-import {
+  margin-top: var(--space-4, 1rem);
+  padding-top: var(--space-4, 1rem);
+  border-top: 1px solid var(--color-border, rgba(255, 255, 255, 0.08));
+}
+
+.trip-history-import-heading {
+  margin: 0 0 var(--space-2, 0.5rem);
+  font-weight: 600;
+}
+
+.trip-history-import-mode {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2, 0.5rem);
+  margin-bottom: var(--space-2, 0.5rem);
+}
+
+.trip-history-import-mode-opt {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2, 0.5rem);
+  font-size: var(--text-sm, 0.8125rem);
+  color: var(--color-text-secondary, #a8a8b8);
+  cursor: pointer;
+}
+
+.trip-history-import-errors {
+  margin: var(--space-2, 0.5rem) 0 0;
+  padding-left: 1.25rem;
+  font-size: var(--text-sm, 0.8125rem);
+  color: var(--color-danger, #f87171);
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
