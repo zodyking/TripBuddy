@@ -23,6 +23,12 @@ import {
   fetchFedexLinehaulTripStatus,
   fetchFedexLinehaulTrips,
   getSettingsAccessLog,
+  getSettingsDevices,
+  postSettingsDeviceRegister,
+  putSettingsDeviceName,
+  deleteSettingsDeviceSession,
+  deleteSettingsDevice,
+  postSettingsDeviceTouch,
   getBridgeTrafficExport,
   getSettingsGeoFence,
   putSettingsGeoFence,
@@ -41,7 +47,12 @@ import {
   countByDirectoryLocationType,
   normalizeLocationTypeForStorage,
 } from '../utils/directoryLocationTypes.js'
-import { parseCsvRecords } from '../utils/csvParse.js'
+import {
+  collectDeviceInfo,
+  formatFormFactorLabel,
+  getLocalDeviceName,
+  setLocalDeviceName,
+} from '../utils/deviceInfo.js'
 import {
   exportTripHistoryToCsv,
   parseTripHistoryFromCsv,
@@ -175,7 +186,7 @@ const SECRET_SAVED_MASK = '••••••••••••••••'
 const router = useRouter()
 const route = useRoute()
 
-/** @type {import('vue').Ref<'general' | 'automation' | 'audio' | 'email' | 'security' | 'directory' | 'traffic' | 'helpers' | 'whatsapp' | 'imessage'>} */
+/** @type {import('vue').Ref<'general' | 'automation' | 'audio' | 'email' | 'security' | 'devices' | 'directory' | 'traffic' | 'helpers' | 'whatsapp' | 'imessage'>} */
 const settingsTab = ref('general')
 const settingsTabsEl = ref(/** @type {HTMLElement | null} */ (null))
 const signOutBusy = ref(false)
@@ -335,6 +346,142 @@ async function loadSecurityAccessLog() {
     accessLogLoading.value = false
   }
 }
+
+/** @type {import('vue').Ref<Array<{
+ *   id: string,
+ *   name: string,
+ *   os: string,
+ *   formFactor: string,
+ *   browser: string,
+ *   registeredAt: string,
+ *   lastSeenAt: string,
+ *   sessionId: string | null,
+ *   lastIp: string | null,
+ *   isSignedIn?: boolean,
+ *   isCurrent?: boolean,
+ * }>>} */
+const registeredDevices = ref([])
+const devicesLoading = ref(false)
+const devicesError = ref('')
+const devicesMsg = ref('')
+const devicesBusyId = ref('')
+const deviceRegisterBusy = ref(false)
+const deviceNameDraft = ref(getLocalDeviceName())
+const devicesMaxSessions = ref(2)
+const currentDeviceInfo = ref(collectDeviceInfo())
+
+async function loadDevices() {
+  devicesLoading.value = true
+  devicesError.value = ''
+  try {
+    currentDeviceInfo.value = collectDeviceInfo()
+    deviceNameDraft.value = getLocalDeviceName() || currentDeviceInfo.value.name
+    const res = await getSettingsDevices()
+    registeredDevices.value = Array.isArray(res.devices) ? res.devices : []
+    devicesMaxSessions.value =
+      typeof res.maxSessions === 'number' ? res.maxSessions : 2
+    try {
+      await postSettingsDeviceTouch({ deviceId: currentDeviceInfo.value.deviceId })
+    } catch {
+      /* non-fatal */
+    }
+  } catch (e) {
+    devicesError.value = e instanceof Error ? e.message : String(e)
+    registeredDevices.value = []
+  } finally {
+    devicesLoading.value = false
+  }
+}
+
+async function registerCurrentDevice() {
+  if (deviceRegisterBusy.value) return
+  deviceRegisterBusy.value = true
+  devicesMsg.value = ''
+  devicesError.value = ''
+  try {
+    const info = collectDeviceInfo()
+    const name = deviceNameDraft.value.trim() || info.name
+    setLocalDeviceName(name)
+    await postSettingsDeviceRegister({ ...info, name })
+    devicesMsg.value = 'Device registered.'
+    await loadDevices()
+  } catch (e) {
+    devicesError.value = e instanceof Error ? e.message : String(e)
+  } finally {
+    deviceRegisterBusy.value = false
+  }
+}
+
+async function saveDeviceName(device) {
+  const id = String(device?.id ?? '').trim()
+  if (!id || devicesBusyId.value) return
+  const name = String(device?.name ?? '').trim()
+  if (!name) {
+    devicesError.value = 'Device name is required.'
+    return
+  }
+  devicesBusyId.value = id
+  devicesMsg.value = ''
+  devicesError.value = ''
+  try {
+    await putSettingsDeviceName(id, { name })
+    if (currentDeviceInfo.value.deviceId === id) {
+      setLocalDeviceName(name)
+      deviceNameDraft.value = name
+    }
+    devicesMsg.value = 'Device renamed.'
+    await loadDevices()
+  } catch (e) {
+    devicesError.value = e instanceof Error ? e.message : String(e)
+  } finally {
+    devicesBusyId.value = ''
+  }
+}
+
+async function signOutDevice(device) {
+  const id = String(device?.id ?? '').trim()
+  if (!id || devicesBusyId.value) return
+  devicesBusyId.value = id
+  devicesMsg.value = ''
+  devicesError.value = ''
+  try {
+    await deleteSettingsDeviceSession(id)
+    devicesMsg.value = 'Device signed out.'
+    await loadDevices()
+  } catch (e) {
+    devicesError.value = e instanceof Error ? e.message : String(e)
+  } finally {
+    devicesBusyId.value = ''
+  }
+}
+
+async function removeDevice(device) {
+  const id = String(device?.id ?? '').trim()
+  if (!id || devicesBusyId.value) return
+  devicesBusyId.value = id
+  devicesMsg.value = ''
+  devicesError.value = ''
+  try {
+    await deleteSettingsDevice(id)
+    devicesMsg.value = 'Device removed.'
+    await loadDevices()
+  } catch (e) {
+    devicesError.value = e instanceof Error ? e.message : String(e)
+  } finally {
+    devicesBusyId.value = ''
+  }
+}
+
+function formatDeviceWhen(iso) {
+  if (!iso) return '—'
+  const t = Date.parse(iso)
+  if (!Number.isFinite(t)) return '—'
+  return new Date(t).toLocaleString()
+}
+
+const signedInDeviceCount = computed(
+  () => registeredDevices.value.filter((d) => d.isSignedIn).length,
+)
 
 const geoFenceEnabled = ref(false)
 const geoFenceRedirectUrl = ref('')
@@ -2038,6 +2185,9 @@ watch(settingsTab, (tab) => {
     void loadGeoFenceSettings()
     nextTick(() => geoFenceEditorRef.value?.invalidateSize?.())
   }
+  if (tab === 'devices') {
+    void loadDevices()
+  }
   if (tab === 'directory') {
     void loadDirectoryStats()
   }
@@ -2112,6 +2262,16 @@ onUnmounted(() => {
         @click="settingsTab = 'security'"
       >
         Security
+      </button>
+      <button
+        type="button"
+        class="tab-btn tap"
+        role="tab"
+        :aria-selected="settingsTab === 'devices'"
+        :class="{ active: settingsTab === 'devices' }"
+        @click="settingsTab = 'devices'"
+      >
+        Devices
       </button>
       <button
         type="button"
@@ -3213,6 +3373,106 @@ onUnmounted(() => {
 
     </main>
 
+    <main v-show="settingsTab === 'devices'" class="stack devices-panel">
+      <SettingsSection title="Registered devices" :collapsible="false">
+        <p class="security-lead">
+          Up to <strong>{{ devicesMaxSessions }}</strong> devices can be signed in at once (
+          {{ signedInDeviceCount }} signed in now). Device name, OS, form factor, and browser are
+          collected when you sign in (with consent) or register this device below.
+        </p>
+        <div class="devices-register-card">
+          <h3 class="devices-register-title">This device</h3>
+          <p class="cred-hint">
+            {{ formatFormFactorLabel(currentDeviceInfo.formFactor) }} ·
+            {{ currentDeviceInfo.os }} · {{ currentDeviceInfo.browser }}
+          </p>
+          <label class="lbl" for="device-name-draft">Device name</label>
+          <input
+            id="device-name-draft"
+            v-model="deviceNameDraft"
+            class="inp tap"
+            type="text"
+            maxlength="80"
+            autocomplete="off"
+            placeholder="e.g. Work laptop"
+          />
+          <button
+            type="button"
+            class="btn secondary tap"
+            :disabled="deviceRegisterBusy"
+            @click="registerCurrentDevice"
+          >
+            {{ deviceRegisterBusy ? 'Registering…' : 'Register / update this device' }}
+          </button>
+        </div>
+        <p v-if="devicesLoading" class="cred-msg">Loading…</p>
+        <p v-else-if="devicesError" class="cred-msg cred-msg--error">{{ devicesError }}</p>
+        <p v-if="devicesMsg" class="cred-msg">{{ devicesMsg }}</p>
+        <div v-if="!devicesLoading" class="devices-table-wrap">
+          <table v-if="registeredDevices.length" class="devices-table">
+            <thead>
+              <tr>
+                <th scope="col">Device</th>
+                <th scope="col">Type</th>
+                <th scope="col">Last seen</th>
+                <th scope="col">Status</th>
+                <th scope="col">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="device in registeredDevices" :key="device.id">
+                <td>
+                  <input
+                    v-model="device.name"
+                    class="inp devices-name-inp tap"
+                    type="text"
+                    maxlength="80"
+                    :disabled="devicesBusyId === device.id"
+                    @change="saveDeviceName(device)"
+                  />
+                  <span class="devices-meta">{{ device.os }} · {{ device.browser }}</span>
+                </td>
+                <td>{{ formatFormFactorLabel(device.formFactor) }}</td>
+                <td>{{ formatDeviceWhen(device.lastSeenAt) }}</td>
+                <td>
+                  <span v-if="device.isCurrent" class="devices-badge devices-badge--current"
+                    >This device</span
+                  >
+                  <span v-else-if="device.isSignedIn" class="devices-badge devices-badge--signed-in"
+                    >Signed in</span
+                  >
+                  <span v-else class="devices-badge">Registered</span>
+                </td>
+                <td class="devices-actions">
+                  <button
+                    v-if="device.isSignedIn && !device.isCurrent"
+                    type="button"
+                    class="btn ghost tap"
+                    :disabled="devicesBusyId === device.id"
+                    @click="signOutDevice(device)"
+                  >
+                    Sign out
+                  </button>
+                  <button
+                    v-if="!device.isCurrent"
+                    type="button"
+                    class="btn ghost tap"
+                    :disabled="devicesBusyId === device.id"
+                    @click="removeDevice(device)"
+                  >
+                    Remove
+                  </button>
+                  <span v-if="device.isCurrent" class="devices-meta">Use Sign out below</span>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+          <p v-else class="security-empty">No devices registered yet. Register this device above.</p>
+        </div>
+        <button type="button" class="btn ghost tap" @click="loadDevices">Refresh</button>
+      </SettingsSection>
+    </main>
+
     <main v-show="settingsTab === 'security'" class="stack security-panel">
       <SettingsSection title="Auto redirect" :collapsible="false">
         <p class="security-lead">
@@ -3999,6 +4259,83 @@ onUnmounted(() => {
 .automation-wrap {
   margin-top: 0;
 }
+.devices-panel {
+  max-width: 64rem;
+  margin-inline: auto;
+}
+
+.devices-register-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2, 0.5rem);
+  margin-bottom: var(--space-4, 1rem);
+  padding: var(--space-4, 1rem);
+  border: 1px solid var(--color-border, rgba(255, 255, 255, 0.08));
+  border-radius: var(--radius-md, 0.5rem);
+  background: var(--color-glass-subtle, rgba(255, 255, 255, 0.03));
+}
+
+.devices-register-title {
+  margin: 0;
+  font-size: var(--text-base, 0.9375rem);
+  font-weight: 600;
+}
+
+.devices-table-wrap {
+  overflow-x: auto;
+  margin-bottom: var(--space-3, 0.75rem);
+}
+
+.devices-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--text-sm, 0.8125rem);
+}
+
+.devices-table th,
+.devices-table td {
+  padding: var(--space-2, 0.5rem) var(--space-3, 0.75rem);
+  border-bottom: 1px solid var(--color-border, rgba(255, 255, 255, 0.08));
+  text-align: left;
+  vertical-align: top;
+}
+
+.devices-name-inp {
+  min-width: 10rem;
+  margin-bottom: var(--space-1, 0.25rem);
+}
+
+.devices-meta {
+  display: block;
+  font-size: var(--text-xs, 0.6875rem);
+  color: var(--color-text-tertiary, #6e6e7e);
+}
+
+.devices-badge {
+  display: inline-block;
+  padding: 0.15rem 0.45rem;
+  border-radius: var(--radius-sm, 0.375rem);
+  font-size: var(--text-xs, 0.6875rem);
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--color-text-secondary, #a8a8b8);
+}
+
+.devices-badge--signed-in {
+  background: rgba(74, 222, 128, 0.12);
+  color: #86efac;
+}
+
+.devices-badge--current {
+  background: rgba(123, 77, 181, 0.2);
+  color: #d8b4fe;
+}
+
+.devices-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2, 0.5rem);
+}
+
 .security-panel {
   max-width: 64rem;
   margin-inline: auto;

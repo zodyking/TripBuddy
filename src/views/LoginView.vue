@@ -5,6 +5,7 @@ import { getAuthStatus, postAuthLogin, postLoginAccessLog } from '../api.js'
 import { hydrateAllTrafficKeysFromServer } from '../stores/trafficTileKey.js'
 import LoginAckMap from '../components/LoginAckMap.vue'
 import { useMapVehicleId } from '../composables/useMapVehicleId.js'
+import { collectDeviceInfo, formatFormFactorLabel } from '../utils/deviceInfo.js'
 
 const ACCESS_ACK_KEY = 'fedextool-login-access-ack-v3'
 
@@ -32,6 +33,97 @@ const username = ref('')
 const password = ref('')
 const submitting = ref(false)
 const errorMsg = ref('')
+const ackDeviceDataConsent = ref(false)
+
+/** @type {import('vue').Ref<Array<{ sessionId: string, deviceId: string | null, name: string, os: string, formFactor: string, browser: string }>>} */
+const sessionLimitDevices = ref([])
+const sessionLimitOpen = ref(false)
+const sessionLimitMode = ref(/** @type {'one' | 'all'} */ ('one'))
+const sessionLimitSelectedId = ref('')
+const sessionLimitBusy = ref(false)
+
+const signedInElsewhereMsg = computed(() => {
+  const reason = route.query.reason
+  if (reason === 'signed_in_elsewhere') {
+    return 'You were signed out because this account reached the two-device sign-in limit on another device.'
+  }
+  return ''
+})
+
+function formatDeviceLabel(d) {
+  const name = String(d?.name ?? 'Device').trim() || 'Device'
+  const os = String(d?.os ?? '').trim()
+  const browser = String(d?.browser ?? '').trim()
+  const form = formatFormFactorLabel(d?.formFactor)
+  const bits = [form, os, browser].filter(Boolean)
+  return bits.length ? `${name} (${bits.join(' · ')})` : name
+}
+
+function buildLoginPayload(extra = {}) {
+  const u = username.value.trim()
+  const p = password.value
+  const device = collectDeviceInfo()
+  return {
+    username: u,
+    password: p,
+    deviceConsent: true,
+    device,
+    ...extra,
+  }
+}
+
+async function finishLogin(extra = {}) {
+  await postAuthLogin(buildLoginPayload(extra))
+  await hydrateAllTrafficKeysFromServer()
+  const target = redirectTarget()
+  if (typeof window !== 'undefined') {
+    const base = import.meta.env.BASE_URL || '/'
+    const path = target.startsWith('/') ? target : `/${target}`
+    window.location.assign(`${base.replace(/\/$/, '')}${path}`)
+    return
+  }
+  await router.replace(target)
+}
+
+function openSessionLimitModal(activeSessions) {
+  sessionLimitDevices.value = Array.isArray(activeSessions) ? activeSessions : []
+  sessionLimitMode.value = 'one'
+  sessionLimitSelectedId.value = sessionLimitDevices.value[0]?.sessionId ?? ''
+  sessionLimitOpen.value = true
+}
+
+async function confirmSessionLimitSignOut() {
+  if (sessionLimitBusy.value) return
+  sessionLimitBusy.value = true
+  errorMsg.value = ''
+  try {
+    if (sessionLimitMode.value === 'all') {
+      await finishLogin({ revokeAll: true })
+      return
+    }
+    const sid = sessionLimitSelectedId.value.trim()
+    if (!sid) {
+      errorMsg.value = 'Select a device to sign out.'
+      return
+    }
+    await finishLogin({ revokeSessionIds: [sid] })
+  } catch (e) {
+    if (/** @type {any} */ (e)?.code === 'SESSION_LIMIT') {
+      openSessionLimitModal(/** @type {any} */ (e).activeSessions)
+      errorMsg.value =
+        e instanceof Error ? e.message : 'Two devices are still signed in.'
+    } else {
+      errorMsg.value =
+        e instanceof Error ? e.message : 'Sign-in failed. Check credentials.'
+    }
+  } finally {
+    sessionLimitBusy.value = false
+  }
+}
+
+function closeSessionLimitModal() {
+  sessionLimitOpen.value = false
+}
 
 const canContinueAck = computed(
   () => ackRealPerson.value && ackNotSecurityOrMarketingVendor.value,
@@ -186,21 +278,22 @@ async function onSubmit() {
     errorMsg.value = 'Enter username and password.'
     return
   }
+  if (!ackDeviceDataConsent.value) {
+    errorMsg.value = 'Consent to device information collection is required to sign in.'
+    return
+  }
   submitting.value = true
   try {
-    await postAuthLogin({ username: u, password: p })
-    await hydrateAllTrafficKeysFromServer()
-    const target = redirectTarget()
-    if (typeof window !== 'undefined') {
-      const base = import.meta.env.BASE_URL || '/'
-      const path = target.startsWith('/') ? target : `/${target}`
-      window.location.assign(`${base.replace(/\/$/, '')}${path}`)
-      return
-    }
-    await router.replace(target)
+    await finishLogin()
   } catch (e) {
-    errorMsg.value =
-      e instanceof Error ? e.message : 'Sign-in failed. Check credentials.'
+    if (/** @type {any} */ (e)?.code === 'SESSION_LIMIT') {
+      openSessionLimitModal(/** @type {any} */ (e).activeSessions)
+      errorMsg.value =
+        e instanceof Error ? e.message : 'Two devices are already signed in.'
+    } else {
+      errorMsg.value =
+        e instanceof Error ? e.message : 'Sign-in failed. Check credentials.'
+    }
   } finally {
     submitting.value = false
   }
@@ -292,6 +385,69 @@ async function onSubmit() {
       </div>
     </Teleport>
 
+    <Teleport to="body">
+      <div
+        v-if="sessionLimitOpen"
+        class="login-access-overlay"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="session-limit-title"
+      >
+        <div class="login-access-card session-limit-card glass" @click.stop>
+          <h2 id="session-limit-title" class="login-access-title">Two devices signed in</h2>
+          <p class="login-access-lead">
+            This account allows two active sign-ins. Choose a device to sign out, or sign out all
+            devices to continue here.
+          </p>
+          <div class="session-limit-mode">
+            <label class="login-access-label tap">
+              <input v-model="sessionLimitMode" type="radio" value="one" />
+              <span>Sign out one device</span>
+            </label>
+            <label class="login-access-label tap">
+              <input v-model="sessionLimitMode" type="radio" value="all" />
+              <span>Sign out all devices</span>
+            </label>
+          </div>
+          <ul
+            v-if="sessionLimitMode === 'one' && sessionLimitDevices.length"
+            class="session-limit-list"
+            role="list"
+          >
+            <li v-for="d in sessionLimitDevices" :key="d.sessionId" class="session-limit-item">
+              <label class="login-access-label tap">
+                <input
+                  v-model="sessionLimitSelectedId"
+                  type="radio"
+                  :value="d.sessionId"
+                  name="session-limit-pick"
+                />
+                <span>{{ formatDeviceLabel(d) }}</span>
+              </label>
+            </li>
+          </ul>
+          <div class="login-access-loc-actions">
+            <button
+              type="button"
+              class="login-access-btn tap"
+              :disabled="sessionLimitBusy || (sessionLimitMode === 'one' && !sessionLimitSelectedId)"
+              @click="confirmSessionLimitSignOut"
+            >
+              {{ sessionLimitBusy ? 'Signing in…' : 'Continue sign-in' }}
+            </button>
+            <button
+              type="button"
+              class="login-access-btn login-access-btn--ghost tap"
+              :disabled="sessionLimitBusy"
+              @click="closeSessionLimitModal"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      </div>
+    </Teleport>
+
     <div
       class="login-main"
       :class="{ 'is-behind-access': !accessAcknowledged }"
@@ -300,6 +456,8 @@ async function onSubmit() {
     >
       <div class="login-card glass">
         <h1 class="login-title">Sign in</h1>
+
+        <p v-if="signedInElsewhereMsg" class="login-note" role="status">{{ signedInElsewhereMsg }}</p>
 
         <form class="login-form" @submit.prevent="onSubmit">
           <label class="login-label">
@@ -325,12 +483,25 @@ async function onSubmit() {
             />
           </label>
 
+          <label class="login-access-label login-device-consent tap">
+            <input
+              v-model="ackDeviceDataConsent"
+              type="checkbox"
+              class="login-access-cb"
+              :disabled="submitting || !accessAcknowledged"
+            />
+            <span>
+              I consent to collection of device information (device name, OS, mobile/desktop, and
+              browser) for session management and security.
+            </span>
+          </label>
+
           <p v-if="errorMsg" class="login-err" role="alert">{{ errorMsg }}</p>
 
           <button
             type="submit"
             class="login-submit tap"
-            :disabled="submitting || !accessAcknowledged"
+            :disabled="submitting || !accessAcknowledged || !ackDeviceDataConsent"
           >
             <span v-if="submitting" class="login-submit-inner">
               <span class="login-spinner" aria-hidden="true" />
@@ -475,6 +646,50 @@ async function onSubmit() {
 .login-access-btn:disabled {
   opacity: 0.45;
   cursor: not-allowed;
+}
+
+.login-access-btn--ghost {
+  background: transparent;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  color: var(--color-text-secondary, #a8a8b8);
+  box-shadow: none;
+}
+
+.session-limit-card {
+  max-width: 26rem;
+}
+
+.session-limit-mode {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2, 0.5rem);
+  margin-bottom: var(--space-3, 0.75rem);
+}
+
+.session-limit-list {
+  margin: 0 0 var(--space-3, 0.75rem);
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2, 0.5rem);
+}
+
+.session-limit-item {
+  margin: 0;
+}
+
+.login-device-consent {
+  text-align: left;
+  color: var(--color-text-secondary, #a8a8b8);
+  font-size: var(--text-xs, 0.6875rem);
+}
+
+.login-note {
+  margin: 0 0 var(--space-4, 1rem);
+  font-size: var(--text-sm, 0.8125rem);
+  line-height: 1.45;
+  color: var(--color-accent-orange, #ff9b4a);
 }
 
 .login-access-loc-actions {

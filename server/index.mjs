@@ -45,7 +45,24 @@ import {
   destroySession,
   isValidSession,
   getSessionAccountKey,
+  getActiveSessionIdsForAccount,
+  revokeSessionsForAccount,
+  revokeAllSessionsForAccount,
+  MAX_SESSIONS_PER_ACCOUNT,
+  getSessionEntry,
 } from './auth-session.mjs'
+import {
+  parseDevicePayload,
+  upsertRegisteredDevice,
+  listRegisteredDevices,
+  listActiveSessionDevices,
+  renameRegisteredDevice,
+  revokeDeviceSession,
+  clearDeviceSessionLink,
+  registerDeviceOnly,
+  deleteRegisteredDevice,
+  touchCurrentDevice,
+} from './device-store.mjs'
 import { registerSseConnection } from './session-sse.mjs'
 import { verifyAppLoginWithBearerCapture, tryFedexBearerReuseLogin } from './auth-probe.mjs'
 import {
@@ -438,7 +455,84 @@ app.post('/api/auth/login', async (req, reply) => {
   } catch {
     /* non-fatal */
   }
-  const id = createSession(accountKey)
+
+  if (body.deviceConsent !== true) {
+    return reply.code(400).send({
+      ok: false,
+      error: 'Device information consent is required to sign in.',
+    })
+  }
+
+  let devicePayload
+  try {
+    devicePayload = parseDevicePayload(body.device ?? {})
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e)
+    return reply.code(400).send({ ok: false, error: msg })
+  }
+
+  const revokeSessionIds = Array.isArray(body.revokeSessionIds)
+    ? body.revokeSessionIds
+        .map((x) => (typeof x === 'string' ? x.trim() : ''))
+        .filter(Boolean)
+    : []
+  if (body.revokeAll === true) {
+    const existing = getActiveSessionIdsForAccount(accountKey)
+    revokeAllSessionsForAccount(accountKey)
+    for (const sid of existing) {
+      await clearDeviceSessionLink(sid, accountKey)
+    }
+  } else if (revokeSessionIds.length > 0) {
+    revokeSessionsForAccount(accountKey, revokeSessionIds)
+    for (const sid of revokeSessionIds) {
+      await clearDeviceSessionLink(sid, accountKey)
+    }
+  }
+
+  const existingForDevice = getActiveSessionIdsForAccount(accountKey).filter((sid) => {
+    const entry = getSessionEntry(sid)
+    return entry?.deviceId === devicePayload.deviceId
+  })
+  if (existingForDevice.length > 0) {
+    revokeSessionsForAccount(accountKey, existingForDevice)
+    for (const sid of existingForDevice) {
+      await clearDeviceSessionLink(sid, accountKey)
+    }
+  }
+
+  const activeCount = getActiveSessionIdsForAccount(accountKey).length
+  if (activeCount >= MAX_SESSIONS_PER_ACCOUNT) {
+    const activeSessions = await listActiveSessionDevices(accountKey)
+    return reply.code(409).send({
+      ok: false,
+      code: 'SESSION_LIMIT',
+      error: 'Two devices are already signed in. Sign out one to continue.',
+      activeSessions,
+      maxSessions: MAX_SESSIONS_PER_ACCOUNT,
+    })
+  }
+
+  const id = createSession(accountKey, devicePayload.deviceId)
+  if (!id) {
+    const activeSessions = await listActiveSessionDevices(accountKey)
+    return reply.code(409).send({
+      ok: false,
+      code: 'SESSION_LIMIT',
+      error: 'Two devices are already signed in. Sign out one to continue.',
+      activeSessions,
+      maxSessions: MAX_SESSIONS_PER_ACCOUNT,
+    })
+  }
+
+  try {
+    await upsertRegisteredDevice(accountKey, devicePayload, {
+      sessionId: id,
+      ip: getClientIp(req),
+    })
+  } catch {
+    /* non-fatal */
+  }
+
   reply.setCookie(COOKIE_NAME, id, {
     path: '/',
     httpOnly: true,
@@ -446,12 +540,19 @@ app.post('/api/auth/login', async (req, reply) => {
     sameSite: 'lax',
     maxAge: 7 * 24 * 60 * 60,
   })
-  return { ok: true }
+  return { ok: true, deviceId: devicePayload.deviceId }
 })
 
 app.post('/api/auth/logout', async (req, reply) => {
   const sid = req.cookies?.[COOKIE_NAME]
   const ak = getSessionAccountKey(sid)
+  if (sid && ak) {
+    try {
+      await clearDeviceSessionLink(sid, ak)
+    } catch {
+      /* non-fatal */
+    }
+  }
   destroySession(sid)
   reply.clearCookie(COOKIE_NAME, { path: '/' })
   if (ak) {
@@ -2148,6 +2249,113 @@ app.delete('/api/settings/credentials', async () => {
 app.get('/api/settings/access-log', async () => {
   const entries = await listAccessEntries()
   return { ok: true, entries }
+})
+
+app.get('/api/settings/devices', async (req) => {
+  const ak = String(req.credentialAccountKey || getDataAccountKey() || '').trim()
+  if (!ak) {
+    return { ok: true, devices: [], maxSessions: MAX_SESSIONS_PER_ACCOUNT }
+  }
+  const sid = req.cookies?.[COOKIE_NAME]
+  const devices = await listRegisteredDevices(ak, typeof sid === 'string' ? sid : '')
+  return { ok: true, devices, maxSessions: MAX_SESSIONS_PER_ACCOUNT }
+})
+
+app.post('/api/settings/devices/register', async (req, reply) => {
+  const ak = String(req.credentialAccountKey || getDataAccountKey() || '').trim()
+  if (!ak) {
+    return reply.code(401).send({ error: 'Not signed in' })
+  }
+  try {
+    const payload = parseDevicePayload(req.body ?? {})
+    const device = await registerDeviceOnly(ak, payload, getClientIp(req))
+    return { ok: true, device }
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e)
+    return reply.code(400).send({ ok: false, error: msg })
+  }
+})
+
+app.put('/api/settings/devices/:deviceId', async (req, reply) => {
+  const ak = String(req.credentialAccountKey || getDataAccountKey() || '').trim()
+  if (!ak) {
+    return reply.code(401).send({ error: 'Not signed in' })
+  }
+  const deviceId = String(req.params?.deviceId ?? '').trim()
+  const name = typeof req.body?.name === 'string' ? req.body.name : ''
+  try {
+    const device = await renameRegisteredDevice(ak, deviceId, name)
+    return { ok: true, device }
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e)
+    return reply.code(400).send({ ok: false, error: msg })
+  }
+})
+
+app.delete('/api/settings/devices/:deviceId/session', async (req, reply) => {
+  const ak = String(req.credentialAccountKey || getDataAccountKey() || '').trim()
+  if (!ak) {
+    return reply.code(401).send({ error: 'Not signed in' })
+  }
+  const deviceId = String(req.params?.deviceId ?? '').trim()
+  const sid = req.cookies?.[COOKIE_NAME]
+  try {
+    const list = await listRegisteredDevices(ak, typeof sid === 'string' ? sid : '')
+    const target = list.find((d) => d.id === deviceId)
+    if (target?.isCurrent) {
+      return reply.code(400).send({
+        ok: false,
+        error: 'Use Sign out to end this device session.',
+      })
+    }
+    const result = await revokeDeviceSession(ak, deviceId)
+    return { ok: true, ...result }
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e)
+    return reply.code(400).send({ ok: false, error: msg })
+  }
+})
+
+app.delete('/api/settings/devices/:deviceId', async (req, reply) => {
+  const ak = String(req.credentialAccountKey || getDataAccountKey() || '').trim()
+  if (!ak) {
+    return reply.code(401).send({ error: 'Not signed in' })
+  }
+  const deviceId = String(req.params?.deviceId ?? '').trim()
+  const sid = req.cookies?.[COOKIE_NAME]
+  try {
+    const list = await listRegisteredDevices(ak, typeof sid === 'string' ? sid : '')
+    const target = list.find((d) => d.id === deviceId)
+    if (target?.isCurrent) {
+      return reply.code(400).send({
+        ok: false,
+        error: 'Sign out before removing this device.',
+      })
+    }
+    await deleteRegisteredDevice(ak, deviceId)
+    return { ok: true }
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e)
+    return reply.code(400).send({ ok: false, error: msg })
+  }
+})
+
+app.post('/api/settings/devices/touch', async (req, reply) => {
+  const ak = String(req.credentialAccountKey || getDataAccountKey() || '').trim()
+  if (!ak) {
+    return reply.code(401).send({ error: 'Not signed in' })
+  }
+  const deviceId = typeof req.body?.deviceId === 'string' ? req.body.deviceId : ''
+  if (!deviceId) {
+    return reply.code(400).send({ ok: false, error: 'deviceId required' })
+  }
+  try {
+    const device = await touchCurrentDevice(ak, deviceId, getClientIp(req))
+    return { ok: true, device }
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e)
+    return reply.code(400).send({ ok: false, error: msg })
+  }
 })
 
 app.get('/api/settings/bridge-traffic-export', async (_req, reply) => {

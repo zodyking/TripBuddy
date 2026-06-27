@@ -73,6 +73,8 @@ export async function getAuthStatus() {
 
 /**
  * Verify FedEx credentials via server Playwright (dispatch + PurpleID gate), set session cookie.
+ * @param {object} body
+ * @returns {Promise<object>}
  */
 export async function postAuthLogin(body) {
   const r = await apiFetch('/api/auth/login', {
@@ -80,7 +82,30 @@ export async function postAuthLogin(body) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body ?? {}),
   })
-  return handleJson(r)
+  const text = await r.text()
+  let data = {}
+  try {
+    data = text ? JSON.parse(text) : {}
+  } catch {
+    data = { raw: text }
+  }
+  if (r.status === 409 && data.code === 'SESSION_LIMIT') {
+    const err = new Error(
+      typeof data.error === 'string' ? data.error : 'Two devices are already signed in.',
+    )
+    /** @type {any} */ (err).code = 'SESSION_LIMIT'
+    /** @type {any} */ (err).activeSessions = Array.isArray(data.activeSessions)
+      ? data.activeSessions
+      : []
+    /** @type {any} */ (err).maxSessions =
+      typeof data.maxSessions === 'number' ? data.maxSessions : 2
+    throw err
+  }
+  if (!r.ok) {
+    const errStr = typeof data.error === 'string' ? data.error.trim() : ''
+    throw new Error(errStr || r.statusText || 'Sign-in failed')
+  }
+  return data
 }
 
 export async function postAuthLogout() {
@@ -119,6 +144,63 @@ export async function postVisitPing() {
  */
 export async function getSettingsAccessLog() {
   const r = await apiFetch('/api/settings/access-log')
+  return handleJson(r)
+}
+
+export async function getSettingsDevices() {
+  const r = await apiFetch('/api/settings/devices')
+  return handleJson(r)
+}
+
+/**
+ * @param {{ deviceId: string, name?: string, os?: string, formFactor?: string, browser?: string, userAgent?: string }} body
+ */
+export async function postSettingsDeviceRegister(body) {
+  const r = await apiFetch('/api/settings/devices/register', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body ?? {}),
+  })
+  return handleJson(r)
+}
+
+/**
+ * @param {string} deviceId
+ * @param {{ name: string }} body
+ */
+export async function putSettingsDeviceName(deviceId, body) {
+  const r = await apiFetch(`/api/settings/devices/${encodeURIComponent(deviceId)}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body ?? {}),
+  })
+  return handleJson(r)
+}
+
+/** @param {string} deviceId */
+export async function deleteSettingsDeviceSession(deviceId) {
+  const r = await apiFetch(
+    `/api/settings/devices/${encodeURIComponent(deviceId)}/session`,
+    { method: 'DELETE' },
+  )
+  return handleJson(r)
+}
+
+/** @param {string} deviceId */
+export async function deleteSettingsDevice(deviceId) {
+  const r = await apiFetch(`/api/settings/devices/${encodeURIComponent(deviceId)}`, {
+    method: 'DELETE',
+  })
+  return handleJson(r)
+}
+
+/** @param {{ deviceId: string }} body */
+export async function postSettingsDeviceTouch(body) {
+  const r = await apiFetch('/api/settings/devices/touch', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body ?? {}),
+  })
   return handleJson(r)
 }
 
