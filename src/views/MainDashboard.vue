@@ -2416,11 +2416,13 @@ onMounted(async () => {
   })
   unregisterAutomationSync = registerAutomationSyncListener(handleAutomationSyncEvent)
   unregisterSession = registerSessionListener((data) => {
-    if (data?.code !== 'SESSION_REVOKED') return
+    const code = data?.code
+    if (code !== 'SESSION_REVOKED' && code !== 'SESSION_IDLE_TIMEOUT') return
     const base = import.meta.env.BASE_URL || '/'
     const loginPath = `${base.replace(/\/$/, '')}/login`
+    const reason = code === 'SESSION_IDLE_TIMEOUT' ? 'idle_timeout' : 'signed_in_elsewhere'
     window.location.assign(
-      `${loginPath}?reason=signed_in_elsewhere&redirect=${encodeURIComponent(
+      `${loginPath}?reason=${reason}&redirect=${encodeURIComponent(
         router.currentRoute.value.fullPath,
       )}`,
     )

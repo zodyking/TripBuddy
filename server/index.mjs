@@ -50,6 +50,7 @@ import {
   revokeAllSessionsForAccount,
   MAX_SESSIONS_PER_ACCOUNT,
   getSessionEntry,
+  touchSessionActivity,
 } from './auth-session.mjs'
 import {
   parseDevicePayload,
@@ -345,7 +346,10 @@ app.addHook('onRequest', async (req, reply) => {
   if (shouldSkipGeoFenceForPath(path)) return
   if (!isAuthEnabled()) return
   const sid = req.cookies?.[COOKIE_NAME]
-  if (isValidSession(sid)) return
+  if (isValidSession(sid)) {
+    touchSessionActivity(sid)
+    return
+  }
   try {
     const redirectTo = await getGeoFenceRedirectUrl(getClientIp(req))
     if (redirectTo) return reply.redirect(302, redirectTo)
@@ -363,6 +367,7 @@ app.addHook('preHandler', async (req) => {
   if (path.startsWith('/api/bluebubbles/webhook/')) return
   const sid = req.cookies?.[COOKIE_NAME]
   if (isValidSession(sid)) {
+    touchSessionActivity(sid)
     const ak = getSessionAccountKey(sid)
     if (ak) req.credentialAccountKey = ak
     setLastActiveAccountKey(ak)
@@ -380,7 +385,10 @@ app.addHook('preHandler', async (req, reply) => {
   if (path === '/api/public/geo-fence-check') return
   if (path.startsWith('/api/bluebubbles/webhook/')) return
   const sid = req.cookies?.[COOKIE_NAME]
-  if (isValidSession(sid)) return
+  if (isValidSession(sid)) {
+    touchSessionActivity(sid)
+    return
+  }
   return reply.code(401).send({ error: 'Unauthorized', code: 'AUTH_REQUIRED' })
 })
 
@@ -1317,6 +1325,7 @@ app.get('/api/events', async (req, reply) => {
   if (!isValidSession(sid)) {
     return reply.code(401).send({ error: 'Unauthorized', code: 'AUTH_REQUIRED' })
   }
+  touchSessionActivity(sid)
   reply.hijack()
   // Hijacked responses skip @fastify/cors hooks — EventSource from Vite (another origin/port) needs these.
   const origin = req.headers.origin

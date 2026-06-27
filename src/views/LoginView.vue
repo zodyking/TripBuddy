@@ -46,6 +46,9 @@ const signedInElsewhereMsg = computed(() => {
   if (reason === 'signed_in_elsewhere') {
     return 'You were signed out because this account reached the two-device sign-in limit on another device.'
   }
+  if (reason === 'idle_timeout') {
+    return 'You were signed out after 3 hours with no activity. Sign in again to continue.'
+  }
   return ''
 })
 

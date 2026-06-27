@@ -1,7 +1,7 @@
 import crypto from 'node:crypto'
 import { notifySessionRevoked } from './session-sse.mjs'
 
-/** @typedef {{ exp: number, accountKey: string | null, deviceId?: string | null }} SessionEntry */
+/** @typedef {{ exp: number, accountKey: string | null, deviceId?: string | null, lastActivityAt: number }} SessionEntry */
 
 /** @type {Map<string, SessionEntry>} */
 const sessions = new Map()
@@ -12,6 +12,8 @@ const accountKeyToSessionIds = new Map()
 
 export const MAX_SESSIONS_PER_ACCOUNT = 2
 const SESSION_MS = 7 * 24 * 60 * 60 * 1000
+/** Sign out after this much time without an authenticated request. */
+export const SESSION_IDLE_MS = 3 * 60 * 60 * 1000
 
 export function isAuthEnabled() {
   const v = process.env.FEDEX_TOOL_AUTH_ENABLED
@@ -39,6 +41,7 @@ export function getSessionEntry(id) {
   pruneSessions()
   const s = sessions.get(id)
   if (!s || s.exp < Date.now()) return null
+  if (destroySessionIfIdle(id, s)) return null
   return s
 }
 
@@ -58,10 +61,12 @@ export function createSession(accountKey = null, deviceId = null, opts = {}) {
     }
   }
   const id = crypto.randomBytes(32).toString('hex')
+  const now = Date.now()
   sessions.set(id, {
-    exp: Date.now() + SESSION_MS,
+    exp: now + SESSION_MS,
     accountKey: accountKey && typeof accountKey === 'string' ? accountKey : null,
     deviceId: deviceId && typeof deviceId === 'string' ? deviceId : null,
+    lastActivityAt: now,
   })
   if (accountKey && typeof accountKey === 'string') {
     const prev = getActiveSessionIdsForAccount(accountKey)
@@ -93,7 +98,11 @@ export function revokeAllSessionsForAccount(accountKey) {
   }
 }
 
-export function destroySession(id) {
+/**
+ * @param {string} id
+ * @param {{ code?: string, message?: string }} [opts]
+ */
+export function destroySession(id, opts = {}) {
   if (!id) return
   const s = sessions.get(id)
   if (s?.accountKey) {
@@ -107,7 +116,7 @@ export function destroySession(id) {
       accountKeyToSessionIds.delete(ak)
     }
   }
-  notifySessionRevoked(id)
+  notifySessionRevoked(id, opts)
   sessions.delete(id)
 }
 
@@ -130,9 +139,43 @@ export function isValidSession(id) {
   return true
 }
 
+/**
+ * Record authenticated activity so idle timeout resets.
+ * @param {string | undefined} id
+ */
+export function touchSessionActivity(id) {
+  if (!id || typeof id !== 'string') return
+  const s = sessions.get(id)
+  if (!s || s.exp < Date.now() || isSessionIdleExpired(s)) return
+  s.lastActivityAt = Date.now()
+}
+
+/**
+ * @param {SessionEntry} s
+ * @returns {boolean}
+ */
+function isSessionIdleExpired(s) {
+  const last = typeof s.lastActivityAt === 'number' ? s.lastActivityAt : 0
+  return last > 0 && Date.now() - last >= SESSION_IDLE_MS
+}
+
+/**
+ * @param {string} id
+ * @param {SessionEntry} s
+ */
+function destroySessionIfIdle(id, s) {
+  if (!isSessionIdleExpired(s)) return false
+  destroySession(id, {
+    code: 'SESSION_IDLE_TIMEOUT',
+    message: 'Signed out after 3 hours of inactivity',
+  })
+  return true
+}
+
 function pruneSessions() {
   const now = Date.now()
   for (const [k, s] of sessions) {
+    if (destroySessionIfIdle(k, s)) continue
     if (s.exp < now) {
       if (s.accountKey) {
         const mapped = accountKeyToSessionIds.get(s.accountKey) || []
@@ -145,4 +188,10 @@ function pruneSessions() {
   }
 }
 
-setInterval(pruneSessions, 60 * 60 * 1000).unref()
+/** @internal testing */
+export function setSessionLastActivityAtForTest(id, ts) {
+  const s = sessions.get(id)
+  if (s && typeof ts === 'number') s.lastActivityAt = ts
+}
+
+setInterval(pruneSessions, 5 * 60 * 1000).unref()

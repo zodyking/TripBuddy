@@ -41,17 +41,25 @@ export function broadcastToAccount(accountKey, payload) {
 }
 
 /**
- * Notify browser still holding an old session cookie (signed in elsewhere).
+ * Notify browser still holding an old session cookie (signed in elsewhere or idle timeout).
  * @param {string} sessionId
+ * @param {{ code?: string, message?: string }} [opts]
  */
-export function notifySessionRevoked(sessionId) {
+export function notifySessionRevoked(sessionId, opts = {}) {
   const entry = sendBySessionId.get(sessionId)
   if (!entry) return
+  const code = opts.code === 'SESSION_IDLE_TIMEOUT' ? 'SESSION_IDLE_TIMEOUT' : 'SESSION_REVOKED'
+  const message =
+    typeof opts.message === 'string' && opts.message.trim()
+      ? opts.message.trim()
+      : code === 'SESSION_IDLE_TIMEOUT'
+        ? 'Signed out after 3 hours of inactivity'
+        : 'Signed in on another device'
   try {
     entry.send({
       type: 'session',
-      code: 'SESSION_REVOKED',
-      message: 'Signed in on another device',
+      code,
+      message,
       ts: Date.now(),
     })
   } catch {
