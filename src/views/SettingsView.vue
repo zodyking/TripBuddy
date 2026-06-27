@@ -187,7 +187,7 @@ const SECRET_SAVED_MASK = '••••••••••••••••'
 const router = useRouter()
 const route = useRoute()
 
-/** @type {import('vue').Ref<'general' | 'automation' | 'audio' | 'email' | 'security' | 'devices' | 'directory' | 'traffic' | 'helpers' | 'whatsapp' | 'imessage'>} */
+/** @type {import('vue').Ref<'general' | 'automation' | 'audio' | 'email' | 'security' | 'directory' | 'traffic' | 'helpers' | 'whatsapp' | 'imessage'>} */
 const settingsTab = ref('general')
 const settingsTabsEl = ref(/** @type {HTMLElement | null} */ (null))
 const signOutBusy = ref(false)
@@ -2155,6 +2155,7 @@ onMounted(async () => {
   )
   syncWahaSpeechPrefsFromStorage()
   applySettingsRouteFragment()
+  void loadDevices()
 })
 
 watch(() => route.hash, () => applySettingsRouteFragment())
@@ -2164,6 +2165,7 @@ watch(
   (tab) => {
     if (tab === 'whatsapp') settingsTab.value = 'whatsapp'
     if (tab === 'imessage') settingsTab.value = 'imessage'
+    if (tab === 'devices') settingsTab.value = 'general'
   },
   { immediate: true },
 )
@@ -2187,7 +2189,7 @@ watch(settingsTab, (tab) => {
     void loadGeoFenceSettings()
     nextTick(() => geoFenceEditorRef.value?.invalidateSize?.())
   }
-  if (tab === 'devices') {
+  if (tab === 'general') {
     void loadDevices()
   }
   if (tab === 'directory') {
@@ -2264,16 +2266,6 @@ onUnmounted(() => {
         @click="settingsTab = 'security'"
       >
         Security
-      </button>
-      <button
-        type="button"
-        class="tab-btn tap"
-        role="tab"
-        :aria-selected="settingsTab === 'devices'"
-        :class="{ active: settingsTab === 'devices' }"
-        @click="settingsTab = 'devices'"
-      >
-        Devices
       </button>
       <button
         type="button"
@@ -2875,6 +2867,104 @@ onUnmounted(() => {
         </Teleport>
       </SettingsSection>
 
+      <SettingsSection title="Registered devices" section-id="settings-devices" :collapsible="false">
+        <p class="security-lead">
+          Up to <strong>{{ devicesMaxSessions }}</strong> devices can be signed in at once (
+          {{ signedInDeviceCount }} signed in now). Device name, OS, form factor, and browser are
+          collected when you sign in (with consent) or register this device below.
+        </p>
+        <div class="devices-register-card">
+          <h3 class="devices-register-title">This device</h3>
+          <p class="cred-hint">
+            {{ formatDeviceTypeLabel(currentDeviceInfo) }} ·
+            {{ currentDeviceInfo.os }} · {{ currentDeviceInfo.browser }}
+          </p>
+          <label class="lbl" for="device-name-draft">Device name</label>
+          <input
+            id="device-name-draft"
+            v-model="deviceNameDraft"
+            class="inp tap"
+            type="text"
+            maxlength="80"
+            autocomplete="off"
+            placeholder="e.g. Work laptop"
+          />
+          <button
+            type="button"
+            class="btn secondary tap"
+            :disabled="deviceRegisterBusy"
+            @click="registerCurrentDevice"
+          >
+            {{ deviceRegisterBusy ? 'Registering…' : 'Register / update this device' }}
+          </button>
+        </div>
+        <p v-if="devicesLoading" class="cred-msg">Loading…</p>
+        <p v-else-if="devicesError" class="cred-msg cred-msg--error">{{ devicesError }}</p>
+        <p v-if="devicesMsg" class="cred-msg">{{ devicesMsg }}</p>
+        <div v-if="!devicesLoading" class="devices-table-wrap">
+          <table v-if="registeredDevices.length" class="devices-table">
+            <thead>
+              <tr>
+                <th scope="col">Device</th>
+                <th scope="col">Type</th>
+                <th scope="col">Last seen</th>
+                <th scope="col">Status</th>
+                <th scope="col">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="device in registeredDevices" :key="device.id">
+                <td>
+                  <input
+                    v-model="device.name"
+                    class="inp devices-name-inp tap"
+                    type="text"
+                    maxlength="80"
+                    :disabled="devicesBusyId === device.id"
+                    @change="saveDeviceName(device)"
+                  />
+                  <span class="devices-meta">{{ device.os }} · {{ device.browser }}</span>
+                </td>
+                <td>{{ formatDeviceTypeLabel(device) }}</td>
+                <td>{{ formatDeviceWhen(device.lastSeenAt) }}</td>
+                <td>
+                  <span v-if="device.isCurrent" class="devices-badge devices-badge--current"
+                    >This device</span
+                  >
+                  <span v-else-if="device.isSignedIn" class="devices-badge devices-badge--signed-in"
+                    >Signed in</span
+                  >
+                  <span v-else class="devices-badge">Registered</span>
+                </td>
+                <td class="devices-actions">
+                  <button
+                    v-if="device.isSignedIn && !device.isCurrent"
+                    type="button"
+                    class="btn ghost tap"
+                    :disabled="devicesBusyId === device.id"
+                    @click="signOutDevice(device)"
+                  >
+                    Sign out
+                  </button>
+                  <button
+                    v-if="!device.isCurrent"
+                    type="button"
+                    class="btn ghost tap"
+                    :disabled="devicesBusyId === device.id"
+                    @click="removeDevice(device)"
+                  >
+                    Remove
+                  </button>
+                  <span v-if="device.isCurrent" class="devices-meta">Use Sign out below</span>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+          <p v-else class="security-empty">No devices registered yet. Register this device above.</p>
+        </div>
+        <button type="button" class="btn ghost tap" @click="loadDevices">Refresh</button>
+      </SettingsSection>
+
       <div class="settings-sign-out-wrap">
         <button
           type="button"
@@ -3373,106 +3463,6 @@ onUnmounted(() => {
         </div>
       </SettingsSection>
 
-    </main>
-
-    <main v-show="settingsTab === 'devices'" class="stack devices-panel">
-      <SettingsSection title="Registered devices" :collapsible="false">
-        <p class="security-lead">
-          Up to <strong>{{ devicesMaxSessions }}</strong> devices can be signed in at once (
-          {{ signedInDeviceCount }} signed in now). Device name, OS, form factor, and browser are
-          collected when you sign in (with consent) or register this device below.
-        </p>
-        <div class="devices-register-card">
-          <h3 class="devices-register-title">This device</h3>
-          <p class="cred-hint">
-            {{ formatDeviceTypeLabel(currentDeviceInfo) }} ·
-            {{ currentDeviceInfo.os }} · {{ currentDeviceInfo.browser }}
-          </p>
-          <label class="lbl" for="device-name-draft">Device name</label>
-          <input
-            id="device-name-draft"
-            v-model="deviceNameDraft"
-            class="inp tap"
-            type="text"
-            maxlength="80"
-            autocomplete="off"
-            placeholder="e.g. Work laptop"
-          />
-          <button
-            type="button"
-            class="btn secondary tap"
-            :disabled="deviceRegisterBusy"
-            @click="registerCurrentDevice"
-          >
-            {{ deviceRegisterBusy ? 'Registering…' : 'Register / update this device' }}
-          </button>
-        </div>
-        <p v-if="devicesLoading" class="cred-msg">Loading…</p>
-        <p v-else-if="devicesError" class="cred-msg cred-msg--error">{{ devicesError }}</p>
-        <p v-if="devicesMsg" class="cred-msg">{{ devicesMsg }}</p>
-        <div v-if="!devicesLoading" class="devices-table-wrap">
-          <table v-if="registeredDevices.length" class="devices-table">
-            <thead>
-              <tr>
-                <th scope="col">Device</th>
-                <th scope="col">Type</th>
-                <th scope="col">Last seen</th>
-                <th scope="col">Status</th>
-                <th scope="col">Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr v-for="device in registeredDevices" :key="device.id">
-                <td>
-                  <input
-                    v-model="device.name"
-                    class="inp devices-name-inp tap"
-                    type="text"
-                    maxlength="80"
-                    :disabled="devicesBusyId === device.id"
-                    @change="saveDeviceName(device)"
-                  />
-                  <span class="devices-meta">{{ device.os }} · {{ device.browser }}</span>
-                </td>
-                <td>{{ formatDeviceTypeLabel(device) }}</td>
-                <td>{{ formatDeviceWhen(device.lastSeenAt) }}</td>
-                <td>
-                  <span v-if="device.isCurrent" class="devices-badge devices-badge--current"
-                    >This device</span
-                  >
-                  <span v-else-if="device.isSignedIn" class="devices-badge devices-badge--signed-in"
-                    >Signed in</span
-                  >
-                  <span v-else class="devices-badge">Registered</span>
-                </td>
-                <td class="devices-actions">
-                  <button
-                    v-if="device.isSignedIn && !device.isCurrent"
-                    type="button"
-                    class="btn ghost tap"
-                    :disabled="devicesBusyId === device.id"
-                    @click="signOutDevice(device)"
-                  >
-                    Sign out
-                  </button>
-                  <button
-                    v-if="!device.isCurrent"
-                    type="button"
-                    class="btn ghost tap"
-                    :disabled="devicesBusyId === device.id"
-                    @click="removeDevice(device)"
-                  >
-                    Remove
-                  </button>
-                  <span v-if="device.isCurrent" class="devices-meta">Use Sign out below</span>
-                </td>
-              </tr>
-            </tbody>
-          </table>
-          <p v-else class="security-empty">No devices registered yet. Register this device above.</p>
-        </div>
-        <button type="button" class="btn ghost tap" @click="loadDevices">Refresh</button>
-      </SettingsSection>
     </main>
 
     <main v-show="settingsTab === 'security'" class="stack security-panel">
