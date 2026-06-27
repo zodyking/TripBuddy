@@ -42,7 +42,8 @@ test('parseDevicePayload validates device id and normalizes fields', () => {
   const payload = parseDevicePayload({
     deviceId: 'abc12345-device',
     name: 'Work laptop',
-    os: 'macOS',
+    os: 'macOS 14',
+    deviceClass: 'mac',
     formFactor: 'desktop',
     browser: 'Safari',
     userAgent: 'Mozilla/5.0',

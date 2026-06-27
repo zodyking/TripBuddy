@@ -5,7 +5,7 @@ import { getAuthStatus, postAuthLogin, postLoginAccessLog } from '../api.js'
 import { hydrateAllTrafficKeysFromServer } from '../stores/trafficTileKey.js'
 import LoginAckMap from '../components/LoginAckMap.vue'
 import { useMapVehicleId } from '../composables/useMapVehicleId.js'
-import { collectDeviceInfo, formatFormFactorLabel } from '../utils/deviceInfo.js'
+import { collectDeviceInfo, formatDeviceTypeLabel } from '../utils/deviceInfo.js'
 
 const ACCESS_ACK_KEY = 'fedextool-login-access-ack-v3'
 
@@ -53,8 +53,8 @@ function formatDeviceLabel(d) {
   const name = String(d?.name ?? 'Device').trim() || 'Device'
   const os = String(d?.os ?? '').trim()
   const browser = String(d?.browser ?? '').trim()
-  const form = formatFormFactorLabel(d?.formFactor)
-  const bits = [form, os, browser].filter(Boolean)
+  const type = formatDeviceTypeLabel(d)
+  const bits = [type, os, browser].filter(Boolean)
   return bits.length ? `${name} (${bits.join(' · ')})` : name
 }
 

@@ -16,6 +16,7 @@ const DEVICE_ID_RE = /^[a-zA-Z0-9._-]{8,128}$/
  * @property {string} name
  * @property {string} os
  * @property {'mobile' | 'desktop' | 'tablet'} formFactor
+ * @property {string} [deviceClass]
  * @property {string} browser
  * @property {string|null} userAgent
  * @property {string} registeredAt
@@ -65,7 +66,15 @@ function normalizeFormFactor(v) {
 
 /**
  * @param {unknown} body
- * @returns {{ deviceId: string, name: string, os: string, formFactor: 'mobile' | 'desktop' | 'tablet', browser: string, userAgent: string | null }}
+ * @returns {{
+ *   deviceId: string,
+ *   name: string,
+ *   os: string,
+ *   formFactor: 'mobile' | 'desktop' | 'tablet',
+ *   deviceClass: string,
+ *   browser: string,
+ *   userAgent: string | null,
+ * }}
  */
 export function parseDevicePayload(body) {
   const b = body && typeof body === 'object' ? /** @type {Record<string, unknown>} */ (body) : {}
@@ -73,9 +82,12 @@ export function parseDevicePayload(body) {
   if (!DEVICE_ID_RE.test(deviceId)) {
     throw new Error('Invalid device id')
   }
+  const deviceClass = String(b.deviceClass ?? '').trim().slice(0, 32)
   const os = String(b.os ?? 'Unknown OS').trim().slice(0, 80) || 'Unknown OS'
   const browser = String(b.browser ?? 'Unknown browser').trim().slice(0, 80) || 'Unknown browser'
-  const defaultName = `${browser} on ${os}`.slice(0, 80)
+  const defaultName = deviceClass
+    ? `${browser} · ${deviceClass}`.slice(0, 80)
+    : `${browser} on ${os}`.slice(0, 80)
   const nameRaw = String(b.name ?? '').trim()
   const name = (nameRaw || defaultName).slice(0, 80)
   const ua = typeof b.userAgent === 'string' ? b.userAgent.slice(0, 512) : null
@@ -84,6 +96,7 @@ export function parseDevicePayload(body) {
     name,
     os,
     formFactor: normalizeFormFactor(b.formFactor),
+    deviceClass,
     browser,
     userAgent: ua,
   }
@@ -134,6 +147,7 @@ export async function upsertRegisteredDevice(accountKey, payload, meta = {}) {
     name: payload.name,
     os: payload.os,
     formFactor: payload.formFactor,
+    ...(payload.deviceClass ? { deviceClass: payload.deviceClass } : {}),
     browser: payload.browser,
     userAgent: payload.userAgent,
     registeredAt: idx >= 0 ? list[idx].registeredAt : now,
@@ -185,6 +199,7 @@ export async function listActiveSessionDevices(accountKey, currentSessionId = ''
         deviceId: dev.id,
         name: dev.name,
         os: dev.os,
+        deviceClass: dev.deviceClass ?? null,
         formFactor: dev.formFactor,
         browser: dev.browser,
         lastSeenAt: dev.lastSeenAt,
@@ -196,6 +211,7 @@ export async function listActiveSessionDevices(accountKey, currentSessionId = ''
       deviceId: entry?.deviceId ?? null,
       name: 'Unknown device',
       os: '',
+      deviceClass: null,
       formFactor: 'desktop',
       browser: '',
       lastSeenAt: null,

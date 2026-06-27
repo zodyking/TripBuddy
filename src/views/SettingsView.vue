@@ -50,6 +50,7 @@ import {
 import {
   collectDeviceInfo,
   formatFormFactorLabel,
+  formatDeviceTypeLabel,
   getLocalDeviceName,
   setLocalDeviceName,
 } from '../utils/deviceInfo.js'
@@ -352,6 +353,7 @@ async function loadSecurityAccessLog() {
  *   name: string,
  *   os: string,
  *   formFactor: string,
+ *   deviceClass?: string,
  *   browser: string,
  *   registeredAt: string,
  *   lastSeenAt: string,
@@ -3383,7 +3385,7 @@ onUnmounted(() => {
         <div class="devices-register-card">
           <h3 class="devices-register-title">This device</h3>
           <p class="cred-hint">
-            {{ formatFormFactorLabel(currentDeviceInfo.formFactor) }} ·
+            {{ formatDeviceTypeLabel(currentDeviceInfo) }} ·
             {{ currentDeviceInfo.os }} · {{ currentDeviceInfo.browser }}
           </p>
           <label class="lbl" for="device-name-draft">Device name</label>
@@ -3432,7 +3434,7 @@ onUnmounted(() => {
                   />
                   <span class="devices-meta">{{ device.os }} · {{ device.browser }}</span>
                 </td>
-                <td>{{ formatFormFactorLabel(device.formFactor) }}</td>
+                <td>{{ formatDeviceTypeLabel(device) }}</td>
                 <td>{{ formatDeviceWhen(device.lastSeenAt) }}</td>
                 <td>
                   <span v-if="device.isCurrent" class="devices-badge devices-badge--current"
