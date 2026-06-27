@@ -1,17 +1,42 @@
-/** Live EventSource connections keyed by session id (for SESSION_REVOKED on login elsewhere). */
+/** Live EventSource connections keyed by session id. */
 
-/** @type {Map<string, (payload: object) => void>} */
+/**
+ * @typedef {{ send: (payload: object) => void, accountKey: string | null }} SseConnection
+ */
+
+/** @type {Map<string, SseConnection>} */
 const sendBySessionId = new Map()
 
 /**
  * @param {string} sessionId
+ * @param {string | null} accountKey
  * @param {(payload: object) => void} send
  * @returns {() => void} unregister
  */
-export function registerSseConnection(sessionId, send) {
-  sendBySessionId.set(sessionId, send)
+export function registerSseConnection(sessionId, accountKey, send) {
+  sendBySessionId.set(sessionId, {
+    send,
+    accountKey: accountKey && typeof accountKey === 'string' ? accountKey : null,
+  })
   return () => {
     sendBySessionId.delete(sessionId)
+  }
+}
+
+/**
+ * @param {string} accountKey
+ * @param {object} payload
+ */
+export function broadcastToAccount(accountKey, payload) {
+  const ak = String(accountKey ?? '').trim()
+  if (!ak) return
+  for (const entry of sendBySessionId.values()) {
+    if (entry.accountKey !== ak) continue
+    try {
+      entry.send(payload)
+    } catch {
+      /* client gone */
+    }
   }
 }
 
@@ -20,10 +45,10 @@ export function registerSseConnection(sessionId, send) {
  * @param {string} sessionId
  */
 export function notifySessionRevoked(sessionId) {
-  const send = sendBySessionId.get(sessionId)
-  if (!send) return
+  const entry = sendBySessionId.get(sessionId)
+  if (!entry) return
   try {
-    send({
+    entry.send({
       type: 'session',
       code: 'SESSION_REVOKED',
       message: 'Signed in on another device',

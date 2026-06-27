@@ -64,6 +64,11 @@ import {
   touchCurrentDevice,
 } from './device-store.mjs'
 import { registerSseConnection } from './session-sse.mjs'
+import {
+  publishAutomationStart,
+  publishAutomationComplete,
+  publishLinehaulRefresh,
+} from './automation-sync.mjs'
 import { verifyAppLoginWithBearerCapture, tryFedexBearerReuseLogin } from './auth-probe.mjs'
 import {
   requestAsyncLocalStorage,
@@ -1308,6 +1313,7 @@ app.get('/api/events', async (req, reply) => {
     return reply.code(503).send({ error: 'Auth disabled' })
   }
   const sid = req.cookies?.[COOKIE_NAME]
+  const accountKey = sid ? getSessionAccountKey(sid) : null
   if (!isValidSession(sid)) {
     return reply.code(401).send({ error: 'Unauthorized', code: 'AUTH_REQUIRED' })
   }
@@ -1340,7 +1346,7 @@ app.get('/api/events', async (req, reply) => {
   logBus.on('entry', onEntry)
   let unregisterSse = () => {}
   if (sid) {
-    unregisterSse = registerSseConnection(sid, send)
+    unregisterSse = registerSseConnection(sid, accountKey, send)
   }
   req.raw.on('close', () => {
     logBus.off('entry', onEntry)
@@ -3228,6 +3234,9 @@ app.post('/api/automations/:id/duplicate', async (req, reply) => {
 
 app.post('/api/automations/:id/run', async (req, reply) => {
   const { headless = true, slowMo = 0, tripData = {}, preempt = false } = req.body ?? {}
+  const ak = String(req.credentialAccountKey || getDataAccountKey() || '').trim()
+  const deviceId =
+    typeof req.body?.deviceId === 'string' ? req.body.deviceId.trim().slice(0, 128) : ''
   if (isAnyPlaywrightRunnerBusy()) {
     if (!preempt) {
       return reply.code(409).send({ error: 'Runner busy' })
@@ -3240,12 +3249,64 @@ app.post('/api/automations/:id/run', async (req, reply) => {
   }
   const auto = await getAutomation(req.params.id)
   if (!auto) return reply.code(404).send({ error: 'Automation not found' })
+  const pendingRunId = `auto-${Date.now()}`
+  if (ak) {
+    publishAutomationStart(ak, {
+      runId: pendingRunId,
+      automationId: auto.id,
+      automationName: auto.name || auto.manualButtonLabel || 'Quick action',
+      deviceId,
+    })
+  }
   try {
     const result = await runAutomation(auto, { headless, slowMo, tripData })
+    const runId = typeof result.runId === 'string' ? result.runId : pendingRunId
+    if (ak) {
+      publishAutomationComplete(ak, {
+        runId,
+        automationId: auto.id,
+        automationName: auto.name || auto.manualButtonLabel || 'Quick action',
+        deviceId,
+        ok: result.ok === true,
+        error: typeof result.error === 'string' ? result.error : '',
+        variables:
+          result.variables && typeof result.variables === 'object' ? result.variables : {},
+      })
+      publishLinehaulRefresh(ak, { reason: 'automation', runId })
+      const msg = result.ok
+        ? `${auto.manualButtonLabel || auto.name || 'Quick action'} completed`
+        : typeof result.error === 'string' && result.error.trim()
+          ? result.error.trim()
+          : 'Quick action failed'
+      void publishInAppForAccount(ak, {
+        type: result.ok ? 'success' : 'error',
+        message: msg,
+        source: 'Quick action',
+        extra: { runId, automationId: auto.id, deviceId },
+      })
+    }
     return result
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e)
     emitLog('error', msg)
+    if (ak) {
+      publishAutomationComplete(ak, {
+        runId: pendingRunId,
+        automationId: auto.id,
+        automationName: auto.name || auto.manualButtonLabel || 'Quick action',
+        deviceId,
+        ok: false,
+        error: msg,
+        variables: {},
+      })
+      publishLinehaulRefresh(ak, { reason: 'automation', runId: pendingRunId })
+      void publishInAppForAccount(ak, {
+        type: 'error',
+        message: msg,
+        source: 'Quick action',
+        extra: { runId: pendingRunId, automationId: auto.id, deviceId },
+      })
+    }
     return reply.code(500).send({ error: msg })
   }
 })

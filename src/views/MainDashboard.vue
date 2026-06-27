@@ -28,6 +28,7 @@ import {
   deleteDollyNumber,
   getTrailerNumbers,
   putTrailerNumber,
+  postInAppNotification,
 } from '../api.js'
 import {
   linehaulTractorBody,
@@ -71,8 +72,10 @@ import {
   liveLogEntries,
   registerAssignmentListener,
   registerSessionListener,
+  registerAutomationSyncListener,
   reconnectLiveLogStream,
 } from '../stores/liveLogStore.js'
+import { getOrCreateDeviceId } from '../utils/deviceInfo.js'
 import { pushInAppFromStream } from '../stores/inAppNotificationsStore.js'
 import { formatRunErrorForUser } from '../utils/runErrorFormat.js'
 import { isCheckInLocationMismatchMessage } from '../utils/checkInLocationMismatch.js'
@@ -247,6 +250,26 @@ const showAutomationPreviewFocus = computed(
 
 const quickActionAutomations = ref([])
 const runningAutomationId = ref(null)
+const localDeviceId = getOrCreateDeviceId()
+/** Remote quick action started on another signed-in device. */
+const remoteAutomationRun = ref(
+  /** @type {{ runId: string, automationId: string, deviceId: string, startedAt: number } | null} */ (
+    null
+  ),
+)
+
+function isQuickActionRunning(autoId) {
+  if (runningAutomationId.value === autoId) return true
+  return remoteAutomationRun.value?.automationId === autoId
+}
+
+function isWatchingAutomationRun() {
+  return runningAutomationId.value != null || remoteAutomationRun.value != null
+}
+
+function isLocalAutomationController() {
+  return runningAutomationId.value != null
+}
 
 const tripStatusUi = computed(() => {
   const phase = tripPhase.value
@@ -1168,19 +1191,104 @@ async function loadQuickActions() {
   }
 }
 
-/** Quick action outcomes go to the header notification inbox (no page overlay). */
-function notifyQuickActionInApp(message, kind = 'info') {
+/** Quick action outcomes go to the header notification inbox (synced across devices). */
+async function notifyQuickActionInApp(message, kind = 'info') {
   const raw = typeof message === 'string' ? message : String(message)
   const m = (kind === 'error' ? formatRunErrorForUser(raw) : raw).trim()
   if (!m) return
-  pushInAppFromStream({
-    id: `qa-${Date.now()}-${Math.random().toString(36).slice(2, 11)}`,
-    message: m,
-    type: kind,
-    source: 'Quick action',
-    ts: Date.now(),
-    read: false,
-  })
+  try {
+    await postInAppNotification({ type: kind, message: m, source: 'Quick action' })
+  } catch {
+    pushInAppFromStream({
+      id: `qa-${Date.now()}-${Math.random().toString(36).slice(2, 11)}`,
+      message: m,
+      type: kind,
+      source: 'Quick action',
+      ts: Date.now(),
+      read: false,
+    })
+  }
+}
+
+/**
+ * @param {unknown} variables
+ * @returns {'re-checkin' | 'cancelled' | 'ok' | ''}
+ */
+function applyAutomationOutcomeTts(variables) {
+  if (!variables || typeof variables !== 'object') return ''
+  const v = /** @type {Record<string, unknown>} */ (variables)
+  const inspectReCheckin = v._inspectCheckoutContinue
+  if (
+    inspectReCheckin &&
+    typeof inspectReCheckin === 'object' &&
+    /** @type {{ requiresReCheckin?: boolean }} */ (inspectReCheckin).requiresReCheckin === true
+  ) {
+    announceInspectCheckoutNewTripDetails()
+    return 're-checkin'
+  }
+  if (v._inspectCheckoutCancelled === true) {
+    announceInspectCheckoutCancelled()
+    return 'cancelled'
+  }
+  const arrivePayload = v._arrivePayload
+  if (arrivePayload && typeof arrivePayload === 'object') {
+    if (/** @type {{ alreadyArrivedByGeofence?: boolean }} */ (arrivePayload).alreadyArrivedByGeofence === true) {
+      announceGeofenceArrival()
+    } else {
+      announceArrivalSuccess()
+    }
+  }
+  const checkInPayload = v._checkInPayload
+  if (checkInPayload && typeof checkInPayload === 'object') {
+    const c = /** @type {Record<string, unknown>} */ (checkInPayload)
+    if (c.checkInNewTripFound === true) {
+      announceCheckInNewTrip()
+    } else if (c.tripReadyAcknowledged === true) {
+      announceCheckInTripReady()
+    } else if (c.missionComplete === true || c.signedOut === true) {
+      announceCheckInSuccess()
+    } else if (c.success === false) {
+      announceCheckInFail()
+    }
+  }
+  return 'ok'
+}
+
+function handleAutomationSyncEvent(data) {
+  if (data?.type === 'linehaul' && data.code === 'REFRESH') {
+    void refreshLinehaulApis()
+    return
+  }
+  if (data?.type !== 'automation') return
+  if (data.code === 'AUTOMATION_START') {
+    const deviceId = String(data.deviceId ?? '')
+    if (deviceId && deviceId === localDeviceId) return
+    remoteAutomationRun.value = {
+      runId: String(data.runId ?? ''),
+      automationId: String(data.automationId ?? ''),
+      deviceId,
+      startedAt: Date.now(),
+    }
+    runStartTs.value = Date.now()
+    streamBannerHandledKey.value = null
+    return
+  }
+  if (data.code === 'AUTOMATION_COMPLETE') {
+    const deviceId = String(data.deviceId ?? '')
+    const wasLocal = runningAutomationId.value != null
+    const wasRemote = remoteAutomationRun.value != null
+    if (!wasLocal) {
+      applyAutomationOutcomeTts(data.variables)
+    }
+    remoteAutomationRun.value = null
+    if (!wasLocal) {
+      runStartTs.value = null
+    }
+    void refreshLinehaulApis()
+    if (wasRemote && deviceId && deviceId !== localDeviceId) {
+      /* passive device: server already published inbox notification */
+    }
+  }
 }
 
 function dismissInBrowserAutomationPrompts() {
@@ -1248,7 +1356,12 @@ async function runQuickAction(auto) {
     }
     const legSeq = currentTripLegSeq.value
     if (legSeq) tripData.dailyTripLegSequence = String(legSeq)
-    const result = await runAutomation(auto.id, { headless: true, tripData, preempt: true })
+    const result = await runAutomation(auto.id, {
+      headless: true,
+      tripData,
+      preempt: true,
+      deviceId: localDeviceId,
+    })
     if (quickActionRunGeneration.value !== myGen) return { ok: false, skipped: true }
     const inspectReCheckin = result.variables?._inspectCheckoutContinue
     if (inspectReCheckin?.requiresReCheckin === true) {
@@ -1263,37 +1376,12 @@ async function runQuickAction(auto) {
     }
     if (result.ok) {
       if (result.variables?._inspectCheckoutCancelled === true) {
-        notifyQuickActionInApp('No trip to inspect', 'info')
         announceInspectCheckoutCancelled()
         return { ok: true }
       }
-      const arrivePayload = result.variables?._arrivePayload
-      if (arrivePayload && typeof arrivePayload === 'object') {
-        if (arrivePayload.alreadyArrivedByGeofence === true) {
-          announceGeofenceArrival()
-        } else {
-          announceArrivalSuccess()
-        }
-      }
-      const checkInPayload = result.variables?._checkInPayload
-      if (checkInPayload && typeof checkInPayload === 'object') {
-        if (checkInPayload.checkInNewTripFound === true) {
-          announceCheckInNewTrip()
-        } else if (checkInPayload.tripReadyAcknowledged === true) {
-          announceCheckInTripReady()
-        } else if (
-          checkInPayload.missionComplete === true ||
-          checkInPayload.signedOut === true
-        ) {
-          announceCheckInSuccess()
-        } else if (checkInPayload.success === false) {
-          announceCheckInFail()
-        }
-      }
-      notifyQuickActionInApp(`${auto.manualButtonLabel || auto.name} completed`, 'success')
+      applyAutomationOutcomeTts(result.variables)
       return { ok: true }
     }
-    notifyQuickActionInApp(result.error || 'Failed', 'error')
     return { ok: false }
   } catch (e) {
     if (quickActionRunGeneration.value === myGen) {
@@ -1417,7 +1505,7 @@ const {
     if (!b || typeof b !== 'object' || Array.isArray(b)) return false
     return true
   },
-  isAutomationRunning: () => runningAutomationId.value != null,
+  isAutomationRunning: () => isWatchingAutomationRun(),
   onYes: runLateNightArriveThenCheckIn,
 })
 
@@ -1435,7 +1523,7 @@ useDestinationAutoArriveCheckIn({
     if (!b || typeof b !== 'object' || Array.isArray(b)) return false
     return true
   },
-  isAutomationRunning: () => runningAutomationId.value != null,
+  isAutomationRunning: () => isWatchingAutomationRun(),
   runArriveThenCheckIn: helpersProxRunArriveChain,
   notifyInApp: (msg, kind) => notifyQuickActionInApp(msg, kind || 'info'),
   remainingDistM: tripProgressDistM,
@@ -1612,7 +1700,7 @@ async function saveInspectField() {
 }
 
 function handleInspectConfirmFromLiveLog() {
-  if (!runningAutomationId.value) return
+  if (!isWatchingAutomationRun() || !isLocalAutomationController()) return
   const start = runStartTs.value
   if (start == null) return
   const list = liveLogEntries.value
@@ -1635,7 +1723,7 @@ function handleInspectConfirmFromLiveLog() {
 }
 
 function handleInspectFieldFromLiveLog() {
-  if (!runningAutomationId.value) return
+  if (!isWatchingAutomationRun() || !isLocalAutomationController()) return
   const start = runStartTs.value
   if (start == null) return
   const list = liveLogEntries.value
@@ -1658,7 +1746,7 @@ function handleInspectFieldFromLiveLog() {
 }
 
 function handleCheckInBannerFromLiveLog() {
-  if (!runningAutomationId.value) return
+  if (!isWatchingAutomationRun()) return
   const start = runStartTs.value
   if (start == null) return
   const list = liveLogEntries.value
@@ -2318,6 +2406,7 @@ async function pollAutomationPreview() {
 let unregisterRecover = () => {}
 let unregisterAssignment = () => {}
 let unregisterSession = () => {}
+let unregisterAutomationSync = () => {}
 
 onMounted(async () => {
   unregisterAssignment = registerAssignmentListener((data) => {
@@ -2325,6 +2414,7 @@ onMounted(async () => {
       void loadAssignment()
     }
   })
+  unregisterAutomationSync = registerAutomationSyncListener(handleAutomationSyncEvent)
   unregisterSession = registerSessionListener((data) => {
     if (data?.code !== 'SESSION_REVOKED') return
     const base = import.meta.env.BASE_URL || '/'
@@ -2372,6 +2462,7 @@ onUnmounted(() => {
   clearTripInAppTracking()
   unregisterAssignment()
   unregisterSession()
+  unregisterAutomationSync()
   unregisterRecover()
   if (previewPollTimer) {
     clearInterval(previewPollTimer)
@@ -3504,7 +3595,7 @@ onUnmounted(() => {
           class="btn primary tap quick-action-btn"
           @click="runQuickAction(auto)"
         >
-          {{ runningAutomationId === auto.id ? 'Running…' : (auto.manualButtonLabel || auto.name) }}
+          {{ isQuickActionRunning(auto.id) ? 'Running…' : (auto.manualButtonLabel || auto.name) }}
         </button>
       </div>
     </section>

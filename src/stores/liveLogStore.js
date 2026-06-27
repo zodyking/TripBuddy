@@ -76,6 +76,9 @@ const assignmentListeners = new Set()
 /** @type {Set<(data: object) => void>} */
 const sessionListeners = new Set()
 
+/** @type {Set<(data: object) => void>} */
+const automationSyncListeners = new Set()
+
 /** @type {EventSource | null} */
 let eventSource = null
 
@@ -136,6 +139,26 @@ export function registerSessionListener(fn) {
   return () => sessionListeners.delete(fn)
 }
 
+/**
+ * Automation + linehaul sync across signed-in devices (same account).
+ * @param {(data: object) => void} fn
+ * @returns {() => void}
+ */
+export function registerAutomationSyncListener(fn) {
+  automationSyncListeners.add(fn)
+  return () => automationSyncListeners.delete(fn)
+}
+
+function notifyAutomationSync(data) {
+  for (const fn of automationSyncListeners) {
+    try {
+      fn(data)
+    } catch {
+      /* ignore */
+    }
+  }
+}
+
 function notifySessionListeners(data) {
   for (const fn of sessionListeners) {
     try {
@@ -173,6 +196,12 @@ export function connectLiveLogStream() {
       }
       if (data.type === 'session') {
         notifySessionListeners(data)
+      }
+      if (
+        data.type === 'automation' ||
+        (data.type === 'linehaul' && data.code === 'REFRESH')
+      ) {
+        notifyAutomationSync(data)
       }
       if (data.type === 'inapp' && data.id) {
         const msg = typeof data.message === 'string' ? data.message : ''
