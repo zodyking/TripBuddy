@@ -309,7 +309,7 @@ export function maybeAnnounceNewTrip(tripsBody, noActiveTrip) {
 
   const o = toSpeechPhrase(origin)
   const d = toSpeechPhrase(destination)
-  const text = `New trip ready from ${o} to ${d}.`
+  const text = `New trip from ${o} to ${d}.`
   const bell = mode === 'both'
 
   if (!gestureUnlocked) {

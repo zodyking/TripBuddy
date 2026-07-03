@@ -1814,30 +1814,21 @@ watch(
 
 /** Track last fingerprint to prevent false TTS triggers */
 let _lastVoiceTriggerFingerprint = ''
+let _tripVoiceWatcherReady = false
 
 watch(
   [() => stableTripState.value._fingerprint, linehaulTripsNoActive, prePlanTripSnapshot, linehaulLastFetchAt],
   ([newFp]) => {
-    // Only process if fingerprint actually changed (or on first load)
-    const isFirstTripSeed = !_lastVoiceTriggerFingerprint
-    if (newFp && newFp === _lastVoiceTriggerFingerprint) {
-      return // Same data, skip TTS
+    const prevFp = _lastVoiceTriggerFingerprint
+    if (newFp && newFp === prevFp) {
+      return
     }
     _lastVoiceTriggerFingerprint = newFp || ''
 
-    if (isFirstTripSeed) {
-      seedTripVoiceFromSnapshot(
-        linehaulTripsBody.value,
-        linehaulTripsNoActive.value,
-        prePlanTripSnapshot.value,
-      )
-      seedTripInAppFromSnapshot(
-        linehaulTripsBody.value,
-        linehaulTripsNoActive.value,
-        prePlanTripSnapshot.value,
-        tripPhase.value,
-      )
-    } else {
+    const isFirstObservation = !_tripVoiceWatcherReady
+    _tripVoiceWatcherReady = true
+
+    if (!isFirstObservation) {
       maybeAnnounceNewTrip(
         linehaulTripsBody.value,
         linehaulTripsNoActive.value,
@@ -1848,17 +1839,19 @@ watch(
         linehaulTripsNoActive.value,
       )
       maybeNotifyPrePlanTripInApp(prePlanTripSnapshot.value)
-      seedTripVoiceFromSnapshot(
-        linehaulTripsBody.value,
-        linehaulTripsNoActive.value,
-        prePlanTripSnapshot.value,
-      )
-      seedTripInAppFromSnapshot(
-        linehaulTripsBody.value,
-        linehaulTripsNoActive.value,
-        prePlanTripSnapshot.value,
-      )
     }
+
+    seedTripVoiceFromSnapshot(
+      linehaulTripsBody.value,
+      linehaulTripsNoActive.value,
+      prePlanTripSnapshot.value,
+    )
+    seedTripInAppFromSnapshot(
+      linehaulTripsBody.value,
+      linehaulTripsNoActive.value,
+      prePlanTripSnapshot.value,
+      tripPhase.value,
+    )
     syncTripVoiceUnlockHint()
   },
 )

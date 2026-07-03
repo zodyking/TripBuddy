@@ -3378,11 +3378,11 @@ onUnmounted(() => {
                 <input type="checkbox" :checked="alertPrefs.tripReady" @change="updateAlertPref('tripReady', $event.target.checked)" />
                 <span class="toggle-slider"></span>
               </label>
-              <span class="audio-row-label">New trip ready</span>
+              <span class="audio-row-label">New trip</span>
               <button
                 type="button"
                 class="audio-test-btn tap"
-                @click="previewTripAlertSample('New trip ready from Example Origin to Example Destination.')"
+                @click="previewTripAlertSample('New trip from Example Origin to Example Destination.')"
               >
                 Test
               </button>
