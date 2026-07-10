@@ -53,6 +53,13 @@ import {
   FEDERAL_HOLIDAY_PDF_NOTE,
   tripTouchesFederalHoliday,
 } from '../utils/federalHolidayMileage.js'
+import {
+  PAY_ROUND_BAND_MIN,
+  PAY_ROUND_BAND_MAX,
+  PAY_ROUND_TO_MI,
+  billableMilesForPayEstimate,
+  isPayMileageRounded,
+} from '../utils/payMileageRounding.js'
 
 const HistoryPdfJsViewer = defineAsyncComponent(() => import('../components/HistoryPdfJsViewer.vue'))
 
@@ -453,16 +460,13 @@ function mileageHeaderLine(sum, deliveredTrips) {
 }
 
 /**
- * Trip header: paid miles value only (numeric string; 0 when unknown).
+ * Trip header: billable miles for pay (34–49 → 50); raw paid mileage block unchanged below.
  * @param {LedgerEntry} e
  */
 function tripHeaderMilesValue(e) {
   const paid = tripPaidMiles(e)
   if (paid == null) return '0'
-  if (e.federalHolidayMileage15xApproved === true) {
-    return formatMilesSum(billableMilesForLedgerEntry(e, paid))
-  }
-  return formatMilesSum(paid)
+  return formatMilesSum(billableMilesForLedgerEntry(e, paid))
 }
 
 /**
@@ -511,24 +515,8 @@ function tripTrailersDecorated(e) {
   }))
 }
 
-/** Paid miles in [PAY_ROUND_BAND_MIN, PAY_ROUND_BAND_MAX] count as {@link PAY_ROUND_TO_MI} mi for pay estimate. */
-const PAY_ROUND_BAND_MIN = 34
-const PAY_ROUND_BAND_MAX = 50
-const PAY_ROUND_TO_MI = 50
-
 /**
- * Billable miles for the pay estimate ($1 / mi rule).
- * Only 34–50 mi paid bands up to 50; below 34 unchanged; above 50 unchanged.
- * @param {number} paidMi
- */
-function billableMilesForPayEstimate(paidMi) {
-  if (!Number.isFinite(paidMi)) return 0
-  if (paidMi >= PAY_ROUND_BAND_MIN && paidMi <= PAY_ROUND_BAND_MAX) return PAY_ROUND_TO_MI
-  return paidMi
-}
-
-/**
- * Billable miles for pay estimate / PDF (34–50 band, then optional federal-holiday 1.5×).
+ * Billable miles for pay estimate / PDF (34–49 band, then optional federal-holiday 1.5×).
  * @param {LedgerEntry} e
  * @param {number | null} paidMi
  */
@@ -576,20 +564,14 @@ function historyTripDayGroupKey(tMs) {
 }
 
 /**
- * Miles for week/month summary headers: matches PDF billable rule in pay schedule mode.
+ * Miles for week/month summary headers: billable rule (34–49 → 50, then federal-holiday 1.5×).
  * @param {LedgerEntry} e
  * @returns {number | null}
  */
 function tripMilesForHistoryTotals(e) {
   const raw = tripPaidMiles(e)
   if (raw == null) return null
-  if (historyGroupingOpts.value.groupLabelMode === 'fedexPaySchedule') {
-    return billableMilesForLedgerEntry(e, raw)
-  }
-  if (e.federalHolidayMileage15xApproved === true) {
-    return billableMilesForLedgerEntry(e, raw)
-  }
-  return raw
+  return billableMilesForLedgerEntry(e, raw)
 }
 
 /**
@@ -807,7 +789,7 @@ function computeWeekPayEstimate(items) {
       tractorNumber: tripPdfTractor(e),
       paidMi,
       billableMi,
-      rounded: base >= PAY_ROUND_BAND_MIN && base <= PAY_ROUND_BAND_MAX,
+      rounded: isPayMileageRounded(base),
       equipmentPdfBlock: formatTripEquipmentPdfBlock(e.tripDetails),
     })
   }
