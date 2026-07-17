@@ -235,6 +235,7 @@ import {
 import {
   linehaulGet,
   linehaulTripStatusByReferenceId,
+  linehaulTripSessionGet,
   linehaulTripsGet,
   linehaulTransportationNetworkLocationGet,
   linehaulViewTripInfoDetailsGet,
@@ -2570,6 +2571,32 @@ app.get('/api/fedex/linehaul/driver', async (req, reply) => {
     })
   }
   const result = await linehaulGet('driver', driverId, bearer)
+  return reply.code(result.status).send({
+    ok: result.ok,
+    status: result.status,
+    body: result.body,
+  })
+})
+
+app.get('/api/fedex/linehaul/trip-session', async (req, reply) => {
+  const driverId =
+    typeof req.query?.driver === 'string' && req.query.driver.trim()
+      ? req.query.driver.trim()
+      : await getLinehaulDriverId()
+  if (!driverId || !DIGITS_RE.test(driverId)) {
+    return reply.code(400).send({
+      error:
+        'Set Username / Driver ID in Settings (digits only), or pass ?driver= for a one-off test.',
+    })
+  }
+  const bearer = await getDecryptedLinehaulBearer()
+  if (!bearer) {
+    return reply.code(401).send({
+      error:
+        'No FedEx Linehaul bearer token on file. Use Settings → Capture Linehaul token, or save a token under Driver Credentials.',
+    })
+  }
+  const result = await linehaulTripSessionGet(driverId, bearer)
   return reply.code(result.status).send({
     ok: result.ok,
     status: result.status,

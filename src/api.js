@@ -1037,6 +1037,48 @@ export async function fetchFedexLinehaulTripStatus(opts = {}) {
 }
 
 /**
+ * Driver trip session — returns `dailyTripLegSequence` while enroute (external dispatch).
+ * Never throws.
+ * @param {{ driver?: string }} [opts]
+ * @returns {{ ok: boolean, status: number, body?: unknown, error?: string }}
+ */
+export async function fetchFedexLinehaulTripSession(opts = {}) {
+  const q = new URLSearchParams()
+  if (opts.driver != null && String(opts.driver).trim() !== '') {
+    q.set('driver', String(opts.driver).trim())
+  }
+  const qs = q.toString()
+  const r = await apiFetch(
+    `/api/fedex/linehaul/trip-session${qs ? `?${qs}` : ''}`,
+  )
+  const text = await r.text()
+  let parsed = {}
+  try {
+    parsed = text ? JSON.parse(text) : {}
+  } catch {
+    parsed = { raw: text }
+  }
+  if (!r.ok) {
+    return {
+      ok: false,
+      status: r.status,
+      body: parsed.body,
+      error:
+        typeof parsed.error === 'string'
+          ? parsed.error
+          : `HTTP ${r.status}`,
+    }
+  }
+  return {
+    ok: parsed.ok !== false,
+    status: parsed.status ?? r.status,
+    body: parsed.body,
+    error:
+      typeof parsed.error === 'string' ? parsed.error : undefined,
+  }
+}
+
+/**
  * Planned mileage / routing for origin→destination org ids (`viewTripInfoDetails`).
  * Never throws.
  * @param {{ orgIdOrigin: string, orgIdDest: string, originId?: string }} opts

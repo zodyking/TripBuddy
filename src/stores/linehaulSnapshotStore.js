@@ -3,6 +3,7 @@ import {
   fetchFedexLinehaulTractor,
   fetchFedexLinehaulDriver,
   fetchFedexLinehaulTripStatus,
+  fetchFedexLinehaulTripSession,
   fetchFedexLinehaulTrips,
   getCredentials,
   getAssignment,
@@ -1646,14 +1647,35 @@ async function refreshLinehaulApisImpl(attempt) {
 
   /** @type {{ ok: boolean, status: number, body?: unknown, error?: string, noActiveTrip?: boolean } | null} */
   let tripsByLeg = null
-  if (seqForLeg) {
+
+  /** Externally dispatched trips (ENRT/DSPCH) are absent from the APRVD list — discover leg via trip-session. */
+  let seqForLegResolved = seqForLeg
+  /** @type {{ ok: boolean, status: number, body?: unknown, error?: string } | null} */
+  let tripSession = null
+  if (!seqForLegResolved && treatAsDispatchedPoll && driverId) {
+    tripSession = await fetchFedexLinehaulTripSession({ driver: driverId })
+    if (tripSession.ok && tripSession.body != null && typeof tripSession.body === 'object') {
+      const seqFromSession = tripBodyDailySeq(tripSession.body)
+      if (seqFromSession) {
+        seqForLegResolved = seqFromSession
+        lastDailyTripLegSequence.value = seqFromSession
+        pushLiveLog({
+          type: 'info',
+          message: `Discovered active trip leg ${seqFromSession} via trip-session (external dispatch).`,
+          ts: Date.now(),
+        })
+      }
+    }
+  }
+
+  if (seqForLegResolved) {
     const originId =
       tractorBody?.locationId != null &&
       String(tractorBody.locationId).trim() !== ''
         ? String(tractorBody.locationId).trim()
         : ''
     tripsByLeg = await fetchFedexLinehaulTrips({
-      dailyTripLegSequence: seqForLeg,
+      dailyTripLegSequence: seqForLegResolved,
       alreadyCalled: 'false',
       ...(originId ? { originId } : {}),
     })
@@ -1665,6 +1687,7 @@ async function refreshLinehaulApisImpl(attempt) {
       isAuthFailure(dr) ||
       isAuthFailure(trip) ||
       isAuthFailure(tripsAprvd) ||
+      (tripSession != null && isAuthFailure(tripSession)) ||
       (tripsByLeg != null && isAuthFailure(tripsByLeg)))
 
   if (authFailed) {

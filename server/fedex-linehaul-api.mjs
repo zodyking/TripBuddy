@@ -114,6 +114,40 @@ export async function linehaulTripStatusByReferenceId(referenceId, bearerToken) 
  * @param {string} bearerToken raw JWT
  * @param {{ originId?: string }} [opts] optional originId header (matches browser tab)
  */
+/**
+ * Active trip session for a driver (`GET …/trip-session/session/drivers/{driverId}`).
+ * Returns `dailyTripLegSequence` while enroute even when APRVD list is empty.
+ * @param {string} driverId digits only
+ * @param {string} bearerToken raw JWT (no "Bearer " prefix)
+ */
+export async function linehaulTripSessionGet(driverId, bearerToken) {
+  return withFedexLinehaulQuota(async () => {
+    const path = `${LINEHAUL_TRIP_BASE}/trip-session/session/drivers/${encodeURIComponent(driverId)}`
+    const res = await fetch(path, {
+      method: 'GET',
+      headers: {
+        Accept: 'application/json, text/plain, */*',
+        Authorization: `Bearer ${bearerToken}`,
+        Origin: ORIGIN,
+        Referer: `${ORIGIN}/`,
+      },
+    })
+    const text = await res.text()
+    let body
+    try {
+      body = text ? JSON.parse(text) : null
+    } catch {
+      body = { raw: text }
+    }
+    return {
+      ok: res.ok,
+      status: res.status,
+      headers: Object.fromEntries(res.headers.entries()),
+      body,
+    }
+  })
+}
+
 export async function linehaulTripsGet(queryString, bearerToken, opts = {}) {
   return withFedexLinehaulQuota(async () => {
   const qs = queryString.replace(/^\?/, '')
