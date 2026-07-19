@@ -43,6 +43,7 @@ import {
   linehaulLastFetchAt,
   linehaulFetching,
   linehaulAuthRecoveryInProgress,
+  linehaulRefreshPausedForQuickAction,
   linehaulLocationMatch,
   refreshLinehaulApis,
   tripPhase,
@@ -1306,6 +1307,21 @@ function dismissInBrowserAutomationPrompts() {
   inBrowserRetryRunId.value = null
 }
 
+/** Wait until Playwright is not running automations or Linehaul bearer capture. */
+async function waitForBrowserSessionIdle(maxWaitMs = 180_000) {
+  const deadline = Date.now() + maxWaitMs
+  while (Date.now() < deadline) {
+    try {
+      const health = await getHealth()
+      if (!health?.busy) return true
+    } catch {
+      /* API may be restarting */
+    }
+    await new Promise((resolve) => setTimeout(resolve, 250))
+  }
+  return false
+}
+
 /**
  * @returns {Promise<{ ok: boolean, skipped?: boolean }>}
  * `skipped` means this invocation was superseded (user started another quick action) or is otherwise benign to ignore.
@@ -1314,15 +1330,25 @@ async function runQuickAction(auto) {
   quickActionRunGeneration.value += 1
   const myGen = quickActionRunGeneration.value
 
-  dismissInBrowserAutomationPrompts()
   /* Cancel block + scenario runners, close browser, then start the newly tapped quick action. */
   try {
     await postCancelRun()
   } catch {
     /* no active run or server already idle */
   }
+  dismissInBrowserAutomationPrompts()
   clearAutomationPreviewNow()
 
+  if (!(await waitForBrowserSessionIdle())) {
+    if (quickActionRunGeneration.value !== myGen) return { ok: false, skipped: true }
+    notifyQuickActionInApp(
+      'Browser is still synchronizing with FedEx. Wait a moment and try again.',
+      'warning',
+    )
+    return { ok: false }
+  }
+
+  linehaulRefreshPausedForQuickAction.value = true
   runningAutomationId.value = auto.id
   runStartTs.value = Date.now()
   streamBannerHandledKey.value = null
@@ -1337,6 +1363,7 @@ async function runQuickAction(auto) {
       )
       return { ok: false }
     }
+    reconnectLiveLogStream()
     // Same equipment JSON as Trip Details cards on the home page
     const slideBody = tripDetailsBodyForSlide.value
     const tripData =
@@ -1390,6 +1417,7 @@ async function runQuickAction(auto) {
     }
     return { ok: false, skipped: true }
   } finally {
+    linehaulRefreshPausedForQuickAction.value = false
     if (quickActionRunGeneration.value === myGen) {
       runningAutomationId.value = null
       runStartTs.value = null

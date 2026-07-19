@@ -159,6 +159,7 @@ import {
 import {
   cancelAllPlaywrightRuns,
   isAnyPlaywrightRunnerBusy,
+  isBrowserSessionBusy,
   waitForPlaywrightIdle,
 } from './playwright/run-control.mjs'
 import { EMAIL_TEST_KINDS, sendTestEmailForKind } from './email-test-sender.mjs'
@@ -3119,7 +3120,7 @@ app.post('/api/run', async (req, reply) => {
 
 app.post('/api/run/cancel', async () => {
   cancelAllPlaywrightRuns()
-  const idle = await waitForPlaywrightIdle()
+  const idle = await waitForPlaywrightIdle(180_000)
   return { ok: true, idle }
 })
 
@@ -3273,12 +3274,12 @@ app.post('/api/automations/:id/run', async (req, reply) => {
   const ak = String(req.credentialAccountKey || getDataAccountKey() || '').trim()
   const deviceId =
     typeof req.body?.deviceId === 'string' ? req.body.deviceId.trim().slice(0, 128) : ''
-  if (isAnyPlaywrightRunnerBusy()) {
+  if (isBrowserSessionBusy()) {
     if (!preempt) {
       return reply.code(409).send({ error: 'Runner busy' })
     }
     cancelAllPlaywrightRuns()
-    const idle = await waitForPlaywrightIdle()
+    const idle = await waitForPlaywrightIdle(180_000)
     if (!idle) {
       return reply.code(503).send({ error: 'Runner still busy after cancel' })
     }

@@ -671,6 +671,29 @@ export const linehaulLastFetchAt = ref(null)
 export const linehaulFetching = ref(false)
 /** True while Playwright bearer capture runs after FedEx 401/403 (avoid flashing errors in cards). */
 export const linehaulAuthRecoveryInProgress = ref(false)
+/** Pause Linehaul polls/auth recovery while a local quick action owns the browser. */
+export const linehaulRefreshPausedForQuickAction = ref(false)
+
+/** @type {Promise<void> | null} */
+let linehaulRefreshInFlight = null
+/** @type {boolean} */
+let linehaulRefreshQueued = false
+/** @type {ReturnType<typeof setTimeout> | null} */
+let linehaulDeferredRefreshTimer = null
+/** Retry bearer capture once after a quick action finishes. */
+let linehaulPendingAuthRecovery = false
+
+function scheduleDeferredLinehaulRefresh(delayMs = 1500) {
+  if (linehaulDeferredRefreshTimer != null) {
+    clearTimeout(linehaulDeferredRefreshTimer)
+  }
+  linehaulDeferredRefreshTimer = setTimeout(() => {
+    linehaulDeferredRefreshTimer = null
+    if (!linehaulRefreshPausedForQuickAction.value) {
+      void refreshLinehaulApis()
+    }
+  }, delayMs)
+}
 
 /** Last `getAssignment().tripHistoryLedger` snapshot (for Home trip card / pay helpers). */
 export const assignmentTripHistoryLedger = ref(/** @type {unknown[]} */ ([]))
@@ -1532,13 +1555,32 @@ async function finishLinehaulPollSideEffects(
  * On 401/403 (attempt 0), runs browser bearer capture once then retries fetch.
  */
 export async function refreshLinehaulApis() {
-  linehaulFetching.value = true
-  try {
-    await refreshLinehaulApisImpl(0)
-  } finally {
-    linehaulLastFetchAt.value = Date.now()
-    linehaulFetching.value = false
+  if (linehaulRefreshPausedForQuickAction.value) {
+    scheduleDeferredLinehaulRefresh(2000)
+    return
   }
+
+  if (linehaulRefreshInFlight) {
+    linehaulRefreshQueued = true
+    return linehaulRefreshInFlight
+  }
+
+  linehaulFetching.value = true
+  linehaulRefreshInFlight = (async () => {
+    try {
+      await refreshLinehaulApisImpl(0)
+    } finally {
+      linehaulLastFetchAt.value = Date.now()
+      linehaulFetching.value = false
+      linehaulRefreshInFlight = null
+      if (linehaulRefreshQueued) {
+        linehaulRefreshQueued = false
+        void refreshLinehaulApis()
+      }
+    }
+  })()
+
+  return linehaulRefreshInFlight
 }
 
 /**
@@ -1681,50 +1723,68 @@ async function refreshLinehaulApisImpl(attempt) {
     })
   }
 
-  const authFailed =
+  const coreAuthFailed =
     attempt === 0 &&
     (isAuthFailure(tr) ||
       isAuthFailure(dr) ||
       isAuthFailure(trip) ||
       isAuthFailure(tripsAprvd) ||
-      (tripSession != null && isAuthFailure(tripSession)) ||
       (tripsByLeg != null && isAuthFailure(tripsByLeg)))
 
-  if (authFailed) {
-    linehaulAuthRecoveryInProgress.value = true
-    let recovered = false
-    startLinehaulBearerCaptureOverlay()
-    try {
+  if (tripSession != null && isAuthFailure(tripSession)) {
+    pushLiveLog({
+      type: 'info',
+      message:
+        'Trip-session auth failed — skipping bearer refresh for that endpoint only.',
+      ts: Date.now(),
+    })
+  }
+
+  if (coreAuthFailed) {
+    if (linehaulRefreshPausedForQuickAction.value) {
+      linehaulPendingAuthRecovery = true
       pushLiveLog({
         type: 'info',
         message:
-          'Linehaul returned 401/403 — refreshing bearer from browser, then retrying…',
+          'Deferring Linehaul bearer refresh until the current quick action finishes.',
         ts: Date.now(),
       })
-      const cap = await postLinehaulCaptureBearer({
-        bypassValidityProbe: true,
-        clearSession: false,
-        tryOktaLogin: true,
-        headless: true,
-      })
-      if (cap && cap.ok === true && cap.saved === true) {
-        await refreshLinehaulApisImpl(1)
-        recovered = true
+    } else {
+      linehaulAuthRecoveryInProgress.value = true
+      let recovered = false
+      startLinehaulBearerCaptureOverlay()
+      try {
+        pushLiveLog({
+          type: 'info',
+          message:
+            'Linehaul returned 401/403 — refreshing bearer from browser, then retrying…',
+          ts: Date.now(),
+        })
+        const cap = await postLinehaulCaptureBearer({
+          bypassValidityProbe: true,
+          clearSession: false,
+          tryOktaLogin: true,
+          headless: true,
+        })
+        if (cap && cap.ok === true && cap.saved === true) {
+          await refreshLinehaulApisImpl(1)
+          recovered = true
+        }
+      } catch (e) {
+        pushLiveLog({
+          type: 'error',
+          message:
+            e instanceof Error
+              ? e.message
+              : `Linehaul bearer capture failed: ${String(e)}`,
+          ts: Date.now(),
+        })
+      } finally {
+        finishLinehaulBearerCaptureOverlay(recovered)
+        linehaulAuthRecoveryInProgress.value = false
       }
-    } catch (e) {
-      pushLiveLog({
-        type: 'error',
-        message:
-          e instanceof Error
-            ? e.message
-            : `Linehaul bearer capture failed: ${String(e)}`,
-        ts: Date.now(),
-      })
-    } finally {
-      finishLinehaulBearerCaptureOverlay(recovered)
-      linehaulAuthRecoveryInProgress.value = false
+      if (recovered) return
     }
-    if (recovered) return
   }
 
   const { aprvdBody, dspchBody } = applyLinehaulFedexPollSnapshot({
