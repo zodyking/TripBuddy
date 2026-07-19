@@ -155,6 +155,10 @@ import {
   submitBlockInspectConfirm,
   cancelBlockInspectConfirm,
   cancelBlockRun,
+  getPendingAutomationPrompt,
+  hasPendingBlockInspectField,
+  hasPendingBlockInspectConfirm,
+  hasPendingBlockRetry,
 } from './playwright/blocks.mjs'
 import {
   cancelAllPlaywrightRuns,
@@ -632,10 +636,17 @@ function getWahaInternalUrl() {
 
 app.get('/api/health', async () => {
   const dist = await getSpaDistFingerprints()
+  const pendingAutomationPrompt = getPendingAutomationPrompt()
   return {
     ok: true,
     busy:
       isRunnerBusy() || isBlockRunnerBusy() || isLinehaulCaptureBusy(),
+    pendingAutomationPrompt,
+    pendingAutomationInput: {
+      locationRetry: hasPendingBlockRetry(),
+      inspectField: hasPendingBlockInspectField(),
+      inspectConfirm: hasPendingBlockInspectConfirm(),
+    },
     /** When null, API uses ephemeral `server/.local` — set FEDEX_TOOL_DATA_DIR for durable shared storage. */
     dataDir: PERSISTENCE_DATA_ROOT,
     localDataPath: LOCAL_DIR,

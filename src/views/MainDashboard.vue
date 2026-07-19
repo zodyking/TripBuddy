@@ -87,6 +87,7 @@ import {
   buildEnhancedTrailerCards,
   buildDollySection,
   buildInspectAutomationTripData,
+  applyTrailerNumberRegistryToTripData,
 } from '../utils/tripDetailsDisplay.js'
 import {
   formatLinehaulLocationForDisplay,
@@ -699,11 +700,21 @@ const trailerNbrPutBusy = ref(false)
 
 async function loadTrailerNumbers() {
   const seq = currentTripLegSeq.value
-  if (!seq) { trailerNbrReg.value = {}; return }
+  await loadTrailerNumbersForSeq(seq)
+}
+
+async function loadTrailerNumbersForSeq(seqRaw) {
+  const seq = String(seqRaw ?? '').trim()
+  if (!/^\d+$/.test(seq)) {
+    trailerNbrReg.value = {}
+    return
+  }
   try {
-    const res = await getTrailerNumbers(String(seq))
+    const res = await getTrailerNumbers(seq)
     trailerNbrReg.value = res?.numbers && typeof res.numbers === 'object' ? res.numbers : {}
-  } catch { trailerNbrReg.value = {} }
+  } catch {
+    trailerNbrReg.value = {}
+  }
 }
 
 function trailerNbrForOrder(order) {
@@ -1308,18 +1319,80 @@ function dismissInBrowserAutomationPrompts() {
 }
 
 /** Wait until Playwright is not running automations or Linehaul bearer capture. */
-async function waitForBrowserSessionIdle(maxWaitMs = 180_000) {
+async function waitForBrowserSessionIdle(maxWaitMs = 90_000) {
   const deadline = Date.now() + maxWaitMs
+  let lastBusyNotice = 0
   while (Date.now() < deadline) {
     try {
       const health = await getHealth()
       if (!health?.busy) return true
+      const now = Date.now()
+      if (now - lastBusyNotice > 8_000) {
+        lastBusyNotice = now
+        notifyQuickActionInApp(
+          'Waiting for the browser to finish the previous FedEx session…',
+          'info',
+        )
+      }
     } catch {
       /* API may be restarting */
     }
     await new Promise((resolve) => setTimeout(resolve, 250))
   }
   return false
+}
+
+/** @type {ReturnType<typeof setInterval> | null} */
+let pendingAutomationPromptPollTimer = null
+
+function stopPendingAutomationPromptPoll() {
+  if (pendingAutomationPromptPollTimer != null) {
+    clearInterval(pendingAutomationPromptPollTimer)
+    pendingAutomationPromptPollTimer = null
+  }
+}
+
+async function syncPendingAutomationPromptFromHealth() {
+  if (!isWatchingAutomationRun() || !isLocalAutomationController()) return
+  try {
+    const health = await getHealth()
+    const p = health?.pendingAutomationPrompt
+    if (!p || typeof p !== 'object') return
+    const runId = typeof p.runId === 'string' ? p.runId : ''
+    const message = typeof p.message === 'string' ? p.message.trim() : ''
+    if (!runId || !message) return
+    const key = `health:${p.kind}:${runId}:${p.ts ?? message}`
+    if (streamBannerHandledKey.value === key) return
+    if (p.kind === 'inspectField' && !inspectFieldOpen.value) {
+      streamBannerHandledKey.value = key
+      await openInspectFieldModal(message, runId, p.field != null ? String(p.field) : '')
+    } else if (p.kind === 'inspectConfirm' && !inspectDollyConfirmOpen.value) {
+      streamBannerHandledKey.value = key
+      await openInspectDollyConfirmModal(message, runId)
+    } else if (p.kind === 'locationRetry' && !locationRetryOpen.value) {
+      streamBannerHandledKey.value = key
+      await openLocationRetryModal(p.bannerText || message, runId)
+    }
+  } catch {
+    /* ignore */
+  }
+}
+
+function startPendingAutomationPromptPoll() {
+  stopPendingAutomationPromptPoll()
+  pendingAutomationPromptPollTimer = setInterval(() => {
+    void syncPendingAutomationPromptFromHealth()
+  }, 800)
+}
+
+/** @param {{ steps?: unknown[] } | null | undefined} auto */
+function automationUsesInspectCheckout(auto) {
+  const steps = Array.isArray(auto?.steps) ? auto.steps : []
+  return steps.some((s) => {
+    if (!s || typeof s !== 'object') return false
+    const a = /** @type {Record<string, unknown>} */ (s).action
+    return a === 'inspectCheckoutContinue' || a === 'inspectCheckoutHomeGate'
+  })
 }
 
 /**
@@ -1348,6 +1421,21 @@ async function runQuickAction(auto) {
     return { ok: false }
   }
 
+  if (!(await ensureFedexApiReady())) {
+    if (quickActionRunGeneration.value !== myGen) return { ok: false, skipped: true }
+    notifyQuickActionInApp(
+      'API is not running on port 3847. With vite-only dev, wait a few seconds for autostart, or run npm run dev from the project root.',
+      'error',
+    )
+    return { ok: false }
+  }
+  reconnectLiveLogStream()
+  try {
+    await refreshLinehaulApis()
+  } catch {
+    /* trip cards may still be usable */
+  }
+
   linehaulRefreshPausedForQuickAction.value = true
   runningAutomationId.value = auto.id
   runStartTs.value = Date.now()
@@ -1355,18 +1443,26 @@ async function runQuickAction(auto) {
   dismissRunErrorBanner()
   automationPreviewHidden.value = false
   try {
-    if (!(await ensureFedexApiReady())) {
-      if (quickActionRunGeneration.value !== myGen) return { ok: false, skipped: true }
+    const legSeq =
+      activeDispatchTripSeq.value ||
+      lastDailyTripLegSequence.value ||
+      tripBodyDailySeq(linehaulTripsBody.value)
+
+    if (legSeq) {
+      await loadTrailerNumbersForSeq(legSeq)
+    }
+
+    if (automationUsesInspectCheckout(auto) && !legSeq) {
       notifyQuickActionInApp(
-        'API is not running on port 3847. With vite-only dev, wait a few seconds for autostart, or run npm run dev from the project root.',
-        'error',
+        'Trip leg is not loaded yet. Wait for trip data to update on Home, then try Inspect & Check Out again.',
+        'warning',
       )
       return { ok: false }
     }
-    reconnectLiveLogStream()
+
     // Same equipment JSON as Trip Details cards on the home page
     const slideBody = tripDetailsBodyForSlide.value
-    const tripData =
+    let tripData =
       slideBody && typeof slideBody === 'object' && !Array.isArray(slideBody)
         ? buildInspectAutomationTripData(slideBody)
         : buildInspectAutomationTripData({
@@ -1381,8 +1477,9 @@ async function runQuickAction(auto) {
       if (!tripData.dolly) tripData.dolly = {}
       tripData.dolly.number1 = dollyFromCard
     }
-    const legSeq = currentTripLegSeq.value
+    tripData = applyTrailerNumberRegistryToTripData(tripData, trailerNbrReg.value)
     if (legSeq) tripData.dailyTripLegSequence = String(legSeq)
+    startPendingAutomationPromptPoll()
     const result = await runAutomation(auto.id, {
       headless: true,
       tripData,
@@ -1417,6 +1514,7 @@ async function runQuickAction(auto) {
     }
     return { ok: false, skipped: true }
   } finally {
+    stopPendingAutomationPromptPoll()
     linehaulRefreshPausedForQuickAction.value = false
     if (quickActionRunGeneration.value === myGen) {
       runningAutomationId.value = null
@@ -2473,6 +2571,7 @@ onActivated(() => {
 
 onUnmounted(() => {
   tripLegMapOpen.value = false
+  stopPendingAutomationPromptPoll()
   if (tripPhaseVoiceTimer) {
     clearTimeout(tripPhaseVoiceTimer)
     tripPhaseVoiceTimer = null

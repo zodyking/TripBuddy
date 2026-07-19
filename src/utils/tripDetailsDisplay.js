@@ -599,6 +599,55 @@ export function buildInspectAutomationTripData(body) {
 }
 
 /**
+ * Merge home-page pre-entered empty trailer numbers into automation trip payload
+ * so Inspect & Check Out can skip driver prompts when numbers were saved on the card.
+ *
+ * @param {ReturnType<typeof buildInspectAutomationTripData>} tripData
+ * @param {Record<string, string>} registry trailer order (1-based string) → digits
+ * @returns {ReturnType<typeof buildInspectAutomationTripData>}
+ */
+export function applyTrailerNumberRegistryToTripData(tripData, registry) {
+  if (!tripData || typeof tripData !== 'object') return tripData
+  if (!registry || typeof registry !== 'object') return tripData
+
+  /** @type {[string, string][]} */
+  const entries = Object.entries(registry).filter(
+    ([k, v]) => /^\d+$/.test(String(k)) && String(v ?? '').trim().length >= 4,
+  )
+  if (!entries.length) return tripData
+
+  /** @type {Record<string, unknown>[]} */
+  const trailers = Array.isArray(tripData.trailers)
+    ? tripData.trailers.map((t) =>
+        t && typeof t === 'object' && !Array.isArray(t) ? { .../** @type {Record<string, unknown>} */ (t) } : t,
+      ).filter((t) => t && typeof t === 'object')
+    : []
+
+  for (const [orderStr, rawNbr] of entries) {
+    const order = Number(orderStr)
+    const nbr = String(rawNbr).trim()
+    const idx = trailers.findIndex((t) => {
+      const tr = /** @type {Record<string, unknown>} */ (t)
+      const o = Number(tr.trlrOrder ?? tr.dailyTripLegConfigSeq ?? 0)
+      return o === order
+    })
+    if (idx >= 0) {
+      trailers[idx] = { .../** @type {Record<string, unknown>} */ (trailers[idx]), trlrNbr: nbr }
+    } else {
+      trailers.push({ trlrOrder: order, trlrNbr: nbr, emptyFlag: 'Y' })
+    }
+  }
+
+  trailers.sort((a, b) => {
+    const oa = Number(/** @type {Record<string, unknown>} */ (a).trlrOrder ?? 0)
+    const ob = Number(/** @type {Record<string, unknown>} */ (b).trlrOrder ?? 0)
+    return oa - ob
+  })
+
+  return { ...tripData, trailers }
+}
+
+/**
  * @param {unknown} body
  * @returns {{ show: boolean, rows: { label: string, value: string }[], hasData: boolean }}
  * `show` is true only when at least one dolly field is non-empty (omit block otherwise).

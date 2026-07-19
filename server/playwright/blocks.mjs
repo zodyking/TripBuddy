@@ -148,6 +148,7 @@ function waitForBlockRetryLocation(runId, signal) {
       if (state?.timeoutId) clearTimeout(state.timeoutId)
       signal?.removeEventListener('abort', onAbort)
       if (pendingBlockRetry === state) pendingBlockRetry = null
+      clearPendingAutomationPrompt()
     }
     const onAbort = () => {
       if (!state) return
@@ -205,6 +206,33 @@ export function hasPendingBlockRetry() {
   return pendingBlockRetry !== null
 }
 
+/** Last in-browser prompt shown to the driver (fallback when SSE/live-log is delayed). */
+/** @type {{ kind: 'inspectField' | 'inspectConfirm' | 'locationRetry', runId: string, message: string, field?: string, dollyNumber?: string, bannerText?: string, ts: number } | null} */
+let pendingAutomationPrompt = null
+
+/**
+ * @param {{ kind: 'inspectField' | 'inspectConfirm' | 'locationRetry', runId: string, message: string, field?: string, dollyNumber?: string, bannerText?: string } | null} p
+ */
+export function setPendingAutomationPrompt(p) {
+  pendingAutomationPrompt = p ? { ...p, ts: Date.now() } : null
+}
+
+export function clearPendingAutomationPrompt() {
+  pendingAutomationPrompt = null
+}
+
+export function getPendingAutomationPrompt() {
+  return pendingAutomationPrompt
+}
+
+export function hasPendingBlockInspectField() {
+  return pendingBlockInspectField !== null
+}
+
+export function hasPendingBlockInspectConfirm() {
+  return pendingBlockInspectConfirm !== null
+}
+
 function waitForBlockInspectField(runId, signal) {
   return new Promise((resolve, reject) => {
     if (pendingBlockInspectField) {
@@ -218,6 +246,7 @@ function waitForBlockInspectField(runId, signal) {
       if (state?.timeoutId) clearTimeout(state.timeoutId)
       signal?.removeEventListener('abort', onAbort)
       if (pendingBlockInspectField === state) pendingBlockInspectField = null
+      clearPendingAutomationPrompt()
     }
     const onAbort = () => {
       if (!state) return
@@ -291,6 +320,7 @@ function waitForBlockInspectConfirm(runId, signal) {
       if (state?.timeoutId) clearTimeout(state.timeoutId)
       signal?.removeEventListener('abort', onAbort)
       if (pendingBlockInspectConfirm === state) pendingBlockInspectConfirm = null
+      clearPendingAutomationPrompt()
     }
     const onAbort = () => {
       if (!state) return
@@ -772,11 +802,24 @@ async function executeAction(action, page, ctx) {
           field,
           message,
         })
+        setPendingAutomationPrompt({
+          kind: 'inspectField',
+          runId: ctx.runId,
+          field,
+          message,
+        })
         return waitForBlockInspectField(ctx.runId, signal)
       }
       const waitForInspectConfirm = async ({ field, message, dollyNumber }) => {
         log('info', message, {
           inspectConfirmNeeded: true,
+          runId: ctx.runId,
+          field,
+          message,
+          dollyNumber,
+        })
+        setPendingAutomationPrompt({
+          kind: 'inspectConfirm',
           runId: ctx.runId,
           field,
           message,
@@ -962,6 +1005,12 @@ async function executeAction(action, page, ctx) {
             throw new Error(`Location mismatch: ${outcome.bannerText}`)
           } else if (action.onMismatch === 'retry') {
             log('info', 'Waiting for location retry from UI...')
+            setPendingAutomationPrompt({
+              kind: 'locationRetry',
+              runId: ctx.runId,
+              message: outcome.bannerText,
+              bannerText: outcome.bannerText,
+            })
             const newLoc = await waitForBlockRetryLocation(ctx.runId, signal)
             const locationEl = page.locator(`xpath=${CX.locationInput}`)
             await locationEl.waitFor({
