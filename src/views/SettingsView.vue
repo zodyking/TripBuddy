@@ -157,20 +157,6 @@ import {
   applyWahaPrefsFromCredentials,
   saveWahaPrefsToServer,
 } from '../utils/wahaPrefs.js'
-import {
-  getBlueBubblesUrlForSettings,
-  setBlueBubblesBaseUrl,
-  getBlueBubblesPasswordForSettings,
-  setBlueBubblesPassword,
-  isBlueBubblesProxyMode,
-  pingBlueBubblesViaServer,
-} from '../utils/blueBubblesApi.js'
-import {
-  saveBlueBubblesPrefsToServer,
-  registerBlueBubblesWebhookOnServer,
-  applyBlueBubblesPrefsFromCredentials,
-} from '../utils/blueBubblesPrefs.js'
-import { restartBlueBubblesBackgroundPoll } from '../utils/blueBubblesBackgroundPoll.js'
 import { workWeekChangeEffectiveFromMs, workWeekStartMsForAnchorDate } from '../utils/workWeekGroup.js'
 import {
   appGeoLat,
@@ -187,7 +173,7 @@ const SECRET_SAVED_MASK = '••••••••••••••••'
 const router = useRouter()
 const route = useRoute()
 
-/** @type {import('vue').Ref<'general' | 'automation' | 'audio' | 'email' | 'security' | 'directory' | 'traffic' | 'helpers' | 'whatsapp' | 'imessage'>} */
+/** @type {import('vue').Ref<'general' | 'automation' | 'audio' | 'email' | 'security' | 'directory' | 'traffic' | 'helpers' | 'whatsapp'>} */
 const settingsTab = ref('general')
 const settingsTabsEl = ref(/** @type {HTMLElement | null} */ (null))
 const signOutBusy = ref(false)
@@ -1083,68 +1069,6 @@ const wahaSendMsg = ref('')
 
 const wahaQrUrl = ref('')
 
-/** BlueBubbles / iMessage settings (connection + webhook only) */
-const bbUrlDraft = ref(getBlueBubblesUrlForSettings())
-const bbPasswordDraft = ref(getBlueBubblesPasswordForSettings())
-const bbUsesServerProxy = computed(() => isBlueBubblesProxyMode())
-const bbConnMsg = ref('')
-const bbSaveMsg = ref('')
-const bbWebhookUrl = ref('')
-
-async function testBlueBubblesConnection() {
-  setBlueBubblesBaseUrl(bbUrlDraft.value)
-  setBlueBubblesPassword(bbPasswordDraft.value)
-  bbConnMsg.value = 'Checking…'
-  try {
-    const r = await pingBlueBubblesViaServer({
-      serverUrl: bbUrlDraft.value,
-      password: bbPasswordDraft.value,
-    })
-    if (r.ok) {
-      bbConnMsg.value = 'Connected to BlueBubbles server.'
-      restartBlueBubblesBackgroundPoll()
-    } else {
-      bbConnMsg.value = r.error || `Cannot reach BlueBubbles (${r.status}).`
-    }
-  } catch (e) {
-    bbConnMsg.value = e instanceof Error ? e.message : String(e)
-  }
-}
-
-async function saveBlueBubblesSettings() {
-  bbSaveMsg.value = 'Saving…'
-  try {
-    const res = await saveBlueBubblesPrefsToServer({
-      serverUrl: bbUrlDraft.value,
-      password: bbPasswordDraft.value,
-    })
-    if (res?.blueBubblesWebhookUrl) bbWebhookUrl.value = res.blueBubblesWebhookUrl
-    bbSaveMsg.value = 'Saved — synced to your account.'
-    restartBlueBubblesBackgroundPoll()
-  } catch (e) {
-    bbSaveMsg.value = e instanceof Error ? e.message : String(e)
-  }
-}
-
-async function registerBbWebhook() {
-  bbConnMsg.value = 'Registering webhook…'
-  try {
-    await saveBlueBubblesPrefsToServer({
-      serverUrl: bbUrlDraft.value,
-      password: bbPasswordDraft.value,
-    })
-    const r = await registerBlueBubblesWebhookOnServer()
-    if (r?.webhookUrl) {
-      bbWebhookUrl.value = r.webhookUrl
-      bbConnMsg.value = r.registered ? 'Webhook registered on BlueBubbles.' : 'Webhook already registered.'
-    } else {
-      bbConnMsg.value = r?.error || 'Webhook registration failed.'
-    }
-  } catch (e) {
-    bbConnMsg.value = e instanceof Error ? e.message : String(e)
-  }
-}
-
 async function testWahaConnection() {
   setWahaBaseUrl(wahaUrlDraft.value)
   setWahaApiKey(wahaApiKeyDraft.value)
@@ -1472,14 +1396,7 @@ async function loadCredentials() {
     emailWeeklySummaryCcDraft.value = String(credMeta.value.emailWeeklySummaryCc ?? '')
     applyHelpersLocationPrefsFromCredentials(credMeta.value)
     applyWahaPrefsFromCredentials(credMeta.value)
-    applyBlueBubblesPrefsFromCredentials(credMeta.value)
     wahaChatIdDraft.value = getWahaChatId()
-    bbUrlDraft.value = getBlueBubblesUrlForSettings()
-    bbPasswordDraft.value = getBlueBubblesPasswordForSettings()
-    if (typeof credMeta.value?.blueBubblesWebhookToken === 'string' && credMeta.value.blueBubblesWebhookToken) {
-      const origin = typeof window !== 'undefined' ? window.location.origin : ''
-      bbWebhookUrl.value = `${origin}/api/bluebubbles/webhook/${credMeta.value.blueBubblesWebhookToken}`
-    }
     syncWahaSpeechPrefsFromStorage()
     syncHelpersPrefsFromStorage()
     await refreshApiQuota()
@@ -2164,7 +2081,6 @@ watch(
   () => route.query.tab,
   (tab) => {
     if (tab === 'whatsapp') settingsTab.value = 'whatsapp'
-    if (tab === 'imessage') settingsTab.value = 'imessage'
     if (tab === 'devices') settingsTab.value = 'general'
   },
   { immediate: true },
@@ -2296,16 +2212,6 @@ onUnmounted(() => {
         @click="settingsTab = 'whatsapp'"
       >
         WhatsApp
-      </button>
-      <button
-        type="button"
-        class="tab-btn tap"
-        role="tab"
-        :aria-selected="settingsTab === 'imessage'"
-        :class="{ active: settingsTab === 'imessage' }"
-        @click="settingsTab = 'imessage'"
-      >
-        iMessage
       </button>
     </div>
 
@@ -3881,60 +3787,6 @@ onUnmounted(() => {
           </button>
         </div>
         <p v-if="wahaSendMsg" class="cred-msg">{{ wahaSendMsg }}</p>
-      </SettingsSection>
-    </main>
-
-    <main v-show="settingsTab === 'imessage'" class="stack imessage-panel">
-      <SettingsSection title="iMessage (BlueBubbles)" section-id="settings-imessage">
-        <p class="cred-hint">
-          Connect to your
-          <a href="https://docs.bluebubbles.app/server/developer-guides/rest-api-and-webhooks" target="_blank" rel="noopener noreferrer" class="ext-link">BlueBubbles</a>
-          server for Open Bubbles / iMessage. All conversations appear in Chats → iMessage.
-          Per-contact speech and auto-reply settings are configured inside each conversation.
-        </p>
-
-        <h4 class="api-sub-heading" style="margin-top:0;padding-top:0;border-top:none">Connection</h4>
-        <p class="cred-hint">
-          Your Mac's BlueBubbles URL and password are stored on TripBuddy and forwarded through the
-          server proxy (<code>/api/bluebubbles</code>) — the browser never calls BlueBubbles directly.
-        </p>
-        <p v-if="bbUsesServerProxy && !bbUrlDraft.trim()" class="cred-hint">
-          Optional: set <code>BLUEBUBBLES_BASE_URL</code> and <code>BLUEBUBBLES_PASSWORD</code> on the
-          TripBuddy container instead of entering them here.
-        </p>
-        <label class="lbl" for="bb-url">BlueBubbles server URL</label>
-        <input
-          id="bb-url"
-          v-model="bbUrlDraft"
-          class="inp tap"
-          type="url"
-          autocomplete="off"
-          placeholder="https://your-mac.trycloudflare.com"
-        />
-        <label class="lbl" for="bb-password">Server password</label>
-        <input
-          id="bb-password"
-          v-model="bbPasswordDraft"
-          class="inp tap"
-          type="password"
-          autocomplete="off"
-          placeholder="BlueBubbles API password"
-        />
-        <div class="btn-row">
-          <button type="button" class="btn tap" @click="testBlueBubblesConnection">Check connection</button>
-          <button type="button" class="btn primary tap" @click="saveBlueBubblesSettings">Save settings</button>
-          <button type="button" class="btn tap" @click="registerBbWebhook">Register webhook</button>
-        </div>
-        <p v-if="bbConnMsg" class="cred-msg">{{ bbConnMsg }}</p>
-        <p v-if="bbSaveMsg" class="cred-msg">{{ bbSaveMsg }}</p>
-        <p v-if="bbWebhookUrl" class="cred-hint">
-          Webhook URL (add in BlueBubbles → API &amp; Webhooks if auto-register fails):<br />
-          <code>{{ bbWebhookUrl }}</code>
-        </p>
-        <p class="cred-hint">
-          OpenRouter auto-replies require an API key in Settings → General → API. Enable speech or
-          auto-reply per contact from the ⚡ button inside each iMessage conversation.
-        </p>
       </SettingsSection>
     </main>
 
