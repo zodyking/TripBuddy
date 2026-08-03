@@ -545,10 +545,6 @@ watch([hasPrePlanTrip, dispatchSlideIndex], () => {
   }
 })
 
-watch(dispatchSlideIndex, () => {
-  expandedTrailers.value = {}
-})
-
 const activeDispatchTripSeq = computed(() => {
   if (dispatchSlideIndex.value === 1 && prePlanTripLegSeq.value) {
     return prePlanTripLegSeq.value
@@ -606,7 +602,17 @@ const primaryDollyOnTrip = computed(() => {
   return dollySix(o.dollyNumber1) || dollySix(o.dollyNumber2) || ''
 })
 
-const dollyPrimaryDisplay = computed(() => primaryDollyOnTrip.value || dollyReg.value?.lastPrimaryNbr || '')
+const dollyPrimaryDisplay = computed(() => {
+  const onTrip = primaryDollyOnTrip.value
+  if (onTrip) return onTrip
+  const fallback = dollyReg.value?.lastPrimaryNbr || ''
+  if (!fallback) return ''
+  const seq = activeDispatchTripSeq.value
+  if (!seq) return ''
+  const entry = dollyReg.value?.items?.[fallback]
+  if (entry?.lastTripLegSeq === seq) return fallback
+  return ''
+})
 
 /** Registry entry for the displayed dolly (manual add/remove target). */
 const dollyRegistryEntry = computed(() => {
@@ -643,11 +649,13 @@ function onDollyAddInput(e) {
 async function onAddDollySubmit() {
   const n = dollySix(dollyAddDigits.value)
   if (!n) return
+  const seq = activeDispatchTripSeq.value
+  if (!seq) return
   dollyPutBusy.value = true
   try {
     dollyReg.value = await putDollyNumber({
       dollyNbr: n,
-      legSeq: String(currentTripLegSeq.value || ''),
+      legSeq: String(seq),
     })
     dollyAddOpen.value = false
     dollyAddDigits.value = ''
@@ -697,7 +705,7 @@ const trailerNbrAddDigits = ref('')
 const trailerNbrPutBusy = ref(false)
 
 async function loadTrailerNumbers() {
-  const seq = currentTripLegSeq.value
+  const seq = activeDispatchTripSeq.value
   if (!seq) { trailerNbrReg.value = {}; return }
   try {
     const res = await getTrailerNumbers(String(seq))
@@ -719,7 +727,7 @@ function onTrailerNbrInput(e) {
 async function onTrailerNbrSubmit(order) {
   const n = trailerNbrAddDigits.value.trim()
   if (!n) return
-  const seq = currentTripLegSeq.value
+  const seq = activeDispatchTripSeq.value
   if (!seq) return
   trailerNbrPutBusy.value = true
   try {
@@ -731,6 +739,13 @@ async function onTrailerNbrSubmit(order) {
   } catch { /* */ }
   finally { trailerNbrPutBusy.value = false }
 }
+
+watch([activeDispatchTripSeq, dispatchSlideIndex], () => {
+  expandedTrailers.value = {}
+  trailerNbrAddKey.value = ''
+  trailerNbrAddDigits.value = ''
+  void loadTrailerNumbers()
+})
 
 function showCopyToast(message, ms = 2200) {
   copyToast.value = message
@@ -3397,7 +3412,7 @@ onUnmounted(() => {
         <template v-if="tripDetailsBodyForSlide">
           <div
             v-for="card in tripTrailerCards"
-            :key="card.id"
+            :key="`${activeDispatchTripSeq}-${card.id}`"
             class="trailer-card"
           >
             <div
