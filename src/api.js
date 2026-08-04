@@ -805,6 +805,56 @@ export async function putWahaPrefs(body) {
   return handleJson(r)
 }
 
+/** Persist BlueBubbles / iMessage prefs for the signed-in user. */
+export async function putBlueBubblesPrefs(body) {
+  let r
+  try {
+    r = await apiFetch('/api/settings/bluebubbles-prefs', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body ?? {}),
+    })
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e)
+    throw new Error(
+      msg === 'Load failed' || msg === 'Failed to fetch'
+        ? 'Could not reach the server. Check your connection or try again after deploy finishes.'
+        : msg,
+    )
+  }
+  return handleJson(r)
+}
+
+/** Test BlueBubbles connection (server proxies to your Mac). */
+export async function postIMessagePing(body = {}) {
+  let r
+  try {
+    r = await apiFetch('/api/imessage/ping', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    })
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e)
+    throw new Error(
+      msg === 'Load failed' || msg === 'Failed to fetch'
+        ? 'Could not reach the server. Check your connection or try again after deploy finishes.'
+        : msg,
+    )
+  }
+  return handleJson(r)
+}
+
+/** Register TripBuddy webhook URL on the BlueBubbles server. */
+export async function registerBlueBubblesWebhook() {
+  const r = await apiFetch('/api/settings/bluebubbles-register-webhook', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({}),
+  })
+  return handleJson(r)
+}
+
 /** Per-account API usage counters and limits (server / PostgreSQL). */
 export async function getApiQuotaSettings() {
   const r = await apiFetch('/api/settings/api-quota')
@@ -1551,6 +1601,115 @@ export async function syncWhatsAppThread(chatId, opts = {}) {
     }),
   })
   return handleJson(r)
+}
+
+/** Cached iMessage thread (server disk) — fast open. */
+export async function getIMessageThreadCache(chatGuid) {
+  const id = encodeURIComponent(String(chatGuid || '').trim())
+  const r = await apiFetch(`/api/imessage/thread?chatGuid=${id}`)
+  return handleJson(r)
+}
+
+/** Sync iMessage thread from BlueBubbles into server cache. */
+export async function syncIMessageThread(chatGuid, opts = {}) {
+  const r = await apiFetch('/api/imessage/thread/sync', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      chatGuid: String(chatGuid || '').trim(),
+      limit: opts.limit ?? 60,
+    }),
+  })
+  return handleJson(r)
+}
+
+/** Trigger server-side OpenRouter auto-reply for one incoming iMessage. */
+export async function postIMessageAutoReply(body) {
+  const r = await apiFetch('/api/imessage/auto-reply', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body ?? {}),
+  })
+  return handleJson(r)
+}
+
+/** Send an iMessage via server-stored BlueBubbles credentials. */
+export async function postIMessageSend(body) {
+  let r
+  try {
+    r = await apiFetch('/api/imessage/send', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body ?? {}),
+    })
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e)
+    return {
+      ok: false,
+      status: 0,
+      error:
+        msg === 'Load failed' || msg === 'Failed to fetch'
+          ? 'Could not reach the server. Check your connection or try again after deploy finishes.'
+          : msg,
+    }
+  }
+  const text = await r.text()
+  /** @type {{ ok?: boolean, error?: string, data?: unknown, status?: number }} */
+  let data = {}
+  try {
+    data = text ? JSON.parse(text) : {}
+  } catch {
+    data = {}
+  }
+  if (!r.ok) {
+    const err =
+      typeof data.error === 'string'
+        ? data.error
+        : typeof data.message === 'string'
+          ? data.message
+          : r.statusText || `HTTP ${r.status}`
+    return {
+      ok: false,
+      status: r.status,
+      error: err,
+      body: null,
+    }
+  }
+  return {
+    ok: data.ok !== false,
+    status: r.status,
+    body: data.data ?? data,
+    error: '',
+    verifiedAfterTimeout: data.verifiedAfterTimeout === true,
+  }
+}
+
+/** Recent iMessage inbox (uses server-stored BlueBubbles creds for this account). */
+export async function fetchIMessageRecentMessages(opts = {}) {
+  const limit = Math.min(100, Math.max(1, Number(opts.limit) || 40))
+  const r = await apiFetch(`/api/imessage/recent?limit=${limit}`)
+  const text = await r.text()
+  /** @type {{ ok?: boolean, error?: string, messages?: unknown[], status?: number }} */
+  let data = {}
+  try {
+    data = text ? JSON.parse(text) : {}
+  } catch {
+    data = {}
+  }
+  if (!r.ok) {
+    return {
+      ok: false,
+      status: r.status,
+      error: typeof data.error === 'string' ? data.error : r.statusText || `HTTP ${r.status}`,
+      messages: [],
+    }
+  }
+  return {
+    ok: data.ok !== false,
+    status: r.status,
+    error: typeof data.error === 'string' ? data.error : '',
+    messages: Array.isArray(data.messages) ? data.messages : [],
+  }
 }
 
 /** Open-graph style preview for a public https URL. */
