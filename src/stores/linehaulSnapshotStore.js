@@ -397,13 +397,13 @@ function processApiResponse(mergedApiBody, assignmentInstructions, context) {
     updates.push('status')
   }
 
-  const trailerGate = gateTrailers(mergedApiBody.trailers, next.trailers)
+  const trailerGate = gateTrailers(mergedApiBody.trailers, prev.trailers)
   if (trailerGate.update) {
     next.trailers = trailerGate.value
     updates.push(`trailers:${trailerGate.reason}`)
   }
 
-  const dollyGate = gateDolly(mergedApiBody, next.dolly)
+  const dollyGate = gateDolly(mergedApiBody, prev.dolly)
   if (dollyGate.update && dollyGate.value) {
     next.dolly = dollyGate.value
     updates.push(`dolly:${dollyGate.reason}`)
