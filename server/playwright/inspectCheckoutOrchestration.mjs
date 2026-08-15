@@ -69,6 +69,18 @@ const RX = {
   newTripDetails: /new\s+trip\s+details/i,
   tripDetailsChanged: /details.*have\s+been\s+changed|no\s+longer\s+match/i,
   refreshBtn: /^refresh$/i,
+  /** FedEx validation overlay on dispatch / inspect — dismiss OK and continue. */
+  invalidDataEntered: /invalid\s+data\s+entered/i,
+  invalidDataValues: /values\s+you\s+entered\s+are\s+not\s+valid/i,
+}
+
+/**
+ * True for FedEx "Invalid Data Entered" overlay copy (title or body).
+ * @param {unknown} text
+ */
+export function isInvalidDataEnteredCopy(text) {
+  const t = String(text ?? '')
+  return RX.invalidDataEntered.test(t) || RX.invalidDataValues.test(t)
 }
 
 /**
@@ -110,6 +122,9 @@ const DISPATCH_CONFIRM_WAIT_MS = 2_000
 const DISPATCHED_SUCCESS_WAIT_MS = 2_000
 /** Post-AGREE settle poll (was 500ms AFTER_CLICK_MS). */
 const POST_AGREE_SETTLE_MS = 800
+/** FedEx "Invalid Data Entered" overlay — click OK and keep going. */
+const INVALID_DATA_MODAL_MS = 2_000
+const MAX_INVALID_DATA_DISMISS = 10
 
 /**
  * @param {import('playwright').Page} page
@@ -376,6 +391,48 @@ async function clickTrailerValidateButton(page) {
 async function hasInvalidTrailerError(page) {
   const errorBanner = page.getByText(RX.invalidTrailerNumber).first()
   return await errorBanner.isVisible().catch(() => false)
+}
+
+/**
+ * Generic FedEx overlay: "Invalid Data Entered" / "values you entered are not valid".
+ * Blocks DISPATCH / AGREE clicks (overlay intercept) and was aborting the flow.
+ * @param {import('playwright').Page} page
+ */
+async function isInvalidDataEnteredDialog(page) {
+  const title = page.getByText(RX.invalidDataEntered).first()
+  if (await title.isVisible().catch(() => false)) return true
+  const body = page.getByText(RX.invalidDataValues).first()
+  return await body.isVisible().catch(() => false)
+}
+
+/**
+ * Dismiss "Invalid Data Entered" with OK so inspect/checkout can finish.
+ * @param {import('playwright').Page} page
+ * @param {(type: string, message: string, extra?: object) => void} log
+ * @returns {Promise<boolean>} true if the dialog was present and dismissed (or already gone)
+ */
+async function dismissInvalidDataEnteredIfPresent(page, log) {
+  if (!(await isInvalidDataEnteredDialog(page))) return false
+
+  const deadline = Date.now() + INVALID_DATA_MODAL_MS
+  while (Date.now() < deadline) {
+    if (!(await isInvalidDataEnteredDialog(page))) return true
+    const okRole = page.getByRole('button', { name: /^\s*ok\s*$/i }).first()
+    if (await okRole.isVisible().catch(() => false)) {
+      await okRole.click({ timeout: 2_000 }).catch(() => {})
+    } else {
+      const okAlt = buttonLikeByVisibleText(page, /^ok$/i).first()
+      if (await okAlt.isVisible().catch(() => false)) {
+        await okAlt.click({ timeout: 2_000 }).catch(() => {})
+      }
+    }
+    log('warn', 'Dismissed Invalid Data Entered (OK) — continuing inspect/checkout')
+    await waitForPageSettle(page)
+    await page.waitForTimeout(80)
+    if (!(await isInvalidDataEnteredDialog(page))) return true
+    await page.waitForTimeout(55)
+  }
+  return !(await isInvalidDataEnteredDialog(page))
 }
 
 /**
@@ -875,6 +932,7 @@ async function waitForPostDispatchConfirmSettle(page, maxMs, stepMs = FAST_POLL_
   while (Date.now() < deadline) {
     if (await isDispatchedSuccessScreen(page)) return
     if (await isNewTripDetailsModal(page)) return
+    if (await isInvalidDataEnteredDialog(page)) return
     const remaining = deadline - Date.now()
     if (remaining <= 0) break
     await page.waitForTimeout(Math.min(stepMs, remaining))
@@ -893,6 +951,7 @@ async function waitForPostDispatchButtonSettle(page, maxMs, stepMs = FAST_POLL_M
   while (Date.now() < deadline) {
     if (await isDispatchConfirmModal(page)) return
     if (await isDispatchedSuccessScreen(page)) return
+    if (await isInvalidDataEnteredDialog(page)) return
     const remaining = deadline - Date.now()
     if (remaining <= 0) break
     await page.waitForTimeout(Math.min(stepMs, remaining))
@@ -912,6 +971,7 @@ async function waitForPostAgreeCheckOutSettle(page, maxMs, stepMs = FAST_POLL_MS
     if (await isDispatchScreen(page)) return
     if (await isDispatchedSuccessScreen(page)) return
     if (await isDispatchConfirmModal(page)) return
+    if (await isInvalidDataEnteredDialog(page)) return
     const remaining = deadline - Date.now()
     if (remaining <= 0) break
     await page.waitForTimeout(Math.min(stepMs, remaining))
@@ -1047,6 +1107,7 @@ export async function runInspectCheckoutAfterGate(page, opts) {
   const manualDollyState = { userChoice: null, addDone: false }
   let dispatchClicked = false
   let checklistDone = false
+  let invalidDataDismissCount = 0
 
   const aborted = () => {
     if (signal?.aborted) throw new Error('Aborted')
@@ -1054,6 +1115,7 @@ export async function runInspectCheckoutAfterGate(page, opts) {
 
   await dismissInspectWarningIfPresent(page, log)
   await dismissEmptyTrailerVerifiedModalIfPresent(page, log)
+  await dismissInvalidDataEnteredIfPresent(page, log)
   await maybePromptAndAddDolly(
     page,
     tripDataEffective,
@@ -1069,6 +1131,15 @@ export async function runInspectCheckoutAfterGate(page, opts) {
     mainLoopIteration += 1
     if (mainLoopIteration > 1) await page.waitForTimeout(POLL_MS)
     await dismissEmptyTrailerVerifiedModalIfPresent(page, log)
+    if (await isInvalidDataEnteredDialog(page)) {
+      if (invalidDataDismissCount >= MAX_INVALID_DATA_DISMISS) {
+        log('warn', 'Invalid Data Entered kept returning — continuing without aborting')
+      } else if (await dismissInvalidDataEnteredIfPresent(page, log)) {
+        invalidDataDismissCount += 1
+        lastProgress = Date.now()
+        continue
+      }
+    }
 
     // --- Check for "You are Dispatched!" success ---
     if (await isDispatchedSuccessScreen(page)) {
@@ -1100,7 +1171,18 @@ export async function runInspectCheckoutAfterGate(page, opts) {
 
     // --- Dispatch confirmation modal (YES/NO) ---
     if (await isDispatchConfirmModal(page)) {
-      await clickDispatchConfirmYes(page)
+      await dismissInvalidDataEnteredIfPresent(page, log)
+      try {
+        await clickDispatchConfirmYes(page)
+      } catch (e) {
+        if (await dismissInvalidDataEnteredIfPresent(page, log)) {
+          invalidDataDismissCount += 1
+          lastProgress = Date.now()
+          log('warn', 'YES click blocked by Invalid Data Entered — dismissed, retrying')
+          continue
+        }
+        throw e
+      }
       log('info', 'Clicked YES on dispatch confirmation')
       lastProgress = Date.now()
       await waitForPostDispatchConfirmSettle(page, AFTER_CLICK_MS)
@@ -1142,7 +1224,18 @@ export async function runInspectCheckoutAfterGate(page, opts) {
     // --- Dispatch screen (Review and Start Trip / Dispatch Summary) ---
     if (await isDispatchScreen(page)) {
       await captureProof(page, 'Dispatch Summary', proofScreenshots, log)
-      await clickDispatchButton(page)
+      await dismissInvalidDataEnteredIfPresent(page, log)
+      try {
+        await clickDispatchButton(page)
+      } catch (e) {
+        if (await dismissInvalidDataEnteredIfPresent(page, log)) {
+          invalidDataDismissCount += 1
+          lastProgress = Date.now()
+          log('warn', 'DISPATCH click blocked by Invalid Data Entered — dismissed, retrying')
+          continue
+        }
+        throw e
+      }
       dispatchClicked = true
       log('info', 'Clicked DISPATCH button')
       lastProgress = Date.now()
@@ -1154,6 +1247,7 @@ export async function runInspectCheckoutAfterGate(page, opts) {
         aborted()
         if (await isDispatchConfirmModal(page)) break
         if (await isDispatchedSuccessScreen(page)) break
+        if (await isInvalidDataEnteredDialog(page)) break
         await page.waitForTimeout(FAST_POLL_MS)
       }
       continue
@@ -1167,7 +1261,18 @@ export async function runInspectCheckoutAfterGate(page, opts) {
       await captureProof(page, 'Inspection Checklist', proofScreenshots, log)
       const agreeBtn = buttonLikeByVisibleText(page, RX.agreeAndCheckOut).first()
       if (await agreeBtn.isVisible().catch(() => false)) {
-        await agreeBtn.click()
+        await dismissInvalidDataEnteredIfPresent(page, log)
+        try {
+          await agreeBtn.click()
+        } catch (e) {
+          if (await dismissInvalidDataEnteredIfPresent(page, log)) {
+            invalidDataDismissCount += 1
+            lastProgress = Date.now()
+            log('warn', 'AGREE AND CHECK OUT blocked by Invalid Data Entered — dismissed, retrying')
+            continue
+          }
+          throw e
+        }
         checklistDone = true
         log('info', 'Clicked AGREE AND CHECK OUT')
         lastProgress = Date.now()
@@ -1180,6 +1285,7 @@ export async function runInspectCheckoutAfterGate(page, opts) {
           if (await isDispatchScreen(page)) break
           if (await isDispatchedSuccessScreen(page)) break
           if (await isDispatchConfirmModal(page)) break
+          if (await isInvalidDataEnteredDialog(page)) break
           await page.waitForTimeout(FAST_POLL_MS)
         }
       }
@@ -1608,6 +1714,14 @@ export async function runInspectCheckoutAfterGate(page, opts) {
     if (handled) continue
 
     // Idle exit — report failure if dispatch was never completed
+    if (
+      invalidDataDismissCount < MAX_INVALID_DATA_DISMISS &&
+      (await isInvalidDataEnteredDialog(page))
+    ) {
+      lastProgress = Date.now()
+      continue
+    }
+
     const idleBudgetMs =
       checklistDone && !dispatchClicked ? POST_CHECKLIST_IDLE_MS : IDLE_EXIT_MS
     if (Date.now() - lastProgress > idleBudgetMs) {
