@@ -142,6 +142,7 @@ import {
   testTractorChangeAlert,
   testDriverChangeAlert,
   testSuccessAlert,
+  announceInspectCheckoutFailure,
 } from '../utils/alertAudioQueue.js'
 import {
   getHelpersAutoArriveNearDestEnabled,
@@ -153,6 +154,10 @@ import {
   HELPERS_RADIUS_NM_DEFAULT,
   applyHelpersLocationPrefsFromCredentials,
 } from '../utils/helpersLocationPrefs.js'
+import {
+  getInspectCheckoutUiMode,
+  setInspectCheckoutUiMode,
+} from '../utils/inspectCheckoutUiPrefs.js'
 import {
   applyWahaPrefsFromCredentials,
   saveWahaPrefsToServer,
@@ -219,6 +224,14 @@ function onSettingsTabsWheel(e) {
 
 const helpersAutoArriveEnabled = ref(getHelpersAutoArriveNearDestEnabled())
 const helpersRadiusNm = ref(getHelpersAutoArriveRadiusNm())
+/** @type {import('vue').Ref<'preview' | 'button'>} */
+const inspectCheckoutUiMode = ref(getInspectCheckoutUiMode())
+
+function onInspectCheckoutUiModeChange(mode) {
+  const next = mode === 'button' ? 'button' : 'preview'
+  inspectCheckoutUiMode.value = next
+  setInspectCheckoutUiMode(next)
+}
 const helpersLocationBusy = ref(false)
 const helpersProximityBusy = ref(false)
 const helpersProximityMsg = ref('')
@@ -2199,6 +2212,7 @@ watch(settingsTab, (tab) => {
     helpersProximityMsg.value = ''
     syncHelpersPrefsFromStorage()
     syncWahaSpeechPrefsFromStorage()
+    inspectCheckoutUiMode.value = getInspectCheckoutUiMode()
   }
 })
 
@@ -3036,6 +3050,33 @@ onUnmounted(() => {
         </p>
       </SettingsSection>
 
+      <SettingsSection title="Inspect & Check Out">
+        <p class="helpers-hint">
+          Choose how Home shows Inspect &amp; Checkout while it runs. Speech still announces
+          errors and failure reasons in both modes.
+        </p>
+        <label class="toggle-row tap">
+          <input
+            type="radio"
+            name="inspect-checkout-ui"
+            value="preview"
+            :checked="inspectCheckoutUiMode === 'preview'"
+            @change="onInspectCheckoutUiModeChange('preview')"
+          />
+          <span>Browser preview — full-screen live screenshot (current)</span>
+        </label>
+        <label class="toggle-row tap">
+          <input
+            type="radio"
+            name="inspect-checkout-ui"
+            value="button"
+            :checked="inspectCheckoutUiMode === 'button'"
+            @change="onInspectCheckoutUiModeChange('button')"
+          />
+          <span>Button status — keep Home open; the button shows the step and errors</span>
+        </label>
+      </SettingsSection>
+
       <SettingsSection title="WhatsApp speech">
         <p class="helpers-hint">
           Monitored chat is set under WhatsApp. Daily briefing needs an OpenRouter key in General → API.
@@ -3458,6 +3499,21 @@ onUnmounted(() => {
               </label>
               <span class="audio-row-label">Check-in results</span>
               <button type="button" class="audio-test-btn tap" @click="testSuccessAlert">Test</button>
+            </div>
+
+            <div class="audio-row">
+              <label class="toggle-switch">
+                <input type="checkbox" :checked="alertPrefs.inspectCheckout" @change="updateAlertPref('inspectCheckout', $event.target.checked)" />
+                <span class="toggle-slider"></span>
+              </label>
+              <span class="audio-row-label">Inspect &amp; checkout steps and failures</span>
+              <button
+                type="button"
+                class="audio-test-btn tap"
+                @click="announceInspectCheckoutFailure('Invalid trailer number. Check the number and try again.', 'inspectCheckoutTest')"
+              >
+                Test
+              </button>
             </div>
           </div>
         </div>

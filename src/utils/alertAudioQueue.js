@@ -450,11 +450,46 @@ export function testErrorAlert() {
 }
 
 export function announceInspectCheckoutNewTripDetails() {
+  announceInspectCheckoutFailure(
+    'Inspect and checkout failed. New trip details were added. Begin a new check-in.',
+    'inspectCheckoutNewTrip',
+  )
+}
+
+/**
+ * Speak an inspect/checkout failure or error (dolly, seal, trailer, dispatch).
+ * @param {string} message
+ * @param {string} [category]
+ */
+export function announceInspectCheckoutFailure(message, category = 'inspectCheckoutFail') {
   const prefs = getAlertPrefs()
   if (!prefs.inspectCheckout) {
     pushLiveLog({ type: 'warn', message: `[Alert] inspectCheckout blocked by prefs`, ts: Date.now() })
     return
   }
-  pushLiveLog({ type: 'warn', message: `[Alert] Inspect & Checkout failed: new trip details`, ts: Date.now() })
-  speakDirect('Inspect and checkout failed, begin new checkin.')
+  const text = String(message ?? '').trim()
+  if (!text) return
+  pushLiveLog({ type: 'warn', message: `[Alert] Inspect & Checkout: ${text}`, ts: Date.now() })
+  enqueueAnnouncement(text, { category, bell: true })
+}
+
+/**
+ * Mid-run step error (invalid dolly / seal / trailer / data). Deduped by category.
+ * @param {string} message
+ * @param {string} [category]
+ */
+export function announceInspectCheckoutStepError(message, category = 'inspectCheckoutStep') {
+  announceInspectCheckoutFailure(message, category)
+}
+
+/**
+ * Successful inspect/checkout.
+ * @param {string} [message]
+ */
+export function announceInspectCheckoutSuccess(message) {
+  const prefs = getAlertPrefs()
+  if (!prefs.inspectCheckout) return
+  const text = String(message ?? '').trim() || 'Inspect and checkout complete. You are dispatched.'
+  pushLiveLog({ type: 'info', message: `[Alert] Inspect & Checkout success: ${text}`, ts: Date.now() })
+  enqueueAnnouncement(text, { category: 'inspectCheckoutSuccess' })
 }
