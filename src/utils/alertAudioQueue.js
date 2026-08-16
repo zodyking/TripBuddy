@@ -14,6 +14,7 @@ import {
 } from '../stores/speechAlertModalStore.js'
 import { closeChatMessageSpeech, focusChatMessageSpeechByCategory } from '../stores/chatMessageSpeechStore.js'
 import { isWhatsAppTapToReadCategory } from './chatMessageSpeech.js'
+import { speakUtterance } from './speechSynthesisSpeak.js'
 
 const PREFS_KEY = 'fedexAlertPrefs'
 
@@ -117,6 +118,14 @@ function playBellThenSpeak(text, category = '') {
   const url = ALERT_SOUNDS.tripReady
   pushLiveLog({ type: 'info', message: `[Queue] bell triggered: ${url}`, ts: Date.now() })
 
+  let handedOff = false
+  const speakAfterBell = (reason) => {
+    if (handedOff) return
+    handedOff = true
+    pushLiveLog({ type: 'info', message: `[Queue] ${reason}: ${text}`, ts: Date.now() })
+    speakText(text, category)
+  }
+
   try {
     if (currentAudio) {
       currentAudio.pause()
@@ -127,23 +136,21 @@ function playBellThenSpeak(text, category = '') {
 
     audio.addEventListener('ended', () => {
       if (currentAudio === audio) currentAudio = null
-      pushLiveLog({ type: 'info', message: `[Queue] bell ended, speaking: ${text}`, ts: Date.now() })
-      setTimeout(() => speakText(text, category), 300)
+      setTimeout(() => speakAfterBell('bell ended, speaking'), 300)
     }, { once: true })
 
     audio.addEventListener('error', () => {
-      pushLiveLog({ type: 'error', message: `[Queue] bell failed, speaking anyway: ${text}`, ts: Date.now() })
       if (currentAudio === audio) currentAudio = null
-      speakText(text, category)
+      speakAfterBell('bell failed, speaking anyway')
     }, { once: true })
 
     audio.play().catch((e) => {
       pushLiveLog({ type: 'error', message: `[Queue] bell play rejected: ${e.message || e}`, ts: Date.now() })
-      speakText(text, category)
+      speakAfterBell('bell play rejected, speaking anyway')
     })
   } catch (e) {
     pushLiveLog({ type: 'error', message: `[Queue] bell exception: ${e.message || e}`, ts: Date.now() })
-    speakText(text, category)
+    speakAfterBell('bell exception, speaking anyway')
   }
 }
 
@@ -161,72 +168,75 @@ function speakText(text, category = '') {
   }
 
   const spoken = String(text || '').trim()
+  if (!spoken) {
+    isSpeaking = false
+    processNextSpeech()
+    return
+  }
+
   const words = tokenizeSpeechWords(spoken)
   let boundarySeen = false
   /** @type {ReturnType<typeof setInterval> | null} */
   let fallbackTimer = null
+  let finished = false
+
+  const finish = (kind, errorName) => {
+    if (finished) return
+    finished = true
+    if (fallbackTimer) {
+      clearInterval(fallbackTimer)
+      fallbackTimer = null
+    }
+    if (kind === 'error') {
+      pushLiveLog({
+        type: 'error',
+        message: `[Queue] TTS error: ${text} - ${errorName || 'unknown'}`,
+        ts: Date.now(),
+      })
+    } else {
+      pushLiveLog({ type: 'info', message: `[Queue] TTS ended: ${text}`, ts: Date.now() })
+    }
+    const cat = category || currentSpeechCategory
+    if (shouldShowSpeechSubtitles(cat)) hideSpeechAlertModal()
+    currentUtterance = null
+    currentSpeechCategory = ''
+    isSpeaking = false
+    processNextSpeech()
+  }
 
   try {
-    const u = new SpeechSynthesisUtterance(spoken)
-    u.rate = 1.05
-    u.pitch = 1
-    u.volume = 1
+    const u = speakUtterance(spoken, {
+      onboundary: (e) => {
+        if (e.name !== 'word' || e.charIndex == null) return
+        boundarySeen = true
+        const idx = wordIndexFromCharIndex(spoken, e.charIndex)
+        if (idx >= 0) setSpeechAlertWordIndex(idx)
+      },
+      onstart: () => {
+        pushLiveLog({ type: 'info', message: `[Queue] TTS started: ${text}`, ts: Date.now() })
+        const cat = category || currentSpeechCategory
+        if (isWhatsAppTapToReadCategory(cat)) {
+          focusChatMessageSpeechByCategory(cat)
+        } else if (shouldShowSpeechSubtitles(cat)) {
+          showSpeechAlertModal(spoken)
+          setSpeechAlertWordIndex(0)
+          const stepMs = Math.max(120, Math.max(3000, words.length * 380) / Math.max(1, words.length))
+          let i = 0
+          fallbackTimer = setInterval(() => {
+            if (boundarySeen) return
+            i += 1
+            if (i < words.length) setSpeechAlertWordIndex(i)
+          }, stepMs)
+        }
+      },
+      onend: () => finish('end'),
+      onerror: (e) => finish('error', e.error),
+    })
     currentUtterance = u
-
-    u.onboundary = (e) => {
-      if (e.name !== 'word' || e.charIndex == null) return
-      boundarySeen = true
-      const idx = wordIndexFromCharIndex(spoken, e.charIndex)
-      if (idx >= 0) setSpeechAlertWordIndex(idx)
+    if (!u) {
+      finish('error', 'speak failed')
+      return
     }
-
-    u.onstart = () => {
-      pushLiveLog({ type: 'info', message: `[Queue] TTS started: ${text}`, ts: Date.now() })
-      const cat = category || currentSpeechCategory
-      if (isWhatsAppTapToReadCategory(cat)) {
-        focusChatMessageSpeechByCategory(cat)
-      } else if (shouldShowSpeechSubtitles(cat)) {
-        showSpeechAlertModal(spoken)
-        setSpeechAlertWordIndex(0)
-        const stepMs = Math.max(120, Math.max(3000, words.length * 380) / Math.max(1, words.length))
-        let i = 0
-        fallbackTimer = setInterval(() => {
-          if (boundarySeen) return
-          i += 1
-          if (i < words.length) setSpeechAlertWordIndex(i)
-        }, stepMs)
-      }
-    }
-
-    u.onend = () => {
-      pushLiveLog({ type: 'info', message: `[Queue] TTS ended: ${text}`, ts: Date.now() })
-      if (fallbackTimer) {
-        clearInterval(fallbackTimer)
-        fallbackTimer = null
-      }
-      const cat = category || currentSpeechCategory
-      if (shouldShowSpeechSubtitles(cat)) hideSpeechAlertModal()
-      currentUtterance = null
-      currentSpeechCategory = ''
-      isSpeaking = false
-      processNextSpeech()
-    }
-
-    u.onerror = (e) => {
-      pushLiveLog({ type: 'error', message: `[Queue] TTS error: ${text} - ${e.error || 'unknown'}`, ts: Date.now() })
-      if (fallbackTimer) {
-        clearInterval(fallbackTimer)
-        fallbackTimer = null
-      }
-      const cat = category || currentSpeechCategory
-      if (shouldShowSpeechSubtitles(cat)) hideSpeechAlertModal()
-      currentUtterance = null
-      currentSpeechCategory = ''
-      isSpeaking = false
-      processNextSpeech()
-    }
-
-    window.speechSynthesis.speak(u)
     pushLiveLog({ type: 'info', message: `[Queue] TTS triggered: ${text}`, ts: Date.now() })
   } catch (e) {
     if (fallbackTimer) {
@@ -277,15 +287,21 @@ export function speakDirect(text, opts = {}) {
 
   if (opts.bell) {
     const url = ALERT_SOUNDS.tripReady
+    let handedOff = false
+    const speakOnce = () => {
+      if (handedOff) return
+      handedOff = true
+      speakDirectTts(text)
+    }
     try {
       const audio = new Audio(url)
       audio.addEventListener('ended', () => {
-        setTimeout(() => speakDirectTts(text), 300)
+        setTimeout(speakOnce, 300)
       }, { once: true })
-      audio.addEventListener('error', () => speakDirectTts(text), { once: true })
-      audio.play().catch(() => speakDirectTts(text))
+      audio.addEventListener('error', speakOnce, { once: true })
+      audio.play().catch(speakOnce)
     } catch {
-      speakDirectTts(text)
+      speakOnce()
     }
   } else {
     speakDirectTts(text)
@@ -294,16 +310,15 @@ export function speakDirect(text, opts = {}) {
 
 function speakDirectTts(text) {
   if (typeof window === 'undefined' || !window.speechSynthesis) return
+  const spoken = String(text || '').trim()
+  if (!spoken) return
   try {
-    window.speechSynthesis.cancel()
-    const u = new SpeechSynthesisUtterance(text)
-    u.rate = 1.05
-    u.pitch = 1
-    u.volume = 1
-    u.onstart = () => pushLiveLog({ type: 'info', message: `[Direct] TTS started: ${text}`, ts: Date.now() })
-    u.onend = () => pushLiveLog({ type: 'info', message: `[Direct] TTS ended: ${text}`, ts: Date.now() })
-    u.onerror = (e) => pushLiveLog({ type: 'error', message: `[Direct] TTS error: ${text} - ${e.error}`, ts: Date.now() })
-    window.speechSynthesis.speak(u)
+    speakUtterance(spoken, {
+      onstart: () => pushLiveLog({ type: 'info', message: `[Direct] TTS started: ${spoken}`, ts: Date.now() }),
+      onend: () => pushLiveLog({ type: 'info', message: `[Direct] TTS ended: ${spoken}`, ts: Date.now() }),
+      onerror: (e) =>
+        pushLiveLog({ type: 'error', message: `[Direct] TTS error: ${spoken} - ${e.error}`, ts: Date.now() }),
+    })
   } catch (e) {
     pushLiveLog({ type: 'error', message: `[Direct] TTS exception: ${e.message || e}`, ts: Date.now() })
   }

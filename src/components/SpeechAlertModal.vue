@@ -23,9 +23,7 @@ const subtitleSizeClass = computed(() => {
     <div
       v-if="speechAlertModalOpen && words.length"
       class="speech-subtitle-wrap"
-      role="status"
-      aria-live="polite"
-      aria-atomic="true"
+      aria-hidden="true"
     >
       <p class="speech-subtitle-bar" :class="subtitleSizeClass">
         <span
