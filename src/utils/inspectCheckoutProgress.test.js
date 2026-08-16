@@ -4,6 +4,7 @@ import {
   parseInspectCheckoutProgress,
   inspectCheckoutOutcomeSpeech,
   isInspectCheckoutAutomation,
+  isClientGeneratedLiveLog,
 } from './inspectCheckoutProgress.js'
 
 test('parseInspectCheckoutProgress maps dolly / seal / trailer errors', () => {
@@ -56,4 +57,44 @@ test('isInspectCheckoutAutomation matches name and action types', () => {
     true,
   )
   assert.equal(isInspectCheckoutAutomation({ name: 'Check In' }), false)
+})
+
+test('isClientGeneratedLiveLog skips TTS and queue lines', () => {
+  assert.equal(isClientGeneratedLiveLog('[Alert] Inspect & Checkout: hello'), true)
+  assert.equal(isClientGeneratedLiveLog('[Queue] next'), true)
+  assert.equal(isClientGeneratedLiveLog('[Test] testErrorAlert called'), true)
+  assert.equal(isClientGeneratedLiveLog('Inspect & Check Out requires re-checkin due to trip changes'), false)
+})
+
+test('parseInspectCheckoutProgress ignores stacked [Alert] failure lines', () => {
+  const stacked =
+    '[Alert] Inspect & Checkout: [Alert] Inspect & Checkout [Alert] Inspect & Checkout: Inspect & Check Out requires re-checkin due to trip changes'
+  assert.equal(parseInspectCheckoutProgress(stacked, 'warn'), null)
+  assert.equal(
+    parseInspectCheckoutProgress('[Alert] Inspect & Checkout: Inspect & Check Out requires re-checkin due to trip changes', 'warn'),
+    null,
+  )
+})
+
+test('parseInspectCheckoutProgress maps re-checkin without a unique warn hash', () => {
+  const parsed = parseInspectCheckoutProgress(
+    'Inspect & Check Out requires re-checkin due to trip changes',
+    'warn',
+  )
+  assert.equal(parsed?.button, 'New trip details')
+  assert.equal(parsed?.ttsKey, 'new_trip')
+  assert.equal(parsed?.error, 'Trip details changed')
+})
+
+test('parseInspectCheckoutProgress does not treat unknown inspect warns as progress', () => {
+  assert.equal(parseInspectCheckoutProgress('Inspect & Check Out post-gate finished', 'info'), null)
+  assert.equal(parseInspectCheckoutProgress('Inspect & Check Out: something unexpected', 'warn'), null)
+})
+
+test('parseInspectCheckoutProgress maps check-in and arrive steps', () => {
+  assert.equal(parseInspectCheckoutProgress('Opening Check In')?.button, 'Opening check-in')
+  assert.equal(parseInspectCheckoutProgress('Submitting check-in')?.button, 'Submitting')
+  assert.equal(parseInspectCheckoutProgress('FedEx reported a message after submit', 'warn')?.button, 'Check-in issue')
+  assert.equal(parseInspectCheckoutProgress('Clicked Arrive (xpath)')?.button, 'Tapping Arrive')
+  assert.equal(parseInspectCheckoutProgress('Tractor already arrived by geofence — skipping manual arrive')?.button, 'Already arrived')
 })

@@ -1,7 +1,7 @@
 /**
- * Map Inspect & Check Out live-log lines to a short button label and optional TTS.
- * Orchestration log copy is the source of truth — keep patterns aligned with
- * server/playwright/inspectCheckoutOrchestration.mjs.
+ * Map Check In / Inspect & Check Out / Arrive live-log lines to a short
+ * button label and optional TTS. Orchestration log copy is the source of
+ * truth — keep patterns aligned with server/playwright flows.
  */
 
 /**
@@ -13,20 +13,31 @@
  * }} InspectProgress
  */
 
+const CLIENT_LOG_PREFIX = /^\[(Alert|Queue|Test|Direct|TripVoice)\]/i
+
+/**
+ * Client-side live-log lines (TTS / queue / tests). Never treat these as
+ * automation progress — they used to re-enter the parser and stack forever.
+ * @param {unknown} message
+ */
+export function isClientGeneratedLiveLog(message) {
+  return CLIENT_LOG_PREFIX.test(String(message ?? '').trim())
+}
+
 /**
  * @param {unknown} message
  * @param {unknown} [type]
  * @returns {InspectProgress | null}
  */
-export function parseInspectCheckoutProgress(message, type) {
+export function parseInspectCheckoutProgress(message, _type) {
   const m = String(message ?? '').trim()
   if (!m) return null
-  const isWarn = type === 'warn' || type === 'error'
+  if (isClientGeneratedLiveLog(m)) return null
 
   if (/you are dispatched/i.test(m) && !/never appeared/i.test(m)) {
     return prog('Dispatched', '', 'Inspect and checkout complete. You are dispatched.', 'done')
   }
-  if (/new trip details/i.test(m)) {
+  if (/new trip details/i.test(m) || /requires re-checkin|re-checkin due to trip/i.test(m)) {
     return prog(
       'New trip details',
       'Trip details changed',
@@ -52,6 +63,9 @@ export function parseInspectCheckoutProgress(message, type) {
       'Inspect and checkout failed. Dispatch was not confirmed.',
       'dispatch_not_confirmed',
     )
+  }
+  if (/no recognized screen/i.test(m)) {
+    return prog('Screen unknown', 'Screen was not recognized', '', 'idle_screen')
   }
   if (/invalid data entered/i.test(m)) {
     return prog(
@@ -131,10 +145,105 @@ export function parseInspectCheckoutProgress(message, type) {
     return prog('Acknowledging warning', '', '', 'warning')
   }
 
-  if (isWarn && /inspect/i.test(m)) {
-    return prog('Inspect issue', clip(m, 42), clip(m, 160), `warn_${hashKey(m)}`)
-  }
+  const checkIn = parseCheckInProgress(m)
+  if (checkIn) return checkIn
+  const arrive = parseArriveProgress(m)
+  if (arrive) return arrive
 
+  return null
+}
+
+/**
+ * @param {string} m
+ * @returns {InspectProgress | null}
+ */
+function parseCheckInProgress(m) {
+  if (/fedex reported a message after submit/i.test(m)) {
+    return prog('Check-in issue', 'FedEx reported a message', '', 'checkin_banner')
+  }
+  if (/begin new check-in dialog.*could not/i.test(m)) {
+    return prog('Check-in blocked', 'Could not continue check-in', '', 'checkin_begin_blocked')
+  }
+  if (/check-in mission complete/i.test(m)) {
+    return prog('Check-in done', '', '', 'checkin_done')
+  }
+  if (/check-in finished/i.test(m)) {
+    return prog('Check-in done', '', '', 'checkin_finished')
+  }
+  if (/check-in session ready/i.test(m)) {
+    return prog('Session ready', '', '', 'checkin_ready')
+  }
+  if (/confirmed new check-in/i.test(m)) {
+    return prog('Confirming check-in', '', '', 'checkin_confirm')
+  }
+  if (/starting new check-in/i.test(m)) {
+    return prog('Starting check-in', '', '', 'checkin_start')
+  }
+  if (/check-in already started|opening check in/i.test(m)) {
+    return prog('Opening check-in', '', '', 'checkin_open')
+  }
+  if (/using menu to (start|open) check-in/i.test(m)) {
+    return prog('Opening check-in', '', '', 'checkin_menu')
+  }
+  if (/choosing check-in option/i.test(m)) {
+    return prog('Choosing option', '', '', 'checkin_option')
+  }
+  if (/entering tractor and location/i.test(m)) {
+    return prog('Entering tractor', '', '', 'checkin_tractor')
+  }
+  if (/retrying check-in with new location/i.test(m)) {
+    return prog('Retrying location', '', '', 'checkin_retry_loc')
+  }
+  if (/submitting check-in retry/i.test(m)) {
+    return prog('Submitting retry', '', '', 'checkin_retry_submit')
+  }
+  if (/submitting check-in/i.test(m)) {
+    return prog('Submitting', '', '', 'checkin_submit')
+  }
+  if (/checking result/i.test(m)) {
+    return prog('Checking result', '', '', 'checkin_result')
+  }
+  if (/contact linehaul/i.test(m)) {
+    return prog('Contact Linehaul', '', '', 'checkin_linehaul')
+  }
+  if (/trip ready page detected/i.test(m)) {
+    return prog('Trip ready', '', '', 'checkin_trip_ready')
+  }
+  if (/entered driver phone|sent phone number|phone modal/i.test(m)) {
+    return prog('Phone number', '', '', 'checkin_phone')
+  }
+  if (/confirmed assistance|no assistance modal|assistance \(if any\)/i.test(m)) {
+    return prog('Assistance', '', '', 'checkin_assist')
+  }
+  return null
+}
+
+/**
+ * @param {string} m
+ * @returns {InspectProgress | null}
+ */
+function parseArriveProgress(m) {
+  if (/already arrived by geofence/i.test(m)) {
+    return prog('Already arrived', '', '', 'arrive_geofence_skip')
+  }
+  if (/geofence arrival/i.test(m)) {
+    return prog('Geofence arrive', '', '', 'arrive_geofence')
+  }
+  if (/arrive post-flow complete/i.test(m)) {
+    return prog('Arrive done', '', '', 'arrive_done')
+  }
+  if (/clicked arrive/i.test(m)) {
+    return prog('Tapping Arrive', '', '', 'arrive_click')
+  }
+  if (/selected tractor number option/i.test(m)) {
+    return prog('Selecting tractor', '', '', 'arrive_tractor_opt')
+  }
+  if (/entered tractor number/i.test(m)) {
+    return prog('Entering tractor', '', '', 'arrive_tractor')
+  }
+  if (/clicked continue/i.test(m)) {
+    return prog('Continuing', '', '', 'arrive_continue')
+  }
   return null
 }
 
@@ -199,20 +308,6 @@ export function isInspectCheckoutAutomation(auto) {
  */
 function prog(button, error, tts, ttsKey) {
   return { button, error, tts, ttsKey }
-}
-
-/** @param {string} s @param {number} n */
-function clip(s, n) {
-  const t = String(s || '').replace(/\s+/g, ' ').trim()
-  if (t.length <= n) return t
-  return `${t.slice(0, n - 1)}…`
-}
-
-/** @param {string} s */
-function hashKey(s) {
-  let h = 0
-  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0
-  return String(h)
 }
 
 /** @param {string} r */

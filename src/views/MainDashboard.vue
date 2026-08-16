@@ -138,12 +138,10 @@ import {
   cancelAllAlerts,
 } from '../utils/alertAudioQueue.js'
 import {
-  getInspectCheckoutUiMode,
-} from '../utils/inspectCheckoutUiPrefs.js'
-import {
   parseInspectCheckoutProgress,
   inspectCheckoutOutcomeSpeech,
   isInspectCheckoutAutomation,
+  isClientGeneratedLiveLog,
 } from '../utils/inspectCheckoutProgress.js'
 
 const router = useRouter()
@@ -254,11 +252,13 @@ let previewPollTimer = null
 let linehaulPollTimer = null
 const lastPreviewBusy = ref(false)
 
-/** Home: while automation preview is active, only the preview is shown (fills main area); other cards unmount. */
-const inspectCheckoutUiMode = ref(getInspectCheckoutUiMode())
+/** Home quick-action buttons show live step/error text. Browser preview never replaces Home. */
 const inspectLiveLabel = ref('')
 const inspectLiveIsError = ref(false)
+const liveStatusActionId = ref(/** @type {string | null} */ (null))
 let lastInspectTtsKey = ''
+/** @type {ReturnType<typeof setTimeout> | null} */
+let inspectLiveClearTimer = null
 
 const quickActionAutomations = ref([])
 const runningAutomationId = ref(null)
@@ -270,18 +270,7 @@ const remoteAutomationRun = ref(
   ),
 )
 
-const runningInspectCheckout = computed(() => {
-  const id = runningAutomationId.value || remoteAutomationRun.value?.automationId
-  if (!id) return false
-  const auto = quickActionAutomations.value.find((a) => a.id === id)
-  return isInspectCheckoutAutomation(auto)
-})
-
-const showAutomationPreviewFocus = computed(() => {
-  if (!lastPreviewBusy.value || automationPreviewHidden.value) return false
-  if (runningInspectCheckout.value && inspectCheckoutUiMode.value === 'button') return false
-  return true
-})
+const showAutomationPreviewFocus = computed(() => false)
 
 function isQuickActionRunning(autoId) {
   if (runningAutomationId.value === autoId) return true
@@ -292,7 +281,7 @@ function isQuickActionRunning(autoId) {
  * @param {{ id?: string, name?: string, manualButtonLabel?: string, actions?: unknown[] }} auto
  */
 function quickActionButtonLabel(auto) {
-  if (isQuickActionRunning(auto.id) && isInspectCheckoutAutomation(auto) && inspectLiveLabel.value) {
+  if (auto.id === liveStatusActionId.value && inspectLiveLabel.value) {
     return inspectLiveLabel.value
   }
   if (isQuickActionRunning(auto.id)) return 'Running…'
@@ -300,9 +289,25 @@ function quickActionButtonLabel(auto) {
 }
 
 function resetInspectLiveStatus() {
+  if (inspectLiveClearTimer) {
+    clearTimeout(inspectLiveClearTimer)
+    inspectLiveClearTimer = null
+  }
   inspectLiveLabel.value = ''
   inspectLiveIsError.value = false
   lastInspectTtsKey = ''
+  liveStatusActionId.value = null
+}
+
+function scheduleInspectLiveClear() {
+  if (inspectLiveClearTimer) {
+    clearTimeout(inspectLiveClearTimer)
+    inspectLiveClearTimer = null
+  }
+  inspectLiveClearTimer = setTimeout(() => {
+    resetInspectLiveStatus()
+    inspectLiveClearTimer = null
+  }, 4000)
 }
 
 /**
@@ -312,12 +317,11 @@ function resetInspectLiveStatus() {
 function applyInspectProgressFromLog(message, type) {
   const parsed = parseInspectCheckoutProgress(message, type)
   if (!parsed) return
+  const runningId = runningAutomationId.value || remoteAutomationRun.value?.automationId
+  if (runningId) liveStatusActionId.value = runningId
   inspectLiveLabel.value = parsed.button
   inspectLiveIsError.value = Boolean(parsed.error)
-  const midRunError =
-    parsed.error &&
-    parsed.tts &&
-    /^(invalid_|warn_)/.test(parsed.ttsKey)
+  const midRunError = parsed.error && parsed.tts && /^invalid_/.test(parsed.ttsKey)
   if (midRunError && parsed.ttsKey !== lastInspectTtsKey) {
     lastInspectTtsKey = parsed.ttsKey
     announceInspectCheckoutStepError(parsed.tts, `inspectStep:${parsed.ttsKey}`)
@@ -1345,6 +1349,9 @@ function handleAutomationSyncEvent(data) {
     }
     runStartTs.value = Date.now()
     streamBannerHandledKey.value = null
+    resetInspectLiveStatus()
+    liveStatusActionId.value = String(data.automationId ?? '') || null
+    inspectLiveLabel.value = 'Starting…'
     return
   }
   if (data.code === 'AUTOMATION_COMPLETE') {
@@ -1357,6 +1364,7 @@ function handleAutomationSyncEvent(data) {
     remoteAutomationRun.value = null
     if (!wasLocal) {
       runStartTs.value = null
+      scheduleInspectLiveClear()
     }
     void refreshLinehaulApis()
     if (wasRemote && deviceId && deviceId !== localDeviceId) {
@@ -1390,10 +1398,8 @@ async function runQuickAction(auto) {
 
   dismissInBrowserAutomationPrompts()
   resetInspectLiveStatus()
-  inspectCheckoutUiMode.value = getInspectCheckoutUiMode()
-  if (isInspectCheckoutAutomation(auto) && inspectCheckoutUiMode.value === 'button') {
-    inspectLiveLabel.value = 'Starting…'
-  }
+  liveStatusActionId.value = auto.id
+  inspectLiveLabel.value = 'Starting…'
   /* Cancel block + scenario runners, close browser, then start the newly tapped quick action. */
   try {
     await postCancelRun()
@@ -1470,15 +1476,18 @@ async function runQuickAction(auto) {
       announceInspectCheckoutFailure(speech || 'Inspect and checkout failed.')
       inspectLiveLabel.value = ic?.reason ? String(ic.reason).replace(/_/g, ' ') : 'Failed'
       inspectLiveIsError.value = true
+    } else {
+      inspectLiveLabel.value = 'Failed'
+      inspectLiveIsError.value = true
     }
     return { ok: false }
   } catch (e) {
     if (quickActionRunGeneration.value === myGen) {
       const raw = e instanceof Error ? e.message : String(e)
       notifyQuickActionInApp(raw, 'error')
+      inspectLiveLabel.value = 'Failed'
+      inspectLiveIsError.value = true
       if (isInspectCheckoutAutomation(auto)) {
-        inspectLiveLabel.value = 'Failed'
-        inspectLiveIsError.value = true
         announceInspectCheckoutFailure(
           inspectCheckoutOutcomeSpeech('', { ok: false }) || `Inspect and checkout failed. ${raw}`,
         )
@@ -1490,6 +1499,7 @@ async function runQuickAction(auto) {
     if (quickActionRunGeneration.value === myGen) {
       runningAutomationId.value = null
       runStartTs.value = null
+      scheduleInspectLiveClear()
       setTimeout(() => void refreshLinehaulApis(), 1500)
     }
   }
@@ -1910,6 +1920,7 @@ function handleInspectProgressFromLiveLog() {
     const e = list[i]
     if (e.ts < start) break
     if (typeof e.message !== 'string' || !e.message.trim()) continue
+    if (isClientGeneratedLiveLog(e.message)) continue
     const parsed = parseInspectCheckoutProgress(e.message, e.type)
     if (parsed) {
       applyInspectProgressFromLog(e.message, e.type)
@@ -2538,7 +2549,6 @@ onMounted(async () => {
     )
   })
   unregisterRecover = registerApiRecover(reconnectLiveLogStream)
-  inspectCheckoutUiMode.value = getInspectCheckoutUiMode()
   await loadAssignment()
   void refreshLinehaulCredMeta()
   void loadQuickActions()
@@ -2552,7 +2562,6 @@ onMounted(async () => {
 })
 
 onActivated(() => {
-  inspectCheckoutUiMode.value = getInspectCheckoutUiMode()
   loadAssignment()
   void refreshLinehaulCredMeta()
   void loadDollyRegistry()
@@ -2578,6 +2587,10 @@ onUnmounted(() => {
   unregisterSession()
   unregisterAutomationSync()
   unregisterRecover()
+  if (inspectLiveClearTimer) {
+    clearTimeout(inspectLiveClearTimer)
+    inspectLiveClearTimer = null
+  }
   if (previewPollTimer) {
     clearInterval(previewPollTimer)
     previewPollTimer = null
@@ -3708,8 +3721,8 @@ onUnmounted(() => {
           type="button"
           class="btn primary tap quick-action-btn"
           :class="{
-            'quick-action-btn--live': isQuickActionRunning(auto.id) && isInspectCheckoutAutomation(auto) && inspectLiveLabel,
-            'quick-action-btn--err': isQuickActionRunning(auto.id) && isInspectCheckoutAutomation(auto) && inspectLiveIsError,
+            'quick-action-btn--live': auto.id === liveStatusActionId && inspectLiveLabel,
+            'quick-action-btn--err': auto.id === liveStatusActionId && inspectLiveIsError,
           }"
           @click="runQuickAction(auto)"
         >
