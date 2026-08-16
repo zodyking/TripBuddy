@@ -469,7 +469,7 @@ export function announceInspectCheckoutFailure(message, category = 'inspectCheck
   }
   const text = String(message ?? '').trim()
   if (!text) return
-  pushLiveLog({ type: 'warn', message: `[Alert] Inspect & Checkout: ${text}`, ts: Date.now() })
+  pushLiveLog({ type: 'info', message: `[Alert] announceInspectCheckoutFailure called`, ts: Date.now() })
   enqueueAnnouncement(text, { category, bell: true })
 }
 

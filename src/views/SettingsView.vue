@@ -155,10 +155,6 @@ import {
   applyHelpersLocationPrefsFromCredentials,
 } from '../utils/helpersLocationPrefs.js'
 import {
-  getInspectCheckoutUiMode,
-  setInspectCheckoutUiMode,
-} from '../utils/inspectCheckoutUiPrefs.js'
-import {
   applyWahaPrefsFromCredentials,
   saveWahaPrefsToServer,
 } from '../utils/wahaPrefs.js'
@@ -224,14 +220,6 @@ function onSettingsTabsWheel(e) {
 
 const helpersAutoArriveEnabled = ref(getHelpersAutoArriveNearDestEnabled())
 const helpersRadiusNm = ref(getHelpersAutoArriveRadiusNm())
-/** @type {import('vue').Ref<'preview' | 'button'>} */
-const inspectCheckoutUiMode = ref(getInspectCheckoutUiMode())
-
-function onInspectCheckoutUiModeChange(mode) {
-  const next = mode === 'button' ? 'button' : 'preview'
-  inspectCheckoutUiMode.value = next
-  setInspectCheckoutUiMode(next)
-}
 const helpersLocationBusy = ref(false)
 const helpersProximityBusy = ref(false)
 const helpersProximityMsg = ref('')
@@ -2212,7 +2200,6 @@ watch(settingsTab, (tab) => {
     helpersProximityMsg.value = ''
     syncHelpersPrefsFromStorage()
     syncWahaSpeechPrefsFromStorage()
-    inspectCheckoutUiMode.value = getInspectCheckoutUiMode()
   }
 })
 
@@ -3050,31 +3037,11 @@ onUnmounted(() => {
         </p>
       </SettingsSection>
 
-      <SettingsSection title="Inspect & Check Out">
+      <SettingsSection title="Quick actions">
         <p class="helpers-hint">
-          Choose how Home shows Inspect &amp; Checkout while it runs. Speech still announces
-          errors and failure reasons in both modes.
+          Check In, Inspect/Checkout, and Arrive stay on Home while they run. Each button
+          shows the current step or error. The browser preview does not open.
         </p>
-        <label class="toggle-row tap">
-          <input
-            type="radio"
-            name="inspect-checkout-ui"
-            value="preview"
-            :checked="inspectCheckoutUiMode === 'preview'"
-            @change="onInspectCheckoutUiModeChange('preview')"
-          />
-          <span>Browser preview — full-screen live screenshot (current)</span>
-        </label>
-        <label class="toggle-row tap">
-          <input
-            type="radio"
-            name="inspect-checkout-ui"
-            value="button"
-            :checked="inspectCheckoutUiMode === 'button'"
-            @change="onInspectCheckoutUiModeChange('button')"
-          />
-          <span>Button status — keep Home open; the button shows the step and errors</span>
-        </label>
       </SettingsSection>
 
       <SettingsSection title="WhatsApp speech">
