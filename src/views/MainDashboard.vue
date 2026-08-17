@@ -142,7 +142,12 @@ import {
   inspectCheckoutOutcomeSpeech,
   isInspectCheckoutAutomation,
   isClientGeneratedLiveLog,
+  isInspectRetryProgressKey,
 } from '../utils/inspectCheckoutProgress.js'
+import {
+  getInspectCheckoutUiMode,
+  INSPECT_CHECKOUT_UI_MODE_EVENT,
+} from '../utils/inspectCheckoutUiPrefs.js'
 
 const router = useRouter()
 const { startPolling: startWhatsAppPolling } = useWhatsAppGroup()
@@ -252,7 +257,8 @@ let previewPollTimer = null
 let linehaulPollTimer = null
 const lastPreviewBusy = ref(false)
 
-/** Home quick-action buttons show live step/error text. Browser preview never replaces Home. */
+/** Home: smart action buttons (live step/error) or full-screen browser preview. */
+const inspectCheckoutUiMode = ref(getInspectCheckoutUiMode())
 const inspectLiveLabel = ref('')
 const inspectLiveIsError = ref(false)
 const liveStatusActionId = ref(/** @type {string | null} */ (null))
@@ -270,7 +276,15 @@ const remoteAutomationRun = ref(
   ),
 )
 
-const showAutomationPreviewFocus = computed(() => false)
+const showAutomationPreviewFocus = computed(() => {
+  if (!lastPreviewBusy.value || automationPreviewHidden.value) return false
+  if (inspectCheckoutUiMode.value === 'button') return false
+  return true
+})
+
+function onInspectCheckoutUiModeChanged() {
+  inspectCheckoutUiMode.value = getInspectCheckoutUiMode()
+}
 
 function isQuickActionRunning(autoId) {
   if (runningAutomationId.value === autoId) return true
@@ -319,6 +333,9 @@ function applyInspectProgressFromLog(message, type) {
   if (!parsed) return
   const runningId = runningAutomationId.value || remoteAutomationRun.value?.automationId
   if (runningId) liveStatusActionId.value = runningId
+  if (inspectLiveIsError.value && !parsed.error && isInspectRetryProgressKey(parsed.ttsKey)) {
+    return
+  }
   inspectLiveLabel.value = parsed.button
   inspectLiveIsError.value = Boolean(parsed.error)
   const midRunError = parsed.error && parsed.tts && /^invalid_/.test(parsed.ttsKey)
@@ -1398,6 +1415,7 @@ async function runQuickAction(auto) {
 
   dismissInBrowserAutomationPrompts()
   resetInspectLiveStatus()
+  inspectCheckoutUiMode.value = getInspectCheckoutUiMode()
   liveStatusActionId.value = auto.id
   inspectLiveLabel.value = 'Starting…'
   /* Cancel block + scenario runners, close browser, then start the newly tapped quick action. */
@@ -1916,16 +1934,12 @@ function handleInspectProgressFromLiveLog() {
   const start = runStartTs.value
   if (start == null) return
   const list = liveLogEntries.value
-  for (let i = list.length - 1; i >= 0; i--) {
+  for (let i = 0; i < list.length; i++) {
     const e = list[i]
-    if (e.ts < start) break
+    if (e.ts < start) continue
     if (typeof e.message !== 'string' || !e.message.trim()) continue
     if (isClientGeneratedLiveLog(e.message)) continue
-    const parsed = parseInspectCheckoutProgress(e.message, e.type)
-    if (parsed) {
-      applyInspectProgressFromLog(e.message, e.type)
-      return
-    }
+    applyInspectProgressFromLog(e.message, e.type)
   }
 }
 
@@ -2549,6 +2563,8 @@ onMounted(async () => {
     )
   })
   unregisterRecover = registerApiRecover(reconnectLiveLogStream)
+  inspectCheckoutUiMode.value = getInspectCheckoutUiMode()
+  window.addEventListener(INSPECT_CHECKOUT_UI_MODE_EVENT, onInspectCheckoutUiModeChanged)
   await loadAssignment()
   void refreshLinehaulCredMeta()
   void loadQuickActions()
@@ -2562,6 +2578,7 @@ onMounted(async () => {
 })
 
 onActivated(() => {
+  inspectCheckoutUiMode.value = getInspectCheckoutUiMode()
   loadAssignment()
   void refreshLinehaulCredMeta()
   void loadDollyRegistry()
@@ -2587,6 +2604,7 @@ onUnmounted(() => {
   unregisterSession()
   unregisterAutomationSync()
   unregisterRecover()
+  window.removeEventListener(INSPECT_CHECKOUT_UI_MODE_EVENT, onInspectCheckoutUiModeChanged)
   if (inspectLiveClearTimer) {
     clearTimeout(inspectLiveClearTimer)
     inspectLiveClearTimer = null

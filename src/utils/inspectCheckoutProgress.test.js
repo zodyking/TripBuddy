@@ -5,19 +5,46 @@ import {
   inspectCheckoutOutcomeSpeech,
   isInspectCheckoutAutomation,
   isClientGeneratedLiveLog,
+  isInspectRetryProgressKey,
 } from './inspectCheckoutProgress.js'
 
-test('parseInspectCheckoutProgress maps dolly / seal / trailer errors', () => {
+test('parseInspectCheckoutProgress maps dolly / seal / trailer errors with numbers and TTS', () => {
   const dolly = parseInspectCheckoutProgress('Dolly candidate rejected: 123456 — trying next')
-  assert.equal(dolly?.button, 'Invalid dolly')
-  assert.match(dolly?.tts || '', /Dolly number was rejected/)
+  assert.equal(dolly?.button, 'Dolly 123456 rejected')
+  assert.equal(dolly?.error, 'Dolly 123456 was rejected')
+  assert.match(dolly?.tts || '', /Dolly 1, 2, 3, 4, 5, 6 was rejected/)
+  assert.equal(dolly?.ttsKey, 'invalid_dolly_123456')
 
   const seal = parseInspectCheckoutProgress('Invalid seal: 999 for Trailer 2 — trying next')
-  assert.equal(seal?.button, 'Invalid seal T2')
-  assert.match(seal?.tts || '', /trailer 2/)
+  assert.equal(seal?.button, 'Seal 999 T2 rejected')
+  assert.equal(seal?.error, 'Seal 999 for trailer 2 was rejected')
+  assert.match(seal?.tts || '', /Seal 9, 9, 9 for trailer 2 was rejected/)
+  assert.equal(seal?.ttsKey, 'invalid_seal_2_999')
 
-  const trailer = parseInspectCheckoutProgress('Invalid trailer number after batch validate — will retry next pass')
-  assert.equal(trailer?.button, 'Invalid trailer #')
+  const trailer = parseInspectCheckoutProgress('Invalid trailer number: 835125 — will retry')
+  assert.equal(trailer?.button, 'Trailer 835125 rejected')
+  assert.match(trailer?.tts || '', /trailer 8, 3, 5, 1, 2, 5 was rejected/)
+  assert.equal(trailer?.ttsKey, 'invalid_trailer_835125')
+
+  const batch = parseInspectCheckoutProgress('Invalid trailer number: 835125, 822697 — will retry')
+  assert.equal(batch?.button, 'Trailers 835125, 822697 rejected')
+  assert.match(batch?.tts || '', /trailer 8, 3, 5, 1, 2, 5, and trailer 8, 2, 2, 6, 9, 7 were rejected/)
+})
+
+test('retry progress keys are the entering-field steps that bounced the Home button', () => {
+  const retry = parseInspectCheckoutProgress('Trying seal candidate: 888 for Trailer 2')
+  assert.equal(retry?.button, 'Entering seal T2')
+  assert.equal(retry?.error, '')
+  assert.equal(isInspectRetryProgressKey(retry?.ttsKey || ''), true)
+
+  const dollyTry = parseInspectCheckoutProgress('Trying dolly candidate: 687818')
+  assert.equal(isInspectRetryProgressKey(dollyTry?.ttsKey || ''), true)
+
+  const trailerTry = parseInspectCheckoutProgress('Filled trailer number: 835125')
+  assert.equal(isInspectRetryProgressKey(trailerTry?.ttsKey || ''), true)
+
+  const rejected = parseInspectCheckoutProgress('Invalid seal: 999 for Trailer 2 — trying next')
+  assert.equal(isInspectRetryProgressKey(rejected?.ttsKey || ''), false)
 })
 
 test('parseInspectCheckoutProgress maps live steps without TTS', () => {

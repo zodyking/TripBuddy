@@ -76,34 +76,63 @@ export function parseInspectCheckoutProgress(message, _type) {
     )
   }
 
+  const dollyRejected = m.match(/dolly candidate rejected:\s*([0-9A-Za-z]+)/i)
+  if (dollyRejected || /dolly validation failed/i.test(m)) {
+    const n = dollyRejected ? dollyRejected[1] : ''
+    return prog(
+      n ? `Dolly ${n} rejected` : 'Dolly rejected',
+      n ? `Dolly ${n} was rejected` : 'Dolly number was rejected',
+      n
+        ? `Dolly ${digitsForSpeech(n)} was rejected. Trying the next number.`
+        : 'Dolly number was rejected. Trying the next number.',
+      n ? `invalid_dolly_${n}` : 'invalid_dolly',
+    )
+  }
+
+  const sealInvalid = m.match(/invalid seal:\s*([0-9A-Za-z]+)\s+for\s+trailer\s+(\d+)/i)
+  if (sealInvalid || /invalid seal/i.test(m)) {
+    const n = sealInvalid ? sealInvalid[1] : ''
+    const t = sealInvalid ? sealInvalid[2] : ''
+    const sealTrailer = t || (m.match(/trailer\s+(\d+)/i) || [])[1] || ''
+    return prog(
+      n && sealTrailer ? `Seal ${n} T${sealTrailer} rejected` : sealTrailer ? `Invalid seal T${sealTrailer}` : 'Seal rejected',
+      n && sealTrailer
+        ? `Seal ${n} for trailer ${sealTrailer} was rejected`
+        : sealTrailer
+          ? `Invalid seal number for trailer ${sealTrailer}`
+          : 'Invalid seal number',
+      n && sealTrailer
+        ? `Seal ${digitsForSpeech(n)} for trailer ${sealTrailer} was rejected. Trying the next seal.`
+        : sealTrailer
+          ? `Invalid seal number for trailer ${sealTrailer}. Trying the next seal.`
+          : 'Invalid seal number. Trying the next seal.',
+      n ? `invalid_seal_${sealTrailer || 'x'}_${n}` : `invalid_seal_${sealTrailer || 'x'}`,
+    )
+  }
+
+  if (/invalid trailer/i.test(m)) {
+    const nums = [...m.matchAll(/\b(\d{4,})\b/g)].map((x) => x[1])
+    const unique = [...new Set(nums)]
+    const n = unique[0] || ''
+    const multi = unique.length > 1
+    const listed = unique.join(', ')
+    const spoken = unique.map((id) => `trailer ${digitsForSpeech(id)}`).join(', and ')
+    return prog(
+      multi ? `Trailers ${listed} rejected` : n ? `Trailer ${n} rejected` : 'Trailer # rejected',
+      multi
+        ? `Trailers ${listed} were rejected`
+        : n
+          ? `Trailer ${n} was rejected`
+          : 'Invalid trailer number',
+      unique.length
+        ? `${spoken} ${multi ? 'were' : 'was'} rejected. Check the number and try again.`
+        : 'Invalid trailer number. Check the number and try again.',
+      unique.length ? `invalid_trailer_${unique.join('_')}` : 'invalid_trailer',
+    )
+  }
+
   const sealTrailer = m.match(/trailer\s+(\d+)/i)
   const sealN = sealTrailer ? sealTrailer[1] : ''
-  if (/invalid seal/i.test(m)) {
-    return prog(
-      sealN ? `Invalid seal T${sealN}` : 'Invalid seal',
-      sealN ? `Invalid seal number for trailer ${sealN}` : 'Invalid seal number',
-      sealN
-        ? `Invalid seal number for trailer ${sealN}. Trying the next seal.`
-        : 'Invalid seal number. Trying the next seal.',
-      `invalid_seal_${sealN || 'x'}`,
-    )
-  }
-  if (/invalid trailer/i.test(m)) {
-    return prog(
-      'Invalid trailer #',
-      'Invalid trailer number',
-      'Invalid trailer number. Check the number and try again.',
-      'invalid_trailer',
-    )
-  }
-  if (/dolly candidate rejected|dolly validation failed/i.test(m)) {
-    return prog(
-      'Invalid dolly',
-      'Dolly number rejected',
-      'Dolly number was rejected. Trying the next number.',
-      'invalid_dolly',
-    )
-  }
 
   if (/trying dolly|filled dolly|validate dolly/i.test(m)) {
     return prog('Entering dolly', '', '', 'dolly')
@@ -310,7 +339,24 @@ function prog(button, error, tts, ttsKey) {
   return { button, error, tts, ttsKey }
 }
 
+/**
+ * Entering / retrying a field after a rejection. Do not replace the error
+ * label with these — that made the Home button bounce on each retry.
+ * @param {string} ttsKey
+ */
+export function isInspectRetryProgressKey(ttsKey) {
+  const k = String(ttsKey || '')
+  return k === 'dolly' || k === 'seals' || k === 'trailer' || k === 'add_dolly'
+}
+
 /** @param {string} r */
 function humanizeReason(r) {
   return r.replace(/[_-]+/g, ' ').replace(/\s+/g, ' ').trim()
+}
+
+/** Speak equipment IDs digit-by-digit. */
+function digitsForSpeech(raw) {
+  const s = String(raw ?? '').trim()
+  if (/^\d+$/.test(s)) return s.split('').join(', ')
+  return s
 }
