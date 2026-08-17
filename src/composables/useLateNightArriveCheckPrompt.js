@@ -1,4 +1,5 @@
 import { ref, onMounted, onUnmounted } from 'vue'
+import { speakUtterance } from '../utils/speechSynthesisSpeak.js'
 
 const TICK_MS = 15_000
 const SILENCE_MS = 5 * 60 * 1000
@@ -36,12 +37,7 @@ function cancelArriveCheckSpeech() {
 
 function speakArriveCheckPrompt() {
   try {
-    const syn = globalThis.speechSynthesis
-    if (!syn) return
-    syn.cancel()
-    const u = new SpeechSynthesisUtterance('Would you like to arrive the trip?')
-    u.rate = 1
-    syn.speak(u)
+    speakUtterance('Would you like to arrive the trip?', { rate: 1 })
   } catch {
     /* ignore */
   }

@@ -394,6 +394,22 @@ async function hasInvalidTrailerError(page) {
 }
 
 /**
+ * @param {(type: string, message: string, extra?: object) => void} log
+ * @param {string | string[]} numbers
+ */
+function logInvalidTrailerNumbers(log, numbers) {
+  const list = (Array.isArray(numbers) ? numbers : [numbers])
+    .map((n) => String(n ?? '').trim())
+    .filter(Boolean)
+  log(
+    'warn',
+    list.length
+      ? `Invalid trailer number: ${list.join(', ')} — will retry`
+      : 'Invalid trailer number — will retry',
+  )
+}
+
+/**
  * Generic FedEx overlay: "Invalid Data Entered" / "values you entered are not valid".
  * Blocks DISPATCH / AGREE clicks (overlay intercept) and was aborting the flow.
  * @param {import('playwright').Page} page
@@ -1393,11 +1409,15 @@ export async function runInspectCheckoutAfterGate(page, opts) {
         lastProgress = Date.now()
         await waitForPageSettle(page)
         const tDriver = Date.now()
+        let driverDollyOk = false
         while (Date.now() - tDriver < AFTER_CLICK_MS) {
           aborted()
-          if (await isDollySuccessScreen(page)) break
-          if (!(await isDollyEntryScreen(page))) break
+          if (await isDollySuccessScreen(page)) { driverDollyOk = true; break }
+          if (!(await isDollyEntryScreen(page))) { driverDollyOk = true; break }
           await page.waitForTimeout(DOLLY_POLL_MS)
+        }
+        if (!driverDollyOk && (await isDollyEntryScreen(page))) {
+          log('warn', `Dolly candidate rejected: ${val} — trying next`)
         }
       }
       continue
@@ -1414,6 +1434,8 @@ export async function runInspectCheckoutAfterGate(page, opts) {
         batchSealsAttempted = true
         let filledAny = false
         let missingCandidate = false
+        /** @type {{ trailerIndex: number, val: string }[]} */
+        const batchSealFills = []
         for (const row of sealRows) {
           aborted()
           const trailerIndex = row.trailerIndex
@@ -1422,6 +1444,7 @@ export async function runInspectCheckoutAfterGate(page, opts) {
           if (!val) { missingCandidate = true; break }
           await row.input.fill(val)
           filledAny = true
+          batchSealFills.push({ trailerIndex, val })
           log('info', `Batch seal pre-fill Trailer ${trailerIndex}: ${val}`)
         }
         if (filledAny && !missingCandidate) {
@@ -1434,7 +1457,9 @@ export async function runInspectCheckoutAfterGate(page, opts) {
               await captureProof(page, 'Seals Validated', proofScreenshots, log)
               continue
             }
-            log('warn', 'Batch seal validation failed — falling through to per-field swap handling')
+            for (const { trailerIndex, val } of batchSealFills) {
+              log('warn', `Invalid seal: ${val} for Trailer ${trailerIndex} — trying next`)
+            }
           }
         }
       }
@@ -1451,6 +1476,7 @@ export async function runInspectCheckoutAfterGate(page, opts) {
         (trailerRows.length >= 1 && (await vmtBtn.isVisible().catch(() => false)))
       if (batchMt) {
         log('info', `Detected ${trailerRows.length} empty trailer input(s) — batch fill then validate`)
+        const batchTrailerNums = []
         for (const row of trailerRows) {
           aborted()
           const trailerIndex = row.trailerIndex
@@ -1468,6 +1494,7 @@ export async function runInspectCheckoutAfterGate(page, opts) {
             ).trim()
           }
           if (!val) throw new Error(`Inspect: trailer number required for Trailer ${trailerIndex}`)
+          batchTrailerNums.push(val)
           await row.input.fill(val)
         }
         const clickedValidate = await clickTrailerValidateButton(page)
@@ -1476,7 +1503,7 @@ export async function runInspectCheckoutAfterGate(page, opts) {
           lastProgress = Date.now()
           await waitForTrailerValidationSettle(page, AFTER_CLICK_MS)
           if (await hasInvalidTrailerError(page)) {
-            log('warn', 'Invalid trailer number after batch validate — will retry next pass')
+            logInvalidTrailerNumbers(log, batchTrailerNums)
             await page.waitForTimeout(100)
           }
           continue
@@ -1489,6 +1516,9 @@ export async function runInspectCheckoutAfterGate(page, opts) {
           log('info', 'Clicked fallback validate after batch trailer numbers')
           lastProgress = Date.now()
           await waitForTrailerValidationSettle(page, AFTER_CLICK_MS)
+          if (await hasInvalidTrailerError(page)) {
+            logInvalidTrailerNumbers(log, batchTrailerNums)
+          }
           continue
         }
       }
@@ -1556,6 +1586,9 @@ export async function runInspectCheckoutAfterGate(page, opts) {
             log('info', `Clicked VALIDATE SEAL with driver value: ${val}`)
             lastProgress = Date.now()
             await waitForSealValidationSettle(page, AFTER_CLICK_MS)
+            if (await hasInvalidSealError(page)) {
+              log('warn', `Invalid seal: ${val} for Trailer ${trailerIndex} — trying next`)
+            }
           }
         }
 
@@ -1602,6 +1635,9 @@ export async function runInspectCheckoutAfterGate(page, opts) {
             lastProgress = Date.now()
             await waitForTrailerValidationSettle(page, AFTER_CLICK_MS)
           }
+        }
+        if (await hasInvalidTrailerError(page)) {
+          logInvalidTrailerNumbers(log, val)
         }
 
         handled = true
@@ -1670,6 +1706,9 @@ export async function runInspectCheckoutAfterGate(page, opts) {
             await btn.click()
             lastProgress = Date.now()
             await waitForSealValidationSettle(page, AFTER_CLICK_MS)
+            if (await hasInvalidSealError(page)) {
+              log('warn', `Invalid seal: ${val} for Trailer ${trailerIndex}`)
+            }
           }
         }
 
@@ -1704,6 +1743,9 @@ export async function runInspectCheckoutAfterGate(page, opts) {
           await submit.click()
           lastProgress = Date.now()
           await waitForTrailerValidationSettle(page, AFTER_CLICK_MS)
+        }
+        if (await hasInvalidTrailerError(page)) {
+          logInvalidTrailerNumbers(log, val)
         }
 
         handled = true

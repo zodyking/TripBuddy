@@ -18,6 +18,7 @@ function legSeqKey(body) {
 }
 import { pushLiveLog } from '../stores/liveLogStore.js'
 import { enqueueAnnouncement, speakDirect, cancelAllAlerts } from './alertAudioQueue.js'
+import { speakUtterance } from './speechSynthesisSpeak.js'
 
 const OLD_TTS_KEY = 'fedexTripTtsEnabled'
 const MODE_KEY = 'fedexTripAlertMode'
@@ -231,11 +232,7 @@ export function tripVoiceIsGestureUnlocked() {
 function primeSpeechSynthesisFromGesture() {
   if (typeof window === 'undefined' || !window.speechSynthesis) return
   try {
-    window.speechSynthesis.cancel()
-    const u = new SpeechSynthesisUtterance('\u200b')
-    u.volume = 0.01
-    u.rate = 2
-    window.speechSynthesis.speak(u)
+    speakUtterance('\u200b', { volume: 0.01, rate: 2 })
   } catch {
     /* ignore */
   }

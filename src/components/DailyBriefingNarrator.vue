@@ -19,7 +19,6 @@ const words = computed(() => tokenizeBriefingWords(props.text))
       v-if="active && text"
       class="daily-briefing-narrator"
       role="region"
-      aria-live="polite"
       aria-label="Daily briefing playback"
     >
       <div class="daily-briefing-narrator-inner">

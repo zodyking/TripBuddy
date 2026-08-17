@@ -8,6 +8,7 @@ import {
   setSpeechAlertWordIndex,
   tokenizeSpeechWords,
 } from '../stores/speechAlertModalStore.js'
+import { speakUtterance } from './speechSynthesisSpeak.js'
 
 const BRIEFING_PREFIX = 'Daily briefing.'
 
@@ -106,69 +107,65 @@ export function speakDailyBriefing(bodyText, callbacks = {}) {
   activeCancel = cancel
 
   try {
-    const u = new SpeechSynthesisUtterance(utterText)
-    u.rate = 1.02
-    u.pitch = 1
-    u.volume = 1
-    utterance = u
-
-    u.onboundary = (e) => {
-      if (e.name !== 'word' || e.charIndex == null) return
-      boundarySeen = true
-      const bodyChar = e.charIndex - prefixLen
-      if (bodyChar < 0) {
-        const prefixIdx = wordIndexFromCharIndex(BRIEFING_PREFIX, e.charIndex)
-        if (prefixIdx >= 0) setSpeechAlertWordIndex(prefixIdx)
-        return
-      }
-      const idx = wordIndexFromCharIndex(body, bodyChar)
-      if (idx >= 0) {
-        callbacks.onWordIndex?.(idx)
-        setSpeechAlertWordIndex(idx + prefixWordCount)
-      }
-    }
-
-    u.onstart = () => {
-      pushLiveLog({ type: 'info', message: '[Briefing] TTS started', ts: Date.now() })
-      showSpeechAlertModal(utterText)
-      setSpeechAlertWordIndex(0)
-      callbacks.onStart?.()
-      callbacks.onWordIndex?.(0)
-
-      const durationMs = estimateSpeechMs(utterText)
-      const stepMs = Math.max(120, durationMs / Math.max(1, words.length))
-      let i = 0
-      fallbackTimer = setInterval(() => {
-        if (boundarySeen) return
-        i += 1
-        if (i < words.length) {
-          callbacks.onWordIndex?.(i)
-          setSpeechAlertWordIndex(i + prefixWordCount)
+    const u = speakUtterance(utterText, {
+      rate: 1.02,
+      onboundary: (e) => {
+        if (e.name !== 'word' || e.charIndex == null) return
+        boundarySeen = true
+        const bodyChar = e.charIndex - prefixLen
+        if (bodyChar < 0) {
+          const prefixIdx = wordIndexFromCharIndex(BRIEFING_PREFIX, e.charIndex)
+          if (prefixIdx >= 0) setSpeechAlertWordIndex(prefixIdx)
+          return
         }
-      }, stepMs)
-    }
+        const idx = wordIndexFromCharIndex(body, bodyChar)
+        if (idx >= 0) {
+          callbacks.onWordIndex?.(idx)
+          setSpeechAlertWordIndex(idx + prefixWordCount)
+        }
+      },
+      onstart: () => {
+        pushLiveLog({ type: 'info', message: '[Briefing] TTS started', ts: Date.now() })
+        showSpeechAlertModal(utterText)
+        setSpeechAlertWordIndex(0)
+        callbacks.onStart?.()
+        callbacks.onWordIndex?.(0)
 
-    u.onend = () => {
-      pushLiveLog({ type: 'info', message: '[Briefing] TTS ended', ts: Date.now() })
-      hideSpeechAlertModal()
+        const durationMs = estimateSpeechMs(utterText)
+        const stepMs = Math.max(120, durationMs / Math.max(1, words.length))
+        let i = 0
+        fallbackTimer = setInterval(() => {
+          if (boundarySeen) return
+          i += 1
+          if (i < words.length) {
+            callbacks.onWordIndex?.(i)
+            setSpeechAlertWordIndex(i + prefixWordCount)
+          }
+        }, stepMs)
+      },
+      onend: () => {
+        pushLiveLog({ type: 'info', message: '[Briefing] TTS ended', ts: Date.now() })
+        hideSpeechAlertModal()
+        cleanup()
+        callbacks.onWordIndex?.(Math.max(0, words.length - 1))
+        callbacks.onEnd?.()
+      },
+      onerror: (e) => {
+        pushLiveLog({
+          type: 'error',
+          message: `[Briefing] TTS error: ${e?.error || 'unknown'}`,
+          ts: Date.now(),
+        })
+        hideSpeechAlertModal()
+        cleanup()
+        callbacks.onError?.(e?.error || 'error')
+      },
+    })
+    utterance = u
+    if (!u) {
       cleanup()
-      callbacks.onWordIndex?.(Math.max(0, words.length - 1))
-      callbacks.onEnd?.()
+      callbacks.onError?.('speak failed')
     }
-
-    u.onerror = (e) => {
-      pushLiveLog({
-        type: 'error',
-        message: `[Briefing] TTS error: ${e?.error || 'unknown'}`,
-        ts: Date.now(),
-      })
-      hideSpeechAlertModal()
-      cleanup()
-      callbacks.onError?.(e?.error || 'error')
-    }
-
-    window.speechSynthesis.cancel()
-    window.speechSynthesis.speak(u)
   } catch (e) {
     cleanup()
     callbacks.onError?.(e instanceof Error ? e.message : String(e))
